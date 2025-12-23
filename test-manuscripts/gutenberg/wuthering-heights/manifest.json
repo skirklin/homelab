@@ -1,0 +1,18 @@
+{
+  "title": "Wuthering Heights",
+  "type": "gutenberg",
+  "source": {
+    "type": "gutenberg",
+    "id": "768",
+    "url": "https://www.gutenberg.org/ebooks/768"
+  },
+  "files": {
+    "manuscript": "manuscript.txt"
+  },
+  "metadata": {
+    "author": "Emily Brontë",
+    "year": 1847,
+    "wordCount": 107945,
+    "chapterCount": 34
+  }
+}
