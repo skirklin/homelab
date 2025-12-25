@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Optional, Union
 
-from .types import ParsedDocument, Heading
+from critic.types import ParsedDocument, Heading
 
 
 def parse_document(
@@ -65,28 +65,43 @@ def parse_text(text: str, title: str = "Untitled") -> ParsedDocument:
     headings: list[Heading] = []
 
     for i, para in enumerate(paragraphs):
-        # Markdown headings
-        md_match = re.match(r'^(#{1,6})\s+(.+)$', para)
-        if md_match:
-            level = len(md_match.group(1))
-            heading_text = md_match.group(2).strip()
-            headings.append(Heading(text=heading_text, level=level, paragraph_index=i))
-            continue
+        # Check each line within the paragraph for headings
+        # (paragraphs may contain multiple consecutive heading lines)
+        lines = para.split('\n')
+        found_heading = False
 
-        # All-caps lines that look like chapter headings
-        if para.isupper() and len(para) < 100 and '\n' not in para:
-            headings.append(Heading(text=para, level=1, paragraph_index=i))
-            continue
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
 
-        # "Chapter X" or "CHAPTER X" patterns
-        chapter_match = re.match(
-            r'^(Chapter|CHAPTER)\s+(\d+|[IVXLC]+)\.?\s*(.*?)$',
-            para,
-            re.IGNORECASE
-        )
-        if chapter_match:
-            chapter_text = para.split('\n')[0]  # Just first line
-            headings.append(Heading(text=chapter_text, level=1, paragraph_index=i))
+            # Markdown headings
+            md_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+            if md_match:
+                level = len(md_match.group(1))
+                heading_text = md_match.group(2).strip()
+                headings.append(Heading(text=heading_text, level=level, paragraph_index=i))
+                found_heading = True
+                continue
+
+            # All-caps lines that look like chapter headings
+            if line.isupper() and len(line) < 100:
+                headings.append(Heading(text=line, level=1, paragraph_index=i))
+                found_heading = True
+                continue
+
+            # "Chapter X" or "CHAPTER X" patterns
+            chapter_match = re.match(
+                r'^(Chapter|CHAPTER)\s+(\d+|[IVXLC]+)\.?\s*(.*?)$',
+                line,
+                re.IGNORECASE
+            )
+            if chapter_match:
+                headings.append(Heading(text=line, level=1, paragraph_index=i))
+                found_heading = True
+                continue
+
+        if found_heading:
             continue
 
     # Use first heading as title if available

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useAnalysis } from '../context/AnalysisContext';
-import type { IssueWithContext, IssueType } from '../types/analysis';
+import type { IssueWithContext, IssueType, TextLocation } from '../types/analysis';
 import './IssuesView.css';
 
 type FilterSeverity = 'all' | 'error' | 'warning' | 'info';
@@ -74,9 +74,10 @@ export function IssuesView() {
       selectIssue(filteredIssues[newIndex]);
     } else if (e.key === 'Enter' && selectedIssue) {
       // Navigate to the first evidence location
-      if (selectedIssue.evidence.length > 0) {
+      const firstLocation = selectedIssue.evidence[0]?.location;
+      if (firstLocation) {
         e.preventDefault();
-        navigateToLocation(selectedIssue.evidence[0].location);
+        navigateToLocation(firstLocation);
       }
     } else if (e.key === 'd' && selectedIssue) {
       e.preventDefault();
@@ -168,11 +169,14 @@ interface IssueCardProps {
   issue: IssueWithContext;
   selected: boolean;
   onSelect: () => void;
-  onNavigate: (location: IssueWithContext['evidence'][0]['location']) => void;
+  onNavigate: (location: TextLocation) => void;
   onStatusChange: (status: IssueWithContext['status']) => void;
 }
 
 function IssueCard({ issue, selected, onSelect, onNavigate, onStatusChange }: IssueCardProps) {
+  // Filter to evidence with locations for navigation
+  const evidenceWithLocations = issue.evidence.filter(ev => ev.location != null);
+
   return (
     <div
       className={`issue-card ${issue.severity} ${selected ? 'selected' : ''} ${issue.status}`}
@@ -184,19 +188,19 @@ function IssueCard({ issue, selected, onSelect, onNavigate, onStatusChange }: Is
       </div>
       <p className="issue-description">{issue.description}</p>
 
-      {issue.evidence.length > 0 && (
+      {evidenceWithLocations.length > 0 && (
         <div className="issue-evidence">
-          {issue.evidence.slice(0, 2).map((ev, idx) => (
+          {evidenceWithLocations.slice(0, 2).map((ev, idx) => (
             <div
               key={idx}
               className="evidence-item"
               onClick={(e) => {
                 e.stopPropagation();
-                onNavigate(ev.location);
+                if (ev.location) onNavigate(ev.location);
               }}
             >
               <span className="evidence-quote">"{ev.quote}"</span>
-              <span className="evidence-location">{ev.location.humanReadable}</span>
+              <span className="evidence-location">{ev.location!.humanReadable}</span>
             </div>
           ))}
         </div>

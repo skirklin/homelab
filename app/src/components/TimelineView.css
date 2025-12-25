@@ -275,3 +275,254 @@
   color: #666;
   font-size: 14px;
 }
+
+/* Control label for grouping */
+.control-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #888;
+}
+
+.control-label select {
+  padding: 6px 12px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #eee;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Time anchors section */
+.anchors-section {
+  margin-bottom: 16px;
+}
+
+.anchors-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #888;
+}
+
+.anchors-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.anchor-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 20px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.anchor-chip:hover {
+  background: #1a2744;
+  border-color: #4ecca3;
+}
+
+.anchor-chip.selected {
+  background: #4ecca3;
+  border-color: #4ecca3;
+  color: #0d1117;
+}
+
+.anchor-count {
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Grouped timeline */
+.timeline-grouped {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.timeline-group {
+  background: #16213e;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.group-header {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4ecca3;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #0f3460;
+}
+
+/* Anchor point (Day 0 description) */
+.anchor-point {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(78, 204, 163, 0.1);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border-left: 3px solid #4ecca3;
+}
+
+.anchor-point-label {
+  font-weight: 600;
+  color: #4ecca3;
+  font-size: 13px;
+}
+
+.anchor-point-desc {
+  color: #ccc;
+  font-size: 13px;
+}
+
+/* Entity selector */
+.entity-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.entity-group h3 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #888;
+}
+
+.entity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.entity-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 20px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.entity-chip:hover {
+  background: #1a2744;
+  border-color: #4ecca3;
+}
+
+.entity-chip.selected {
+  background: #4ecca3;
+  border-color: #4ecca3;
+  color: #0d1117;
+}
+
+.entity-chip.location {
+  border-color: #3498db;
+}
+
+.entity-chip.location:hover {
+  border-color: #3498db;
+}
+
+.entity-chip.location.selected {
+  background: #3498db;
+  border-color: #3498db;
+}
+
+.entity-count {
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.entity-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 150px;
+  color: #666;
+  font-size: 14px;
+  font-style: italic;
+}
+
+/* Entity timeline header */
+.entity-timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #0f3460;
+}
+
+.entity-timeline-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #4ecca3;
+}
+
+.entity-timeline-header .event-count {
+  font-size: 12px;
+  color: #888;
+}
+
+/* Flashback styling */
+.timeline-event.flashback .event-dot {
+  background: #9b59b6;
+  box-shadow: 0 0 0 3px rgba(155, 89, 182, 0.3);
+}
+
+.timeline-event.flashback .event-content {
+  border-left: 3px solid #9b59b6;
+}
+
+.flashback-badge {
+  padding: 2px 8px;
+  background: rgba(155, 89, 182, 0.2);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #9b59b6;
+}
+
+/* Time display */
+.time-normalized {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.time-original {
+  font-size: 12px;
+  color: #888;
+  font-style: italic;
+}
+
+.event-location {
+  color: #3498db;
+}

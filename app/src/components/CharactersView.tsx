@@ -210,6 +210,38 @@ function CharacterDetail({ character, issues, characters, chunks, eventsMap, onN
         </div>
       </div>
 
+      {character.profile && (
+        <div className="detail-section">
+          <h3>Profile</h3>
+          <div className="profile-content">
+            {character.profile.occupation && (
+              <div className="profile-row">
+                <span className="profile-label">Occupation:</span>
+                <span className="profile-value">{character.profile.occupation}</span>
+              </div>
+            )}
+            {character.profile.physical && character.profile.physical.length > 0 && (
+              <div className="profile-row">
+                <span className="profile-label">Physical:</span>
+                <span className="profile-value">{character.profile.physical.join(', ')}</span>
+              </div>
+            )}
+            {character.profile.personality && character.profile.personality.length > 0 && (
+              <div className="profile-row">
+                <span className="profile-label">Personality:</span>
+                <span className="profile-value">{character.profile.personality.join(', ')}</span>
+              </div>
+            )}
+            {character.profile.keyRelationships && character.profile.keyRelationships.length > 0 && (
+              <div className="profile-row">
+                <span className="profile-label">Key Relationships:</span>
+                <span className="profile-value">{character.profile.keyRelationships.join(', ')}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {characterEvents.length > 0 && (
         <div className="detail-section">
           <h3>Timeline ({characterEvents.length} events)</h3>

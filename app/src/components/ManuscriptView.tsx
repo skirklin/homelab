@@ -18,6 +18,7 @@ export function ManuscriptView() {
     const map = new Map<string, IssueWithContext[]>();
     for (const issue of analysis.issues) {
       for (const evidence of issue.evidence) {
+        if (!evidence.location) continue;
         const chunkId = evidence.location.chunkId;
         if (!map.has(chunkId)) {
           map.set(chunkId, []);
@@ -151,6 +152,7 @@ const ChunkDisplay = React.memo(function ChunkDisplay({
     const issuesToShow = issues.slice(0, 10);
     for (const issue of issuesToShow) {
       for (const evidence of issue.evidence) {
+        if (!evidence.location) continue;
         if (evidence.location.chunkId === chunk.id) {
           const start = Math.max(0, evidence.location.startOffset);
           const end = Math.min(textLength, evidence.location.endOffset);

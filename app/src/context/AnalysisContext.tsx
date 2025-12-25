@@ -24,6 +24,8 @@ interface AnalysisContextType {
   highlightLocation: (location: TextLocation | null) => void;
   /** Navigate to a location in the manuscript */
   navigateToLocation: (location: TextLocation) => void;
+  /** Navigate to a chunk in the manuscript */
+  navigateToChunk: (chunkId: string) => void;
   /** Update issue status */
   updateIssueStatus: (issueId: string, status: IssueWithContext['status']) => void;
   /** Active tab */
@@ -81,7 +83,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
   const selectIssue = useCallback((issue: IssueWithContext | null) => {
     setSelectedIssue(issue);
-    if (issue && issue.evidence.length > 0) {
+    if (issue && issue.evidence.length > 0 && issue.evidence[0].location) {
       setHighlightedLocation(issue.evidence[0].location);
     }
   }, []);
@@ -92,6 +94,18 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
   const navigateToLocation = useCallback((location: TextLocation) => {
     setHighlightedLocation(location);
+    setActiveTab('manuscript');
+  }, []);
+
+  const navigateToChunk = useCallback((chunkId: string) => {
+    // Create a minimal location pointing to the chunk start
+    setHighlightedLocation({
+      chunkId,
+      startOffset: 0,
+      endOffset: 0,
+      snippet: '',
+      humanReadable: '',
+    });
     setActiveTab('manuscript');
   }, []);
 
@@ -120,6 +134,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         highlightedLocation,
         highlightLocation,
         navigateToLocation,
+        navigateToChunk,
         updateIssueStatus,
         activeTab,
         setActiveTab,

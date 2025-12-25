@@ -8,12 +8,13 @@ from pathlib import Path
 
 import click
 
-from .analyzer import analyze_document
-from .parser import parse_document
-from .chunker import chunk_document, ChunkOptions
-from .cache import AnalysisCache
-from .critic import run_critic, insights_to_issues
-from .schema import AnalysisOutput
+from critic.analyzer import analyze_document
+from critic.parser import parse_document
+from critic.chunker import chunk_document, ChunkOptions
+from critic.cache import AnalysisCache
+from critic.critic import run_critic, insights_to_issues
+from critic.schema import AnalysisOutput
+from critic.inspect import main as inspect_main
 
 
 @click.group()
@@ -281,6 +282,10 @@ def cache_cmd(stats, clear, cache_dir):
     click.echo(f"  Discovery results: {cache_stats.discovery}")
     click.echo(f"  Extraction results: {cache_stats.extraction}")
     click.echo(f"  Total size: {cache_stats.total_size}")
+
+
+# Add inspect subcommands
+main.add_command(inspect_main, name="inspect")
 
 
 if __name__ == "__main__":

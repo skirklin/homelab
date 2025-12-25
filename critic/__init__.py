@@ -5,12 +5,12 @@ Analyzes manuscripts for continuity errors, character inconsistencies,
 plot holes, and more using Claude AI.
 """
 
-from .types import (
+from critic.types import (
     ParsedDocument as ParsedDocument,
     Heading as Heading,
     Chunk as Chunk,
 )
-from .schema import (
+from critic.schema import (
     AnalysisOutput as AnalysisOutput,
     DocumentInfo as DocumentInfo,
     ChunkWithText as ChunkWithText,
@@ -32,24 +32,27 @@ from .schema import (
     PlotThreadEvent as PlotThreadEvent,
     TimelineView as TimelineView,
     TimelineEvent as TimelineEvent,
-    TimelineInconsistency as TimelineInconsistency,
-    TimeSpan as TimeSpan,
+    TimeAnchor as TimeAnchor,
+    EntityTimeline as EntityTimeline,
+    CharacterProfile as CharacterProfile,
+    DialogueLine as DialogueLine,
+    SceneBreak as SceneBreak,
     IssueWithContext as IssueWithContext,
     IssueType as IssueType,
     EvidenceItem as EvidenceItem,
     AnalysisSummary as AnalysisSummary,
     TokenUsage as TokenUsage,
 )
-from .parser import parse_document as parse_document, parse_text as parse_text
-from .chunker import chunk_document as chunk_document, estimate_tokens as estimate_tokens
-from .discovery import (
+from critic.parser import parse_document as parse_document, parse_text as parse_text
+from critic.chunker import chunk_document as chunk_document, estimate_tokens as estimate_tokens
+from critic.discovery import (
     discover_entities as discover_entities,
     DiscoveryResult as DiscoveryResult,
     DiscoveredEntities as DiscoveredEntities,
 )
-from .analyzer import analyze_document as analyze_document
-from .cache import AnalysisCache as AnalysisCache
-from .critic import (
+from critic.analyzer import analyze_document as analyze_document
+from critic.cache import AnalysisCache as AnalysisCache
+from critic.critic import (
     run_critic as run_critic,
     insights_to_issues as insights_to_issues,
     CriticInsight as CriticInsight,

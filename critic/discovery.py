@@ -10,9 +10,10 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import anthropic
-from anthropic.types import TextBlock
 
-from .types import Chunk
+from critic.types import Chunk
+from critic.retry import retry_api_call
+from critic.config import DEFAULT_MODEL
 
 
 @dataclass
@@ -79,9 +80,6 @@ Return as JSON:
 Focus on being comprehensive - it's better to include minor characters than miss important ones."""
 
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
-
-
 def discover_entities(
     chunks: list[Chunk],
     api_key: Optional[str] = None,
@@ -146,22 +144,35 @@ def _discover_from_segment(
     segment: str,
 ) -> tuple[DiscoveredEntities, dict]:
     """Discover entities from a single segment."""
-    response = client.messages.create(
-        model=model,
-        max_tokens=16384,
-        messages=[{
-            'role': 'user',
-            'content': f"{DISCOVERY_PROMPT}\n\n---\n\nTEXT TO ANALYZE:\n\n{segment}",
-        }],
-    )
+    # Use streaming to avoid timeout issues with long requests
+    text_parts: list[str] = []
+    response = None
 
-    text = ''.join(
-        block.text for block in response.content
-        if isinstance(block, TextBlock)
-    )
+    def make_request():
+        nonlocal text_parts, response
+        text_parts = []  # Reset on retry
 
+        with client.messages.stream(
+            model=model,
+            max_tokens=16384,
+            messages=[{
+                'role': 'user',
+                'content': f"{DISCOVERY_PROMPT}\n\n---\n\nTEXT TO ANALYZE:\n\n{segment}",
+            }],
+        ) as stream:
+            for text_chunk in stream.text_stream:
+                text_parts.append(text_chunk)
+            response = stream.get_final_message()
+
+    def on_retry(attempt, delay, _exc):
+        print(f"  Rate limited during discovery, waiting {delay:.0f}s (attempt {attempt})...")
+
+    retry_api_call(make_request, on_retry=on_retry)
+
+    text = ''.join(text_parts)
     entities = _parse_discovery_response(text)
 
+    assert response is not None  # Set by make_request
     return entities, {
         'input_tokens': response.usage.input_tokens,
         'output_tokens': response.usage.output_tokens,

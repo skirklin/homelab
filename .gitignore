@@ -5,3 +5,8 @@ app/node_modules/
 .env.local
 *.log
 .DS_Store
+.book-editor-cache/
+critic/__pycache__/
+__pycache__/
+*.pyc
+.vscode/

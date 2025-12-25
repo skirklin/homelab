@@ -12,7 +12,8 @@ from typing import Any, Callable, Optional
 import anthropic
 from anthropic.types import MessageParam, ToolParam, TextBlock
 
-from .schema import AnalysisOutput, EventExtraction, ChunkWithText
+from critic.schema import AnalysisOutput, EventExtraction, ChunkWithText
+from critic.config import DEFAULT_MODEL
 
 
 # Tool definitions for the Claude API
@@ -264,26 +265,36 @@ class CriticToolExecutor:
     def get_insights(self) -> list[CriticInsight]:
         return self.insights
 
+    def _search(self, items, match_fn, to_dict_fn, limit: int = 20) -> list[dict]:
+        """Generic search helper."""
+        results = []
+        for item in items:
+            if match_fn(item):
+                results.append(to_dict_fn(item))
+                if len(results) >= limit:
+                    break
+        return results
+
     def _tool_search_characters(self, inputs: dict) -> dict:
         query = inputs.get("query", "").lower()
         limit = inputs.get("limit", 10)
 
-        results = []
-        for char in self.analysis.entities.characters:
-            if (query in char.name.lower() or
-                any(query in a.lower() for a in char.aliases) or
-                any(query in a.attribute.lower() or query in a.value.lower()
-                    for a in char.attributes)):
-                results.append({
-                    "id": char.id,
-                    "name": char.name,
-                    "aliases": char.aliases,
-                    "total_mentions": char.stats.total_mentions,
-                    "issue_count": len(char.issue_ids),
-                })
-                if len(results) >= limit:
-                    break
+        def matches(char) -> bool:
+            return (query in char.name.lower() or
+                    any(query in a.lower() for a in char.aliases) or
+                    any(query in a.attribute.lower() or query in a.value.lower()
+                        for a in char.attributes))
 
+        def to_dict(char) -> dict:
+            return {
+                "id": char.id,
+                "name": char.name,
+                "aliases": char.aliases,
+                "total_mentions": char.stats.total_mentions,
+                "issue_count": len(char.issue_ids),
+            }
+
+        results = self._search(self.analysis.entities.characters, matches, to_dict, limit)
         return {"characters": results, "total": len(results)}
 
     def _tool_get_character_details(self, inputs: dict) -> dict:
@@ -324,27 +335,32 @@ class CriticToolExecutor:
         chunk_id = inputs.get("chunk_id")
         limit = inputs.get("limit", 20)
 
-        results = []
-        for chunk in self.analysis.chunks:
-            if chunk_id and chunk.id != chunk_id:
-                continue
+        # Build flat list of (event, chunk) pairs for searching
+        event_pairs = [
+            (event, chunk)
+            for chunk in self.analysis.chunks
+            if not chunk_id or chunk.id == chunk_id
+            for event in chunk.extraction.events
+        ]
 
-            for event in chunk.extraction.events:
-                if char_id and char_id not in event.character_ids:
-                    continue
-                if query and query not in event.description.lower():
-                    continue
+        def matches(pair) -> bool:
+            event, _ = pair
+            if char_id and char_id not in event.character_ids:
+                return False
+            if query and query not in event.description.lower():
+                return False
+            return True
 
-                results.append({
-                    "id": event.id,
-                    "description": event.description,
-                    "time_marker": event.time_marker,
-                    "chunk_id": chunk.id,
-                })
+        def to_dict(pair) -> dict:
+            event, chunk = pair
+            return {
+                "id": event.id,
+                "description": event.description,
+                "time_marker": event.time_marker,
+                "chunk_id": chunk.id,
+            }
 
-                if len(results) >= limit:
-                    return {"events": results, "total": len(results)}
-
+        results = self._search(event_pairs, matches, to_dict, limit)
         return {"events": results, "total": len(results)}
 
     def _tool_get_event_details(self, inputs: dict) -> dict:
@@ -381,27 +397,34 @@ class CriticToolExecutor:
         subject = inputs.get("subject", "").lower()
         limit = inputs.get("limit", 20)
 
-        results = []
-        for chunk in self.analysis.chunks:
-            for fact in chunk.extraction.facts:
-                if category and fact.category != category:
-                    continue
-                if subject and subject not in fact.subject.lower():
-                    continue
-                if query and query not in fact.content.lower():
-                    continue
+        # Build flat list of (fact, chunk) pairs
+        fact_pairs = [
+            (fact, chunk)
+            for chunk in self.analysis.chunks
+            for fact in chunk.extraction.facts
+        ]
 
-                results.append({
-                    "id": fact.id,
-                    "content": fact.content,
-                    "category": fact.category,
-                    "subject": fact.subject,
-                    "chunk_id": chunk.id,
-                })
+        def matches(pair) -> bool:
+            fact, _ = pair
+            if category and fact.category != category:
+                return False
+            if subject and subject not in fact.subject.lower():
+                return False
+            if query and query not in fact.content.lower():
+                return False
+            return True
 
-                if len(results) >= limit:
-                    return {"facts": results, "total": len(results)}
+        def to_dict(pair) -> dict:
+            fact, chunk = pair
+            return {
+                "id": fact.id,
+                "content": fact.content,
+                "category": fact.category,
+                "subject": fact.subject,
+                "chunk_id": chunk.id,
+            }
 
+        results = self._search(fact_pairs, matches, to_dict, limit)
         return {"facts": results, "total": len(results)}
 
     def _tool_get_plot_threads(self, inputs: dict) -> dict:
@@ -488,27 +511,26 @@ class CriticToolExecutor:
         severity = inputs.get("severity")
         char_id = inputs.get("character_id")
 
-        issues = self.analysis.issues
-        if issue_type:
-            issues = [i for i in issues if i.type == issue_type]
-        if severity:
-            issues = [i for i in issues if i.severity == severity]
-        if char_id:
-            issues = [i for i in issues if char_id in i.related_entity_ids]
+        def matches(issue) -> bool:
+            if issue_type and issue.type != issue_type:
+                return False
+            if severity and issue.severity != severity:
+                return False
+            if char_id and char_id not in issue.related_entity_ids:
+                return False
+            return True
 
-        return {
-            "issues": [
-                {
-                    "id": i.id,
-                    "type": i.type,
-                    "severity": i.severity,
-                    "title": i.title,
-                    "description": i.description,
-                }
-                for i in issues
-            ],
-            "total": len(issues),
-        }
+        def to_dict(issue) -> dict:
+            return {
+                "id": issue.id,
+                "type": issue.type,
+                "severity": issue.severity,
+                "title": issue.title,
+                "description": issue.description,
+            }
+
+        results = self._search(self.analysis.issues, matches, to_dict, limit=100)
+        return {"issues": results, "total": len(results)}
 
     def _tool_get_document_overview(self, _inputs: dict[str, Any]) -> dict[str, Any]:
         summary = self.analysis.summary
@@ -573,9 +595,6 @@ class CriticToolExecutor:
         )
         self.insights.append(insight)
         return {"success": True, "total_insights": len(self.insights)}
-
-
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
 
 
 def _build_system_prompt(focus_areas: Optional[list[str]] = None) -> str:

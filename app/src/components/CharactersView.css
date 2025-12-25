@@ -477,3 +477,32 @@
   color: #666;
   text-transform: uppercase;
 }
+
+/* Profile section */
+.profile-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #0f3460;
+  padding: 16px;
+  border-radius: 8px;
+}
+
+.profile-row {
+  display: flex;
+  gap: 12px;
+}
+
+.profile-label {
+  font-weight: 600;
+  color: #888;
+  font-size: 13px;
+  min-width: 120px;
+  flex-shrink: 0;
+}
+
+.profile-value {
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+}

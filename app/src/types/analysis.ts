@@ -1,6 +1,6 @@
 /**
  * Analysis Output Types
- * Matches the schema from core/src/output-schema.ts
+ * Matches the schema from critic/schema.py
  */
 
 export interface AnalysisOutput {
@@ -41,6 +41,8 @@ export interface ChunkExtraction {
   facts: FactExtraction[];
   plotThreads: PlotThreadTouch[];
   setups: SetupExtraction[];
+  dialogue: DialogueLine[];
+  scenes: SceneBreak[];
   openQuestions: string[];
 }
 
@@ -49,6 +51,7 @@ export interface EventExtraction {
   description: string;
   timeMarker: string;
   precision: 'exact' | 'relative' | 'vague';
+  sequenceNote?: string;
   characterIds: string[];
   location: TextLocation;
 }
@@ -59,6 +62,7 @@ export interface CharacterMention {
   role: 'present' | 'mentioned' | 'flashback';
   location: TextLocation;
   attributesMentioned: string[];
+  relationshipsMentioned: Array<{ target: string; relationship: string }>;
 }
 
 export interface FactExtraction {
@@ -76,6 +80,7 @@ export interface FactExtraction {
 
 export interface PlotThreadTouch {
   threadId: string;
+  name: string;
   action: 'introduced' | 'advanced' | 'complicated' | 'resolved';
   description: string;
   location: TextLocation;
@@ -96,6 +101,25 @@ export interface SetupExtraction {
   issueId?: string;
 }
 
+export interface DialogueLine {
+  speaker: string;
+  target?: string;
+  summary: string;
+  tone?: string;
+  reveals: string[];
+  location: TextLocation;
+}
+
+export interface SceneBreak {
+  sceneNumber: number;
+  location?: string;
+  time?: string;
+  charactersPresent: string[];
+  povCharacter?: string;
+  startOffset: number;
+  endOffset: number;
+}
+
 export interface TextLocation {
   chunkId: string;
   startOffset: number;
@@ -110,10 +134,20 @@ export interface EntityIndex {
   objects: ObjectEntity[];
 }
 
+export type AttributeCategory = 'physical' | 'personality' | 'occupation' | 'relationship' | 'state' | 'action';
+
+export interface CharacterProfile {
+  physical: string[];
+  personality: string[];
+  occupation?: string;
+  keyRelationships: string[];
+}
+
 export interface CharacterEntity {
   id: string;
   name: string;
   aliases: string[];
+  profile: CharacterProfile;
   attributes: CharacterAttribute[];
   appearances: CharacterAppearance[];
   relationships: CharacterRelationship[];
@@ -130,6 +164,7 @@ export interface CharacterEntity {
 export interface CharacterAttribute {
   attribute: string;
   value: string;
+  category: AttributeCategory;
   location: TextLocation;
   conflictsWith?: {
     attributeIndex: number;
@@ -153,27 +188,13 @@ export interface CharacterRelationship {
 export interface LocationEntity {
   id: string;
   name: string;
-  aliases: string[];
   description?: string;
-  appearances: Array<{
-    chunkId: string;
-    mentions: TextLocation[];
-  }>;
-  parentLocationId?: string;
 }
 
 export interface ObjectEntity {
   id: string;
   name: string;
   description?: string;
-  significance: 'normal' | 'emphasized' | 'chekhov';
-  appearances: Array<{
-    chunkId: string;
-    mentions: TextLocation[];
-    action?: 'introduced' | 'used' | 'mentioned';
-  }>;
-  payoffStatus?: 'pending' | 'resolved' | 'abandoned';
-  issueIds: string[];
 }
 
 export interface PlotThreadView {
@@ -192,30 +213,39 @@ export interface PlotThreadEvent {
   location: TextLocation;
 }
 
-export interface TimelineView {
-  events: TimelineEvent[];
-  inconsistencies: TimelineInconsistency[];
-  spans: TimeSpan[];
-}
-
 export interface TimelineEvent {
   eventId: string;
-  position: number;
-  confidence: number;
-}
-
-export interface TimelineInconsistency {
   description: string;
-  eventIds: string[];
-  issueId: string;
+  normalizedTime: string;  // e.g., "Day 0, 9:00 AM"
+  originalTimeMarker: string;  // Original text reference
+  chapter: string;
+  sequence: number;
+  isFlashback: boolean;
+  characterIds: string[];
+  location?: string;
+  chunkId: string;
 }
 
-export interface TimeSpan {
+export interface EntityTimeline {
+  entityId: string;
+  entityName: string;
+  entityType: 'character' | 'location';
+  events: TimelineEvent[];
+}
+
+export interface TimeAnchor {
   id: string;
-  name: string;
-  startPosition: number;
-  endPosition: number;
+  name: string;  // e.g., "Day 0 (Tuesday)"
+  dayOffset: number;  // Relative to anchor point
   description?: string;
+}
+
+export interface TimelineView {
+  anchorPoint: string;  // Description of Day 0
+  globalEvents: TimelineEvent[];  // All events chronologically
+  entityTimelines: EntityTimeline[];  // Per-character/location timelines
+  timeAnchors: TimeAnchor[];
+  chapters: string[];
 }
 
 export interface IssueWithContext {
@@ -226,8 +256,8 @@ export interface IssueWithContext {
   description: string;
   chunkIds: string[];
   evidence: EvidenceItem[];
-  relatedEntityIds: string[];
-  status: 'open' | 'dismissed' | 'fixed';
+  relatedEntityIds?: string[];
+  status?: 'open' | 'dismissed' | 'fixed';
   userNote?: string;
 }
 
@@ -246,7 +276,7 @@ export type IssueType =
 
 export interface EvidenceItem {
   quote: string;
-  location: TextLocation;
+  location?: TextLocation;
   note?: string;
 }
 
@@ -266,5 +296,10 @@ export interface AnalysisSummary {
     error: number;
     warning: number;
     info: number;
+  };
+  tokenUsage?: {
+    discovery: { inputTokens: number; outputTokens: number };
+    extraction: { inputTokens: number; outputTokens: number };
+    total: { inputTokens: number; outputTokens: number };
   };
 }

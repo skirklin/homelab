@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from .schema import (
+from critic.schema import (
     AnalysisOutput,
     DocumentInfo,
     ChunkWithText,
@@ -29,16 +29,21 @@ from .schema import (
     PlotThreadView,
     TimelineView,
 )
-from .parser import parse_document
-from .chunker import chunk_document
-from .discovery import discover_entities
-from .extractor import extract_from_chunks
-from .aggregator import aggregate_entities
-from .timeline import reconstruct_timeline
-from .cache import AnalysisCache
+from critic.parser import parse_document
+from critic.chunker import chunk_document
+from critic.discovery import discover_entities
+from critic.extractor import extract_from_chunks
+from critic.aggregator import aggregate_entities
+from critic.timeline import reconstruct_timeline
+from critic.cache import AnalysisCache
+from critic.config import DEFAULT_MODEL
 
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+# Note: Character inconsistencies are detected by the literary critic agent,
+# not by code-based pattern matching. The model has the context to
+# understand whether different descriptions are contradictions
+# (e.g., "blue eyes" vs "brown eyes") or natural progressions
+# (e.g., aging character with different hair color decades later).
 
 
 def analyze_document(
@@ -114,6 +119,11 @@ def analyze_document(
         if analysis_cache:
             analysis_cache.set_discovery(doc.full_text, model, discovery_result)
 
+    # Invalidate stale extraction cache entries (entities changed = old extractions invalid)
+    if analysis_cache:
+        entities_hash = analysis_cache.hash_discovered_entities(discovery_result.entities)
+        analysis_cache.invalidate_stale_extractions(entities_hash)
+
     # Phase 4: Extraction pass
     extracted_chunks, extraction_usage = extract_from_chunks(
         chunks,
@@ -134,7 +144,12 @@ def analyze_document(
     # Phase 6: Reconstruct timeline
     if on_progress:
         on_progress('timeline', 0, 1)
-    timeline = reconstruct_timeline(chunks_with_text)
+    timeline = reconstruct_timeline(
+        chunks_with_text,
+        characters=entities.characters,
+        api_key=api_key,
+        model=model,
+    )
     if on_progress:
         on_progress('timeline', 1, 1)
 
@@ -202,46 +217,8 @@ def _detect_issues(
     issues: list[IssueWithContext] = []
     issue_counter = 0
 
-    # 1. Character inconsistencies (attribute conflicts)
-    for char in characters:
-        attrs_by_type: dict[str, list] = {}
-
-        for attr in char.attributes:
-            attr_type = attr.attribute.lower()
-            if attr_type not in attrs_by_type:
-                attrs_by_type[attr_type] = []
-            attrs_by_type[attr_type].append(attr)
-
-        for attr_type, attrs in attrs_by_type.items():
-            if len(attrs) >= 2:
-                unique_values = set(a.value.lower() for a in attrs)
-                if len(unique_values) > 1:
-                    issue_counter += 1
-                    issue_id = f"issue-{issue_counter}"
-
-                    issues.append(IssueWithContext(
-                        id=issue_id,
-                        type="character_inconsistency",
-                        severity="error",
-                        title=f"{char.name}'s {attr_type} inconsistency",
-                        description=f"{char.name} is described with conflicting {attr_type}: {' vs '.join(unique_values)}",
-                        chunk_ids=[a.location.chunk_id for a in attrs],
-                        evidence=[
-                            EvidenceItem(
-                                quote=a.location.snippet,
-                                location=a.location,
-                                note=f"{attr_type}: {a.value}",
-                            )
-                            for a in attrs
-                        ],
-                        related_entity_ids=[char.id],
-                    ))
-
-                    # Mark attributes as conflicting
-                    for i, attr in enumerate(attrs[1:], 1):
-                        attr.conflicts_with = {'attributeIndex': 0, 'issueId': issue_id}
-
-                    char.issue_ids.append(issue_id)
+    # 1. Character inconsistencies - detected by literary critic agent (run with --critic flag)
+    # The model can understand context (e.g., time jumps, aging) that code cannot
 
     # 2. Unresolved plot threads
     for thread in plot_threads:
@@ -303,23 +280,7 @@ def _detect_issues(
             except ValueError:
                 pass
 
-    # 4. Timeline inconsistencies
-    for inconsistency in timeline.inconsistencies:
-        issue_counter += 1
-        issue_id = f"issue-{issue_counter}"
-        inconsistency.issue_id = issue_id
-
-        issues.append(IssueWithContext(
-            id=issue_id,
-            type="timeline_inconsistency",
-            severity="error",
-            title="Timeline conflict",
-            description=inconsistency.description,
-            chunk_ids=[],
-            evidence=[],
-        ))
-
-    # 5. Orphaned setups
+    # 4. Orphaned setups
     for chunk in chunks:
         for setup in chunk.extraction.setups:
             if setup.status == 'pending' and setup.weight != 'subtle':

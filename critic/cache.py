@@ -13,11 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
-from .types import Chunk
-from .schema import ChunkExtraction
+from critic.types import Chunk
+from critic.schema import ChunkExtraction
 
 if TYPE_CHECKING:
-    from .discovery import DiscoveryResult, DiscoveredEntities
+    from critic.discovery import DiscoveryResult, DiscoveredEntities
 
 
 CACHE_VERSION = "1.0.0"
@@ -265,6 +265,13 @@ class AnalysisCache:
         if not self.enabled:
             return
 
+        # Don't cache empty/failed extractions
+        if (not extraction.events and
+            not extraction.character_mentions and
+            not extraction.facts):
+            print("[Cache] Skipping cache for empty extraction (likely failed)")
+            return
+
         chunk_hash = self.hash(chunk_content)
         model_hash = self.hash(model)
         context_hash = self.hash(entities_hash)
@@ -337,3 +344,30 @@ class AnalysisCache:
             extraction=count_files("extraction"),
             total_size=total_size,
         )
+
+    def invalidate_stale_extractions(self, current_entities_hash: str) -> int:
+        """Remove extraction cache entries that don't match the current entities hash.
+
+        Returns number of files removed.
+        """
+        if not self.enabled:
+            return 0
+
+        extraction_dir = self.cache_dir / "extraction"
+        if not extraction_dir.exists():
+            return 0
+
+        context_hash = self.hash(current_entities_hash)
+        removed = 0
+
+        for f in extraction_dir.glob("*.json"):
+            # Cache filename format: chunk_hash-model_hash-context_hash.json
+            parts = f.stem.split('-')
+            if len(parts) >= 3 and parts[2] != context_hash:
+                f.unlink()
+                removed += 1
+
+        if removed > 0:
+            print(f"[Cache] Invalidated {removed} stale extraction cache entries")
+
+        return removed

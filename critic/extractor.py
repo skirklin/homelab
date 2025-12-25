@@ -7,13 +7,13 @@ This is the detailed extraction pass that runs after discovery.
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import anthropic
-from anthropic.types import TextBlock
 
-from .types import Chunk
-from .schema import (
+from critic.types import Chunk
+from critic.retry import retry_api_call
+from critic.schema import (
     ChunkWithText,
     ChunkExtraction,
     EventExtraction,
@@ -21,15 +21,16 @@ from .schema import (
     FactExtraction,
     PlotThreadTouch,
     SetupExtraction,
+    DialogueLine,
+    SceneBreak,
     TextLocation,
 )
-from .discovery import DiscoveredEntities, format_discovered_context
+from critic.discovery import DiscoveredEntities, format_discovered_context
 
 if TYPE_CHECKING:
-    from .cache import AnalysisCache
+    from critic.cache import AnalysisCache
 
-
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+from critic.config import DEFAULT_MODEL
 
 
 def build_extraction_prompt(discovered_context: Optional[str] = None) -> str:
@@ -48,7 +49,14 @@ The following characters and plot threads have been identified in this manuscrip
     character_instructions = """For each character that appears or is mentioned:
 - name: Character's name (use the canonical name from the known characters list if they match)
 - role: "present" (in the scene), "mentioned" (talked about), or "flashback"
-- attributes: Array of physical/personality details, each as a string like "blue eyes", "tall", "nervous demeanor"
+- attributes: Array of character details. For each attribute:
+  - value: The attribute (e.g., "blue eyes", "detective", "nervous")
+  - category: One of:
+    - "physical": Stable physical traits (eye color, height, scars, age)
+    - "personality": Stable personality traits (determined, kind, suspicious)
+    - "occupation": Job or role (detective, fisherman, bartender)
+    - "action": Momentary actions (clutching coffee, leaning forward) - SKIP THESE, don't include actions
+  IMPORTANT: Only include stable traits (physical, personality, occupation). Skip momentary actions.
 - relationships: Array of relationships FROM THIS CHARACTER'S PERSPECTIVE. Format: {target: "other character name", relationship: "what the target is TO this character"}
   IMPORTANT: The relationship describes what the TARGET is to the SOURCE character.
   Examples: If Alice's mother is named Beth, Alice's relationship entry is {target: "Beth", relationship: "mother"} (Beth is Alice's mother).
@@ -102,7 +110,24 @@ Things that seem to promise future payoff:
 - impliedPayoff: What this seems to promise
 - quote: The setup text
 
-## 6. Open Questions
+## 6. Dialogue (important conversations only)
+For significant dialogue exchanges that reveal character or advance plot:
+- speaker: Who is speaking
+- target: Who they're speaking to (if clear)
+- summary: Brief summary of what they said (2-3 sentences max)
+- tone: The emotional tone (e.g., "angry", "pleading", "casual", "threatening")
+- reveals: Array of key information revealed in this dialogue
+- quote: A key quote from this dialogue
+
+## 7. Scene Structure
+When the scene changes (location, time, or POV shift):
+- sceneNumber: Number starting from 1 within this chapter
+- location: Where the scene takes place
+- time: Time reference for this scene (if mentioned)
+- charactersPresent: Array of characters in the scene
+- povCharacter: Whose perspective we're seeing (if clear)
+
+## 8. Open Questions
 Mysteries or questions raised for the reader (just list as strings)
 
 Return as JSON:
@@ -112,6 +137,8 @@ Return as JSON:
   "facts": [...],
   "plotThreads": [...],
   "setups": [...],
+  "dialogue": [...],
+  "scenes": [...],
   "openQuestions": [...]
 }}
 
@@ -241,22 +268,40 @@ def _extract_from_chunk(
         if chunk.title else chunk.content
     )
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=64000,
-        messages=[{
-            'role': 'user',
-            'content': f"{extraction_prompt}\n\n---\n\nTEXT TO ANALYZE:\n\n{chunk_context}",
-        }],
-    )
+    # Use streaming to avoid timeout issues with long requests
+    text_parts = []
+    input_tokens = 0
+    output_tokens = 0
+    stop_reason = None
 
-    if response.stop_reason == 'max_tokens':
+    def make_request():
+        nonlocal text_parts, input_tokens, output_tokens, stop_reason
+        text_parts = []  # Reset on retry
+
+        with client.messages.stream(
+            model=model,
+            max_tokens=64000,
+            messages=[{
+                'role': 'user',
+                'content': f"{extraction_prompt}\n\n---\n\nTEXT TO ANALYZE:\n\n{chunk_context}",
+            }],
+        ) as stream:
+            for text_chunk in stream.text_stream:
+                text_parts.append(text_chunk)
+            response = stream.get_final_message()
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            stop_reason = response.stop_reason
+
+    def on_retry(attempt, delay, exc):
+        print(f"  Rate limited on chunk {chunk.id}, waiting {delay:.0f}s (attempt {attempt})...")
+
+    retry_api_call(make_request, on_retry=on_retry)
+
+    if stop_reason == 'max_tokens':
         print(f"Warning: Extraction for chunk {chunk.id} was truncated")
 
-    text = ''.join(
-        block.text for block in response.content
-        if isinstance(block, TextBlock)
-    )
+    text = ''.join(text_parts)
 
     raw = _parse_json_response(text, chunk.id)
     extraction = _process_raw_extraction(raw, chunk)
@@ -269,94 +314,130 @@ def _extract_from_chunk(
         end_offset=start_offset + len(chunk.content),
         extraction=extraction,
     ), {
-        'input_tokens': response.usage.input_tokens,
-        'output_tokens': response.usage.output_tokens,
+        'input_tokens': input_tokens,
+        'output_tokens': output_tokens,
     }
+
+
+def _normalize_attribute(a: Any) -> Optional[dict]:
+    """Normalize an attribute to {value, category} dict. Returns None for actions."""
+    if isinstance(a, str):
+        # Legacy format - treat as unknown category
+        return {"value": a, "category": "state"}
+    if isinstance(a, dict):
+        category = a.get('category', 'state')
+        # Skip actions - they're momentary, not stable traits
+        if category == 'action':
+            return None
+        value = a.get('value') or a.get('attribute') or a.get('name', '')
+        if value:
+            return {"value": value, "category": category}
+    return None
 
 
 def _process_raw_extraction(raw: dict, chunk: Chunk) -> ChunkExtraction:
     """Process raw extraction and add text locations."""
 
-    def find_location(quote: str) -> TextLocation:
+    def loc(quote: str) -> TextLocation:
         return _find_text_location(quote, chunk.content, chunk.id)
 
+    def make_id(prefix: str, i: int) -> str:
+        return f"{chunk.id}-{prefix}-{i}"
+
     # Process events
-    events = []
-    for i, e in enumerate(raw.get('events', [])):
-        events.append(EventExtraction(
-            id=f"{chunk.id}-event-{i}",
+    events = [
+        EventExtraction(
+            id=make_id("event", i),
             description=e.get('description', ''),
             time_marker=e.get('timeMarker', ''),
             precision=e.get('precision', 'vague'),
             sequence_note=e.get('sequenceNote'),
-            character_ids=[],  # Linked in aggregation
-            location=find_location(e.get('quote', '')),
-        ))
+            character_ids=[],
+            location=loc(e.get('quote', '')),
+        )
+        for i, e in enumerate(raw.get('events', []))
+    ]
 
-    # Process characters
+    # Process characters (needs special handling for attributes)
     character_mentions = []
     for c in raw.get('characters', []):
-        # Handle attributes that might be dicts or strings
-        attributes = []
-        for a in c.get('attributes', []):
-            if isinstance(a, str):
-                attributes.append(a)
-            elif isinstance(a, dict):
-                attr = a.get('attribute') or a.get('name') or a.get('trait', '')
-                val = a.get('value') or a.get('detail') or a.get('description', '')
-                if attr and val:
-                    attributes.append(f"{attr}: {val}")
-                elif attr:
-                    attributes.append(attr)
-                elif val:
-                    attributes.append(val)
-
-        relationships = [
-            {'target': r.get('target', ''), 'relationship': r.get('relationship', '')}
-            for r in c.get('relationships', [])
-        ]
-
+        # Normalize attributes - filter out actions, keep stable traits
+        attrs = [a for a in (_normalize_attribute(x) for x in c.get('attributes', [])) if a]
         character_mentions.append(CharacterMention(
-            character_id='',  # Assigned in aggregation
+            character_id='',
             name=c.get('name', ''),
             role=c.get('role', 'present'),
-            location=find_location(c.get('quote', '')),
-            attributes_mentioned=attributes,
-            relationships_mentioned=relationships,
+            location=loc(c.get('quote', '')),
+            # Store as list of dicts with value and category
+            attributes_mentioned=attrs,
+            relationships_mentioned=[
+                {'target': r.get('target', ''), 'relationship': r.get('relationship', '')}
+                for r in c.get('relationships', [])
+            ],
         ))
 
     # Process facts
-    facts = []
-    for i, f in enumerate(raw.get('facts', [])):
-        facts.append(FactExtraction(
-            id=f"{chunk.id}-fact-{i}",
+    facts = [
+        FactExtraction(
+            id=make_id("fact", i),
             content=f.get('content', ''),
             category=f.get('category', 'other'),
             subject=f.get('subject', ''),
-            location=find_location(f.get('quote', '')),
-        ))
+            location=loc(f.get('quote', '')),
+        )
+        for i, f in enumerate(raw.get('facts', []))
+    ]
 
     # Process plot threads
-    plot_threads = []
-    for pt in raw.get('plotThreads', []):
-        plot_threads.append(PlotThreadTouch(
-            thread_id='',  # Assigned in aggregation
+    plot_threads = [
+        PlotThreadTouch(
+            thread_id='',
             name=pt.get('name', ''),
             action=pt.get('action', 'advanced'),
             description=pt.get('description', ''),
-            location=find_location(pt.get('quote', '')),
-        ))
+            location=loc(pt.get('quote', '')),
+        )
+        for pt in raw.get('plotThreads', [])
+    ]
 
     # Process setups
-    setups = []
-    for i, s in enumerate(raw.get('setups', [])):
-        setups.append(SetupExtraction(
-            id=f"{chunk.id}-setup-{i}",
+    setups = [
+        SetupExtraction(
+            id=make_id("setup", i),
             description=s.get('description', ''),
             weight=s.get('weight', 'moderate'),
             implied_payoff=s.get('impliedPayoff', ''),
-            location=find_location(s.get('quote', '')),
+            location=loc(s.get('quote', '')),
             status='pending',
+        )
+        for i, s in enumerate(raw.get('setups', []))
+    ]
+
+    # Process dialogue
+    dialogue = [
+        DialogueLine(
+            speaker=d.get('speaker', ''),
+            target=d.get('target'),
+            summary=d.get('summary', ''),
+            tone=d.get('tone'),
+            reveals=d.get('reveals', []),
+            location=loc(d.get('quote', '')),
+        )
+        for d in raw.get('dialogue', [])
+    ]
+
+    # Process scenes
+    scenes = []
+    for s in raw.get('scenes', []):
+        scene_loc = loc(s.get('location', '') or s.get('time', ''))
+        scenes.append(SceneBreak(
+            scene_number=s.get('sceneNumber', len(scenes) + 1),
+            location=s.get('location'),
+            time=s.get('time'),
+            characters_present=s.get('charactersPresent', []),
+            pov_character=s.get('povCharacter'),
+            start_offset=scene_loc.start_offset,
+            end_offset=scene_loc.end_offset,
         ))
 
     return ChunkExtraction(
@@ -365,6 +446,8 @@ def _process_raw_extraction(raw: dict, chunk: Chunk) -> ChunkExtraction:
         facts=facts,
         plot_threads=plot_threads,
         setups=setups,
+        dialogue=dialogue,
+        scenes=scenes,
         open_questions=raw.get('openQuestions', []),
     )
 

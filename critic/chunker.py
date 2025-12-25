@@ -5,7 +5,7 @@ Document chunker - splits documents into analyzable sections.
 from typing import Literal, Optional
 from dataclasses import dataclass
 
-from .types import ParsedDocument, Chunk
+from critic.types import ParsedDocument, Chunk, Heading
 
 
 @dataclass
@@ -49,14 +49,34 @@ def chunk_document(
         return _chunk_hybrid(doc, opts)
 
 
+def _is_chapter_heading(heading: Heading) -> bool:
+    """Check if a heading is a chapter boundary."""
+    # Level 1-2 headings are always chapter boundaries
+    if heading.level <= 2:
+        return True
+    # Level 3 headings that look like chapter titles
+    text_lower = heading.text.lower()
+    if heading.level == 3 and (
+        text_lower.startswith('chapter') or
+        text_lower.startswith('epilogue') or
+        text_lower.startswith('prologue') or
+        text_lower.startswith('part ')
+    ):
+        return True
+    return False
+
+
 def _chunk_by_chapters(doc: ParsedDocument, opts: ChunkOptions) -> list[Chunk]:
     """Chunk by chapter headings."""
     if not doc.headings:
         # No headings, fall back to size-based
         return _chunk_by_size(doc, opts)
 
-    # Find chapter-level headings (level 1 or 2)
-    chapter_headings = [h for h in doc.headings if h.level <= 2]
+    # Find chapter-level headings
+    chapter_headings = [h for h in doc.headings if _is_chapter_heading(h)]
+
+    # Skip title/subtitle headings at the start (paragraph 0)
+    chapter_headings = [h for h in chapter_headings if h.paragraph_index > 0]
 
     if not chapter_headings:
         return _chunk_by_size(doc, opts)
@@ -64,7 +84,8 @@ def _chunk_by_chapters(doc: ParsedDocument, opts: ChunkOptions) -> list[Chunk]:
     chunks: list[Chunk] = []
 
     for i, heading in enumerate(chapter_headings):
-        start_para = heading.paragraph_index
+        # For first chunk, include any content before the first chapter heading
+        start_para = 0 if i == 0 else heading.paragraph_index
         end_para = (
             chapter_headings[i + 1].paragraph_index
             if i + 1 < len(chapter_headings)

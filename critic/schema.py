@@ -35,7 +35,7 @@ class CharacterMention(BaseModel):
     name: str
     role: Literal["present", "mentioned", "flashback"]
     location: TextLocation
-    attributes_mentioned: list[str] = Field(default_factory=list)
+    attributes_mentioned: list[dict] = Field(default_factory=list)  # [{value, category}]
     relationships_mentioned: list[dict] = Field(default_factory=list)
 
 
@@ -71,6 +71,27 @@ class SetupExtraction(BaseModel):
     issue_id: Optional[str] = None
 
 
+class DialogueLine(BaseModel):
+    """A line of dialogue extracted from the text."""
+    speaker: str
+    target: Optional[str] = None  # Who they're speaking to
+    summary: str  # What they said (summarized)
+    tone: Optional[str] = None  # e.g., "angry", "pleading", "casual"
+    reveals: list[str] = Field(default_factory=list)  # Information revealed
+    location: TextLocation
+
+
+class SceneBreak(BaseModel):
+    """A scene or setting change."""
+    scene_number: int
+    location: Optional[str] = None
+    time: Optional[str] = None
+    characters_present: list[str] = Field(default_factory=list)
+    pov_character: Optional[str] = None
+    start_offset: int
+    end_offset: int
+
+
 class ChunkExtraction(BaseModel):
     """All extractions from a single chunk."""
     events: list[EventExtraction] = Field(default_factory=list)
@@ -78,6 +99,8 @@ class ChunkExtraction(BaseModel):
     facts: list[FactExtraction] = Field(default_factory=list)
     plot_threads: list[PlotThreadTouch] = Field(default_factory=list)
     setups: list[SetupExtraction] = Field(default_factory=list)
+    dialogue: list[DialogueLine] = Field(default_factory=list)
+    scenes: list[SceneBreak] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
 
 
@@ -91,12 +114,24 @@ class ChunkWithText(BaseModel):
     extraction: ChunkExtraction
 
 
+AttributeCategory = Literal["physical", "personality", "occupation", "relationship", "state", "action"]
+
+
 class CharacterAttribute(BaseModel):
     """An attribute of a character."""
     attribute: str
     value: str
+    category: AttributeCategory = "state"
     location: TextLocation
     conflicts_with: Optional[dict] = None
+
+
+class CharacterProfile(BaseModel):
+    """Aggregated stable profile of a character."""
+    physical: list[str] = Field(default_factory=list)  # e.g., "tall", "brown eyes"
+    personality: list[str] = Field(default_factory=list)  # e.g., "determined", "methodical"
+    occupation: Optional[str] = None
+    key_relationships: list[str] = Field(default_factory=list)  # e.g., "Emma's husband"
 
 
 class CharacterAppearance(BaseModel):
@@ -127,6 +162,7 @@ class CharacterEntity(BaseModel):
     id: str
     name: str
     aliases: list[str] = Field(default_factory=list)
+    profile: CharacterProfile = Field(default_factory=CharacterProfile)
     attributes: list[CharacterAttribute] = Field(default_factory=list)
     appearances: list[CharacterAppearance] = Field(default_factory=list)
     relationships: list[CharacterRelationship] = Field(default_factory=list)
@@ -184,31 +220,40 @@ class PlotThreadView(BaseModel):
 class TimelineEvent(BaseModel):
     """An event positioned on the timeline."""
     event_id: str
-    position: float
-    confidence: float
-
-
-class TimelineInconsistency(BaseModel):
-    """A detected timeline inconsistency."""
     description: str
-    event_ids: list[str]
-    issue_id: str = ""
+    normalized_time: str  # Normalized time like "Day 0, 9:00 AM" or "Day -3"
+    original_time_marker: str  # The narrative time reference, e.g., "Thursday night"
+    chapter: str  # Which chapter/section this occurs in
+    sequence: int  # Chronological order (0 = earliest)
+    is_flashback: bool = False  # Whether this is told as a flashback
+    character_ids: list[str] = Field(default_factory=list)
+    location: Optional[str] = None  # Where this event takes place
+    chunk_id: str = ""
 
 
-class TimeSpan(BaseModel):
-    """A span of time in the narrative."""
+class EntityTimeline(BaseModel):
+    """A chronological timeline for a single entity (character or location)."""
+    entity_id: str
+    entity_name: str
+    entity_type: Literal["character", "location"]
+    events: list[TimelineEvent] = Field(default_factory=list)  # In chronological order
+
+
+class TimeAnchor(BaseModel):
+    """A named time reference point in the narrative."""
     id: str
-    name: str
-    start_position: float
-    end_position: float
-    description: Optional[str] = None
+    name: str  # e.g., "Day 0 (Tuesday)", "Day -1 (Monday night)"
+    day_offset: int  # Relative to anchor point (0 = present, -1 = yesterday, etc.)
+    description: Optional[str] = None  # e.g., "Detective arrives on island"
 
 
 class TimelineView(BaseModel):
-    """The reconstructed timeline."""
-    events: list[TimelineEvent] = Field(default_factory=list)
-    inconsistencies: list[TimelineInconsistency] = Field(default_factory=list)
-    spans: list[TimeSpan] = Field(default_factory=list)
+    """The reconstructed timeline organized by entity."""
+    anchor_point: str = ""  # Description of Day 0, e.g., "Tuesday morning - Detective arrives"
+    global_events: list[TimelineEvent] = Field(default_factory=list)  # All events chronologically
+    entity_timelines: list[EntityTimeline] = Field(default_factory=list)  # Per-character/location
+    time_anchors: list[TimeAnchor] = Field(default_factory=list)  # Named time points
+    chapters: list[str] = Field(default_factory=list)  # Chapter names in order
 
 
 class EvidenceItem(BaseModel):

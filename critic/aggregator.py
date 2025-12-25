@@ -4,19 +4,23 @@ Aggregator - combines extraction results from all chunks into unified entities.
 
 from collections import defaultdict
 
-from .schema import (
+from critic.schema import (
     ChunkWithText,
+    CharacterMention,
     EntityIndex,
     CharacterEntity,
     CharacterAttribute,
     CharacterAppearance,
     CharacterRelationship,
+    CharacterProfile,
     CharacterStats,
     LocationEntity,
     ObjectEntity,
     PlotThreadView,
     PlotThreadEvent,
 )
+
+
 
 
 def aggregate_entities(
@@ -85,129 +89,150 @@ def aggregate_entities(
     return chunks, entity_index, plot_threads
 
 
+def _new_char_data() -> dict:
+    """Create empty character data structure."""
+    return {
+        'name': '',
+        'aliases': set(),
+        'attributes': [],
+        'seen_attrs': set(),  # (category, value) pairs to deduplicate
+        'appearances': defaultdict(lambda: {'role': 'mentioned', 'mentions': []}),
+        'relationships': {},
+        'first_chunk': '',
+        'last_chunk': '',
+        'total_mentions': 0,
+        'present_count': 0,
+        'physical_attrs': set(),
+        'personality_attrs': set(),
+        'occupation': None,
+        'key_relationships': set(),
+    }
+
+
+def _update_char_from_mention(
+    data: dict,
+    mention: CharacterMention,
+    chunk_id: str,
+    name_to_id: dict[str, str],
+) -> None:
+    """Update character data from a single mention."""
+    # Set name (first seen)
+    if not data['name']:
+        data['name'] = mention.name
+    elif mention.name.lower() != data['name'].lower():
+        data['aliases'].add(mention.name)
+
+    # Track appearance in this chunk
+    app = data['appearances'][chunk_id]
+    if mention.role == 'present':
+        app['role'] = 'present'
+        data['present_count'] += 1
+    elif mention.role == 'flashback' and app['role'] != 'present':
+        app['role'] = 'flashback'
+    app['mentions'].append(mention.location)
+
+    # Store attributes using model-provided categories (deduplicated)
+    for attr in mention.attributes_mentioned:
+        value = attr.get('value', '') if isinstance(attr, dict) else str(attr)
+        category = attr.get('category', 'state') if isinstance(attr, dict) else 'state'
+
+        # Build profile from stable traits (sets auto-deduplicate)
+        if category == "physical":
+            data['physical_attrs'].add(value)
+        elif category == "personality":
+            data['personality_attrs'].add(value)
+        elif category == "occupation" and not data['occupation']:
+            data['occupation'] = value
+
+        # Store attributes (deduplicated by category+value)
+        if category in ("physical", "personality", "occupation", "relationship"):
+            attr_key = (category, value.lower())
+            if attr_key not in data['seen_attrs']:
+                data['seen_attrs'].add(attr_key)
+                data['attributes'].append(CharacterAttribute(
+                    attribute=category,
+                    value=value,
+                    category=category,
+                    location=mention.location,
+                ))
+
+    # Track relationships
+    for rel in mention.relationships_mentioned:
+        target = rel.get('target', '')
+        relationship = rel.get('relationship', '')
+        if target and relationship:
+            target_id = name_to_id.get(target.lower(), '')
+            rel_key = f"{target_id or target}:{relationship}"
+            if rel_key not in data['relationships']:
+                data['relationships'][rel_key] = {
+                    'target_id': target_id,
+                    'target_name': target,
+                    'relationship': relationship,
+                }
+            data['key_relationships'].add(f"{relationship} of {target}")
+
+    # Update stats
+    data['total_mentions'] += 1
+    if not data['first_chunk']:
+        data['first_chunk'] = chunk_id
+    data['last_chunk'] = chunk_id
+
+
+def _finalize_character(char_id: str, data: dict) -> CharacterEntity:
+    """Convert accumulated character data to CharacterEntity."""
+    return CharacterEntity(
+        id=char_id,
+        name=data['name'],
+        aliases=list(data['aliases']),
+        profile=CharacterProfile(
+            physical=list(data['physical_attrs']),
+            personality=list(data['personality_attrs']),
+            occupation=data['occupation'],
+            key_relationships=list(data['key_relationships']),
+        ),
+        attributes=data['attributes'],
+        appearances=[
+            CharacterAppearance(chunk_id=cid, role=app['role'], mentions=app['mentions'])
+            for cid, app in data['appearances'].items()
+        ],
+        relationships=[
+            CharacterRelationship(
+                target_character_id=rel['target_id'],
+                target_name=rel['target_name'],
+                relationship=rel['relationship'],
+                shared_event_ids=[],
+            )
+            for rel in data['relationships'].values()
+        ],
+        event_ids=[],
+        issue_ids=[],
+        stats=CharacterStats(
+            first_appearance=data['first_chunk'],
+            last_appearance=data['last_chunk'],
+            total_mentions=data['total_mentions'],
+            present_in_chunks=data['present_count'],
+        ),
+    )
+
+
 def _build_character_entities(
     chunks: list[ChunkWithText],
     name_to_id: dict[str, str],
 ) -> list[CharacterEntity]:
     """Build character entities from all mentions."""
-    # Group by character ID
-    char_data: dict[str, dict] = defaultdict(lambda: {
-        'name': '',
-        'aliases': set(),
-        'attributes': [],
-        'appearances': defaultdict(lambda: {'role': 'mentioned', 'mentions': []}),
-        'relationships': {},
-        'event_ids': [],
-        'issue_ids': [],
-        'first_chunk': '',
-        'last_chunk': '',
-        'total_mentions': 0,
-        'present_count': 0,
-    })
+    char_data: dict[str, dict] = defaultdict(_new_char_data)
 
     for chunk in chunks:
         for mention in chunk.extraction.character_mentions:
-            char_id = mention.character_id
-            if not char_id:
-                continue
+            if mention.character_id:
+                _update_char_from_mention(
+                    char_data[mention.character_id],
+                    mention,
+                    chunk.id,
+                    name_to_id,
+                )
 
-            data = char_data[char_id]
-
-            # Set name (use most common or first seen)
-            if not data['name']:
-                data['name'] = mention.name
-
-            # Track aliases
-            if mention.name.lower() != data['name'].lower():
-                data['aliases'].add(mention.name)
-
-            # Track appearances
-            app = data['appearances'][chunk.id]
-            if mention.role == 'present':
-                app['role'] = 'present'
-                data['present_count'] += 1
-            elif mention.role == 'flashback' and app['role'] != 'present':
-                app['role'] = 'flashback'
-            app['mentions'].append(mention.location)
-
-            # Track attributes
-            for attr_str in mention.attributes_mentioned:
-                # Parse "attribute: value" format
-                if ':' in attr_str:
-                    parts = attr_str.split(':', 1)
-                    attr_name = parts[0].strip()
-                    attr_value = parts[1].strip()
-                else:
-                    attr_name = 'description'
-                    attr_value = attr_str
-
-                data['attributes'].append(CharacterAttribute(
-                    attribute=attr_name,
-                    value=attr_value,
-                    location=mention.location,
-                ))
-
-            # Track relationships
-            for rel in mention.relationships_mentioned:
-                target = rel.get('target', '')
-                relationship = rel.get('relationship', '')
-                target_id = name_to_id.get(target.lower(), '')
-
-                if target_id and target_id not in data['relationships']:
-                    data['relationships'][target_id] = {
-                        'target_id': target_id,
-                        'target_name': target,
-                        'relationship': relationship,
-                    }
-
-            # Track mentions
-            data['total_mentions'] += 1
-
-            # Track first/last
-            if not data['first_chunk']:
-                data['first_chunk'] = chunk.id
-            data['last_chunk'] = chunk.id
-
-    # Convert to CharacterEntity objects
-    characters = []
-    for char_id, data in char_data.items():
-        appearances = [
-            CharacterAppearance(
-                chunk_id=chunk_id,
-                role=app['role'],
-                mentions=app['mentions'],
-            )
-            for chunk_id, app in data['appearances'].items()
-        ]
-
-        relationships = [
-            CharacterRelationship(
-                target_character_id=rel['target_id'],
-                target_name=rel['target_name'],
-                relationship=rel['relationship'],
-                shared_event_ids=[],  # Filled in later
-            )
-            for rel in data['relationships'].values()
-        ]
-
-        characters.append(CharacterEntity(
-            id=char_id,
-            name=data['name'],
-            aliases=list(data['aliases']),
-            attributes=data['attributes'],
-            appearances=appearances,
-            relationships=relationships,
-            event_ids=[],  # Filled in later
-            issue_ids=[],
-            stats=CharacterStats(
-                first_appearance=data['first_chunk'],
-                last_appearance=data['last_chunk'],
-                total_mentions=data['total_mentions'],
-                present_in_chunks=data['present_count'],
-            ),
-        ))
-
-    return characters
+    return [_finalize_character(cid, data) for cid, data in char_data.items()]
 
 
 def _build_plot_threads(
@@ -276,18 +301,30 @@ def _link_events_to_characters(
     """Link events to characters based on name mentions in event descriptions."""
     char_by_id = {c.id: c for c in characters}
 
+    # Build list of names/name parts to match for each character
+    char_name_patterns: dict[str, list[str]] = {}
+    for char in characters:
+        patterns = [char.name.lower()]
+        # Add first name if multi-word
+        parts = char.name.split()
+        if len(parts) > 1:
+            patterns.append(parts[0].lower())  # First name
+        # Add aliases
+        for alias in char.aliases:
+            patterns.append(alias.lower())
+        char_name_patterns[char.id] = patterns
+
     for chunk in chunks:
         for event in chunk.extraction.events:
             char_ids: set[str] = set()
 
             desc_lower = event.description.lower()
 
-            for char in characters:
-                if char.name.lower() in desc_lower:
-                    char_ids.add(char.id)
-                for alias in char.aliases:
-                    if alias.lower() in desc_lower:
-                        char_ids.add(char.id)
+            for char_id, patterns in char_name_patterns.items():
+                for pattern in patterns:
+                    if pattern in desc_lower:
+                        char_ids.add(char_id)
+                        break
 
             event.character_ids = list(char_ids)
 
