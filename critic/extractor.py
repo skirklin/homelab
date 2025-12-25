@@ -2,17 +2,17 @@
 Extractor - extracts structured information from each chunk.
 
 This is the detailed extraction pass that runs after discovery.
+Uses the Message Batches API for 50% cost reduction.
 """
 
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import anthropic
 
 from critic.types import Chunk
-from critic.retry import retry_api_call
 from critic.schema import (
     ChunkWithText,
     ChunkExtraction,
@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from critic.cache import AnalysisCache
 
 from critic.config import DEFAULT_MODEL
+
+# Polling interval for batch status (seconds)
+BATCH_POLL_INTERVAL = 5
 
 
 def build_extraction_prompt(discovered_context: Optional[str] = None) -> str:
@@ -151,11 +154,12 @@ def extract_from_chunks(
     model: str = DEFAULT_MODEL,
     discovered_entities: Optional[DiscoveredEntities] = None,
     cache: Optional["AnalysisCache"] = None,
-    concurrency: int = 3,
     on_progress: Optional[Callable[[int, int, str], None]] = None,
 ) -> tuple[list[ChunkWithText], dict]:
     """
-    Extract structured data from chunks with source locations.
+    Extract structured data from chunks using the Message Batches API.
+
+    Uses batch processing for 50% cost reduction.
 
     Args:
         chunks: Document chunks to extract from
@@ -163,7 +167,6 @@ def extract_from_chunks(
         model: Model to use
         discovered_entities: Pre-discovered entities for context
         cache: Optional cache for extraction results
-        concurrency: Number of parallel extractions
         on_progress: Callback (completed, total, chunk_id)
 
     Returns:
@@ -217,106 +220,110 @@ def extract_from_chunks(
                 continue
         uncached_indices.append(i)
 
-    if uncached_indices:
-        print(f"[Extractor] Processing {len(uncached_indices)} uncached chunks "
-              f"({len(chunks) - len(uncached_indices)} from cache)")
+    if not uncached_indices:
+        return [r for r in results if r is not None], token_usage
 
-    # Process uncached chunks with thread pool
-    def process_chunk(idx: int) -> tuple[int, ChunkWithText, dict]:
+    print(f"[Extractor] Processing {len(uncached_indices)} uncached chunks "
+          f"({len(chunks) - len(uncached_indices)} from cache) via batch API")
+
+    # Build batch requests
+    batch_requests = []
+    for idx in uncached_indices:
         chunk = chunks[idx]
-        result, usage = _extract_from_chunk(
-            client, model, chunk, offsets[idx], extraction_prompt
+        chunk_context = (
+            f"## Section: {chunk.title}\n\n{chunk.content}"
+            if chunk.title else chunk.content
         )
+        batch_requests.append({
+            "custom_id": f"chunk-{idx}",
+            "params": {
+                "model": model,
+                "max_tokens": 64000,
+                "messages": [{
+                    "role": "user",
+                    "content": f"{extraction_prompt}\n\n---\n\nTEXT TO ANALYZE:\n\n{chunk_context}",
+                }],
+            },
+        })
 
-        # Save to cache
-        if cache:
-            cache.set_extraction(
-                chunk.content, model, entities_hash,
-                result.extraction, usage
-            )
+    # Submit batch
+    batch = client.messages.batches.create(requests=batch_requests)
+    print(f"[Extractor] Batch submitted: {batch.id}")
 
-        return idx, result, usage
+    # Poll for completion
+    while batch.processing_status != "ended":
+        time.sleep(BATCH_POLL_INTERVAL)
+        batch = client.messages.batches.retrieve(batch.id)
 
-    with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = {
-            executor.submit(process_chunk, idx): idx
-            for idx in uncached_indices
-        }
+        # Count completed
+        batch_completed = (batch.request_counts.succeeded +
+                          batch.request_counts.errored +
+                          batch.request_counts.canceled +
+                          batch.request_counts.expired)
+        total_in_batch = len(uncached_indices)
 
-        for future in as_completed(futures):
-            idx, result, usage = future.result()
-            results[idx] = result
+        if on_progress:
+            on_progress(completed + batch_completed, len(chunks), f"batch:{batch.id[:8]}")
+
+        print(f"[Extractor] Batch progress: {batch_completed}/{total_in_batch} "
+              f"(status: {batch.processing_status})")
+
+    # Process results
+    print(f"[Extractor] Batch complete. Succeeded: {batch.request_counts.succeeded}, "
+          f"Errored: {batch.request_counts.errored}")
+
+    for result in client.messages.batches.results(batch.id):
+        # Parse chunk index from custom_id
+        idx = int(result.custom_id.split("-")[1])
+        chunk = chunks[idx]
+
+        if result.result.type == "succeeded":
+            message = result.result.message
+            text = message.content[0].text if message.content else ""
+
+            usage = {
+                'input_tokens': message.usage.input_tokens,
+                'output_tokens': message.usage.output_tokens,
+            }
             token_usage['input_tokens'] += usage['input_tokens']
             token_usage['output_tokens'] += usage['output_tokens']
-            completed += 1
-            if on_progress:
-                on_progress(completed, len(chunks), chunks[idx].id)
+
+            raw = _parse_json_response(text, chunk.id)
+            extraction = _process_raw_extraction(raw, chunk)
+
+            results[idx] = ChunkWithText(
+                id=chunk.id,
+                title=chunk.title,
+                text=chunk.content,
+                start_offset=offsets[idx],
+                end_offset=offsets[idx] + len(chunk.content),
+                extraction=extraction,
+            )
+
+            # Save to cache
+            if cache:
+                cache.set_extraction(
+                    chunk.content, model, entities_hash,
+                    extraction, usage
+                )
+        else:
+            # Handle error - create empty extraction
+            print(f"[Extractor] Error for chunk {chunk.id}: {result.result.type}")
+            if hasattr(result.result, 'error'):
+                print(f"  Error details: {result.result.error}")
+
+            results[idx] = ChunkWithText(
+                id=chunk.id,
+                title=chunk.title,
+                text=chunk.content,
+                start_offset=offsets[idx],
+                end_offset=offsets[idx] + len(chunk.content),
+                extraction=ChunkExtraction(),
+            )
+
+        completed += 1
 
     return [r for r in results if r is not None], token_usage
-
-
-def _extract_from_chunk(
-    client: anthropic.Anthropic,
-    model: str,
-    chunk: Chunk,
-    start_offset: int,
-    extraction_prompt: str,
-) -> tuple[ChunkWithText, dict]:
-    """Extract from a single chunk."""
-    chunk_context = (
-        f"## Section: {chunk.title}\n\n{chunk.content}"
-        if chunk.title else chunk.content
-    )
-
-    # Use streaming to avoid timeout issues with long requests
-    text_parts = []
-    input_tokens = 0
-    output_tokens = 0
-    stop_reason = None
-
-    def make_request():
-        nonlocal text_parts, input_tokens, output_tokens, stop_reason
-        text_parts = []  # Reset on retry
-
-        with client.messages.stream(
-            model=model,
-            max_tokens=64000,
-            messages=[{
-                'role': 'user',
-                'content': f"{extraction_prompt}\n\n---\n\nTEXT TO ANALYZE:\n\n{chunk_context}",
-            }],
-        ) as stream:
-            for text_chunk in stream.text_stream:
-                text_parts.append(text_chunk)
-            response = stream.get_final_message()
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-            stop_reason = response.stop_reason
-
-    def on_retry(attempt, delay, exc):
-        print(f"  Rate limited on chunk {chunk.id}, waiting {delay:.0f}s (attempt {attempt})...")
-
-    retry_api_call(make_request, on_retry=on_retry)
-
-    if stop_reason == 'max_tokens':
-        print(f"Warning: Extraction for chunk {chunk.id} was truncated")
-
-    text = ''.join(text_parts)
-
-    raw = _parse_json_response(text, chunk.id)
-    extraction = _process_raw_extraction(raw, chunk)
-
-    return ChunkWithText(
-        id=chunk.id,
-        title=chunk.title,
-        text=chunk.content,
-        start_offset=start_offset,
-        end_offset=start_offset + len(chunk.content),
-        extraction=extraction,
-    ), {
-        'input_tokens': input_tokens,
-        'output_tokens': output_tokens,
-    }
 
 
 def _normalize_attribute(a: Any) -> Optional[dict]:
