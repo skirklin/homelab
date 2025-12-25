@@ -298,37 +298,35 @@ def _link_events_to_characters(
     characters: list[CharacterEntity],
     name_to_id: dict[str, str],
 ) -> None:
-    """Link events to characters based on name mentions in event descriptions."""
+    """Link events to characters using model-extracted character names."""
     char_by_id = {c.id: c for c in characters}
 
-    # Build list of names/name parts to match for each character
-    char_name_patterns: dict[str, list[str]] = {}
+    # Build name -> id lookup that handles various name formats
+    name_lookup: dict[str, str] = {}
     for char in characters:
-        patterns = [char.name.lower()]
+        name_lookup[char.name.lower()] = char.id
         # Add first name if multi-word
         parts = char.name.split()
         if len(parts) > 1:
-            patterns.append(parts[0].lower())  # First name
+            name_lookup[parts[0].lower()] = char.id
         # Add aliases
         for alias in char.aliases:
-            patterns.append(alias.lower())
-        char_name_patterns[char.id] = patterns
+            name_lookup[alias.lower()] = char.id
 
     for chunk in chunks:
         for event in chunk.extraction.events:
-            char_ids: set[str] = set()
+            # event.character_ids contains names from extraction, resolve to IDs
+            resolved_ids: set[str] = set()
 
-            desc_lower = event.description.lower()
+            for name in event.character_ids:
+                if isinstance(name, str):
+                    char_id = name_lookup.get(name.lower())
+                    if char_id:
+                        resolved_ids.add(char_id)
 
-            for char_id, patterns in char_name_patterns.items():
-                for pattern in patterns:
-                    if pattern in desc_lower:
-                        char_ids.add(char_id)
-                        break
+            event.character_ids = list(resolved_ids)
 
-            event.character_ids = list(char_ids)
-
-            for char_id in char_ids:
+            for char_id in resolved_ids:
                 char = char_by_id.get(char_id)
                 if char and event.id not in char.event_ids:
                     char.event_ids.append(event.id)

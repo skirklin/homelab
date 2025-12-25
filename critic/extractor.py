@@ -344,7 +344,7 @@ def _process_raw_extraction(raw: dict, chunk: Chunk) -> ChunkExtraction:
     def make_id(prefix: str, i: int) -> str:
         return f"{chunk.id}-{prefix}-{i}"
 
-    # Process events
+    # Process events - store character names (will be resolved to IDs in aggregation)
     events = [
         EventExtraction(
             id=make_id("event", i),
@@ -352,7 +352,7 @@ def _process_raw_extraction(raw: dict, chunk: Chunk) -> ChunkExtraction:
             time_marker=e.get('timeMarker', ''),
             precision=e.get('precision', 'vague'),
             sequence_note=e.get('sequenceNote'),
-            character_ids=[],
+            character_ids=e.get('characters', []),  # Model-provided character names
             location=loc(e.get('quote', '')),
         )
         for i, e in enumerate(raw.get('events', []))
