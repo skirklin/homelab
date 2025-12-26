@@ -23,7 +23,7 @@ class EventExtraction(BaseModel):
     id: str
     description: str
     time_marker: str
-    precision: Literal["exact", "relative", "vague"]
+    precision: str = "vague"  # exact, relative, vague, continuing, etc.
     sequence_note: Optional[str] = None
     character_ids: list[str] = Field(default_factory=list)
     location: TextLocation
@@ -33,7 +33,7 @@ class CharacterMention(BaseModel):
     """A mention of a character in the text."""
     character_id: str = ""
     name: str
-    role: Literal["present", "mentioned", "flashback"]
+    role: str = "present"  # present, mentioned, flashback, etc.
     location: TextLocation
     attributes_mentioned: list[dict] = Field(default_factory=list)  # [{value, category}]
     relationships_mentioned: list[dict] = Field(default_factory=list)
@@ -54,7 +54,7 @@ class PlotThreadTouch(BaseModel):
     """A touch/interaction with a plot thread."""
     thread_id: str = ""
     name: str = ""
-    action: Literal["introduced", "advanced", "complicated", "resolved"]
+    action: str = "advanced"  # introduced, advanced, complicated, resolved, etc.
     description: str
     location: TextLocation
 
@@ -63,11 +63,11 @@ class SetupExtraction(BaseModel):
     """A setup/foreshadowing extracted from the text."""
     id: str
     description: str
-    weight: Literal["subtle", "moderate", "heavy"]
+    weight: str = "moderate"  # subtle, moderate, heavy
     implied_payoff: str
     location: TextLocation
     payoff: Optional[dict] = None
-    status: Literal["pending", "resolved", "orphaned"] = "pending"
+    status: str = "pending"  # pending, resolved, orphaned
     issue_id: Optional[str] = None
 
 
