@@ -43,7 +43,7 @@ class FactExtraction(BaseModel):
     """A fact extracted from the text."""
     id: str
     content: str
-    category: Literal["character", "world", "location", "object", "relationship", "other"]
+    category: str  # character, world, location, object, relationship, other, etc.
     subject: str
     entity_id: Optional[str] = None
     location: TextLocation

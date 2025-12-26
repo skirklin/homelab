@@ -226,7 +226,8 @@ def extract_from_chunks(
     print(f"[Extractor] Processing {len(uncached_indices)} uncached chunks "
           f"({len(chunks) - len(uncached_indices)} from cache) via batch API")
 
-    # Build batch requests
+    # Build batch requests with prompt caching
+    # System prompt is cached; user message contains chunk-specific text
     batch_requests = []
     for idx in uncached_indices:
         chunk = chunks[idx]
@@ -239,9 +240,16 @@ def extract_from_chunks(
             "params": {
                 "model": model,
                 "max_tokens": 64000,
+                "system": [
+                    {
+                        "type": "text",
+                        "text": extraction_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                ],
                 "messages": [{
                     "role": "user",
-                    "content": f"{extraction_prompt}\n\n---\n\nTEXT TO ANALYZE:\n\n{chunk_context}",
+                    "content": f"TEXT TO ANALYZE:\n\n{chunk_context}",
                 }],
             },
         })

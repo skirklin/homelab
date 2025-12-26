@@ -687,7 +687,13 @@ Start by getting an overview, then investigate systematically.""",
         response = client.messages.create(
             model=model,
             max_tokens=4096,
-            system=system_prompt,
+            system=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ],
             tools=CRITIC_TOOLS,
             messages=messages,
         )
