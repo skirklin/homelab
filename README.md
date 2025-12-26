@@ -24,7 +24,7 @@ Early versions tried to detect issues with code-based pattern matching (e.g., "i
 │  1. Parse document (chapters, paragraphs)                        │
 │  2. Chunk into ~5k word sections                                 │
 │  3. Discovery pass: identify all characters, plot threads        │
-│  4. Extraction pass: per-chunk events, facts, dialogue, setups  │
+│  4. Extraction pass: per-chunk extraction via Batch API (50% $) │
 │  5. Aggregation: merge into unified entity profiles              │
 │  6. Timeline reconstruction (model-assisted)                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -54,12 +54,16 @@ Early versions tried to detect issues with code-based pattern matching (e.g., "i
 | Task | Handled By | Why |
 |------|-----------|-----|
 | Parsing, chunking | Code | Deterministic text processing |
-| Entity extraction | Model (per-chunk) | Needs language understanding |
+| Entity extraction | Model (Batch API) | Needs language understanding; 50% cost savings |
 | Entity deduplication | Code + heuristics | "Emma" = "Miss Hartley" can be fuzzy-matched |
 | Timeline ordering | Model | Needs to understand "three days before the murder" |
 | Character inconsistencies | **Critic agent** | Needs full context to judge |
 | Plot hole detection | **Critic agent** | Needs narrative understanding |
 | Setup/payoff matching | **Critic agent** | Semantic similarity + story logic |
+
+### Cost Optimization
+
+The extraction phase uses Anthropic's [Message Batches API](https://docs.anthropic.com/en/docs/build-with-claude/message-batches) for 50% cost reduction. All chunks are submitted as a single batch and processed in parallel by the API.
 
 ### Caching
 
