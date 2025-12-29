@@ -711,10 +711,10 @@ Type: {potential.get('type', 'unknown')}
 Title: {potential.get('title', '')}
 Description: {potential.get('description', '')}
 
-Is this a real issue? If yes, provide:
+Check the original text. If this is a real issue, provide:
 1. Severity (error, warning, or suggestion)
 2. Exact quotes from the text as evidence
-3. A clear explanation
+3. A clear explanation written for an editorial report (do NOT start with phrases like "This is a genuine issue" or "There is indeed" - just describe the problem directly)
 
 If it's NOT a real issue (false positive), explain why.
 
