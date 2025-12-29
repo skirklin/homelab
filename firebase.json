@@ -1,20 +1,30 @@
 {
-  "hosting": {
-    "site": "editor-5d5a3",
-    "public": "app/dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "predeploy": [
-      "npm --prefix app run build"
-    ]
-  }
+  "hosting": [
+    {
+      "target": "editor",
+      "public": "app/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "predeploy": [
+        "npm --prefix app run build"
+      ]
+    },
+    {
+      "target": "critic",
+      "public": "public",
+      "ignore": [
+        "firebase.json",
+        "**/.*"
+      ]
+    }
+  ]
 }

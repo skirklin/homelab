@@ -10,3 +10,7 @@ critic/__pycache__/
 __pycache__/
 *.pyc
 .vscode/
+public/
+.firebase/
+**/wiki/
+**/wiki-v*/

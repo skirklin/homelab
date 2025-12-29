@@ -169,5 +169,39 @@ def show(analysis_json):
         click.echo()
 
 
+@main.command()
+@click.argument("file", type=click.Path(exists=True))
+@click.option("-o", "--output", type=click.Path(), default="wiki", help="Output directory for wiki")
+@click.option("-m", "--model", default=DEFAULT_MODEL, help="Claude model to use")
+@click.option("--from-json", is_flag=True, help="Input is analysis JSON instead of manuscript")
+def wiki(file, output, model, from_json):
+    """Generate a static wiki from a manuscript or analysis JSON."""
+    from critic.schema import AnalysisOutput
+    from critic.wiki_generator import generate_wiki
+
+    file_path = Path(file)
+    output_path = Path(output)
+
+    if from_json:
+        # Load existing analysis
+        click.echo(f"Loading analysis from: {file_path}\n")
+        data = json.loads(file_path.read_text())
+        result = AnalysisOutput.from_dict(data)
+    else:
+        # Run full analysis
+        click.echo(f"Analyzing: {file_path}\n")
+        result = analyze_document(file_path, model=model)
+
+        click.echo(f"\nAnalysis complete: {result.summary.issue_count} issues, "
+                   f"{len(result.wiki.characters)} characters, "
+                   f"{len(result.wiki.locations)} locations\n")
+
+    # Generate wiki
+    generate_wiki(result, output_path)
+
+    click.echo(f"\nWiki generated at: {output_path}/")
+    click.echo(f"Open {output_path}/index.html in a browser to view.")
+
+
 if __name__ == "__main__":
     main()
