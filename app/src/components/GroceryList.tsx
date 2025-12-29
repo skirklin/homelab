@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Spin } from "antd";
+import { useParams, useNavigate } from "react-router-dom";
+import { Spin, Button } from "antd";
 import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAppContext } from "../context";
@@ -10,8 +10,7 @@ import { Header } from "./Header";
 import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";
 import { ShoppingTrips } from "./ShoppingTrips";
-import { CategorySettings } from "./CategorySettings";
-import { ListPicker } from "./ListPicker";
+import { ListSettings } from "./ListSettings";
 import type { GroceryItem, Category } from "../types";
 
 const Container = styled.div`
@@ -40,39 +39,75 @@ const DragItem = styled.div`
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 `;
 
-type View = "list" | "history" | "settings" | "lists";
+const NotFoundContainer = styled.div`
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+`;
+
+const NotFoundHeader = styled.header`
+  padding: var(--space-md);
+  background: var(--color-primary);
+  color: white;
+`;
+
+const NotFoundTitle = styled.h1`
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+`;
+
+const NotFoundContent = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  text-align: center;
+  gap: var(--space-md);
+`;
+
+const NotFoundText = styled.p`
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-lg);
+  margin: 0;
+`;
+
+type View = "list" | "history" | "settings";
 
 export function GroceryList() {
-  const { listId } = useParams<{ listId?: string }>();
+  const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
   const { state, dispatch } = useAppContext();
   const currentListIdRef = useRef<string | null>(null);
   const unsubscribersRef = useRef<(() => void)[]>([]);
   const [view, setView] = useState<View>("list");
   const [draggedItem, setDraggedItem] = useState<GroceryItem | null>(null);
 
-  // Use "default" if no listId in URL (base path behavior)
-  const effectiveListId = listId || "default";
+  // Look up listId from user's slugs
+  const listId = slug ? state.userSlugs[slug] : undefined;
 
   useEffect(() => {
-    if (!state.authUser) return;
+    if (!state.authUser || !listId) return;
 
     // Only resubscribe if the list ID changed
-    if (currentListIdRef.current === effectiveListId) return;
+    if (currentListIdRef.current === listId) return;
 
     // Cleanup previous subscriptions
     unsubscribersRef.current.forEach((unsub) => unsub());
     unsubscribersRef.current = [];
 
-    currentListIdRef.current = effectiveListId;
+    currentListIdRef.current = listId;
 
-    subscribeToList(effectiveListId, state.authUser.uid, dispatch).then((unsubs) => {
+    subscribeToList(listId, state.authUser.uid, dispatch).then((unsubs) => {
       unsubscribersRef.current = unsubs;
     });
 
     return () => {
       unsubscribersRef.current.forEach((unsub) => unsub());
     };
-  }, [state.authUser, effectiveListId, dispatch]);
+  }, [state.authUser, listId, dispatch]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const item = event.active.data.current?.item as GroceryItem;
@@ -93,9 +128,22 @@ export function GroceryList() {
     }
   };
 
-  if (view === "lists") {
+  // Slug not found in user's mapping
+  if (slug && !listId) {
     return (
-      <ListPicker onBack={() => setView("list")} />
+      <NotFoundContainer>
+        <NotFoundHeader>
+          <NotFoundTitle>List Not Found</NotFoundTitle>
+        </NotFoundHeader>
+        <NotFoundContent>
+          <NotFoundText>
+            You don't have a list called "/{slug}"
+          </NotFoundText>
+          <Button type="primary" onClick={() => navigate("/")}>
+            Go to My Lists
+          </Button>
+        </NotFoundContent>
+      </NotFoundContainer>
     );
   }
 
@@ -111,8 +159,9 @@ export function GroceryList() {
 
   if (view === "settings") {
     return (
-      <CategorySettings
-        categories={state.list?.categories || []}
+      <ListSettings
+        slug={slug || ""}
+        listId={listId || ""}
         onBack={() => setView("list")}
       />
     );
@@ -129,9 +178,9 @@ export function GroceryList() {
   return (
     <Container>
       <Header
+        listId={listId || ""}
         onShowHistory={() => setView("history")}
         onShowSettings={() => setView("settings")}
-        onShowLists={() => setView("lists")}
       />
       <AddItem />
       <Content>

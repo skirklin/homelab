@@ -1,15 +1,6 @@
 import { Timestamp } from "firebase/firestore";
 
-// Default categories for new lists
-export const DEFAULT_CATEGORIES = [
-  "produce",
-  "dairy",
-  "meat",
-  "pantry",
-  "household",
-];
-
-// Category is now a string to support custom categories
+// Category is a string to support custom categories
 export type Category = string;
 
 export interface GroceryItem {
@@ -84,7 +75,7 @@ export function listFromStore(id: string, data: GroceryListStore): GroceryList {
     id,
     name: data.name,
     owners: data.owners,
-    categories: data.categories || DEFAULT_CATEGORIES,
+    categories: data.categories || [],
     created: data.created.toDate(),
     updated: data.updated.toDate(),
   };
@@ -120,11 +111,11 @@ export interface ShoppingTripStore {
   items: ShoppingTripItem[];
 }
 
-// User profile for tracking accessible lists
+// User profile for tracking accessible lists via slugs
 export interface UserProfile {
-  lists: { id: string; name: string }[];
+  slugs: Record<string, string>;  // { "groceries": "listId123", "rei": "listId456" }
 }
 
 export interface UserProfileStore {
-  lists: { id: string; name: string }[];
+  slugs: Record<string, string>;
 }

@@ -11,7 +11,6 @@ import {
 } from "firebase/firestore";
 import { db } from "./backend";
 import type { GroceryItem, GroceryItemStore, Category, ItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
-import { DEFAULT_CATEGORIES } from "./types";
 
 // Current list ID - set by the router
 let currentListId = "default";
@@ -56,15 +55,7 @@ export async function ensureListExists(userId: string) {
   const listRef = getListRef();
   const listSnap = await getDoc(listRef);
 
-  if (!listSnap.exists()) {
-    await setDoc(listRef, {
-      name: "Groceries",
-      owners: [userId],
-      categories: DEFAULT_CATEGORIES,
-      created: Timestamp.now(),
-      updated: Timestamp.now(),
-    });
-  } else {
+  if (listSnap.exists()) {
     // Add user to owners if not already there
     const data = listSnap.data();
     if (!data.owners.includes(userId)) {
@@ -73,6 +64,7 @@ export async function ensureListExists(userId: string) {
       });
     }
   }
+  // If list doesn't exist, we don't auto-create - user must create explicitly
 }
 
 export async function addItem(
@@ -162,88 +154,93 @@ export async function updateCategories(categories: string[]) {
 }
 
 // User profile functions
-export async function getUserProfile(userId: string): Promise<{ id: string; name: string }[]> {
+export async function getUserSlugs(userId: string): Promise<Record<string, string>> {
   const userRef = getUserRef(userId);
   const userSnap = await getDoc(userRef);
   if (userSnap.exists()) {
     const data = userSnap.data() as UserProfileStore;
-    return data.lists || [];
+    return data.slugs || {};
   }
-  return [];
+  return {};
 }
 
-export async function addListToUserProfile(userId: string, listId: string, listName: string) {
+export async function setUserSlug(userId: string, slug: string, listId: string) {
   const userRef = getUserRef(userId);
   const userSnap = await getDoc(userRef);
 
   if (userSnap.exists()) {
     const data = userSnap.data() as UserProfileStore;
-    const lists = data.lists || [];
-    // Don't add duplicates
-    if (!lists.some(l => l.id === listId)) {
-      lists.push({ id: listId, name: listName });
-      await updateDoc(userRef, { lists });
-    }
+    const slugs = { ...data.slugs, [slug]: listId };
+    await updateDoc(userRef, { slugs });
   } else {
-    await setDoc(userRef, { lists: [{ id: listId, name: listName }] });
+    await setDoc(userRef, { slugs: { [slug]: listId } });
   }
 }
 
-export async function updateListNameInProfile(userId: string, listId: string, newName: string) {
+export async function removeUserSlug(userId: string, slug: string) {
   const userRef = getUserRef(userId);
   const userSnap = await getDoc(userRef);
 
   if (userSnap.exists()) {
     const data = userSnap.data() as UserProfileStore;
-    const lists = data.lists || [];
-    const idx = lists.findIndex(l => l.id === listId);
-    if (idx >= 0) {
-      lists[idx].name = newName;
-      await updateDoc(userRef, { lists });
+    const slugs = { ...data.slugs };
+    delete slugs[slug];
+    await updateDoc(userRef, { slugs });
+  }
+}
+
+export async function renameUserSlug(userId: string, oldSlug: string, newSlug: string) {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+
+  if (userSnap.exists()) {
+    const data = userSnap.data() as UserProfileStore;
+    const slugs = { ...data.slugs };
+    if (slugs[oldSlug]) {
+      slugs[newSlug] = slugs[oldSlug];
+      delete slugs[oldSlug];
+      await updateDoc(userRef, { slugs });
     }
   }
 }
 
-export async function removeListFromUserProfile(userId: string, listId: string) {
-  const userRef = getUserRef(userId);
-  const userSnap = await getDoc(userRef);
-
-  if (userSnap.exists()) {
-    const data = userSnap.data() as UserProfileStore;
-    const lists = (data.lists || []).filter(l => l.id !== listId);
-    await updateDoc(userRef, { lists });
-  }
-}
-
-// Create a new list
-export async function createList(name: string, userId: string): Promise<string> {
+// Create a new list with a user slug
+export async function createList(name: string, slug: string, userId: string): Promise<string> {
   const listsRef = collection(db, "lists");
   const newListRef = doc(listsRef);
 
   await setDoc(newListRef, {
     name,
     owners: [userId],
-    categories: DEFAULT_CATEGORIES,
+    categories: [],  // Start with no categories
     created: Timestamp.now(),
     updated: Timestamp.now(),
   });
 
-  // Add to user's profile
-  await addListToUserProfile(userId, newListRef.id, name);
+  // Add slug mapping to user's profile
+  await setUserSlug(userId, slug, newListRef.id);
 
   return newListRef.id;
 }
 
-export async function renameList(listId: string, newName: string, userId: string) {
+export async function renameList(listId: string, newName: string) {
   const listRef = getListRef(listId);
   await updateDoc(listRef, { name: newName, updated: Timestamp.now() });
-  await updateListNameInProfile(userId, listId, newName);
 }
 
-export async function deleteList(listId: string, userId: string) {
+export async function deleteList(listId: string) {
   // Note: This doesn't delete subcollections (items, history, trips)
   // For a production app, you'd want a Cloud Function to clean those up
   const listRef = getListRef(listId);
   await deleteDoc(listRef);
-  await removeListFromUserProfile(userId, listId);
+}
+
+// Get list by ID (for adding shared lists)
+export async function getListById(listId: string): Promise<{ name: string } | null> {
+  const listRef = doc(db, "lists", listId);
+  const listSnap = await getDoc(listRef);
+  if (listSnap.exists()) {
+    return { name: listSnap.data().name };
+  }
+  return null;
 }

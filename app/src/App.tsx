@@ -1,11 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import styled from "styled-components";
 import { useAppContext } from "./context";
-import { subscribeToAuth, loadUserLists } from "./subscription";
+import { subscribeToAuth, subscribeToUserSlugs } from "./subscription";
 import { Auth } from "./components/Auth";
 import { GroceryList } from "./components/GroceryList";
+import { ListPicker } from "./components/ListPicker";
 
 const theme = {
   token: {
@@ -28,17 +29,24 @@ const AppWrapper = styled.div`
 
 function AppContent() {
   const { state, dispatch } = useAppContext();
+  const slugsUnsubRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToAuth(dispatch);
     return () => unsubscribe();
   }, [dispatch]);
 
-  // Load user's lists when authenticated
+  // Subscribe to user's slugs when authenticated
   useEffect(() => {
     if (state.authUser) {
-      loadUserLists(state.authUser.uid, dispatch);
+      slugsUnsubRef.current = subscribeToUserSlugs(state.authUser.uid, dispatch);
     }
+    return () => {
+      if (slugsUnsubRef.current) {
+        slugsUnsubRef.current();
+        slugsUnsubRef.current = null;
+      }
+    };
   }, [state.authUser, dispatch]);
 
   // Still determining auth state
@@ -52,8 +60,8 @@ function AppContent() {
 
   return (
     <Routes>
-      <Route path="/" element={<GroceryList />} />
-      <Route path="/:listId" element={<GroceryList />} />
+      <Route path="/" element={<ListPicker />} />
+      <Route path="/:slug" element={<GroceryList />} />
     </Routes>
   );
 }

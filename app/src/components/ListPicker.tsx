@@ -1,11 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Input, List } from "antd";
-import { PlusOutlined, UnorderedListOutlined, ArrowLeftOutlined } from "@ant-design/icons";
+import { Button, Input, List, Modal, Spin } from "antd";
+import { PlusOutlined, LinkOutlined, RightOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAppContext } from "../context";
-import { createList } from "../firestore";
-import { loadUserLists } from "../subscription";
+import { createList, setUserSlug, getListById } from "../firestore";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -14,9 +13,6 @@ const Container = styled.div`
 `;
 
 const Header = styled.header`
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
   padding: var(--space-md);
   background: var(--color-primary);
   color: white;
@@ -26,7 +22,6 @@ const Title = styled.h1`
   margin: 0;
   font-size: var(--font-size-lg);
   font-weight: 600;
-  flex: 1;
 `;
 
 const Content = styled.main`
@@ -34,13 +29,13 @@ const Content = styled.main`
   padding: var(--space-md);
 `;
 
-const CreateForm = styled.div`
+const Actions = styled.div`
   display: flex;
   gap: var(--space-sm);
   margin-bottom: var(--space-lg);
 `;
 
-const ListItem = styled(List.Item)`
+const ListItemRow = styled(List.Item)`
   cursor: pointer;
   padding: var(--space-md) !important;
 
@@ -49,10 +44,19 @@ const ListItem = styled(List.Item)`
   }
 `;
 
-const ListIcon = styled(UnorderedListOutlined)`
-  font-size: 20px;
-  color: var(--color-primary);
-  margin-right: var(--space-md);
+const ListItemContent = styled.div`
+  display: flex;
+  align-items: center;
+  width: 100%;
+`;
+
+const ListName = styled.span`
+  font-weight: 500;
+  flex: 1;
+`;
+
+const GoIcon = styled(RightOutlined)`
+  color: var(--color-text-muted);
 `;
 
 const EmptyState = styled.div`
@@ -61,73 +65,158 @@ const EmptyState = styled.div`
   color: var(--color-text-secondary);
 `;
 
-interface Props {
-  onBack?: () => void;
+const ModalForm = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+`;
+
+const FormField = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+`;
+
+const Label = styled.label`
+  font-weight: 500;
+  color: var(--color-text-secondary);
+`;
+
+interface ListInfo {
+  slug: string;
+  listId: string;
+  name: string | null;  // null while loading
 }
 
-export function ListPicker({ onBack }: Props) {
-  const { state, dispatch } = useAppContext();
+export function ListPicker() {
+  const { state } = useAppContext();
   const navigate = useNavigate();
-  const [newListName, setNewListName] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [lists, setLists] = useState<ListInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Modal state
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [newSlug, setNewSlug] = useState("");
+  const [newName, setNewName] = useState("");
+  const [sharedListId, setSharedListId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Load list names for each slug
+  useEffect(() => {
+    async function loadListNames() {
+      const slugEntries = Object.entries(state.userSlugs);
+      const listInfos: ListInfo[] = slugEntries.map(([slug, listId]) => ({
+        slug,
+        listId,
+        name: null,
+      }));
+      setLists(listInfos);
+      setLoading(false);
+
+      // Load names in parallel
+      const namesPromises = slugEntries.map(async ([slug, listId]) => {
+        const listData = await getListById(listId);
+        return { slug, name: listData?.name || "(deleted)" };
+      });
+
+      const names = await Promise.all(namesPromises);
+      setLists(prev => prev.map(item => {
+        const found = names.find(n => n.slug === item.slug);
+        return found ? { ...item, name: found.name } : item;
+      }));
+    }
+
+    loadListNames();
+  }, [state.userSlugs]);
 
   const handleCreateList = async () => {
-    if (!newListName.trim() || !state.authUser) return;
+    if (!newSlug.trim() || !newName.trim() || !state.authUser) return;
 
-    setCreating(true);
+    const slug = newSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+    // Check if slug already exists
+    if (state.userSlugs[slug]) {
+      alert(`You already have a list with the slug "${slug}"`);
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      const listId = await createList(newListName.trim(), state.authUser.uid);
-      setNewListName("");
-      // Reload user lists
-      await loadUserLists(state.authUser.uid, dispatch);
-      // Navigate to the new list
-      navigate(`/${listId}`);
+      await createList(newName.trim(), slug, state.authUser.uid);
+      setCreateModalOpen(false);
+      setNewSlug("");
+      setNewName("");
+      navigate(`/${slug}`);
     } catch (error) {
       console.error("Failed to create list:", error);
     } finally {
-      setCreating(false);
+      setSubmitting(false);
     }
   };
 
-  const handleSelectList = (listId: string) => {
-    navigate(`/${listId}`);
+  const handleAddSharedList = async () => {
+    if (!newSlug.trim() || !sharedListId.trim() || !state.authUser) return;
+
+    const slug = newSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+    // Check if slug already exists
+    if (state.userSlugs[slug]) {
+      alert(`You already have a list with the slug "${slug}"`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      // Verify the list exists
+      const listData = await getListById(sharedListId.trim());
+      if (!listData) {
+        alert("List not found. Check the ID and try again.");
+        setSubmitting(false);
+        return;
+      }
+
+      await setUserSlug(state.authUser.uid, slug, sharedListId.trim());
+      setAddModalOpen(false);
+      setNewSlug("");
+      setSharedListId("");
+      navigate(`/${slug}`);
+    } catch (error) {
+      console.error("Failed to add shared list:", error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSelectList = (slug: string) => {
+    navigate(`/${slug}`);
   };
 
   return (
     <Container>
       <Header>
-        {onBack && (
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={onBack}
-            style={{ color: "white" }}
-          />
-        )}
         <Title>My Lists</Title>
       </Header>
       <Content>
-        <CreateForm>
-          <Input
-            value={newListName}
-            onChange={(e) => setNewListName(e.target.value)}
-            placeholder="New list name..."
-            size="large"
-            onPressEnter={handleCreateList}
-          />
+        <Actions>
           <Button
             type="primary"
-            size="large"
             icon={<PlusOutlined />}
-            onClick={handleCreateList}
-            loading={creating}
-            disabled={!newListName.trim()}
+            onClick={() => setCreateModalOpen(true)}
           >
-            Create
+            New List
           </Button>
-        </CreateForm>
+          <Button
+            icon={<LinkOutlined />}
+            onClick={() => setAddModalOpen(true)}
+          >
+            Add Shared List
+          </Button>
+        </Actions>
 
-        {state.userLists.length === 0 ? (
+        {loading ? (
+          <EmptyState><Spin /></EmptyState>
+        ) : lists.length === 0 ? (
           <EmptyState>
             <p>No lists yet.</p>
             <p>Create a new list to get started!</p>
@@ -135,16 +224,88 @@ export function ListPicker({ onBack }: Props) {
         ) : (
           <List
             bordered
-            dataSource={state.userLists}
-            renderItem={(list) => (
-              <ListItem onClick={() => handleSelectList(list.id)}>
-                <ListIcon />
-                {list.name}
-              </ListItem>
+            dataSource={lists}
+            renderItem={(item) => (
+              <ListItemRow onClick={() => handleSelectList(item.slug)}>
+                <ListItemContent>
+                  <ListName>{item.name ?? "..."}</ListName>
+                  <GoIcon />
+                </ListItemContent>
+              </ListItemRow>
             )}
           />
         )}
       </Content>
+
+      {/* Create New List Modal */}
+      <Modal
+        title="Create New List"
+        open={createModalOpen}
+        onOk={handleCreateList}
+        onCancel={() => {
+          setCreateModalOpen(false);
+          setNewSlug("");
+          setNewName("");
+        }}
+        confirmLoading={submitting}
+        okText="Create"
+        okButtonProps={{ disabled: !newSlug.trim() || !newName.trim() }}
+      >
+        <ModalForm>
+          <FormField>
+            <Label>URL Slug</Label>
+            <Input
+              value={newSlug}
+              onChange={(e) => setNewSlug(e.target.value)}
+              placeholder="groceries"
+              addonBefore="/"
+            />
+          </FormField>
+          <FormField>
+            <Label>Display Name</Label>
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Weekly Groceries"
+            />
+          </FormField>
+        </ModalForm>
+      </Modal>
+
+      {/* Add Shared List Modal */}
+      <Modal
+        title="Add Shared List"
+        open={addModalOpen}
+        onOk={handleAddSharedList}
+        onCancel={() => {
+          setAddModalOpen(false);
+          setNewSlug("");
+          setSharedListId("");
+        }}
+        confirmLoading={submitting}
+        okText="Add"
+        okButtonProps={{ disabled: !newSlug.trim() || !sharedListId.trim() }}
+      >
+        <ModalForm>
+          <FormField>
+            <Label>List ID (from the person sharing)</Label>
+            <Input
+              value={sharedListId}
+              onChange={(e) => setSharedListId(e.target.value)}
+              placeholder="abc123xyz"
+            />
+          </FormField>
+          <FormField>
+            <Label>Your URL Slug</Label>
+            <Input
+              value={newSlug}
+              onChange={(e) => setNewSlug(e.target.value)}
+              placeholder="groceries"
+              addonBefore="/"
+            />
+          </FormField>
+        </ModalForm>
+      </Modal>
     </Container>
   );
 }

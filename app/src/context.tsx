@@ -2,14 +2,9 @@ import { createContext, useContext, useReducer, type ReactNode } from "react";
 import type { User } from "firebase/auth";
 import type { GroceryItem, GroceryList, ItemHistory, ShoppingTrip } from "./types";
 
-export interface UserListInfo {
-  id: string;
-  name: string;
-}
-
 export interface AppState {
   authUser: User | null | undefined; // undefined = still loading
-  userLists: UserListInfo[];
+  userSlugs: Record<string, string>; // { "groceries": "listId123" }
   list: GroceryList | null;
   items: Map<string, GroceryItem>;
   history: ItemHistory[];
@@ -19,7 +14,7 @@ export interface AppState {
 
 export type Action =
   | { type: "SET_AUTH_USER"; user: User | null }
-  | { type: "SET_USER_LISTS"; lists: UserListInfo[] }
+  | { type: "SET_USER_SLUGS"; slugs: Record<string, string> }
   | { type: "SET_LIST"; list: GroceryList | null }
   | { type: "SET_ITEM"; item: GroceryItem }
   | { type: "REMOVE_ITEM"; itemId: string }
@@ -33,8 +28,8 @@ function reducer(state: AppState, action: Action): AppState {
     case "SET_AUTH_USER":
       return { ...state, authUser: action.user };
 
-    case "SET_USER_LISTS":
-      return { ...state, userLists: action.lists };
+    case "SET_USER_SLUGS":
+      return { ...state, userSlugs: action.slugs };
 
     case "SET_LIST":
       return { ...state, list: action.list };
@@ -70,7 +65,7 @@ function reducer(state: AppState, action: Action): AppState {
 
 const initialState: AppState = {
   authUser: undefined,
-  userLists: [],
+  userSlugs: {},
   list: null,
   items: new Map(),
   history: [],

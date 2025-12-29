@@ -1,8 +1,8 @@
 import { onSnapshot, query, orderBy, limit, type Unsubscribe } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./backend";
-import { getListRef, getItemsRef, getHistoryRef, getTripsRef, ensureListExists, setCurrentListId, getUserProfile, addListToUserProfile } from "./firestore";
-import type { GroceryItemStore, GroceryListStore, ItemHistoryStore, ShoppingTripStore } from "./types";
+import { getListRef, getItemsRef, getHistoryRef, getTripsRef, ensureListExists, setCurrentListId, getUserSlugs, getUserRef } from "./firestore";
+import type { GroceryItemStore, GroceryListStore, ItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
 import { itemFromStore, listFromStore } from "./types";
 import type { AppState, Action } from "./context";
 
@@ -14,15 +14,32 @@ export function subscribeToAuth(dispatch: Dispatch): Unsubscribe {
     if (!user) {
       dispatch({ type: "SET_LIST", list: null });
       dispatch({ type: "CLEAR_ITEMS" });
-      dispatch({ type: "SET_USER_LISTS", lists: [] });
+      dispatch({ type: "SET_USER_SLUGS", slugs: {} });
       dispatch({ type: "SET_LOADING", loading: false });
     }
   });
 }
 
-export async function loadUserLists(userId: string, dispatch: Dispatch) {
-  const lists = await getUserProfile(userId);
-  dispatch({ type: "SET_USER_LISTS", lists });
+export async function loadUserSlugs(userId: string, dispatch: Dispatch) {
+  const slugs = await getUserSlugs(userId);
+  dispatch({ type: "SET_USER_SLUGS", slugs });
+}
+
+export function subscribeToUserSlugs(userId: string, dispatch: Dispatch): Unsubscribe {
+  return onSnapshot(
+    getUserRef(userId),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data() as UserProfileStore;
+        dispatch({ type: "SET_USER_SLUGS", slugs: data.slugs || {} });
+      } else {
+        dispatch({ type: "SET_USER_SLUGS", slugs: {} });
+      }
+    },
+    (error) => {
+      console.error("User slugs subscription error:", error);
+    }
+  );
 }
 
 export async function subscribeToList(
@@ -45,13 +62,11 @@ export async function subscribeToList(
   // Subscribe to list
   const listUnsub = onSnapshot(
     getListRef(),
-    async (snapshot) => {
+    (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data() as GroceryListStore;
         const list = listFromStore(snapshot.id, data);
         dispatch({ type: "SET_LIST", list });
-        // Add to user's profile if not already there
-        await addListToUserProfile(userId, snapshot.id, list.name);
       } else {
         dispatch({ type: "SET_LIST", list: null });
       }
