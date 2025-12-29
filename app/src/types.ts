@@ -1,30 +1,16 @@
 import { Timestamp } from "firebase/firestore";
 
-export const CATEGORIES = [
+// Default categories for new lists
+export const DEFAULT_CATEGORIES = [
   "produce",
   "dairy",
   "meat",
-  "bakery",
-  "frozen",
   "pantry",
-  "beverages",
   "household",
-  "other",
-] as const;
+];
 
-export type Category = (typeof CATEGORIES)[number];
-
-export const CATEGORY_LABELS: Record<Category, string> = {
-  produce: "Produce",
-  dairy: "Dairy",
-  meat: "Meat & Seafood",
-  bakery: "Bakery",
-  frozen: "Frozen",
-  pantry: "Pantry",
-  beverages: "Beverages",
-  household: "Household",
-  other: "Other",
-};
+// Category is now a string to support custom categories
+export type Category = string;
 
 export interface GroceryItem {
   id: string;
@@ -51,6 +37,7 @@ export interface GroceryList {
   id: string;
   name: string;
   owners: string[];
+  categories: string[];
   created: Date;
   updated: Date;
 }
@@ -58,6 +45,7 @@ export interface GroceryList {
 export interface GroceryListStore {
   name: string;
   owners: string[];
+  categories: string[];
   created: Timestamp;
   updated: Timestamp;
 }
@@ -96,7 +84,47 @@ export function listFromStore(id: string, data: GroceryListStore): GroceryList {
     id,
     name: data.name,
     owners: data.owners,
+    categories: data.categories || DEFAULT_CATEGORIES,
     created: data.created.toDate(),
     updated: data.updated.toDate(),
   };
+}
+
+// Item history for autocomplete
+export interface ItemHistory {
+  name: string;
+  category: Category;
+  lastAdded: Date;
+}
+
+export interface ItemHistoryStore {
+  name: string;
+  category: Category;
+  lastAdded: Timestamp;
+}
+
+// Shopping trip record
+export interface ShoppingTripItem {
+  name: string;
+  category: Category;
+}
+
+export interface ShoppingTrip {
+  id: string;
+  completedAt: Date;
+  items: ShoppingTripItem[];
+}
+
+export interface ShoppingTripStore {
+  completedAt: Timestamp;
+  items: ShoppingTripItem[];
+}
+
+// User profile for tracking accessible lists
+export interface UserProfile {
+  lists: { id: string; name: string }[];
+}
+
+export interface UserProfileStore {
+  lists: { id: string; name: string }[];
 }

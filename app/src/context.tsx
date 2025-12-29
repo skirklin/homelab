@@ -1,26 +1,40 @@
 import { createContext, useContext, useReducer, type ReactNode } from "react";
 import type { User } from "firebase/auth";
-import type { GroceryItem, GroceryList } from "./types";
+import type { GroceryItem, GroceryList, ItemHistory, ShoppingTrip } from "./types";
+
+export interface UserListInfo {
+  id: string;
+  name: string;
+}
 
 export interface AppState {
-  authUser: User | null;
+  authUser: User | null | undefined; // undefined = still loading
+  userLists: UserListInfo[];
   list: GroceryList | null;
   items: Map<string, GroceryItem>;
+  history: ItemHistory[];
+  trips: ShoppingTrip[];
   loading: boolean;
 }
 
 export type Action =
   | { type: "SET_AUTH_USER"; user: User | null }
+  | { type: "SET_USER_LISTS"; lists: UserListInfo[] }
   | { type: "SET_LIST"; list: GroceryList | null }
   | { type: "SET_ITEM"; item: GroceryItem }
   | { type: "REMOVE_ITEM"; itemId: string }
   | { type: "CLEAR_ITEMS" }
+  | { type: "SET_HISTORY"; history: ItemHistory[] }
+  | { type: "SET_TRIPS"; trips: ShoppingTrip[] }
   | { type: "SET_LOADING"; loading: boolean };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "SET_AUTH_USER":
       return { ...state, authUser: action.user };
+
+    case "SET_USER_LISTS":
+      return { ...state, userLists: action.lists };
 
     case "SET_LIST":
       return { ...state, list: action.list };
@@ -40,6 +54,12 @@ function reducer(state: AppState, action: Action): AppState {
     case "CLEAR_ITEMS":
       return { ...state, items: new Map() };
 
+    case "SET_HISTORY":
+      return { ...state, history: action.history };
+
+    case "SET_TRIPS":
+      return { ...state, trips: action.trips };
+
     case "SET_LOADING":
       return { ...state, loading: action.loading };
 
@@ -49,9 +69,12 @@ function reducer(state: AppState, action: Action): AppState {
 }
 
 const initialState: AppState = {
-  authUser: null,
+  authUser: undefined,
+  userLists: [],
   list: null,
   items: new Map(),
+  history: [],
+  trips: [],
   loading: true,
 };
 

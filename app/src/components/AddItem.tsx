@@ -1,12 +1,10 @@
-import { useState } from "react";
-import { Input, Select, Button, Space } from "antd";
+import { useState, useMemo } from "react";
+import { AutoComplete, Button } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAppContext } from "../context";
 import { addItem } from "../firestore";
 import { getItemsFromState } from "../subscription";
-import { CATEGORIES, CATEGORY_LABELS } from "../types";
-import type { Category } from "../types";
 
 const Container = styled.div`
   padding: var(--space-md);
@@ -17,10 +15,6 @@ const Container = styled.div`
 const Form = styled.form`
   display: flex;
   gap: var(--space-sm);
-
-  @media (max-width: 480px) {
-    flex-direction: column;
-  }
 `;
 
 const InputWrapper = styled.div`
@@ -30,10 +24,34 @@ const InputWrapper = styled.div`
 export function AddItem() {
   const { state } = useAppContext();
   const [name, setName] = useState("");
-  const [category, setCategory] = useState<Category>("other");
+
+  // Filter history for autocomplete options
+  const autocompleteOptions = useMemo(() => {
+    if (!name.trim()) return [];
+
+    const searchTerm = name.toLowerCase();
+    const existingItems = getItemsFromState(state);
+    const existingNames = new Set(existingItems.map((i) => i.name.toLowerCase()));
+
+    return state.history
+      .filter(
+        (h) =>
+          h.name.toLowerCase().includes(searchTerm) &&
+          !existingNames.has(h.name.toLowerCase())
+      )
+      .slice(0, 8)
+      .map((h) => ({
+        value: h.name,
+        label: h.name,
+      }));
+  }, [name, state.history, state.items]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    submitItem();
+  };
+
+  const submitItem = () => {
     const trimmedName = name.trim();
     if (!trimmedName || !state.authUser) return;
 
@@ -51,8 +69,8 @@ export function AddItem() {
     // Clear immediately for fast typing
     setName("");
 
-    // Fire and forget - don't await
-    addItem(trimmedName, category, state.authUser.uid).catch((error) => {
+    // Fire and forget - addItem will lookup category from history
+    addItem(trimmedName, state.authUser.uid).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };
@@ -61,39 +79,26 @@ export function AddItem() {
     <Container>
       <Form onSubmit={handleSubmit}>
         <InputWrapper>
-          <Input
-            placeholder="Add item..."
+          <AutoComplete
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={setName}
+            onSelect={(value) => setName(value)}
+            options={autocompleteOptions}
+            placeholder="Add item..."
             size="large"
+            style={{ width: "100%" }}
             autoFocus
           />
         </InputWrapper>
-        <Space.Compact>
-          <Select
-            value={category}
-            onChange={setCategory}
-            size="large"
-            style={{ width: 140 }}
-            showSearch
-            filterOption={(input, option) =>
-              (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-            }
-            options={CATEGORIES.map((cat) => ({
-              value: cat,
-              label: CATEGORY_LABELS[cat],
-            }))}
-          />
-          <Button
-            type="primary"
-            htmlType="submit"
-            size="large"
-            icon={<PlusOutlined />}
-            disabled={!name.trim()}
-          >
-            Add
-          </Button>
-        </Space.Compact>
+        <Button
+          type="primary"
+          htmlType="submit"
+          size="large"
+          icon={<PlusOutlined />}
+          disabled={!name.trim()}
+        >
+          Add
+        </Button>
       </Form>
     </Container>
   );

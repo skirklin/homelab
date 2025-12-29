@@ -1,5 +1,5 @@
 import { Button } from "antd";
-import { LogoutOutlined, CheckOutlined } from "@ant-design/icons";
+import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { signOut } from "firebase/auth";
 import { auth } from "../backend";
@@ -19,6 +19,12 @@ const HeaderContainer = styled.header`
   z-index: 100;
 `;
 
+const TitleSection = styled.div`
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+`;
+
 const Title = styled.h1`
   font-size: var(--font-size-xl);
   margin: 0;
@@ -30,19 +36,23 @@ const Actions = styled.div`
   gap: var(--space-sm);
 `;
 
-export function Header() {
+interface Props {
+  onShowHistory: () => void;
+  onShowSettings: () => void;
+  onShowLists: () => void;
+}
+
+export function Header({ onShowHistory, onShowSettings, onShowLists }: Props) {
   const { state } = useAppContext();
   const items = getItemsFromState(state);
   const checkedCount = items.filter((item) => item.checked).length;
+  const listName = state.list?.name || "Groceries";
 
   const handleDoneShopping = async () => {
     if (checkedCount === 0) return;
 
-    // Skip confirmation for now - directly clear checked items
-    console.log("Done shopping clicked, clearing", checkedCount, "items");
     try {
       await clearCheckedItems(items);
-      console.log("Items cleared successfully");
     } catch (error) {
       console.error("Failed to clear items:", error);
     }
@@ -54,8 +64,13 @@ export function Header() {
 
   return (
     <HeaderContainer>
-      <Title>Groceries</Title>
+      <TitleSection>
+        <Button icon={<UnorderedListOutlined />} onClick={onShowLists} />
+        <Title>{listName}</Title>
+      </TitleSection>
       <Actions>
+        <Button icon={<HistoryOutlined />} onClick={onShowHistory} />
+        <Button icon={<SettingOutlined />} onClick={onShowSettings} />
         {checkedCount > 0 && (
           <Button
             type="primary"
