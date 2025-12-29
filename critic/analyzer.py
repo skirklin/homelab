@@ -22,11 +22,18 @@ from critic.schema import (
     Evidence,
     AnalysisSummary,
     TokenUsage,
+    Wiki,
+    WikiCharacter,
+    WikiLocation,
+    WikiEvent,
+    CharacterRelationship,
+    CharacterAppearance,
 )
 from critic.parser import parse_document
 from critic.chunker import chunk_document
 from critic.summarizer import summarize_chapters
 from critic.critic import run_critic
+from critic.wiki_extractor import extract_wiki
 from critic.config import DEFAULT_MODEL
 
 
@@ -80,7 +87,69 @@ def analyze_document(
     summary_input_tokens = sum(len(c.content) // 4 for c in chapters)
     summary_output_tokens = sum(s.word_count * 4 // 3 for s in summaries)
 
-    # Phase 4: Run critic
+    # Phase 4: Generate wiki from summaries
+    if on_progress:
+        on_progress('wiki', 0, 1)
+    wiki_result = extract_wiki(summaries, api_key=api_key, model=model)
+    if on_progress:
+        on_progress('wiki', 1, 1)
+
+    # Convert wiki.py types to schema.py types
+    wiki = Wiki(
+        characters=[
+            WikiCharacter(
+                name=c.name,
+                aliases=c.aliases,
+                description=c.description,
+                physical=c.physical,
+                personality=c.personality,
+                background=c.background,
+                relationships=[
+                    CharacterRelationship(
+                        target=r.target,
+                        relationship=r.relationship,
+                        description=r.description,
+                    )
+                    for r in c.relationships
+                ],
+                appearances=[
+                    CharacterAppearance(
+                        chapter_id=a.chapter_id,
+                        chapter_title=a.chapter_title,
+                        role=a.role,
+                        summary=a.summary,
+                    )
+                    for a in c.appearances
+                ],
+                arc=c.arc,
+            )
+            for c in wiki_result.characters
+        ],
+        locations=[
+            WikiLocation(
+                name=loc.name,
+                description=loc.description,
+                significance=loc.significance,
+                scenes=loc.scenes,
+                associated_characters=loc.associated_characters,
+            )
+            for loc in wiki_result.locations
+        ],
+        timeline=[
+            WikiEvent(
+                description=e.description,
+                when=e.when,
+                where=e.where or "",
+                characters=e.characters,
+                chapter_id=e.chapter_id,
+                is_flashback=e.is_flashback,
+                sequence=e.sequence,
+            )
+            for e in wiki_result.timeline
+        ],
+    )
+
+    # Phase 5: Run critic
     issues: list[Issue] = []
     strengths: list[Strength] = []
     critic_input_tokens = 0
@@ -97,20 +166,27 @@ def analyze_document(
 
         # Convert critic issues to schema
         for ci in critic_result.issues:
+            evidence_list = []
+            for e in ci.evidence:
+                if isinstance(e, dict):
+                    evidence_list.append(Evidence(
+                        chapter_id=e.get('chapter_id', ''),
+                        quote=e.get('quote', ''),
+                        note=e.get('note', ''),
+                    ))
+                elif isinstance(e, str):
+                    evidence_list.append(Evidence(
+                        chapter_id='',
+                        quote=e,
+                        note='',
+                    ))
             issues.append(Issue(
                 id=ci.id,
                 type=ci.type,
                 severity=ci.severity,
                 title=ci.title,
                 description=ci.description,
-                evidence=[
-                    Evidence(
-                        chapter_id=e.get('chapter_id', ''),
-                        quote=e.get('quote', ''),
-                        note=e.get('note', ''),
-                    )
-                    for e in ci.evidence
-                ],
+                evidence=evidence_list,
             ))
 
         # Convert critic strengths to schema
@@ -147,6 +223,9 @@ def analyze_document(
         warning_count=warning_count,
         suggestion_count=suggestion_count,
         strength_count=len(strengths),
+        character_count=len(wiki.characters),
+        location_count=len(wiki.locations),
+        timeline_event_count=len(wiki.timeline),
     )
 
     # Build document info
@@ -165,6 +244,8 @@ def analyze_document(
     )
 
     print(f"[Analyzer] Complete: {len(issues)} issues, {len(strengths)} strengths")
+    print(f"[Analyzer] Wiki: {len(wiki.characters)} characters, {len(wiki.locations)} locations, "
+          f"{len(wiki.timeline)} events")
     print(f"[Analyzer] Tokens: ~{token_usage.total_input + token_usage.total_output:,} total")
 
     return AnalysisOutput(
@@ -176,4 +257,5 @@ def analyze_document(
         strengths=strengths,
         summary=summary,
         token_usage=token_usage,
+        wiki=wiki,
     )

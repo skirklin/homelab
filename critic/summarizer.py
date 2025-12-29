@@ -45,6 +45,21 @@ List concrete factual details that could be contradicted later:
 - World details (the town has one hospital, the company was founded in 1985)
 - Object details (the letter was written on yellow paper, the key opens the back door)
 
+## Ages, Dates & Arithmetic
+CRITICAL: Extract all quantitative temporal information:
+- Any years mentioned (1801, "the summer of '98")
+- Character ages stated or implied ("she was twelve when...", "now in his forties")
+- Time spans ("three years later", "he'd been gone for months")
+- How old characters were during past events mentioned
+- Any arithmetic that can be derived (if X happened 20 years ago and Y was 5, Y is now 25)
+
+## Unexplained Changes
+Note any significant character changes between their last appearance and this one:
+- Status changes (poor→wealthy, uneducated→refined, healthy→ill)
+- Location changes (was in London, now in Yorkshire with no journey shown)
+- Relationship changes that aren't explained
+- Skills/knowledge they didn't have before
+
 ## Plot Developments
 What story threads are touched in this chapter:
 - New threads introduced (what question/conflict is raised?)

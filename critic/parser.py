@@ -104,10 +104,26 @@ def parse_text(text: str, title: str = "Untitled") -> ParsedDocument:
         if found_heading:
             continue
 
-    # Use first heading as title if available
+    # Try to find a proper title
     doc_title = title
-    if headings:
-        doc_title = headings[0].text
+
+    # First check if there's a title-like line at the start of the document
+    # (common in Gutenberg texts: "Title\n\nby Author")
+    first_lines = text.strip().split('\n')
+    if first_lines:
+        potential_title = first_lines[0].strip()
+        # A good title candidate: short, not a chapter marker, not all-caps single word
+        if (potential_title and
+            len(potential_title) < 80 and
+            not re.match(r'^(Chapter|CHAPTER)\s+(\d+|[IVXLC]+)', potential_title, re.IGNORECASE) and
+            not potential_title.startswith('#')):
+            doc_title = potential_title
+
+    # Fall back to first heading if it's not a chapter marker
+    if doc_title == title and headings:
+        first_heading = headings[0].text
+        if not re.match(r'^(Chapter|CHAPTER)\s+(\d+|[IVXLC]+)', first_heading, re.IGNORECASE):
+            doc_title = first_heading
 
     return ParsedDocument(
         title=doc_title,

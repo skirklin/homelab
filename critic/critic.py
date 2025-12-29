@@ -72,6 +72,9 @@ REPORTING_TOOLS: list[ToolParam] = [
                         "dropped_character",
                         "factual_contradiction",
                         "pacing_issue",
+                        "age_arithmetic",
+                        "unexplained_transformation",
+                        "narrator_reliability",
                         "other",
                     ],
                     "description": "Type of issue",
@@ -300,6 +303,27 @@ Your job is to:
 3. **Note Craft Concerns**: Pacing issues, character development problems, structural weaknesses
 4. **Recognize Strengths**: What does the manuscript do well?
 
+## CRITICAL: Age & Timeline Arithmetic
+You MUST explicitly calculate and verify:
+- Character ages across the timeline (if X is 12 in chapter 3 and 10 years pass, X should be 22)
+- Whether stated ages match the events described
+- Whether time spans add up correctly
+- If a narrator claims to remember events from X years ago, are they old enough?
+
+## CRITICAL: Unexplained Transformations
+Flag when characters undergo major changes without explanation:
+- Sudden wealth (how did they get rich?)
+- Sudden education/refinement (where did they learn this?)
+- Unexplained absences (where were they? what happened?)
+- New skills/knowledge with no acquisition shown
+
+## CRITICAL: Narrator Reliability
+Question the plausibility of narration:
+- Can the narrator actually know what they claim to know?
+- Are they present at scenes they describe in detail?
+- Is their memory of old events suspiciously perfect?
+- Do they report private conversations they couldn't have witnessed?
+
 ## Your Process
 
 1. Read through the chapter summaries to understand the story
@@ -337,6 +361,27 @@ You have been given summaries of each chapter below. Your job is to:
 2. **Identify Plot Problems**: Unresolved threads, dropped characters, plot holes, abandoned setups
 3. **Note Craft Concerns**: Pacing issues, character development problems, structural weaknesses
 4. **Recognize Strengths**: What does the manuscript do well?
+
+## CRITICAL: Age & Timeline Arithmetic
+You MUST explicitly calculate and verify:
+- Character ages across the timeline (if X is 12 in chapter 3 and 10 years pass, X should be 22)
+- Whether stated ages match the events described
+- Whether time spans add up correctly
+- If a narrator claims to remember events from X years ago, are they old enough?
+
+## CRITICAL: Unexplained Transformations
+Flag when characters undergo major changes without explanation:
+- Sudden wealth (how did they get rich?)
+- Sudden education/refinement (where did they learn this?)
+- Unexplained absences (where were they? what happened?)
+- New skills/knowledge with no acquisition shown
+
+## CRITICAL: Narrator Reliability
+Question the plausibility of narration:
+- Can the narrator actually know what they claim to know?
+- Are they present at scenes they describe in detail?
+- Is their memory of old events suspiciously perfect?
+- Do they report private conversations they couldn't have witnessed?
 
 ## Your Process
 
@@ -557,10 +602,26 @@ def _run_critic_two_phase(
 
 You have been given summaries of each chapter. Your job is to identify ALL potential issues that warrant investigation.
 
+## CRITICAL CHECKS TO PERFORM:
+
+1. **Age Arithmetic**: Calculate character ages across the timeline. If someone is 12 when X happens, and 10 years pass, they should be 22. Flag any discrepancies.
+
+2. **Unexplained Transformations**: Flag when characters undergo major unexplained changes:
+   - Sudden wealth with no explanation of source
+   - Sudden education/refinement after being uneducated
+   - Unexplained absences (where were they? what happened?)
+
+3. **Narrator Reliability**: Question whether the narrator can plausibly know what they claim:
+   - Are they old enough to remember what they describe?
+   - Were they present at private scenes they narrate?
+   - Is their recall of decades-old conversations realistic?
+
+4. **Standard Continuity**: Physical descriptions, timeline sequence, factual consistency.
+
 For each potential issue, output a JSON object with:
-- "type": the issue type (timeline_inconsistency, character_inconsistency, plot_hole, etc.)
+- "type": the issue type (timeline_inconsistency, character_inconsistency, plot_hole, unexplained_transformation, narrator_reliability, age_arithmetic, etc.)
 - "title": brief description
-- "description": what seems wrong
+- "description": what seems wrong (include your arithmetic if applicable)
 - "chapter_ids": which chapters to check (e.g., ["chapter-3", "chapter-7"])
 
 Output your findings as a JSON array. Be thorough - it's better to flag something that turns out to be fine than to miss a real issue.
@@ -679,7 +740,7 @@ Respond with JSON: {{"is_issue": true/false, "severity": "...", "evidence": [...
                 title=potential.get("title", ""),
                 description=verification.get("explanation", potential.get("description", "")),
                 evidence=[
-                    {"chapter_id": cid, "quote": e.get("quote", ""), "note": e.get("note", "")}
+                    {"chapter_id": cid, "quote": e.get("quote", "") if isinstance(e, dict) else str(e), "note": e.get("note", "") if isinstance(e, dict) else ""}
                     for cid in chapter_ids
                     for e in verification.get("evidence", [])
                 ],
