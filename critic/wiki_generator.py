@@ -382,9 +382,9 @@ class WikiGenerator:
   See also the <a href="timeline.html">timeline of {len(wiki.timeline)} events</a>.
 </p>
 <ul>
-  <li class="severity-error">{summary.error_count} errors</li>
-  <li class="severity-warning">{summary.warning_count} warnings</li>
-  <li class="severity-suggestion">{summary.suggestion_count} suggestions</li>
+  <li class="severity-error"><a href="issues.html#errors">{summary.error_count} errors</a></li>
+  <li class="severity-warning"><a href="issues.html#warnings">{summary.warning_count} warnings</a></li>
+  <li class="severity-suggestion"><a href="issues.html#suggestions">{summary.suggestion_count} suggestions</a></li>
 </ul>
 """
         return self._page(doc.title, content)
