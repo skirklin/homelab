@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, connectAuthEmulator } from "firebase/auth";
-import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getFirestore, connectFirestoreEmulator, enableIndexedDbPersistence } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDnTpynPmWemzfi-AHzPEgu2TqZ0e-8UUA",
@@ -22,3 +22,12 @@ export const db = getFirestore(app);
 if (import.meta.env.DEV) {
   connectFirestoreEmulator(db, "localhost", 8180);
 }
+
+// Enable offline persistence
+enableIndexedDbPersistence(db).catch((err) => {
+  if (err.code === "failed-precondition") {
+    console.warn("Offline persistence unavailable: multiple tabs open");
+  } else if (err.code === "unimplemented") {
+    console.warn("Offline persistence unavailable: browser not supported");
+  }
+});

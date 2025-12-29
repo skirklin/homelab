@@ -69,9 +69,11 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
   const checkedCount = items.filter((item) => item.checked).length;
   const listName = state.list?.name || "List";
 
-  const handleCopyId = () => {
-    navigator.clipboard.writeText(listId);
-    message.success("List ID copied!");
+  const joinLink = `${window.location.origin}/join/${listId}`;
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(joinLink);
+    message.success("Link copied!");
   };
 
   const handleDoneShopping = async () => {
@@ -118,12 +120,12 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
       >
         <ModalForm>
           <FormField>
-            <Label>List ID</Label>
+            <Label>Share this link</Label>
             <Input
-              value={listId}
+              value={joinLink}
               readOnly
               addonAfter={
-                <Button type="text" size="small" onClick={handleCopyId}>
+                <Button type="text" size="small" onClick={handleCopyLink}>
                   Copy
                 </Button>
               }

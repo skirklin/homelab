@@ -7,6 +7,7 @@ import { subscribeToAuth, subscribeToUserSlugs } from "./subscription";
 import { Auth } from "./components/Auth";
 import { GroceryList } from "./components/GroceryList";
 import { ListPicker } from "./components/ListPicker";
+import { JoinList } from "./components/JoinList";
 
 const theme = {
   token: {
@@ -61,6 +62,7 @@ function AppContent() {
   return (
     <Routes>
       <Route path="/" element={<ListPicker />} />
+      <Route path="/join/:listId" element={<JoinList />} />
       <Route path="/:slug" element={<GroceryList />} />
     </Routes>
   );
