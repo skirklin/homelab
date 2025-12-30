@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+venv/
+
+# Build outputs
+dist/
+build/
+*.pyc
+__pycache__/
+
+# Firebase
+.firebase/
+*-debug.log
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Caches
+.critic-cache/
+.ruff_cache/
