@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "scott-kirkl-in",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
