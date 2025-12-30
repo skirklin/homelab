@@ -1,0 +1,85 @@
+:root {
+  /* Colors - refined palette */
+  --color-primary: #2ca6a4;
+  --color-primary-hover: #238a88;
+  --color-accent: #e94f37;
+  --color-accent-light: #fff0ee;
+  --color-warning: #fcba04;
+
+  /* Neutrals */
+  --color-text: #1a1a1a;
+  --color-text-secondary: #666;
+  --color-text-muted: #999;
+  --color-border: #e0e0e0;
+  --color-border-light: #f0f0f0;
+  --color-bg: #ffffff;
+  --color-bg-subtle: #fafafa;
+  --color-bg-muted: #f5f5f5;
+
+  /* Legacy aliases */
+  --jet: #1a1a1a;
+  --cinnabar: #e94f37;
+  --mint-cream: #fafafa;
+  --verdigris: #2ca6a4;
+  --selective-yellow: #fcba04;
+  --pale-spring-bud: #f9f9f7;
+
+  /* Spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 24px;
+  --font-size-2xl: 32px;
+
+  /* Borders */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-y: scroll;
+  background: var(--color-bg);
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Consistent focus states */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Cooking mode - larger fonts for easier reading while cooking */
+body.cooking-mode {
+  --font-size-xs: 16px;
+  --font-size-sm: 18px;
+  --font-size-base: 20px;
+  --font-size-lg: 24px;
+  --font-size-xl: 28px;
+  --font-size-2xl: 36px;
+}

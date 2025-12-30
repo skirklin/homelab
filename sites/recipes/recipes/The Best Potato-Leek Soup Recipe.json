@@ -1,0 +1,221 @@
+{
+  "@context": "http://schema.org",
+  "@type": [
+    "Recipe"
+  ],
+  "headline": "The Best Potato-Leek Soup Recipe",
+  "datePublished": "2015-01-07T06:50:00.000-05:00",
+  "dateModified": "2018-08-29T13:01:00.000-04:00",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "J. Kenji López-Alt",
+      "description": "Kenji is the former culinary director for Serious Eats and a current culinary consultant for the site. He is also a New York Times food columnist and the author of The Food Lab: Better Home Cooking Through Science.",
+      "jobTitle": "Culinary Consultant",
+      "url": "https://www.seriouseats.com/j-kenji-lopez-alt-5118720",
+      "sameAs": [
+        "https://www.instagram.com/kenjilopezalt/",
+        "http://www.kenjilopezalt.com/"
+      ],
+      "knowsAbout": [
+        "Food science, Recipe development, Equipment reviews, Restaurant reviews , General food features"
+      ]
+    }
+  ],
+  "description": "An easy potato-leek soup that takes no shortcuts to deliver the best flavor and texture possible. A touch of buttermilk and potatoes pressed through a ricer are the secret.",
+  "image": [
+    {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/f28a1aP9zmzYlZDpkzSZvu0eLbk=/1500x844/smart/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__images__2014__12__20150105-potato-leek-soup-recipe-07-200d2d3c7c0240479dad3749c0b53469.jpg",
+      "height": 844,
+      "width": 1500
+    },
+    {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/VXswP6MkKaiUv9Kj0l_X0bbTnXE=/1500x1125/smart/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__images__2014__12__20150105-potato-leek-soup-recipe-07-200d2d3c7c0240479dad3749c0b53469.jpg",
+      "height": 1125,
+      "width": 1500
+    },
+    {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/yftoPVWnE5502kpWdAzv9-M0Frk=/1125x1125/smart/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__images__2014__12__20150105-potato-leek-soup-recipe-07-200d2d3c7c0240479dad3749c0b53469.jpg",
+      "height": 1125,
+      "width": 1125
+    }
+  ],
+  "publisher": {
+    "@type": "Organization",
+    "name": "Serious Eats",
+    "url": "https://www.seriouseats.com",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/O7qOTYhS4IAKSKnr4JmNDURwjhw=/320x320/filters:no_upscale():max_bytes(150000):strip_icc()/Serious_Eats_Schema_Logo-033d1e058bdb4c8d9e0ada84a4485482.png",
+      "width": 320,
+      "height": 320
+    },
+    "brand": "Serious Eats",
+    "publishingPrinciples": "https://www.seriouseats.com/about-us-5120006#editorial-guidelines"
+  },
+  "name": "The Best Potato-Leek Soup Recipe",
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "4.7",
+    "ratingCount": "7"
+  },
+  "keywords": "easy, leek, potato, soup, winter",
+  "nutrition": {
+    "@type": "NutritionInformation",
+    "calories": "205 kcal",
+    "carbohydrateContent": "20 g",
+    "cholesterolContent": "34 mg",
+    "fiberContent": "2 g",
+    "proteinContent": "6 g",
+    "saturatedFatContent": "7 g",
+    "sodiumContent": "625 mg",
+    "sugarContent": "5 g",
+    "fatContent": "12 g",
+    "servingSize": "Serrves 6",
+    "unsaturatedFatContent": "0 g"
+  },
+  "recipeCategory": [
+    "Soups and Stews",
+    "Soup"
+  ],
+  "recipeCuisine": [
+    "French",
+    "American"
+  ],
+  "recipeIngredient": [
+    "2 tablespoons unsalted butter",
+    "2 large leeks, white and pale green parts only, rinsed and roughly chopped",
+    "1 quart homemade or store-bought low-sodium chicken stock",
+    "2 medium russet potatoes, peeled and cut into quarters (about 3/4 pound)",
+    "1 bay leaf",
+    "Kosher salt and freshly ground black pepper",
+    "1 cup buttermilk",
+    "1/2 cup heavy cream",
+    "1/2 teaspoon freshly ground nutmeg",
+    "Sliced chives or scallions, for serving"
+  ],
+  "recipeInstructions": [
+    {
+      "@type": "HowToStep",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://www.seriouseats.com/thmb/gseTFR_9tLBE1JFMzOqr2i7xmtg=/1500x1125/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__20150105-potato-leek-soup-recipe-02-792ae2c2dcde45a3aba9da57f46c4e01.jpg",
+        "height": 1125,
+        "width": 1500
+      },
+      "text": "Heat butter in a large saucepan or Dutch oven over medium heat until melted. Add leeks, reduce heat to low, and cook, stirring frequently, until very soft but not browned, 10 to 15 minutes."
+    },
+    {
+      "@type": "HowToStep",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://www.seriouseats.com/thmb/c6IGaZbKz4fLJWEZ5jUNH6jWmcM=/1500x1125/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__20150105-potato-leek-soup-recipe-03-44d7b9943e88473b87a6335068a5e243.jpg",
+        "height": 1125,
+        "width": 1500
+      },
+      "text": "Add stock, potatoes, and bay leaf, and season lightly with salt and pepper. Bring to a boil over high heat, reduce to a gentle simmer, cover, and cook until potatoes are fall-apart tender, about 15 minutes."
+    },
+    {
+      "@type": "HowToStep",
+      "text": "To Finish With a Ricer (Recommended): Remove potatoes from soup using tongs and transfer to a bowl. Set aside. Discard bay leaf. Transfer remaining soup to a blender. Slowly increase blender speed to high and blend until completely smooth, about 2 minutes. Return soup to a clean pot."
+    },
+    {
+      "@type": "HowToStep",
+      "text": "Press potatoes through a potato ricer or food mill into the pot with the soup. Whisk in buttermilk and heavy cream. Whisking frequently, bring soup to a simmer over medium-high heat. Whisk in grated nutmeg. Season to taste with salt and pepper and serve with chives or scallions."
+    },
+    {
+      "@type": "HowToStep",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://www.seriouseats.com/thmb/Yxo4pApAxpLkCQzpVSBETfYjIko=/1500x1125/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__20150105-potato-leek-soup-recipe-05-e6aefba5fd064ebc920619b390ac09ae.jpg",
+        "height": 1125,
+        "width": 1500
+      },
+      "text": "To Finish With a Blender (Faster): Add heavy cream and buttermilk to pot. Discard bay leaf. Working in batches if necessary, transfer soup to a blender. Slowly increase blender speed to high and blend until completely smooth, about 2 minutes. Return soup to a clean pot, pressing it through a fine mesh strainer or chinois with the bottom of a ladle if a smoother texture is desired. Whisking frequently, bring soup to a simmer over medium-high heat. Alternatively, chill completely and serve cold. Whisk in grated nutmeg. Season to taste with salt and pepper and serve with chives or scallions."
+    }
+  ],
+  "recipeYield": "6",
+  "totalTime": "PT45M",
+  "review": [
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "Enid Coleslaw"
+      },
+      "reviewBody": "Zilchie is correct....I was endlessly puzzled at all the other recipes for this soup which advised throwing the dark green parts away. Fortunately there was one recipe which suggested keeping them for stock...I ended up saut&#233;ing them as a base for a pumpkin soup and ate them all. \n\nGuess the concern with the dark green parts is that they may make the soup dark, as it seems the ideal colour for a potato and leek soup is a creamy white. But my suggestion would be if you're fine with it looking darker, include the greens. It seemed terribly wasteful to chuck them out 'cos I'm in South-east Asia where leeks aren't cheap. \n\nAlso for those who prefer a lighter version, I've found the soup works well without milk and/or cream - the potatoes add a lot of richness and make the soup pretty substantial. A swirl of olive oil on top would do the trick."
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "StaffordParkRWC"
+      },
+      "reviewBody": "A little on the thin side, and the texture was not quite a velvety as I'd like. The riced potatoes, while not gummy, were a little grainy. Running the soup through a chinois helps, but it lacked a richness I would have expected. Perhaps a little flour on the leeks prior to adding the stock (like a veloute) would have helped. Worth experimenting with though."
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "Zilchie"
+      },
+      "reviewBody": "Why are leek greens always left out of the party? They taste fine to me. With so much food wastage in the world, we should be using as much as we can of the vegetable/animal product in our food. With leeks, I usually start the cooking on the chopped greens first, add the whites/lights after. Mo' leeks, mo' flava. \n\nUsing buttermilk in this soup is genius!"
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "Sudie"
+      },
+      "reviewBody": "Why not just use a cordless hand mixer for the potatoes? Isn't that a happy medium between a ricer and a blender?"
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "jonathan"
+      },
+      "reviewBody": "Am I missing something? Did the original recipe call for using a Vitamix? Or cooking the ingredients with one? I don't get the first few comments..."
+    }
+  ],
+  "mainEntityOfPage": {
+    "@type": [
+      "WebPage"
+    ],
+    "@id": "https://www.seriouseats.com/best-potato-leek-soup-recipe",
+    "breadcrumb": {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "item": {
+            "@id": "https://www.seriouseats.com/main-recipes-by-type-5117824",
+            "name": "Mains By Type"
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "item": {
+            "@id": "https://www.seriouseats.com/soup-recipes-5117814",
+            "name": "Soups"
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "item": {
+            "@id": "https://www.seriouseats.com/best-potato-leek-soup-recipe",
+            "name": "The Best Potato-Leek Soup Recipe"
+          }
+        }
+      ]
+    }
+  },
+  "about": [],
+  "url": "https://www.seriouseats.com/best-potato-leek-soup-recipe"
+}

@@ -1,0 +1,92 @@
+{
+  "@context": "http://schema.org/",
+  "@type": "Recipe",
+  "mainEntityOfPage": "https://www.chowhound.com/recipes/easy-slow-cooker-pulled-pork-30356",
+  "name": "Easy Slow Cooker Pulled Pork",
+  "image": {
+    "@type": "ImageObject",
+    "url": "https://www.chowhound.com/a/2014/09/30356_slow_cooker_pork_3000x2000.jpg"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Christine Gallary"
+  },
+  "datePublished": "2015-10-02T09:10:00-07:00",
+  "dateModified": "2020-10-23T13:37:29-07:00",
+  "description": "This easy recipe for pulled pork done in the slow cooker uses a simple spice mixture, onions, garlic, and chicken broth.",
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "4.5",
+    "ratingCount": "590"
+  },
+  "video": {
+    "@type": "VideoObject",
+    "description": "This easy recipe for pulled pork done in the slow cooker uses a simple spice mixture, onions, garlic, and chicken broth.",
+    "duration": "PT0H03M03S",
+    "name": "Easy Slow Cooker Pulled Pork",
+    "uploadDate": "2012-05-16T16:51:00-07:00",
+    "embedURL": "https://www.chowhound.com/videos/115077/player",
+    "thumbnailUrl": "https://www.chowhound.com/a/img/resize/f8e5f41e2e0ff9504339b2b72ace19dd05a1b11e/2014/09/30356_slow_cooker_pork_3000x2000.jpg?fit=bounds&amp;height=800&amp;width=1280"
+  },
+  "prepTime": "PT0H30M",
+  "totalTime": "PT6H30M",
+  "recipeYield": "6 servings",
+  "recipeIngredient": [
+    "2 medium yellow onions, thinly sliced",
+    "4 medium garlic cloves, thinly sliced",
+    "1 cup chicken stock or low-sodium chicken broth",
+    "1 tablespoon packed dark brown sugar",
+    "1 tablespoon chili powder",
+    "1 tablespoon kosher salt, plus more as needed",
+    "1/2 teaspoon ground cumin",
+    "1/4 teaspoon ground cinnamon",
+    "1 (4-1/2- to 5-pound) boneless or bone-in pork shoulder (also known as pork butt), twine or netting removed",
+    "2 cups barbecue sauce (optional)"
+  ],
+  "recipeInstructions": "Place the onions and garlic in an even layer in the slow cooker and pour in the stock or broth. Combine the sugar, chili powder, measured salt, cumin, and cinnamon in a small bowl. Pat the pork dry with paper towels. Rub the spice mixture all over the pork and place the meat on top of the onions and garlic. Cover and cook until the pork is fork tender, about 6 to 8 hours on high or 8 to 10 hours on low. Turn off the slow cooker and remove the pork to a cutting board. Set a fine-mesh strainer over a medium heatproof bowl. Pour the onion mixture from the slow cooker through the strainer and return the solids to the slow cooker. Set the strained liquid aside. If the pork has a bone, remove and discard it. Using 2 forks, shred the meat into bite-sized pieces, discarding any large pieces of fat. Return the shredded meat to the slow cooker, add the barbecue sauce, if using, and mix to combine. If you’re not using barbecue sauce, use a spoon to skim and discard the fat from the surface of the strained cooking liquid, and then add 1/4 cup of the liquid at a time to the slow cooker until the pork is just moistened. Taste and season with salt as needed.",
+  "recipeCategory": [
+    "Lunch",
+    "Dinner",
+    "Sub / Sandwich",
+    "Make Ahead",
+    "Weeknight Dinner",
+    "Main Dish"
+  ],
+  "recipeCuisine": [
+    "Comfort Food"
+  ],
+  "keywords": [
+    "March Madness",
+    "Braising",
+    "Slow Cooking",
+    "Slow Cookers",
+    "Dinner Party",
+    "Tailgating",
+    "Picnic",
+    "Gluten Free",
+    "Cinnamon",
+    "Cumin",
+    "Pork",
+    "Brown Sugar",
+    "Garlic",
+    "Onions",
+    "Leftovers",
+    "Salt",
+    "Winter",
+    "Pulled Pork",
+    "Easy",
+    "Eat: Bon Appétit!"
+  ],
+  "publisher": {
+    "@type": "Organization",
+    "name": "Chowhound",
+    "url": "https://www.chowhound.com",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://www.chowhound.com/s/touch-icon-180x180.png",
+      "width": 180,
+      "height": 180
+    }
+  },
+  "url": "https://www.chowhound.com/recipes/easy-slow-cooker-pulled-pork-30356"
+}

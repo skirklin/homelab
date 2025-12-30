@@ -1,0 +1,19 @@
+/venv/
+node_modules
+__pycache__
+*.ipynb
+
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# firebase
+**/.firebase
+**/.firebaserc
+
+# Windows metadata
+*:Zone.Identifier
+
+# Service account keys (sensitive)
+service-account-key.json
+**/service-account-key.json

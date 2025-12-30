@@ -1,0 +1,12 @@
+.recipe-table-clickable-column {
+    cursor: pointer;
+}
+
+/* Compact table rows */
+.ant-table-middle .ant-table-tbody > tr > td {
+    padding: 8px 12px;
+}
+
+.ant-table-middle .ant-table-thead > tr > th {
+    padding: 8px 12px;
+}

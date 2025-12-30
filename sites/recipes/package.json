@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@typescript-eslint/eslint-plugin": "^5.9.0",
+    "@typescript-eslint/parser": "^5.9.0",
+    "eslint-plugin-react": "^7.28.0",
+    "flexsearch": "^0.7.31"
+  }
+}

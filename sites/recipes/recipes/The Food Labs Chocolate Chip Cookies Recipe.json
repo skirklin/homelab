@@ -1,0 +1,233 @@
+{
+  "@context": "http://schema.org",
+  "@type": [
+    "Recipe"
+  ],
+  "headline": "The Food Lab&#39;s Chocolate Chip Cookies Recipe",
+  "datePublished": "2013-12-19T09:00:00.000-05:00",
+  "dateModified": "2020-09-12T15:22:07.000-04:00",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "J. Kenji López-Alt",
+      "description": "Kenji is the former culinary director for Serious Eats and a current culinary consultant for the site. He is also a New York Times food columnist and the author of The Food Lab: Better Home Cooking Through Science.",
+      "jobTitle": "Culinary Consultant",
+      "url": "https://www.seriouseats.com/j-kenji-lopez-alt-5118720",
+      "sameAs": [
+        "https://www.instagram.com/kenjilopezalt/",
+        "http://www.kenjilopezalt.com/"
+      ],
+      "knowsAbout": [
+        "Food science, Recipe development, Equipment reviews, Restaurant reviews , General food features"
+      ]
+    }
+  ],
+  "description": "Learn the secrets and science behind the best browned butter chocolate chip cookies in this classic recipe from The Food Lab.",
+  "image": [
+    {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/ehFBOFTxiYEIlqGgVVOMeg-E4o8=/1500x844/smart/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__images__2015__12__20131213-chocolate-chip-cookies-food-lab-55-edit-04edd98fcca7457281abbf6eac559bfc.jpg",
+      "height": 844,
+      "width": 1500
+    },
+    {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/tviZg8oNEiQNTWL1KSssjUzNOQk=/1500x1125/smart/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__images__2015__12__20131213-chocolate-chip-cookies-food-lab-55-edit-04edd98fcca7457281abbf6eac559bfc.jpg",
+      "height": 1125,
+      "width": 1500
+    },
+    {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/63Q11DRbP_DnlyZ8hVw6UXZY9Gg=/1125x1125/smart/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__images__2015__12__20131213-chocolate-chip-cookies-food-lab-55-edit-04edd98fcca7457281abbf6eac559bfc.jpg",
+      "height": 1125,
+      "width": 1125
+    }
+  ],
+  "publisher": {
+    "@type": "Organization",
+    "name": "Serious Eats",
+    "url": "https://www.seriouseats.com",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://www.seriouseats.com/thmb/O7qOTYhS4IAKSKnr4JmNDURwjhw=/320x320/filters:no_upscale():max_bytes(150000):strip_icc()/Serious_Eats_Schema_Logo-033d1e058bdb4c8d9e0ada84a4485482.png",
+      "width": 320,
+      "height": 320
+    },
+    "brand": "Serious Eats",
+    "publishingPrinciples": "https://www.seriouseats.com/about-us-5120006#editorial-guidelines"
+  },
+  "name": "The Food Lab&#39;s Chocolate Chip Cookies Recipe",
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "4.3",
+    "ratingCount": "27"
+  },
+  "keywords": "baking, brown butter, chocolate, comfort, cookie, dessert",
+  "nutrition": {
+    "@type": "NutritionInformation",
+    "calories": "179 kcal",
+    "carbohydrateContent": "23 g",
+    "cholesterolContent": "31 mg",
+    "fiberContent": "1 g",
+    "proteinContent": "2 g",
+    "saturatedFatContent": "6 g",
+    "sodiumContent": "118 mg",
+    "sugarContent": "14 g",
+    "fatContent": "9 g",
+    "servingSize": "Makes about 28 cookies",
+    "unsaturatedFatContent": "0 g"
+  },
+  "recipeCategory": [
+    "Snack",
+    "Dessert",
+    "Chocolate Chip Cookies",
+    "Cookies"
+  ],
+  "recipeCuisine": [
+    "African"
+  ],
+  "recipeIngredient": [
+    "8 ounces unsalted butter (2 sticks; 225g)",
+    "1 standard ice cube (about 2 tablespoons; 30mL frozen water)",
+    "10 ounces all-purpose flour (about 2 cups; 280g)",
+    "3/4 teaspoon (3g) baking soda",
+    "2 teaspoons Diamond Crystal kosher salt or 1 teaspoon table salt (4g)",
+    "5 ounces granulated sugar (about 3/4 cup; 140g)",
+    "2 large eggs (100g)",
+    "2 teaspoons (10mL) vanilla extract",
+    "5 ounces dark brown sugar (about 1/2 tightly packed cup plus 2 tablespoons; 140g)",
+    "8 ounces (225g) semisweet chocolate, roughly chopped with a knife into 1/2- to 1/4-inch chunks",
+    "Coarse sea salt, for garnish"
+  ],
+  "recipeInstructions": [
+    {
+      "@type": "HowToStep",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://www.seriouseats.com/thmb/PeUuifFVRESsy71Xsb_A7Pbv2Ro=/1500x1125/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__20151110-chocolate-chip-cookies-vicky-wasik-005-f0d67cb4a36c4b7d9207c94de20afa6c.jpg",
+        "height": 1125,
+        "width": 1500
+      },
+      "text": "Melt butter in a medium saucepan over medium-high heat. Cook, gently swirling pan constantly, until particles begin to turn golden brown and butter smells nutty, about 5 minutes. Remove from heat and continue swirling the pan until the butter is a rich brown, about 15 seconds longer. Transfer to a medium bowl, whisk in ice cube, transfer to refrigerator, and allow to cool completely, about 20 minutes, whisking occasionally. (Alternatively, whisk over an ice bath to hasten the process.)"
+    },
+    {
+      "@type": "HowToStep",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://www.seriouseats.com/thmb/MxosUyt7_byQzW1G2JkxvI-nU9g=/1500x1125/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__20151110-chocolate-chip-cookies-vicky-wasik-011-0d9c19fffa0143ab89e62910feaa559e.jpg",
+        "height": 1125,
+        "width": 1500
+      },
+      "text": "Meanwhile, whisk together flour, baking soda, and salt in a large bowl. Place granulated sugar, eggs, and vanilla extract in the bowl of a stand mixer fitted with the whisk attachment. Whisk on medium-high speed until mixture is pale brownish-yellow and falls off the whisk in thick ribbons when lifted, about 5 minutes."
+    },
+    {
+      "@type": "HowToStep",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://www.seriouseats.com/thmb/TNrVdUQ8lM2jaCCu4a9VAbz7Ffs=/1500x1125/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__20151110-chocolate-chip-cookies-vicky-wasik-024-5f6d12301f6440a5b1271f91d5ae3552.jpg",
+        "height": 1125,
+        "width": 1500
+      },
+      "text": "Fit paddle attachment onto mixer. When brown butter mixture has cooled (it should be just starting to turn opaque again and firm around the edges), add brown sugar and cooled brown butter to egg mixture in stand mixer. Mix on medium speed to combine, about 15 seconds. Add flour mixture and mix on low speed until just barely combined, with some dry flour still remaining, about 15 seconds. Add chocolate and mix on low speed until dough comes together, about 15 seconds longer. Transfer to an airtight container and refrigerate dough at least overnight and up to 3 days."
+    },
+    {
+      "@type": "HowToStep",
+      "image": {
+        "@type": "ImageObject",
+        "url": "https://www.seriouseats.com/thmb/FAC-e24bUnGTe1wrVmJ4ceJzXvA=/1500x1125/filters:no_upscale()/__opt__aboutcom__coeus__resources__content_migration__serious_eats__seriouseats.com__recipes__20151110-chocolate-chip-cookies-vicky-wasik-029-90479694fd2743b1977f1f880969c369.jpg",
+        "height": 1125,
+        "width": 1500
+      },
+      "text": "When ready to bake, adjust oven racks to upper- and lower-middle positions and preheat oven to 325°F (160°C). Using a 1-ounce ice cream scoop or a spoon, place scoops of cookie dough onto a nonstick or parchment-lined baking sheet. Each ball should measure approximately 3 tablespoons in volume, and you should be able to fit 6 to 8 balls on each sheet. Tear each ball in half to reveal a rougher surface, then stick them back together with the rough sides facing outward. Transfer to oven and bake until golden brown around edges but still soft, 13 to 16 minutes, rotating pans back to front and top to bottom halfway through baking."
+    },
+    {
+      "@type": "HowToStep",
+      "text": "Remove baking sheets from oven. While cookies are still hot, sprinkle very lightly with coarse salt and gently press salt down to embed. Let cool for 2 minutes, then transfer cookies to a wire rack to cool completely."
+    },
+    {
+      "@type": "HowToStep",
+      "text": "Repeat steps 3 through 5 for remaining cookie dough. Allow cookies to cool completely before storing in an airtight container, plastic bag, or cookie jar at room temperature for up to 5 days."
+    }
+  ],
+  "recipeYield": "28",
+  "totalTime": "PT1440M",
+  "review": [
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "SDKBaker"
+      },
+      "reviewBody": "Heya Kenji!\n\nNot really sure if you're taking a break or still doing work for seriouseats, but I just wanted to say thanks for the recipe! I've been making these cookies for over a year now and they've been a hit every single time. This recipe single-handedly introduced me to the world of brown-butter, which I try to incorporate into everything now.\n\nI would also like people to know that this recipe is \"freezer-friendly,\" so whenever I make a batch, I end up rolling them up into cookie balls and putting them in a freezer bag."
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "funforever"
+      },
+      "reviewBody": "Pro tips for spreading, consistency, and all that jazz!!\nMy first batch's dough looked too loose- so i added a scant 1/2 cup of flour- DON'T DO THIS! Of course they still tasted great, but the texture isn't as amazing if you do this! \nThe reason that some people's dough is too loose (which leads to overspreading) is because they (and I) added the browned butter when it was still a liquid. ADD THE BROWN BUTTER WHEN IT IS COMPLETELY COOLED AND PARTIALLY TURNED BACK INTO A SOLID!!! Think like...the consistency of a moist frosting. LOL :) \nWHIP THE EGGS, SUGAR, AND VANILLA FOR AN ETERNITY!!! If you're using a stand mixer, this might not be the case, but to get the right consistency with a hand mixer, it took me 15+ minutes of constant whipping, with the bowl tilted, at top speed. Consistency is more important than timing here- I knew what to look for cause I've made lots of frostings that use whipped eggs and egg whites. It's difficult to overwhip this mixture because the eggs haven't been heated. Whip like your life depends on it. \nWhat you're looking for is a sense of \"thickness.\" Ribbons are a good descriptor, but remember, IF IT STILL LOOKS WATERY, IF IT'S REALLY RUNNY, AND IT'S NOT FALLING SLOWLY OFF THE BEATERS, IT'S NOT READY!!!\nThe second batch with the extra whipping and without the added flour were literally the best chocolate chip cookies I had ever eaten.\nEXTRA TIPS :)\n1. Pull them out earlyish. Allow them to continue baking on the pan. \n2. Look up tips on browning butter if you've never done it before. \n3. Fold in the butter and brown sugar, and then the flour mixture and chocolate chips by hand. \n4. Rotate pan in oven halfway through.\n5. Put a piece of bread at the bottom of your storage container with the cookies. (keeps 'em moist and chewy in the center)"
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "T86"
+      },
+      "reviewBody": "Unbelievable recipe. I created a user name just so I could comment! \n\nThe first time I made them, they spread all over the place. I now know it was because I didn't whip the eggs and sugar sufficiently until they formed thick ribbons (takes a while). For the second batch, I whipped the eggs much longer, and they turned out perfect.\n\nI prefer without the extra sprinkle of salt on the end."
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "Jacob Sharf"
+      },
+      "reviewBody": "Hi, this is slightly misleading:\n\n\"Even a difference of as little as 50°F (10°C) makes a big difference\"\n\nWhile 50F is in fact 10C, when talking about a *difference* in temperature, a difference of 50F is not the same as a difference in 10C.\n\nProof:\nFor example, 50F + 50F is 100f (37.78 C). 10C + 10C is 20C (not 37C and definitely not 100F).\n\nIt would be more accurate to say a difference of 27 degrees Celsius."
+    },
+    {
+      "@type": "Review",
+      "author": {
+        "@type": "Person",
+        "name": "Jamcat73"
+      },
+      "reviewBody": "Delicious. This is the best recipe ever - the browned butter is amazingly flavorful and the self-chopped chocolate is a game changer. Thanks for all the studying!"
+    }
+  ],
+  "mainEntityOfPage": {
+    "@type": [
+      "WebPage"
+    ],
+    "@id": "https://www.seriouseats.com/the-food-lab-best-chocolate-chip-cookie-recipe",
+    "breadcrumb": {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "item": {
+            "@id": "https://www.seriouseats.com/dessert-recipes-5117878",
+            "name": "Desserts"
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "item": {
+            "@id": "https://www.seriouseats.com/cookie-recipes-5117873",
+            "name": "Cookies"
+          }
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "item": {
+            "@id": "https://www.seriouseats.com/the-food-lab-best-chocolate-chip-cookie-recipe",
+            "name": "The Food Lab&#39;s Chocolate Chip Cookies Recipe"
+          }
+        }
+      ]
+    }
+  },
+  "about": [],
+  "url": "https://www.seriouseats.com/the-food-lab-best-chocolate-chip-cookie-recipe"
+}
