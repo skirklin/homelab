@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import styled from "styled-components";
 import { Button } from "antd";
 import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
@@ -120,6 +121,17 @@ function formatDate(date: Date): string {
 }
 
 export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
+  // Handle Escape key to go back
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onBack();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onBack]);
+
   const handleAddItem = (name: string) => {
     addItem(name, userId).catch((error) => {
       console.error("Failed to add item:", error);

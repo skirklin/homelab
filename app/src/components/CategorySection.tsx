@@ -5,17 +5,17 @@ import type { GroceryItem, CategoryDef } from "../types";
 import { GroceryItemRow } from "./GroceryItem";
 
 const Section = styled.div<{ $isEmpty: boolean }>`
-  margin-bottom: ${(props) => (props.$isEmpty ? "2px" : "var(--space-md)")};
+  margin-bottom: ${(props) => (props.$isEmpty ? "1px" : "var(--space-xs)")};
 `;
 
 const CategoryHeader = styled.div<{ $isOver: boolean; $isEmpty: boolean; $clickable: boolean }>`
   display: flex;
   align-items: center;
-  padding: ${(props) => (props.$isEmpty ? "4px var(--space-md)" : "var(--space-sm) var(--space-md)")};
+  padding: ${(props) => (props.$isEmpty ? "2px var(--space-sm)" : "var(--space-xs) var(--space-sm)")};
   background: ${(props) =>
     props.$isOver ? "var(--color-primary-light, #b8e6e6)" : "var(--color-bg-muted)"};
   font-weight: 600;
-  font-size: ${(props) => (props.$isEmpty ? "var(--font-size-xs, 11px)" : "var(--font-size-sm)")};
+  font-size: ${(props) => (props.$isEmpty ? "10px" : "var(--font-size-xs)")};
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Modal, Input, message } from "antd";
-import { LogoutOutlined, CheckOutlined, HistoryOutlined, UnorderedListOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
+import { Button, Modal, Input, message, Dropdown } from "antd";
+import type { MenuProps } from "antd";
+import { LogoutOutlined, CheckOutlined, HistoryOutlined, ArrowLeftOutlined, SettingOutlined, ShareAltOutlined, MenuOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { signOut } from "firebase/auth";
 import { auth } from "../backend";
@@ -28,14 +29,36 @@ const TitleSection = styled.div`
 `;
 
 const Title = styled.h1`
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
   margin: 0;
   color: var(--color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+
+  @media (min-width: 480px) {
+    font-size: var(--font-size-xl);
+    max-width: none;
+  }
 `;
 
-const Actions = styled.div`
-  display: flex;
+const DesktopActions = styled.div`
+  display: none;
   gap: var(--space-sm);
+
+  @media (min-width: 480px) {
+    display: flex;
+  }
+`;
+
+const MobileActions = styled.div`
+  display: flex;
+  gap: var(--space-xs);
+
+  @media (min-width: 480px) {
+    display: none;
+  }
 `;
 
 const ModalForm = styled.div`
@@ -90,13 +113,23 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
     signOut(auth);
   };
 
+  const menuItems: MenuProps["items"] = [
+    { key: "share", icon: <ShareAltOutlined />, label: "Share", onClick: () => setShareModalOpen(true) },
+    { key: "history", icon: <HistoryOutlined />, label: "History", onClick: onShowHistory },
+    { key: "settings", icon: <SettingOutlined />, label: "Settings", onClick: onShowSettings },
+    { type: "divider" },
+    { key: "logout", icon: <LogoutOutlined />, label: "Sign Out", onClick: handleSignOut },
+  ];
+
   return (
     <HeaderContainer>
       <TitleSection>
-        <Button icon={<UnorderedListOutlined />} onClick={() => navigate("/")} />
+        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/")} size="small" />
         <Title>{listName}</Title>
       </TitleSection>
-      <Actions>
+
+      {/* Desktop: show all buttons */}
+      <DesktopActions>
         <Button icon={<ShareAltOutlined />} onClick={() => setShareModalOpen(true)} />
         <Button icon={<HistoryOutlined />} onClick={onShowHistory} />
         <Button icon={<SettingOutlined />} onClick={onShowSettings} />
@@ -110,7 +143,24 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
           </Button>
         )}
         <Button icon={<LogoutOutlined />} onClick={handleSignOut} />
-      </Actions>
+      </DesktopActions>
+
+      {/* Mobile: dropdown menu + Done button */}
+      <MobileActions>
+        {checkedCount > 0 && (
+          <Button
+            type="primary"
+            icon={<CheckOutlined />}
+            onClick={handleDoneShopping}
+            size="small"
+          >
+            {checkedCount}
+          </Button>
+        )}
+        <Dropdown menu={{ items: menuItems }} trigger={["click"]} placement="bottomRight">
+          <Button icon={<MenuOutlined />} size="small" />
+        </Dropdown>
+      </MobileActions>
 
       <Modal
         title={`Share "${listName}"`}

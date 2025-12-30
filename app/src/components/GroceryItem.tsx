@@ -9,7 +9,7 @@ import { toggleItem, deleteItem } from "../firestore";
 const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
   display: flex;
   align-items: center;
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
   background: ${(props) =>
     props.$isDragging ? "var(--color-primary-light, #e6f7f7)" :
     props.$checked ? "var(--color-bg-muted)" : "var(--color-bg)"};
@@ -24,19 +24,19 @@ const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
 
 const DragHandle = styled.span`
   color: var(--color-text-muted);
-  margin-right: var(--space-xs);
+  margin-right: 2px;
   cursor: grab;
-  padding: 4px;
+  padding: 2px;
   touch-action: none;
 `;
 
 const ItemName = styled.span<{ $checked: boolean }>`
   flex: 1;
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   color: ${(props) =>
     props.$checked ? "var(--color-text-muted)" : "var(--color-text)"};
   text-decoration: ${(props) => (props.$checked ? "line-through" : "none")};
-  margin-left: var(--space-sm);
+  margin-left: var(--space-xs);
 `;
 
 const DeleteButton = styled(Button)`

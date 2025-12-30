@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Input, Modal, message } from "antd";
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
@@ -118,6 +118,17 @@ interface Props {
 export function ListSettings({ slug, listId, onBack }: Props) {
   const navigate = useNavigate();
   const { state } = useAppContext();
+
+  // Handle Escape key to go back
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onBack();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onBack]);
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [slugModalOpen, setSlugModalOpen] = useState(false);
   const [newName, setNewName] = useState(state.list?.name || "");
