@@ -23,11 +23,13 @@ Built with React, Firebase, and Firestore.
 - Firebase Auth for authentication
 - Firestore for real-time data sync
 
-### Cloud Functions (`/functions`)
+### Cloud Functions (`/functions` at repo root)
 - `getRecipes`: Fetches and parses recipe data from URLs
 - `generateRecipe`: Generates recipes using Claude AI
 - `addRecipeOwner` / `addBoxOwner`: Manages recipe/box sharing
 - `enrichRecipes`: Scheduled function for automatic AI enrichment
+
+> Note: Functions are located at the monorepo root (`../../functions/` relative to this directory).
 
 ## Automatic Recipe Enrichment
 
@@ -83,15 +85,17 @@ npm run dev
 
 ### Deployment
 
+Run these commands from the **monorepo root** (`../../`):
+
 ```bash
+# Deploy recipes site
+firebase deploy --only hosting:recipes
+
+# Deploy functions
+firebase deploy --only functions
+
 # Deploy everything
 firebase deploy
-
-# Deploy only hosting
-firebase deploy --only hosting
-
-# Deploy only functions
-firebase deploy --only functions
 ```
 
 ## Monitoring
@@ -104,6 +108,7 @@ Set up Cloud Monitoring alerts for function errors:
 ## Project Structure
 
 ```
+sites/recipes/              # This directory
 ├── app/                    # React frontend
 │   ├── src/
 │   │   ├── Buttons/        # Action button components
@@ -118,10 +123,12 @@ Set up Cloud Monitoring alerts for function errors:
 │   │   ├── storage.tsx     # Data models and converters
 │   │   └── types.ts        # TypeScript types
 │   └── build/              # Production build output
+└── ...
+
+# At monorepo root (../../)
 ├── functions/              # Cloud Functions
-│   └── src/
-│       └── index.ts        # All function definitions
-├── firestore.rules         # Security rules
-├── firestore.indexes.json  # Firestore indexes
-└── firebase.json           # Firebase configuration
+│   └── src/index.ts
+├── firestore.rules         # Shared security rules
+├── firestore.indexes.json
+└── firebase.json           # Unified Firebase config
 ```

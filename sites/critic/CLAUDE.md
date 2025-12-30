@@ -58,7 +58,7 @@ npm run build
 ## Project Structure
 
 ```
-critic/
+sites/critic/               # This directory (in firebase monorepo)
 ├── critic/                 # Python package
 │   ├── analyzer.py         # Main orchestration
 │   ├── parser.py           # Document parsing
@@ -75,9 +75,9 @@ critic/
 │   ├── src/components/     # UI components
 │   ├── src/context/        # Analysis state
 │   └── src/types/          # TypeScript types
+├── public/                 # Static wiki content
 ├── test-manuscripts/       # Test data
-├── pyproject.toml          # Python package config
-└── firebase.json           # Hosting config
+└── pyproject.toml          # Python package config
 ```
 
 ## Caching
@@ -97,12 +97,16 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ## Deployment
 
+Run from the **monorepo root** (`../../`):
+
 ```bash
-firebase deploy --only hosting
+firebase deploy --only hosting:editor      # main app
+firebase deploy --only hosting:critic-wiki # static wiki
 ```
 
-- **URL**: https://editor-5d5a3.web.app
-- **Firebase Project**: `recipe-box-335721` (shared)
+- **App URL**: https://editor-5d5a3.web.app
+- **Wiki URL**: https://critic-wiki.web.app
+- **Firebase Project**: `recipe-box-335721` (shared monorepo)
 
 ## Current Status
 

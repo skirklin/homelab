@@ -1,4 +1,4 @@
-# Book Editor
+# Critic
 
 A tool for writers to analyze manuscripts for continuity errors, plot holes, and structural issues using AI.
 
