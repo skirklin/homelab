@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { AutoComplete, Button } from "antd";
+import type { BaseSelectRef } from "rc-select";
 import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAppContext } from "../context";
@@ -24,6 +25,7 @@ const InputWrapper = styled.div`
 export function AddItem() {
   const { state } = useAppContext();
   const [name, setName] = useState("");
+  const inputRef = useRef<BaseSelectRef>(null);
 
   // Filter history for autocomplete options
   const autocompleteOptions = useMemo(() => {
@@ -69,6 +71,9 @@ export function AddItem() {
     // Clear immediately for fast typing
     setName("");
 
+    // Return focus to input for rapid entry
+    inputRef.current?.focus();
+
     // Fire and forget - addItem will lookup category from history
     addItem(trimmedName, state.authUser.uid).catch((error) => {
       console.error("Failed to add item:", error);
@@ -80,6 +85,7 @@ export function AddItem() {
       <Form onSubmit={handleSubmit}>
         <InputWrapper>
           <AutoComplete
+            ref={inputRef}
             value={name}
             onChange={setName}
             onSelect={(value) => setName(value)}

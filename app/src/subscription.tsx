@@ -109,7 +109,7 @@ export async function subscribeToList(
         const data = doc.data() as ItemHistoryStore;
         return {
           name: data.name,
-          category: data.category,
+          categoryId: data.categoryId || "uncategorized",
           lastAdded: data.lastAdded.toDate(),
         };
       });
@@ -151,14 +151,14 @@ export function getItemsFromState(state: AppState) {
   return Array.from(state.items.values());
 }
 
-export function getItemsByCategory(state: AppState) {
+export function getItemsByCategoryId(state: AppState) {
   const items = getItemsFromState(state);
   const grouped = new Map<string, typeof items>();
 
   for (const item of items) {
-    const existing = grouped.get(item.category) || [];
+    const existing = grouped.get(item.categoryId) || [];
     existing.push(item);
-    grouped.set(item.category, existing);
+    grouped.set(item.categoryId, existing);
   }
 
   return grouped;

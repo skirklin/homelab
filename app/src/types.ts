@@ -1,12 +1,18 @@
 import { Timestamp } from "firebase/firestore";
 
-// Category is a string to support custom categories
-export type Category = string;
+// Category definition with stable ID for renaming
+export interface CategoryDef {
+  id: string;
+  name: string;
+}
+
+// Category ID used for referencing (stored on items)
+export type CategoryId = string;
 
 export interface GroceryItem {
   id: string;
   name: string;
-  category: Category;
+  categoryId: CategoryId;
   checked: boolean;
   addedBy: string;
   addedAt: Date;
@@ -16,7 +22,7 @@ export interface GroceryItem {
 
 export interface GroceryItemStore {
   name: string;
-  category: Category;
+  categoryId: CategoryId;
   checked: boolean;
   addedBy: string;
   addedAt: Timestamp;
@@ -28,7 +34,7 @@ export interface GroceryList {
   id: string;
   name: string;
   owners: string[];
-  categories: string[];
+  categories: CategoryDef[];
   created: Date;
   updated: Date;
 }
@@ -36,12 +42,11 @@ export interface GroceryList {
 export interface GroceryListStore {
   name: string;
   owners: string[];
-  categories: string[];
+  categoryDefs: CategoryDef[];
   created: Timestamp;
   updated: Timestamp;
 }
 
-// Converters
 export function itemFromStore(
   id: string,
   data: GroceryItemStore
@@ -49,7 +54,7 @@ export function itemFromStore(
   return {
     id,
     name: data.name,
-    category: data.category,
+    categoryId: data.categoryId || "uncategorized",
     checked: data.checked,
     addedBy: data.addedBy,
     addedAt: data.addedAt.toDate(),
@@ -61,7 +66,7 @@ export function itemFromStore(
 export function itemToStore(item: Omit<GroceryItem, "id">): GroceryItemStore {
   return {
     name: item.name,
-    category: item.category,
+    categoryId: item.categoryId,
     checked: item.checked,
     addedBy: item.addedBy,
     addedAt: Timestamp.fromDate(item.addedAt),
@@ -75,7 +80,7 @@ export function listFromStore(id: string, data: GroceryListStore): GroceryList {
     id,
     name: data.name,
     owners: data.owners,
-    categories: data.categories || [],
+    categories: data.categoryDefs || [],
     created: data.created.toDate(),
     updated: data.updated.toDate(),
   };
@@ -84,20 +89,20 @@ export function listFromStore(id: string, data: GroceryListStore): GroceryList {
 // Item history for autocomplete
 export interface ItemHistory {
   name: string;
-  category: Category;
+  categoryId: CategoryId;
   lastAdded: Date;
 }
 
 export interface ItemHistoryStore {
   name: string;
-  category: Category;
+  categoryId: CategoryId;
   lastAdded: Timestamp;
 }
 
 // Shopping trip record
 export interface ShoppingTripItem {
   name: string;
-  category: Category;
+  categoryId: CategoryId;
 }
 
 export interface ShoppingTrip {

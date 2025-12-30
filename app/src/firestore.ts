@@ -10,7 +10,7 @@ import {
   addDoc,
 } from "firebase/firestore";
 import { db } from "./backend";
-import type { GroceryItem, GroceryItemStore, Category, ItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
+import type { GroceryItem, GroceryItemStore, CategoryId, CategoryDef, ItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
 
 // Current list ID - set by the router
 let currentListId = "default";
@@ -71,17 +71,16 @@ export async function addItem(
   name: string,
   userId: string
 ) {
-  // Look up category from history, default to "uncategorized"
+  // Look up categoryId from history, default to "uncategorized"
   const historyRef = doc(getHistoryRef(), normalizeItemName(name));
   const historySnap = await getDoc(historyRef);
-  const category = historySnap.exists()
-    ? historySnap.data().category
-    : "uncategorized";
+  const historyData = historySnap.exists() ? historySnap.data() : null;
+  const categoryId = historyData?.categoryId || "uncategorized";
 
   const itemRef = doc(getItemsRef());
   const itemData: GroceryItemStore = {
     name,
-    category,
+    categoryId,
     checked: false,
     addedBy: userId,
     addedAt: Timestamp.now(),
@@ -89,8 +88,8 @@ export async function addItem(
   await setDoc(itemRef, itemData);
 
   // Save to history for autocomplete (preserves the name with correct casing)
-  const historyData: ItemHistoryStore = { name, category, lastAdded: Timestamp.now() };
-  await setDoc(historyRef, historyData);
+  const newHistoryData: ItemHistoryStore = { name, categoryId, lastAdded: Timestamp.now() };
+  await setDoc(historyRef, newHistoryData);
 }
 
 export async function toggleItem(item: GroceryItem, userId: string) {
@@ -117,13 +116,13 @@ export async function deleteItem(itemId: string) {
   await deleteDoc(itemRef);
 }
 
-export async function updateItemCategory(item: GroceryItem, newCategory: Category) {
+export async function updateItemCategory(item: GroceryItem, newCategoryId: CategoryId) {
   const itemRef = getItemRef(item.id);
-  await updateDoc(itemRef, { category: newCategory });
+  await updateDoc(itemRef, { categoryId: newCategoryId });
 
   // Update history too
   const historyRef = doc(getHistoryRef(), normalizeItemName(item.name));
-  await setDoc(historyRef, { name: item.name, category: newCategory, lastAdded: Timestamp.now() });
+  await setDoc(historyRef, { name: item.name, categoryId: newCategoryId, lastAdded: Timestamp.now() });
 }
 
 export async function clearCheckedItems(items: GroceryItem[]) {
@@ -135,7 +134,7 @@ export async function clearCheckedItems(items: GroceryItem[]) {
     completedAt: Timestamp.now(),
     items: checkedItems.map((item) => ({
       name: item.name,
-      category: item.category,
+      categoryId: item.categoryId,
     })),
   };
   await addDoc(getTripsRef(), tripData);
@@ -148,9 +147,9 @@ export async function clearCheckedItems(items: GroceryItem[]) {
   await batch.commit();
 }
 
-export async function updateCategories(categories: string[]) {
+export async function updateCategories(categories: CategoryDef[]) {
   const listRef = getListRef();
-  await updateDoc(listRef, { categories });
+  await updateDoc(listRef, { categoryDefs: categories });
 }
 
 // User profile functions
@@ -212,7 +211,7 @@ export async function createList(name: string, slug: string, userId: string): Pr
   await setDoc(newListRef, {
     name,
     owners: [userId],
-    categories: [],  // Start with no categories
+    categoryDefs: [],  // Start with no categories
     created: Timestamp.now(),
     updated: Timestamp.now(),
   });

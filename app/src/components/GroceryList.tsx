@@ -4,14 +4,14 @@ import { Spin, Button } from "antd";
 import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAppContext } from "../context";
-import { subscribeToList, getItemsByCategory } from "../subscription";
+import { subscribeToList, getItemsByCategoryId } from "../subscription";
 import { updateItemCategory } from "../firestore";
 import { Header } from "./Header";
 import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";
 import { ShoppingTrips } from "./ShoppingTrips";
 import { ListSettings } from "./ListSettings";
-import type { GroceryItem, Category } from "../types";
+import type { GroceryItem, CategoryId, CategoryDef } from "../types";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -84,6 +84,7 @@ export function GroceryList() {
   const unsubscribersRef = useRef<(() => void)[]>([]);
   const [view, setView] = useState<View>("list");
   const [draggedItem, setDraggedItem] = useState<GroceryItem | null>(null);
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
 
   // Look up listId from user's slugs
   const listId = slug ? state.userSlugs[slug] : undefined;
@@ -121,11 +122,23 @@ export function GroceryList() {
     if (!over) return;
 
     const item = active.data.current?.item as GroceryItem;
-    const newCategory = over.id as Category;
+    const newCategoryId = over.id as CategoryId;
 
-    if (item && newCategory && item.category !== newCategory) {
-      updateItemCategory(item, newCategory);
+    if (item && newCategoryId && item.categoryId !== newCategoryId) {
+      updateItemCategory(item, newCategoryId);
     }
+  };
+
+  const toggleCategoryCollapse = (categoryId: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) {
+        next.delete(categoryId);
+      } else {
+        next.add(categoryId);
+      }
+      return next;
+    });
   };
 
   // Slug not found in user's mapping
@@ -151,6 +164,7 @@ export function GroceryList() {
     return (
       <ShoppingTrips
         trips={state.trips}
+        categories={state.list?.categories || []}
         userId={state.authUser?.uid || ""}
         onBack={() => setView("list")}
       />
@@ -167,13 +181,15 @@ export function GroceryList() {
     );
   }
 
-  const itemsByCategory = getItemsByCategory(state);
+  const itemsByCategoryId = getItemsByCategoryId(state);
   const configuredCategories = state.list?.categories || [];
 
   // Always include "uncategorized" at the end for new items
-  const categories = configuredCategories.includes("uncategorized")
+  const uncategorizedDef: CategoryDef = { id: "uncategorized", name: "Uncategorized" };
+  const hasUncategorized = configuredCategories.some(c => c.id === "uncategorized");
+  const categories = hasUncategorized
     ? configuredCategories
-    : [...configuredCategories, "uncategorized"];
+    : [...configuredCategories, uncategorizedDef];
 
   return (
     <Container>
@@ -192,9 +208,12 @@ export function GroceryList() {
           <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             {categories.map((category) => (
               <CategorySection
-                key={category}
+                key={category.id}
                 category={category}
-                items={itemsByCategory.get(category) || []}
+                items={itemsByCategoryId.get(category.id) || []}
+                collapsed={collapsedCategories.has(category.id)}
+                onToggleCollapse={() => toggleCategoryCollapse(category.id)}
+                forceCollapse={draggedItem !== null}
               />
             ))}
             <DragOverlay>

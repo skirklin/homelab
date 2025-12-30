@@ -1,11 +1,15 @@
 import styled from "styled-components";
 import { Button } from "antd";
 import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
-import type { ShoppingTrip } from "../types";
+import type { ShoppingTrip, CategoryDef } from "../types";
 import { addItem } from "../firestore";
 
-function formatCategory(cat: string): string {
-  return cat.charAt(0).toUpperCase() + cat.slice(1);
+function formatCategoryId(categoryId: string, categories: CategoryDef[]): string {
+  // Look up display name from categories, fall back to capitalized ID
+  const cat = categories.find(c => c.id === categoryId);
+  if (cat) return cat.name;
+  // Fall back: capitalize first letter for legacy string categories
+  return categoryId.charAt(0).toUpperCase() + categoryId.slice(1);
 }
 
 const Container = styled.div`
@@ -93,6 +97,7 @@ const EmptyState = styled.div`
 
 interface Props {
   trips: ShoppingTrip[];
+  categories: CategoryDef[];
   userId: string;
   onBack: () => void;
 }
@@ -114,7 +119,7 @@ function formatDate(date: Date): string {
   }
 }
 
-export function ShoppingTrips({ trips, userId, onBack }: Props) {
+export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
   const handleAddItem = (name: string) => {
     addItem(name, userId).catch((error) => {
       console.error("Failed to add item:", error);
@@ -149,7 +154,7 @@ export function ShoppingTrips({ trips, userId, onBack }: Props) {
                 {trip.items.map((item, index) => (
                   <TripItem key={index}>
                     <ItemName>{item.name}</ItemName>
-                    <ItemCategory>{formatCategory(item.category)}</ItemCategory>
+                    <ItemCategory>{formatCategoryId(item.categoryId, categories)}</ItemCategory>
                     <AddButton
                       type="text"
                       size="small"

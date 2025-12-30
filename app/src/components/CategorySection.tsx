@@ -1,17 +1,14 @@
 import { useDroppable } from "@dnd-kit/core";
 import styled from "styled-components";
-import type { GroceryItem, Category } from "../types";
+import { DownOutlined, RightOutlined } from "@ant-design/icons";
+import type { GroceryItem, CategoryDef } from "../types";
 import { GroceryItemRow } from "./GroceryItem";
-
-function formatCategory(cat: string): string {
-  return cat.charAt(0).toUpperCase() + cat.slice(1);
-}
 
 const Section = styled.div<{ $isEmpty: boolean }>`
   margin-bottom: ${(props) => (props.$isEmpty ? "2px" : "var(--space-md)")};
 `;
 
-const CategoryHeader = styled.div<{ $isOver: boolean; $isEmpty: boolean }>`
+const CategoryHeader = styled.div<{ $isOver: boolean; $isEmpty: boolean; $clickable: boolean }>`
   display: flex;
   align-items: center;
   padding: ${(props) => (props.$isEmpty ? "4px var(--space-md)" : "var(--space-sm) var(--space-md)")};
@@ -24,6 +21,15 @@ const CategoryHeader = styled.div<{ $isOver: boolean; $isEmpty: boolean }>`
   letter-spacing: 0.5px;
   transition: background 0.2s;
   opacity: ${(props) => (props.$isEmpty ? 0.6 : 1)};
+  cursor: ${(props) => (props.$clickable ? "pointer" : "default")};
+  user-select: none;
+`;
+
+const CollapseIcon = styled.span`
+  margin-right: var(--space-xs);
+  font-size: 10px;
+  display: flex;
+  align-items: center;
 `;
 
 const ItemCount = styled.span`
@@ -39,17 +45,21 @@ const ItemsContainer = styled.div<{ $isOver: boolean }>`
 `;
 
 interface Props {
-  category: Category;
+  category: CategoryDef;
   items: GroceryItem[];
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  forceCollapse?: boolean; // During drag, collapse all
 }
 
-export function CategorySection({ category, items }: Props) {
+export function CategorySection({ category, items, collapsed, onToggleCollapse, forceCollapse }: Props) {
   const { setNodeRef, isOver } = useDroppable({
-    id: category,
-    data: { category },
+    id: category.id,
+    data: { categoryId: category.id },
   });
 
   const isEmpty = items.length === 0;
+  const isCollapsed = forceCollapse || collapsed;
 
   // Sort items by added time only (keep position stable when checking)
   const sortedItems = [...items].sort((a, b) => {
@@ -58,11 +68,21 @@ export function CategorySection({ category, items }: Props) {
 
   return (
     <Section ref={setNodeRef} $isEmpty={isEmpty}>
-      <CategoryHeader $isOver={isOver} $isEmpty={isEmpty}>
-        {formatCategory(category)}
+      <CategoryHeader
+        $isOver={isOver}
+        $isEmpty={isEmpty}
+        $clickable={!isEmpty}
+        onClick={() => !isEmpty && onToggleCollapse()}
+      >
+        {!isEmpty && (
+          <CollapseIcon>
+            {isCollapsed ? <RightOutlined /> : <DownOutlined />}
+          </CollapseIcon>
+        )}
+        {category.name}
         {!isEmpty && <ItemCount>({items.length})</ItemCount>}
       </CategoryHeader>
-      {!isEmpty && (
+      {!isEmpty && !isCollapsed && (
         <ItemsContainer $isOver={isOver}>
           {sortedItems.map((item) => (
             <GroceryItemRow key={item.id} item={item} />

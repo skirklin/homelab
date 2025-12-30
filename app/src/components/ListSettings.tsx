@@ -5,6 +5,7 @@ import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpO
 import styled from "styled-components";
 import { useAppContext } from "../context";
 import { renameList, renameUserSlug, removeUserSlug, deleteList, updateCategories } from "../firestore";
+import type { CategoryDef } from "../types";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -124,23 +125,47 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   const [submitting, setSubmitting] = useState(false);
 
   // Category management
-  const [localCategories, setLocalCategories] = useState(state.list?.categories || []);
+  const [localCategories, setLocalCategories] = useState<CategoryDef[]>(state.list?.categories || []);
   const [newCategory, setNewCategory] = useState("");
+  const [editingCategory, setEditingCategory] = useState<CategoryDef | null>(null);
+  const [editCategoryName, setEditCategoryName] = useState("");
 
   const handleAddCategory = () => {
-    const trimmed = newCategory.trim().toLowerCase();
-    if (!trimmed || localCategories.includes(trimmed)) return;
+    const trimmed = newCategory.trim();
+    if (!trimmed) return;
 
-    const updated = [...localCategories, trimmed];
+    // Generate ID from name (lowercase, replace spaces with dashes)
+    const id = trimmed.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+
+    // Check if ID already exists
+    if (localCategories.some(c => c.id === id)) {
+      message.warning("A category with this name already exists");
+      return;
+    }
+
+    const newCat: CategoryDef = { id, name: trimmed };
+    const updated = [...localCategories, newCat];
     setLocalCategories(updated);
     updateCategories(updated);
     setNewCategory("");
   };
 
-  const handleRemoveCategory = (cat: string) => {
-    const updated = localCategories.filter((c) => c !== cat);
+  const handleRemoveCategory = (cat: CategoryDef) => {
+    const updated = localCategories.filter((c) => c.id !== cat.id);
     setLocalCategories(updated);
     updateCategories(updated);
+  };
+
+  const handleRenameCategory = () => {
+    if (!editingCategory || !editCategoryName.trim()) return;
+
+    const updated = localCategories.map(c =>
+      c.id === editingCategory.id ? { ...c, name: editCategoryName.trim() } : c
+    );
+    setLocalCategories(updated);
+    updateCategories(updated);
+    setEditingCategory(null);
+    setEditCategoryName("");
   };
 
   const handleMoveCategoryUp = (index: number) => {
@@ -287,8 +312,17 @@ export function ListSettings({ slug, listId, onBack }: Props) {
           <SectionTitle>Categories</SectionTitle>
           <CategoryList>
             {localCategories.map((cat, index) => (
-              <CategoryRow key={cat}>
-                <CategoryName>{cat}</CategoryName>
+              <CategoryRow key={cat.id}>
+                <CategoryName>{cat.name}</CategoryName>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => {
+                    setEditingCategory(cat);
+                    setEditCategoryName(cat.name);
+                  }}
+                />
                 <Button
                   type="text"
                   size="small"
@@ -387,6 +421,26 @@ export function ListSettings({ slug, listId, onBack }: Props) {
           placeholder="groceries"
           addonBefore="/"
           onPressEnter={handleChangeSlug}
+        />
+      </Modal>
+
+      {/* Rename Category Modal */}
+      <Modal
+        title="Rename Category"
+        open={editingCategory !== null}
+        onOk={handleRenameCategory}
+        onCancel={() => {
+          setEditingCategory(null);
+          setEditCategoryName("");
+        }}
+        okText="Rename"
+        okButtonProps={{ disabled: !editCategoryName.trim() }}
+      >
+        <Input
+          value={editCategoryName}
+          onChange={(e) => setEditCategoryName(e.target.value)}
+          placeholder="Category name"
+          onPressEnter={handleRenameCategory}
         />
       </Modal>
     </Container>
