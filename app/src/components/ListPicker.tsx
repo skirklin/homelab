@@ -97,9 +97,9 @@ export function ListPicker() {
   // Modal state
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [newSlug, setNewSlug] = useState("");
   const [newName, setNewName] = useState("");
   const [sharedListId, setSharedListId] = useState("");
+  const [sharedListSlug, setSharedListSlug] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // Load list names for each slug
@@ -131,21 +131,21 @@ export function ListPicker() {
   }, [state.userSlugs]);
 
   const handleCreateList = async () => {
-    if (!newSlug.trim() || !newName.trim() || !state.authUser) return;
+    if (!newName.trim() || !state.authUser) return;
 
-    const slug = newSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const name = newName.trim();
+    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
     // Check if slug already exists
     if (state.userSlugs[slug]) {
-      alert(`You already have a list with the slug "${slug}"`);
+      alert(`You already have a list called "${slug}"`);
       return;
     }
 
     setSubmitting(true);
     try {
-      await createList(newName.trim(), slug, state.authUser.uid);
+      await createList(name, slug, state.authUser.uid);
       setCreateModalOpen(false);
-      setNewSlug("");
       setNewName("");
       navigate(`/${slug}`);
     } catch (error) {
@@ -156,13 +156,13 @@ export function ListPicker() {
   };
 
   const handleAddSharedList = async () => {
-    if (!newSlug.trim() || !sharedListId.trim() || !state.authUser) return;
+    if (!sharedListSlug.trim() || !sharedListId.trim() || !state.authUser) return;
 
-    const slug = newSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const slug = sharedListSlug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
     // Check if slug already exists
     if (state.userSlugs[slug]) {
-      alert(`You already have a list with the slug "${slug}"`);
+      alert(`You already have a list called "${slug}"`);
       return;
     }
 
@@ -178,7 +178,7 @@ export function ListPicker() {
 
       await setUserSlug(state.authUser.uid, slug, sharedListId.trim());
       setAddModalOpen(false);
-      setNewSlug("");
+      setSharedListSlug("");
       setSharedListId("");
       navigate(`/${slug}`);
     } catch (error) {
@@ -244,32 +244,19 @@ export function ListPicker() {
         onOk={handleCreateList}
         onCancel={() => {
           setCreateModalOpen(false);
-          setNewSlug("");
           setNewName("");
         }}
         confirmLoading={submitting}
         okText="Create"
-        okButtonProps={{ disabled: !newSlug.trim() || !newName.trim() }}
+        okButtonProps={{ disabled: !newName.trim() }}
       >
-        <ModalForm>
-          <FormField>
-            <Label>URL Slug</Label>
-            <Input
-              value={newSlug}
-              onChange={(e) => setNewSlug(e.target.value)}
-              placeholder="groceries"
-              addonBefore="/"
-            />
-          </FormField>
-          <FormField>
-            <Label>Display Name</Label>
-            <Input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Weekly Groceries"
-            />
-          </FormField>
-        </ModalForm>
+        <Input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="Groceries"
+          onPressEnter={handleCreateList}
+          autoFocus
+        />
       </Modal>
 
       {/* Add Shared List Modal */}
@@ -279,12 +266,12 @@ export function ListPicker() {
         onOk={handleAddSharedList}
         onCancel={() => {
           setAddModalOpen(false);
-          setNewSlug("");
+          setSharedListSlug("");
           setSharedListId("");
         }}
         confirmLoading={submitting}
         okText="Add"
-        okButtonProps={{ disabled: !newSlug.trim() || !sharedListId.trim() }}
+        okButtonProps={{ disabled: !sharedListSlug.trim() || !sharedListId.trim() }}
       >
         <ModalForm>
           <FormField>
@@ -296,12 +283,11 @@ export function ListPicker() {
             />
           </FormField>
           <FormField>
-            <Label>Your URL Slug</Label>
+            <Label>Name for this list</Label>
             <Input
-              value={newSlug}
-              onChange={(e) => setNewSlug(e.target.value)}
-              placeholder="groceries"
-              addonBefore="/"
+              value={sharedListSlug}
+              onChange={(e) => setSharedListSlug(e.target.value)}
+              placeholder="Groceries"
             />
           </FormField>
         </ModalForm>
