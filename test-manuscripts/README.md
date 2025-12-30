@@ -91,7 +91,7 @@ This allows automated comparison of detected issues against ground truth.
 The CLI validates manuscript directories before processing:
 
 ```bash
-book-editor validate test-manuscripts/synthetic/the-lighthouse-keeper
+critic validate test-manuscripts/synthetic/the-lighthouse-keeper
 ```
 
 Checks performed:

@@ -1,4 +1,4 @@
-# Claude Context for Book Editor
+# Claude Context for Critic
 
 ## Project Overview
 
@@ -58,7 +58,7 @@ npm run build
 ## Project Structure
 
 ```
-book-editor/
+critic/
 ├── critic/                 # Python package
 │   ├── analyzer.py         # Main orchestration
 │   ├── parser.py           # Document parsing
@@ -82,7 +82,7 @@ book-editor/
 
 ## Caching
 
-Analysis results are cached in `.book-editor-cache/`:
+Analysis results are cached in `.critic-cache/`:
 - Chunks (per document hash)
 - Discovery results (per document + model)
 - Extraction results (per chunk + model + entity context)

@@ -125,7 +125,7 @@ critic cache --clear
 ## Project Structure
 
 ```
-book-editor/
+critic/
 ├── app/                    # React frontend (Vite + TypeScript)
 │   ├── src/
 │   │   ├── components/     # UI components
