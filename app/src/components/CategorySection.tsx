@@ -71,7 +71,7 @@ export function CategorySection({ category, items, collapsed, onToggleCollapse, 
 
   return (
     <Section ref={setNodeRef}>
-      <CategoryHeader $isOver={isOver} onClick={onToggleCollapse}>
+      <CategoryHeader $isOver={isOver} onClick={onToggleCollapse} data-testid="category-header">
         <CollapseIcon>
           {isCollapsed ? <RightOutlined /> : <DownOutlined />}
         </CollapseIcon>

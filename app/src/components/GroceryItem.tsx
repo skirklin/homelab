@@ -75,7 +75,7 @@ export function GroceryItemRow({ item }: Props) {
       $checked={item.checked}
       $isDragging={isDragging}
     >
-      <DragHandle {...attributes} {...listeners}>
+      <DragHandle {...attributes} {...listeners} data-testid="drag-handle">
         <HolderOutlined />
       </DragHandle>
       <Checkbox
