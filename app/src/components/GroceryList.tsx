@@ -19,6 +19,12 @@ const Container = styled.div`
   flex-direction: column;
 `;
 
+const StickyTop = styled.div`
+  position: sticky;
+  top: 0;
+  z-index: 100;
+`;
+
 const Content = styled.main`
   flex: 1;
   padding-bottom: var(--space-xl);
@@ -193,12 +199,14 @@ export function GroceryList() {
 
   return (
     <Container>
-      <Header
-        listId={listId || ""}
-        onShowHistory={() => setView("history")}
-        onShowSettings={() => setView("settings")}
-      />
-      <AddItem />
+      <StickyTop>
+        <Header
+          listId={listId || ""}
+          onShowHistory={() => setView("history")}
+          onShowSettings={() => setView("settings")}
+        />
+        <AddItem />
+      </StickyTop>
       <Content>
         {state.loading ? (
           <LoadingContainer>

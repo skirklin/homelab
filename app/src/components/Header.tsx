@@ -17,9 +17,6 @@ const HeaderContainer = styled.header`
   padding: var(--space-md);
   background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
-  position: sticky;
-  top: 0;
-  z-index: 100;
 `;
 
 const TitleSection = styled.div`
