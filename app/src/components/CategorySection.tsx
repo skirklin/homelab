@@ -38,10 +38,13 @@ const ItemCount = styled.span`
   color: var(--color-text-muted);
 `;
 
-const ItemsContainer = styled.div<{ $isOver: boolean }>`
+const ItemsContainer = styled.div<{ $isOver: boolean; $collapsed: boolean }>`
   background: ${(props) =>
     props.$isOver ? "var(--color-primary-light, #e6f7f7)" : "var(--color-bg)"};
-  transition: background 0.2s;
+  transition: background 0.2s, max-height 0.2s, opacity 0.2s;
+  overflow: hidden;
+  max-height: ${(props) => (props.$collapsed ? "0" : "2000px")};
+  opacity: ${(props) => (props.$collapsed ? 0 : 1)};
 `;
 
 interface Props {
@@ -82,8 +85,8 @@ export function CategorySection({ category, items, collapsed, onToggleCollapse, 
         {category.name}
         {!isEmpty && <ItemCount>({items.length})</ItemCount>}
       </CategoryHeader>
-      {!isEmpty && !isCollapsed && (
-        <ItemsContainer $isOver={isOver}>
+      {!isEmpty && (
+        <ItemsContainer $isOver={isOver} $collapsed={isCollapsed}>
           {sortedItems.map((item) => (
             <GroceryItemRow key={item.id} item={item} />
           ))}
