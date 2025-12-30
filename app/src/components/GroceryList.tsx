@@ -10,8 +10,8 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
   if (!activatorEvent || !draggingNodeRect) return transform;
 
   const event = activatorEvent as PointerEvent;
-  // How far from the top of the element did we click?
-  const offsetY = event.pageY - draggingNodeRect.top;
+  // How far from the top of the element did we click? (use clientY for viewport-relative coords)
+  const offsetY = event.clientY - draggingNodeRect.top;
 
   return {
     ...transform,
