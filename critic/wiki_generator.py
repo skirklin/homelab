@@ -706,7 +706,7 @@ class WikiGenerator:
             toc.append('<li><a href="#issues">Issues</a></li>')
             issue_items = []
             for i in issues_here:
-                issue_items.append(f'<li><a href="../issues.html">{"escape(i.title)"}</a> '
+                issue_items.append(f'<li><a href="../issues.html">{escape(i.title)}</a> '
                                    f'<span class="severity-{i.severity}">({i.severity})</span></li>')
             sections.append(f'<h2 id="issues">Issues</h2><ul>{"".join(issue_items)}</ul>')
 
