@@ -1,8 +1,24 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import { Spin, Button } from "antd";
-import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+import { DndContext, DragOverlay, MeasuringStrategy, pointerWithin, type DragEndEvent, type DragStartEvent, type Modifier } from "@dnd-kit/core";
 import styled from "styled-components";
+
+// Custom modifier: only snap Y axis to cursor center, keep original X offset
+const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, transform }) => {
+  if (!activatorEvent || !draggingNodeRect) return transform;
+
+  const event = activatorEvent as PointerEvent;
+  // How far from the top of the element did we click?
+  const offsetY = event.pageY - draggingNodeRect.top;
+
+  return {
+    ...transform,
+    // Adjust Y so element centers vertically on cursor
+    y: transform.y + offsetY - draggingNodeRect.height / 2,
+  };
+};
 import { useAppContext } from "../context";
 import { subscribeToList, getItemsByCategoryId } from "../subscription";
 import { updateItemCategory } from "../firestore";
@@ -213,7 +229,16 @@ export function GroceryList() {
             <Spin size="large" />
           </LoadingContainer>
         ) : (
-          <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              collisionDetection={pointerWithin}
+              measuring={{
+                droppable: {
+                  strategy: MeasuringStrategy.Always,
+                },
+              }}
+            >
             {categories.map((category) => (
               <CategorySection
                 key={category.id}
@@ -224,11 +249,14 @@ export function GroceryList() {
                 forceCollapse={draggedItem !== null}
               />
             ))}
-            <DragOverlay>
-              {draggedItem ? (
-                <DragItem>{draggedItem.name}</DragItem>
-              ) : null}
-            </DragOverlay>
+            {createPortal(
+              <DragOverlay modifiers={[snapVerticalToCursor]}>
+                {draggedItem ? (
+                  <DragItem>{draggedItem.name}</DragItem>
+                ) : null}
+              </DragOverlay>,
+              document.body
+            )}
           </DndContext>
         )}
       </Content>
