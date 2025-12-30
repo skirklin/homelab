@@ -20,13 +20,6 @@
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
     },
     {
-      "target": "editor",
-      "public": "sites/critic/app/dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }],
-      "predeploy": ["npm --prefix sites/critic/app run build"]
-    },
-    {
       "target": "critic-wiki",
       "public": "sites/critic/public",
       "ignore": ["firebase.json", "**/.*"]
