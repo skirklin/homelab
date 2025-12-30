@@ -13,9 +13,17 @@ Generates a complete static site with:
 import html
 import re
 from pathlib import Path
-from typing import Optional
 
-from critic.schema import AnalysisOutput, WikiCharacter, WikiLocation, ChapterInfo
+import markdown
+
+from critic.schema import (
+    AnalysisOutput,
+    WikiCharacter,
+    WikiLocation,
+    ChapterInfo,
+    Issue,
+    Strength,
+)
 
 
 def slugify(text: str) -> str:
@@ -267,7 +275,7 @@ class WikiGenerator:
     def _write(self, path: Path, content: str) -> None:
         path.write_text(content, encoding='utf-8')
 
-    def _page(self, title: str, content: str, breadcrumbs: Optional[list] = None) -> str:
+    def _page(self, title: str, content: str, breadcrumbs: list[tuple[str, str]] | None = None) -> str:
         """Wrap content in full HTML page."""
         bc = ""
         if breadcrumbs:
@@ -291,7 +299,7 @@ class WikiGenerator:
 </body>
 </html>"""
 
-    def _css_path(self, breadcrumbs: Optional[list]) -> str:
+    def _css_path(self, breadcrumbs: list[tuple[str, str]] | None) -> str:
         """Get relative path to CSS based on page depth."""
         if not breadcrumbs or len(breadcrumbs) <= 1:
             return ""
@@ -398,12 +406,12 @@ class WikiGenerator:
         warnings = [i for i in issues if i.severity == 'warning']
         suggestions = [i for i in issues if i.severity == 'suggestion']
 
-        def render_issue(issue):
+        def render_issue(issue: Issue) -> str:
             evidence_html = ""
             if issue.evidence:
-                ev_items = []
+                ev_items: list[str] = []
                 for ev in issue.evidence:
-                    parts = []
+                    parts: list[str] = []
                     if ev.quote:
                         parts.append(f'<blockquote>"{escape(ev.quote)}"</blockquote>')
                     if ev.note:
@@ -421,7 +429,7 @@ class WikiGenerator:
   {evidence_html}
 </div>"""
 
-        def render_strength(s):
+        def render_strength(s: Strength) -> str:
             return f"""
 <div class="card strength">
   <h3>{escape(s.title)}</h3>
@@ -672,9 +680,19 @@ class WikiGenerator:
         sections = []
         toc = ['<li><a href="#summary">Summary</a></li>']
 
-        # Summary
-        summary_paras = [f'<p>{escape(p)}</p>' for p in chapter.summary.split('\n') if p.strip()]
-        sections.append(f'<h2 id="summary">Summary</h2><div class="chapter-summary">{"".join(summary_paras)}</div>')
+        # Summary - render markdown to HTML
+        # Preprocess: ensure blank lines before list items and headers for proper markdown parsing
+        lines = chapter.summary.split('\n')
+        processed_lines = []
+        for i, line in enumerate(lines):
+            # Add blank line before list items or headers if previous line wasn't blank
+            if (line.strip().startswith('-') or line.strip().startswith('#')) and i > 0:
+                if processed_lines and processed_lines[-1].strip():
+                    processed_lines.append('')
+            processed_lines.append(line)
+        processed_summary = '\n'.join(processed_lines)
+        summary_html = markdown.markdown(processed_summary)
+        sections.append(f'<h2 id="summary">Summary</h2><div class="chapter-summary">{summary_html}</div>')
 
         if chars_here:
             toc.append('<li><a href="#characters">Characters</a></li>')

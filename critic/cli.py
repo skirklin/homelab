@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Book Editor CLI - Analyze manuscripts from the command line.
+Critic CLI - Analyze manuscripts from the command line.
 """
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -16,7 +18,7 @@ from critic.config import DEFAULT_MODEL
 
 @click.group()
 @click.version_option(version="0.2.0")
-def main():
+def main() -> None:
     """Analyze manuscripts for continuity errors, plot holes, and more."""
     pass
 
@@ -27,12 +29,12 @@ def main():
 @click.option("-m", "--model", default=DEFAULT_MODEL, help="Claude model to use")
 @click.option("-v", "--verbose", is_flag=True, help="Show detailed progress")
 @click.option("--summarize-only", is_flag=True, help="Only generate summaries, skip critic")
-def analyze(file, output, model, verbose, summarize_only):
+def analyze(file: str, output: str | None, model: str, verbose: bool, summarize_only: bool) -> None:
     """Analyze a manuscript for issues."""
     file_path = Path(file)
     click.echo(f"Analyzing: {file_path}\n")
 
-    def on_progress(phase, completed, total):
+    def on_progress(phase: str, completed: int, total: int) -> None:
         if verbose:
             pct = round(completed / total * 100) if total > 0 else 0
             click.echo(f"  [{phase}] {completed}/{total} ({pct}%)")
@@ -101,7 +103,7 @@ def analyze(file, output, model, verbose, summarize_only):
 
 @main.command()
 @click.argument("file", type=click.Path(exists=True))
-def parse(file):
+def parse(file: str) -> None:
     """Parse a document and show structure (no API calls)."""
     file_path = Path(file)
     doc = parse_document(file_path=file_path)
@@ -123,7 +125,7 @@ def parse(file):
 
 @main.command()
 @click.argument("file", type=click.Path(exists=True))
-def chapters(file):
+def chapters(file: str) -> None:
     """Show chapter structure of a document (no API calls)."""
     file_path = Path(file)
     doc = parse_document(file_path=file_path)
@@ -143,7 +145,7 @@ def chapters(file):
 
 @main.command()
 @click.argument("analysis_json", type=click.Path(exists=True))
-def show(analysis_json):
+def show(analysis_json: str) -> None:
     """Show details of a saved analysis."""
     from critic.schema import AnalysisOutput
 
@@ -173,17 +175,19 @@ def show(analysis_json):
 @click.argument("file", type=click.Path(exists=True))
 @click.option("-o", "--output", type=click.Path(), default="wiki", help="Output directory for wiki")
 @click.option("-m", "--model", default=DEFAULT_MODEL, help="Claude model to use")
-@click.option("--from-json", is_flag=True, help="Input is analysis JSON instead of manuscript")
-def wiki(file, output, model, from_json):
-    """Generate a static wiki from a manuscript or analysis JSON."""
+def wiki(file: str, output: str, model: str) -> None:
+    """Generate a static wiki from a manuscript or analysis JSON.
+
+    Automatically detects if input is a JSON analysis file (by extension).
+    """
     from critic.schema import AnalysisOutput
     from critic.wiki_generator import generate_wiki
 
     file_path = Path(file)
     output_path = Path(output)
 
-    if from_json:
-        # Load existing analysis
+    # Auto-detect JSON files
+    if file_path.suffix.lower() == '.json':
         click.echo(f"Loading analysis from: {file_path}\n")
         data = json.loads(file_path.read_text())
         result = AnalysisOutput.from_dict(data)
