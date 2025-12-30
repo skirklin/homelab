@@ -76,6 +76,7 @@ export default function BoxView(props: BoxProps) {
           <VisibilityControl
             value={box.visibility}
             element="button"
+            boxId={boxId}
             handleChange={handleVisiblityChange}
             handleAddOwner={handleAddOwner}
             disabled={!(writeable && box.owners.includes(authUser.uid))}

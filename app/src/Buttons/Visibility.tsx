@@ -1,5 +1,5 @@
-import { BookOutlined, GlobalOutlined, ShareAltOutlined } from "@ant-design/icons";
-import { Dropdown } from "antd";
+import { BookOutlined, GlobalOutlined, ShareAltOutlined, LinkOutlined } from "@ant-design/icons";
+import { Dropdown, message } from "antd";
 import { ActionButton } from "../StyledComponents";
 import { Visibility } from "../types";
 import { useState, useContext } from "react";
@@ -11,14 +11,23 @@ interface VisibilityProps {
     element: "menu" | "button"
     disabled?: boolean
     value: Visibility
+    boxId?: string
     handleChange: (e: { key: string }) => void
     handleAddOwner: (newOwnerEmail: string) => void
 }
 
 export default function VisibilityControl(props: VisibilityProps) {
-    const { element, value, handleChange, disabled, handleAddOwner } = props;
+    const { element, value, handleChange, disabled, handleAddOwner, boxId } = props;
     const { state } = useContext(Context);
     const [isAddOwnerVisible, setIsAddOwnerVisible] = useState(false);
+
+    const handleCopyLink = () => {
+        if (boxId) {
+            const joinLink = `${window.location.origin}/join/${boxId}`;
+            navigator.clipboard.writeText(joinLink);
+            message.success("Share link copied!");
+        }
+    };
 
     let icon;
     switch (value) {
@@ -46,12 +55,20 @@ export default function VisibilityControl(props: VisibilityProps) {
             },
     ];
 
-    // Only add the "Add owner" option if writeable
+    // Only add these options if writeable
     if (state.writeable) {
+        if (boxId) {
+            menuItems.push({
+                key: 'copyLink',
+                icon: <LinkOutlined />,
+                label: 'Copy share link',
+                onClick: handleCopyLink,
+            });
+        }
         menuItems.push({
             key: 'addOwner',
             icon: <ShareAltOutlined />,
-            label: 'Add owner',
+            label: 'Add owner by email',
             onClick: () => setIsAddOwnerVisible(true),
         });
     }

@@ -11,6 +11,7 @@ import Boxes from './routes/Boxes';
 import Settings from './routes/Settings';
 import RoutedRecipe from './routes/Recipe';
 import MissingPage from './routes/MissingPage'
+import JoinBox from './routes/JoinBox'
 import Auth from "./Auth";
 
 function Router() {
@@ -18,6 +19,7 @@ function Router() {
     <Auth>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
+          <Route path="/join/:boxId" element={<JoinBox />} />
           <Route path="/" element={<Main />}>
             <Route index element={<Contents />} />
             <Route path="settings" element={<Settings />} />
