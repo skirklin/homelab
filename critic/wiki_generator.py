@@ -677,13 +677,13 @@ class WikiGenerator:
   {f'<div class="infobox-row"><span class="infobox-label">Issues</span><br><span class="severity-error">{len(issues_here)}</span></div>' if issues_here else ''}
 </div>"""
 
-        sections = []
-        toc = ['<li><a href="#summary">Summary</a></li>']
+        sections: list[str] = []
+        toc: list[str] = []
 
-        # Summary - render markdown to HTML
+        # Summary - render markdown to HTML (already has its own ## headers)
         # Preprocess: ensure blank lines before list items and headers for proper markdown parsing
         lines = chapter.summary.split('\n')
-        processed_lines = []
+        processed_lines: list[str] = []
         for i, line in enumerate(lines):
             # Add blank line before list items or headers if previous line wasn't blank
             if (line.strip().startswith('-') or line.strip().startswith('#')) and i > 0:
@@ -692,16 +692,7 @@ class WikiGenerator:
             processed_lines.append(line)
         processed_summary = '\n'.join(processed_lines)
         summary_html = markdown.markdown(processed_summary)
-        sections.append(f'<h2 id="summary">Summary</h2><div class="chapter-summary">{summary_html}</div>')
-
-        if chars_here:
-            toc.append('<li><a href="#characters">Characters</a></li>')
-            char_items = []
-            for c in chars_here:
-                app = next((a for a in c.appearances if a.chapter_id == chapter.id), None)
-                role_tag = f' <span class="tag {app.role}">{app.role}</span>' if app else ''
-                char_items.append(f'<li><a href="../characters/{slugify(c.name)}.html">{escape(c.name)}</a>{role_tag}</li>')
-            sections.append(f'<h2 id="characters">Characters</h2><ul>{"".join(char_items)}</ul>')
+        sections.append(summary_html)
 
         if events_here:
             toc.append('<li><a href="#events">Events</a></li>')
@@ -719,7 +710,7 @@ class WikiGenerator:
                                    f'<span class="severity-{i.severity}">({i.severity})</span></li>')
             sections.append(f'<h2 id="issues">Issues</h2><ul>{"".join(issue_items)}</ul>')
 
-        toc_html = f'<div class="toc"><div class="toc-title">Contents</div><ol>{"".join(toc)}</ol></div>'
+        toc_html = f'<div class="toc"><div class="toc-title">Contents</div><ol>{"".join(toc)}</ol></div>' if toc else ''
 
         content = f"""
 <h1>{escape(chapter.title)}</h1>
