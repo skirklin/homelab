@@ -203,8 +203,8 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact format:
   "description": "A brief, appetizing description of the dish",
   "recipeIngredient": ["ingredient 1", "ingredient 2", ...],
   "recipeInstructions": [
-    {"@type": "HowToStep", "text": "Step 1 instructions"},
-    {"@type": "HowToStep", "text": "Step 2 instructions"},
+    {"@type": "HowToStep", "text": "Step 1 instructions", "ingredients": ["ingredient with amount used in this step"]},
+    {"@type": "HowToStep", "text": "Step 2 instructions", "ingredients": ["ingredient 1", "ingredient 2"]},
     ...
   ],
   "recipeCategory": ["category1", "category2"],
@@ -219,7 +219,9 @@ Guidelines:
 - Write instructions as complete sentences
 - Include relevant categories (cuisine type, meal type, dietary info)
 - Be creative but practical
-- Notes should include: tips/variations, make-ahead/storage instructions, and serving suggestions`;
+- Notes should include: tips/variations, make-ahead/storage instructions, and serving suggestions
+- Each step's ingredients array should list the specific ingredients (with amounts) used in that step
+- If an ingredient is divided across steps, show the portion used in each step (e.g., "1 tbsp butter" in step 1, "2 tbsp butter" in step 3)`;
 
     try {
       const response = await anthropic.messages.create({
@@ -317,33 +319,44 @@ export const enrichRecipes = onSchedule(
 
         // Build context from recipe
         const ingredients = Array.isArray(recipe.recipeIngredient)
-          ? recipe.recipeIngredient.join(", ")
-          : "";
+          ? recipe.recipeIngredient
+          : [];
         const instructions = Array.isArray(recipe.recipeInstructions)
-          ? recipe.recipeInstructions.map((i: { text?: string } | string) =>
-              typeof i === 'string' ? i : i.text || ''
-            ).join(" ")
-          : "";
+          ? recipe.recipeInstructions.map((i: { text?: string } | string, idx: number) =>
+              `Step ${idx + 1}: ${typeof i === 'string' ? i : i.text || ''}`
+            )
+          : [];
 
         const enrichmentPrompt = `Analyze this recipe and provide enrichment data.
 
 Recipe Name: ${recipe.name || "Unknown"}
-Ingredients: ${ingredients}
-Instructions: ${instructions}
+Ingredients: ${JSON.stringify(ingredients)}
+Instructions:
+${instructions.join("\n")}
 ${recipe.description ? `Existing Description: ${recipe.description}` : ""}
 
 Return ONLY valid JSON (no markdown) with:
 {
   "description": "A brief, appetizing 1-2 sentence description of the dish",
   "suggestedTags": ["tag1", "tag2", "tag3"],
-  "reasoning": "Brief explanation of why you chose these tags"
+  "stepIngredients": [
+    ["ingredient with amount for step 1", "another ingredient"],
+    ["ingredients for step 2"],
+    ...
+  ],
+  "reasoning": "Brief explanation of your analysis"
 }
 
-Tags should be lowercase and include: cuisine type, meal type, main protein/ingredient, cooking method, dietary info if applicable. Aim for 3-6 relevant tags.`;
+Guidelines:
+- Tags should be lowercase: cuisine type, meal type, main protein/ingredient, cooking method, dietary info. Aim for 3-6 tags.
+- stepIngredients must have exactly ${instructions.length} arrays (one per step)
+- Each step's array lists the specific ingredients (with amounts) used in that step
+- If an ingredient is divided across steps, show the portion in each step
+- Steps with no ingredients (e.g., "let rest") should have an empty array []`;
 
         const response = await anthropic.messages.create({
           model: CLAUDE_MODEL,
-          max_tokens: 500,
+          max_tokens: 2000,
           messages: [{ role: "user", content: enrichmentPrompt }],
         });
 
@@ -371,6 +384,7 @@ Tags should be lowercase and include: cuisine type, meal type, main protein/ingr
           pendingEnrichment: {
             description: enrichment.description || "",
             suggestedTags: enrichment.suggestedTags || [],
+            stepIngredients: enrichment.stepIngredients || [],
             reasoning: enrichment.reasoning || "",
             generatedAt: Timestamp.now(),
             model: CLAUDE_MODEL,
