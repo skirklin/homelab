@@ -41,6 +41,10 @@ const IconButton = styled(Button)`
     color: white;
     border-color: rgba(255, 255, 255, 0.3);
 
+    .anticon {
+      color: white;
+    }
+
     &:hover {
       color: white;
       border-color: rgba(255, 255, 255, 0.6);
