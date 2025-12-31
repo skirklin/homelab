@@ -263,6 +263,114 @@ Guidelines:
   }
 )
 
+// Manually trigger enrichment for a specific recipe (for testing)
+export const enrichRecipeManual = onCall(
+  {
+    secrets: [anthropicApiKey],
+    cors: ["https://recipes.kirkl.in", "https://kirkl.in", "http://localhost:5000"],
+    invoker: "public",
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in")
+    }
+
+    const { boxId, recipeId } = request.data;
+    if (!boxId || !recipeId) {
+      throw new HttpsError("invalid-argument", "Must provide boxId and recipeId")
+    }
+
+    const apiKey = anthropicApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError("internal", "API key not configured")
+    }
+
+    const recipeDoc = await db.doc(`boxes/${boxId}/recipes/${recipeId}`).get();
+    if (!recipeDoc.exists) {
+      throw new HttpsError("not-found", "Recipe not found")
+    }
+
+    const recipeData = recipeDoc.data()!;
+    const recipe = recipeData.data as Recipe;
+
+    const ingredients = Array.isArray(recipe.recipeIngredient)
+      ? recipe.recipeIngredient
+      : [];
+    const instructions = Array.isArray(recipe.recipeInstructions)
+      ? recipe.recipeInstructions.map((i: { text?: string } | string, idx: number) =>
+          `Step ${idx + 1}: ${typeof i === 'string' ? i : i.text || ''}`
+        )
+      : [];
+
+    const anthropic = new Anthropic({ apiKey });
+
+    const enrichmentPrompt = `Analyze this recipe and provide enrichment data.
+
+Recipe Name: ${recipe.name || "Unknown"}
+Ingredients: ${JSON.stringify(ingredients)}
+Instructions:
+${instructions.join("\n")}
+${recipe.description ? `Existing Description: ${recipe.description}` : ""}
+
+Return ONLY valid JSON (no markdown) with:
+{
+  "description": "A brief, appetizing 1-2 sentence description of the dish",
+  "suggestedTags": ["tag1", "tag2", "tag3"],
+  "stepIngredients": [
+    ["ingredient with amount for step 1", "another ingredient"],
+    ["ingredients for step 2"],
+    ...
+  ],
+  "reasoning": "Brief explanation of your analysis"
+}
+
+Guidelines:
+- Tags should be lowercase: cuisine type, meal type, main protein/ingredient, cooking method, dietary info. Aim for 3-6 tags.
+- stepIngredients must have exactly ${instructions.length} arrays (one per step)
+- Each step's array lists the specific ingredients (with amounts) used in that step
+- If an ingredient is divided across steps, show the portion in each step
+- Steps with no ingredients (e.g., "let rest") should have an empty array []`;
+
+    const response = await anthropic.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 2000,
+      messages: [{ role: "user", content: enrichmentPrompt }],
+    });
+
+    const text = response.content[0].type === "text" ? response.content[0].text : "";
+
+    let enrichment;
+    try {
+      let jsonStr = text.trim();
+      if (jsonStr.startsWith("```")) {
+        jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+      }
+      enrichment = JSON.parse(jsonStr);
+    } catch {
+      throw new HttpsError("internal", "Failed to parse enrichment response")
+    }
+
+    if (enrichment.suggestedTags && Array.isArray(enrichment.suggestedTags)) {
+      enrichment.suggestedTags = enrichment.suggestedTags.map((t: string) => t.toLowerCase());
+    }
+
+    // Save pending enrichment
+    await recipeDoc.ref.update({
+      pendingEnrichment: {
+        description: enrichment.description || "",
+        suggestedTags: enrichment.suggestedTags || [],
+        stepIngredients: enrichment.stepIngredients || [],
+        reasoning: enrichment.reasoning || "",
+        generatedAt: Timestamp.now(),
+        model: CLAUDE_MODEL,
+      },
+      enrichmentStatus: "pending",
+    });
+
+    return { success: true, enrichment };
+  }
+)
+
 // Scheduled function to enrich recipes that need it
 const ENRICHMENT_DELAY_MINUTES = 5;
 const ENRICHMENT_BATCH_SIZE = 10;

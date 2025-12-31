@@ -77,7 +77,7 @@ export function Auth() {
 
   return (
     <Container>
-      <Title>Household</Title>
+      <Title>Upkeep</Title>
       <Subtitle>Track recurring tasks and keep your home running smoothly</Subtitle>
       <Button
         type="primary"
