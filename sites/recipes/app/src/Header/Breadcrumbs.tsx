@@ -1,6 +1,7 @@
 import { Breadcrumb, Dropdown } from 'antd';
 import { useContext } from 'react';
 import { Link, Params, useLocation, useParams } from 'react-router-dom';
+import styled from 'styled-components';
 import { Context } from '../context';
 import { useMediaQuery } from 'react-responsive'
 
@@ -8,6 +9,17 @@ import './Header.css';
 import { AppState } from '../types';
 import { EllipsisOutlined } from '@ant-design/icons';
 import { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
+
+const LogoLink = styled(Link)`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+`;
+
+const LogoIcon = styled.img`
+  width: 20px;
+  height: 20px;
+`;
 
 function getPartMap(params: Readonly<Params<string>>, state: AppState) {
 
@@ -43,7 +55,7 @@ function FullBreadcrumbs() {
     {
       key: 'home',
       className: 'recipes-breadcrumb',
-      title: <Link to="/">Recipe box</Link>,
+      title: <LogoLink to="/"><LogoIcon src="/favicon.svg" alt="" />Recipe box</LogoLink>,
     },
     ...pathParts.map((part, index) => {
       const url = `/${pathParts.slice(0, index + 1).join('/')}`;
@@ -77,7 +89,7 @@ function CollapsedBreadcrumbs() {
     {
       key: 'home',
       className: 'recipes-breadcrumb',
-      title: <Link to="/">Recipes</Link>,
+      title: <LogoLink to="/"><LogoIcon src="/favicon.svg" alt="" />Recipes</LogoLink>,
     },
     {
       key: 'ellipsis',

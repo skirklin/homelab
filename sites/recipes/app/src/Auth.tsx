@@ -70,6 +70,12 @@ function Auth(props: { children: React.ReactNode }) {
     setLoading(false);
   };
 
+  // Still checking auth state - show nothing to avoid flash
+  if (authUser === undefined) {
+    return null;
+  }
+
+  // Not logged in - show login form
   if (authUser === null) {
     return (
       <SignInCard>
@@ -134,9 +140,10 @@ function Auth(props: { children: React.ReactNode }) {
         </Button>
       </SignInCard>
     );
-  } else {
-    return <>{props.children}</>;
   }
+
+  // Logged in - show children
+  return <>{props.children}</>;
 }
 
 export default Auth;

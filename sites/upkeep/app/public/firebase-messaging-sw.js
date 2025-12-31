@@ -13,16 +13,17 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Handle background messages
+// Handle background messages (data-only messages from Cloud Function)
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message:', payload);
 
-  const notificationTitle = payload.notification?.title || 'Upkeep Task Due';
+  // Read from data payload (not notification payload to avoid duplicates)
+  const notificationTitle = payload.data?.title || 'Upkeep Task Due';
   const notificationOptions = {
-    body: payload.notification?.body || 'A task needs your attention',
+    body: payload.data?.body || 'A task needs your attention',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
-    tag: payload.data?.taskId || 'upkeep-notification',
+    tag: 'upkeep-daily-reminder', // Use consistent tag to prevent duplicate notifications
     data: payload.data,
   };
 

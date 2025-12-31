@@ -22,9 +22,12 @@ export type BoxStoreType = {
   data: BoxType
 }
 
+export type StepIngredients = Record<string, string[]>;  // { "0": ["1 cup flour"], "1": ["2 eggs"] }
+
 export type PendingEnrichment = {
   description: string,
   suggestedTags: string[],
+  stepIngredients?: StepIngredients,
   reasoning: string,
   generatedAt: Timestamp,
   model: string,
@@ -51,6 +54,7 @@ export type RecipeStoreType = {
   lastUpdatedBy: string, // user id
   owners: string[], // user ids
   pendingEnrichment?: PendingEnrichment,
+  stepIngredients?: StepIngredients,  // applied from enrichment
   cookingLog?: CookingLogEntryStore[],
   enrichmentStatus?: EnrichmentStatus,
 }
@@ -68,7 +72,7 @@ export type UserStoreType = {
 export type AppState = {
   boxes: Map<string, BoxEntry>
   users: Map<string, UserEntry>
-  authUser: User | null
+  authUser: User | null | undefined  // undefined = still checking auth
   writeable: boolean
   loading: number
   subscriptionsReady: boolean  // true once initial subscription loading completes

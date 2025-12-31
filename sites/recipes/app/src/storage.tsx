@@ -2,7 +2,7 @@ import { doc, DocumentSnapshot, SnapshotOptions, Timestamp } from "firebase/fire
 import _ from "lodash";
 import { Recipe } from "schema-dts";
 import { db } from "./backend";
-import { BoxType, BoxStoreType, RecipeStoreType, Visibility, UserStoreType, BoxId, UserId, PendingEnrichment, CookingLogEntry, EnrichmentStatus } from "./types";
+import { BoxType, BoxStoreType, RecipeStoreType, Visibility, UserStoreType, BoxId, UserId, PendingEnrichment, CookingLogEntry, EnrichmentStatus, StepIngredients } from "./types";
 import { decodeStr } from "./converters";
 
 const DUMMY_FIRST_DATE = new Date(2022, 0, 0)
@@ -19,6 +19,7 @@ export class RecipeEntry {
     updated: Date;
     lastUpdatedBy: string;
     pendingEnrichment?: PendingEnrichment;
+    stepIngredients?: StepIngredients;
     cookingLog: CookingLogEntry[];
     enrichmentStatus: EnrichmentStatus;
 
@@ -32,6 +33,7 @@ export class RecipeEntry {
         updated: Date,
         lastUpdatedBy: string,
         pendingEnrichment?: PendingEnrichment,
+        stepIngredients?: StepIngredients,
         cookingLog?: CookingLogEntry[],
         enrichmentStatus?: EnrichmentStatus
     ) {
@@ -44,6 +46,7 @@ export class RecipeEntry {
         this.updated = updated || DUMMY_FIRST_DATE;
         this.lastUpdatedBy = lastUpdatedBy || this.creator;
         this.pendingEnrichment = pendingEnrichment;
+        this.stepIngredients = stepIngredients;
         this.cookingLog = cookingLog || [];
         this.enrichmentStatus = enrichmentStatus || EnrichmentStatus.needed;
 
@@ -61,6 +64,7 @@ export class RecipeEntry {
             this.updated,
             this.lastUpdatedBy,
             this.pendingEnrichment ? _.cloneDeep(this.pendingEnrichment) : undefined,
+            this.stepIngredients ? _.cloneDeep(this.stepIngredients) : undefined,
             _.cloneDeep(this.cookingLog),
             this.enrichmentStatus
         )
@@ -125,6 +129,7 @@ export const recipeConverter = {
             (rawRecipe.updated || DUMMY_FIRST_TIMESTAMP).toDate(),
             rawRecipe.lastUpdatedBy,
             rawRecipe.pendingEnrichment,
+            rawRecipe.stepIngredients,
             cookingLog,
             rawRecipe.enrichmentStatus,
         );

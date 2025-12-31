@@ -5,6 +5,7 @@ import { FireOutlined, FireFilled } from '@ant-design/icons';
 import { Context } from '../context';
 import { getAppUserFromState } from '../state';
 import { setCookingModeSeen } from '../firestore';
+import { useCookingMode } from '../CookingModeContext';
 
 const IconButton = styled(Button)<{ $active?: boolean; $highlight?: boolean }>`
   background-color: ${props => props.$active ? 'var(--color-accent)' : 'transparent'};
@@ -49,11 +50,11 @@ const PopoverText = styled.p`
 
 function CookingMode() {
   const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
-  const [isActive, setIsActive] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   const [showPopover, setShowPopover] = useState(false);
   const { state } = useContext(Context);
   const user = getAppUserFromState(state);
+  const { isCookingMode: isActive, enableCookingMode: enableCookingModeContext, disableCookingMode: disableCookingModeContext } = useCookingMode();
 
   useEffect(() => {
     // Wake lock is nice-to-have, cooking mode works without it
@@ -77,8 +78,7 @@ function CookingMode() {
 
   const enableCookingMode = useCallback(async () => {
     markAsSeen();
-    setIsActive(true);
-    document.body.classList.add('cooking-mode');
+    enableCookingModeContext();
 
     // Try to acquire wake lock if supported
     if ('wakeLock' in navigator) {
@@ -93,17 +93,16 @@ function CookingMode() {
         console.warn('Wake Lock request failed:', err);
       }
     }
-  }, [markAsSeen]);
+  }, [markAsSeen, enableCookingModeContext]);
 
   const disableCookingMode = useCallback(async () => {
-    setIsActive(false);
-    document.body.classList.remove('cooking-mode');
+    disableCookingModeContext();
 
     if (wakeLock) {
       await wakeLock.release();
       setWakeLock(null);
     }
-  }, [wakeLock]);
+  }, [wakeLock, disableCookingModeContext]);
 
   // Re-acquire wake lock when page becomes visible again
   useEffect(() => {
@@ -124,13 +123,6 @@ function CookingMode() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [isActive]);
-
-  // Clean up on unmount only
-  useEffect(() => {
-    return () => {
-      document.body.classList.remove('cooking-mode');
-    };
-  }, []);
 
   // Release wake lock on unmount
   useEffect(() => {

@@ -8,6 +8,7 @@ import { Header } from "./Header";
 import { KanbanColumn } from "./KanbanColumn";
 import { TaskModal } from "./TaskModal";
 import { CompleteTaskModal } from "./CompleteTaskModal";
+import { appStorage, StorageKeys } from "../storage";
 import type { Task } from "../types";
 
 const Container = styled.div`
@@ -69,7 +70,7 @@ export function TaskBoard() {
   // Save last-used list
   useEffect(() => {
     if (slug && listId) {
-      localStorage.setItem("upkeep-last-list", slug);
+      appStorage.set(StorageKeys.LAST_LIST, slug);
     }
   }, [slug, listId]);
 

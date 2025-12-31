@@ -6,10 +6,10 @@ import Menu from './Menu'
 
 const Container = styled.header`
   background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-hover) 100%);
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-xs) var(--space-md);
   display: flex;
   align-items: center;
-  min-height: 56px;
+  min-height: 44px;
   box-shadow: var(--shadow-sm);
 `
 

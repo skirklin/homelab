@@ -174,7 +174,7 @@ export async function setLastSeenUpdateVersion(userId: UserId, version: number) 
 export async function applyEnrichment(
   boxId: BoxId,
   recipeId: RecipeId,
-  enrichment: { description: string; suggestedTags: string[] }
+  enrichment: { description: string; suggestedTags: string[]; stepIngredients?: Record<string, string[]> }
 ) {
   const recipeRef = doc(db, "boxes", boxId, "recipes", recipeId);
   const recipeDoc = await getDoc(recipeRef);
@@ -204,6 +204,11 @@ export async function applyEnrichment(
 
   // Update tags with merged list
   updates["data.recipeCategory"] = mergedTags;
+
+  // Save step ingredients if provided
+  if (enrichment.stepIngredients && Object.keys(enrichment.stepIngredients).length > 0) {
+    updates["stepIngredients"] = enrichment.stepIngredients;
+  }
 
   await updateDoc(recipeRef, updates);
 }

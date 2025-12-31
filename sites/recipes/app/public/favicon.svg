@@ -1,9 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <circle cx="50" cy="50" r="45" fill="#2ca6a4"/>
-  <ellipse cx="50" cy="55" rx="28" ry="20" fill="white"/>
-  <rect x="22" y="40" width="56" height="15" rx="3" fill="white"/>
-  <rect x="20" y="35" width="60" height="8" rx="2" fill="white"/>
-  <path d="M35 28 Q38 20 42 28" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <path d="M48 25 Q51 15 54 25" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <path d="M61 28 Q64 20 68 28" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <!-- Pot body -->
+  <path d="M25 45 L25 70 Q25 78 33 78 L67 78 Q75 78 75 70 L75 45" fill="white"/>
+  <!-- Pot lid -->
+  <rect x="22" y="40" width="56" height="8" rx="4" fill="white"/>
+  <!-- Lid handle -->
+  <rect x="45" y="32" width="10" height="12" rx="3" fill="white"/>
+  <!-- Pot handles -->
+  <rect x="12" y="52" width="16" height="6" rx="3" fill="white"/>
+  <rect x="72" y="52" width="16" height="6" rx="3" fill="white"/>
 </svg>

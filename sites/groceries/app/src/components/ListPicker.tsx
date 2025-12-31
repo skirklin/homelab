@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, List, Modal, Spin } from "antd";
 import { PlusOutlined, LinkOutlined, RightOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAppContext } from "../context";
 import { createList, setUserSlug, getListById } from "../firestore";
+import { appStorage, StorageKeys } from "../storage";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -91,6 +92,7 @@ interface ListInfo {
 export function ListPicker() {
   const { state } = useAppContext();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [lists, setLists] = useState<ListInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -102,15 +104,20 @@ export function ListPicker() {
   const [sharedListSlug, setSharedListSlug] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Auto-navigate to last-used list (or first list if none)
+  // Auto-navigate to last-used list only if one is saved
+  // Skip if ?pick=true is in URL (user explicitly wants to see the list picker)
   useEffect(() => {
+    const wantsPicker = searchParams.get("pick") === "true";
+    if (wantsPicker) return;
+
     const slugs = Object.keys(state.userSlugs);
-    if (slugs.length > 0) {
-      const lastUsed = localStorage.getItem("groceries-last-list");
-      const targetSlug = lastUsed && slugs.includes(lastUsed) ? lastUsed : slugs[0];
-      navigate(`/${targetSlug}`, { replace: true });
+    const lastUsed = appStorage.get<string | null>(StorageKeys.LAST_LIST, null);
+
+    // Only auto-navigate if we have a saved last-used list that still exists
+    if (lastUsed && slugs.includes(lastUsed)) {
+      navigate(`/${lastUsed}`, { replace: true });
     }
-  }, [state.userSlugs, navigate]);
+  }, [state.userSlugs, navigate, searchParams]);
 
   // Load list names for each slug
   useEffect(() => {

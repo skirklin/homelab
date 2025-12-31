@@ -9,6 +9,10 @@ import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "./messaging";
+import { appStorage } from "./storage";
+
+// Migrate legacy localStorage keys on startup
+appStorage.migrateFromLegacy();
 
 const theme = {
   token: {

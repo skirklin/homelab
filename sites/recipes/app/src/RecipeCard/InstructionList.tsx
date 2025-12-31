@@ -6,6 +6,7 @@ import { getRecipeFromState } from '../state';
 import { Context } from '../context';
 import { getEditableSetter, RecipeCardProps } from './RecipeCard';
 import { StyledTextArea } from '../StyledComponents';
+import { useCookingMode } from '../CookingModeContext';
 
 const InstructionsSection = styled.div``
 
@@ -39,15 +40,34 @@ const Placeholder = styled.span`
   font-style: italic;
 `
 
+const StepIngredientsList = styled.div`
+  margin-top: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+`
+
+const StepIngredientItem = styled.span`
+  &:not(:last-child)::after {
+    content: ' · ';
+    color: var(--color-border);
+  }
+`
+
 
 function InstructionList(props: RecipeCardProps) {
   const [editable, setEditablePrimitive] = useState(false);
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
+  const { isCookingMode } = useCookingMode();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) {
     return null
   }
+
+  const stepIngredients = recipe.stepIngredients;
 
   function formatInstructionList(instructions: Recipe["recipeInstructions"]) {
     let listElts: React.ReactNode[];
@@ -55,7 +75,21 @@ function InstructionList(props: RecipeCardProps) {
       listElts = [<RecipeStep key={0}>{decodeStr(instructions)}</RecipeStep>]
     } else {
       const instructionArray = Array.isArray(instructions) ? instructions : [];
-      listElts = instructionArray.map((ri: any, id) => <RecipeStep key={id}>{decodeStr(String(ri.text ?? ''))}</RecipeStep>);
+      listElts = instructionArray.map((ri: any, idx) => {
+        const stepIngs = isCookingMode && stepIngredients?.[idx.toString()];
+        return (
+          <RecipeStep key={idx}>
+            {decodeStr(String(ri.text ?? ''))}
+            {stepIngs && stepIngs.length > 0 && (
+              <StepIngredientsList>
+                {stepIngs.map((ing, i) => (
+                  <StepIngredientItem key={i}>{ing}</StepIngredientItem>
+                ))}
+              </StepIngredientsList>
+            )}
+          </RecipeStep>
+        );
+      });
     }
     if (listElts.length > 0) {
       return (

@@ -8,6 +8,7 @@ import {
   getDoc,
   updateDoc,
   addDoc,
+  arrayUnion,
 } from "firebase/firestore";
 import { db } from "./backend";
 import type { GroceryItem, GroceryItemStore, CategoryId, CategoryDef, ItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
@@ -174,6 +175,10 @@ export async function setUserSlug(userId: string, slug: string, listId: string) 
   } else {
     await setDoc(userRef, { slugs: { [slug]: listId } });
   }
+
+  // Add user to list owners if not already there (for joining shared lists)
+  const listRef = getListRef(listId);
+  await updateDoc(listRef, { owners: arrayUnion(userId) });
 }
 
 export async function removeUserSlug(userId: string, slug: string) {

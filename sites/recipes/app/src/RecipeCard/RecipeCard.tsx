@@ -19,13 +19,13 @@ import { Divider, RecipeActionGroup } from '../StyledComponents';
 import ByLine from './Byline';
 import Tags from './Tags';
 import { Button, Dropdown, Menu, Input, Modal, message } from 'antd';
-import { MoreOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { MoreOutlined, CheckCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import { useContext, useState } from 'react';
 import { Context } from '../context';
 import { setRecipeVisibility } from '../firestore';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
-import { addRecipeOwner } from '../backend';
+import { addRecipeOwner, enrichRecipeManual } from '../backend';
 import EditButton from '../Buttons/EditRecipe';
 
 const RecipeContainer = styled.article`
@@ -165,6 +165,7 @@ const MenuButton = styled.button`
 function ActionMenu(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
+  const [enriching, setEnriching] = useState(false);
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) {
     return null
@@ -178,8 +179,28 @@ function ActionMenu(props: RecipeCardProps) {
     addRecipeOwner({ boxId, recipeId, newOwnerEmail })
   }
 
+  async function handleEnrich() {
+    setEnriching(true);
+    const hideLoading = message.loading('Generating AI suggestions...', 0);
+    try {
+      await enrichRecipeManual({ boxId, recipeId });
+      hideLoading();
+      message.success('AI suggestions generated! Review them above.');
+    } catch (error) {
+      hideLoading();
+      console.error('Enrichment failed:', error);
+      message.error('Failed to generate suggestions');
+    } finally {
+      setEnriching(false);
+    }
+  }
+
   const menu = (
     <Menu>
+      <Menu.Item key="enrich" icon={<RobotOutlined />} onClick={handleEnrich} disabled={enriching}>
+        {enriching ? 'Enriching...' : 'AI Enrich'}
+      </Menu.Item>
+      <Menu.Divider />
       <DeleteButton {...props} element="menu" />
       <DownloadButton {...props} element="menu" />
       <ForkButton {...props} element="menu" />

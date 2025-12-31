@@ -9,6 +9,7 @@ import { auth } from "../backend";
 import { useAppContext } from "../context";
 import { clearCheckedItems } from "../firestore";
 import { getItemsFromState } from "../subscription";
+import { appStorage, StorageKeys } from "../storage";
 
 const HeaderContainer = styled.header`
   display: flex;
@@ -121,7 +122,10 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
   return (
     <HeaderContainer>
       <TitleSection>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/")} size="small" />
+        <Button icon={<ArrowLeftOutlined />} onClick={() => {
+          appStorage.remove(StorageKeys.LAST_LIST);
+          navigate("/");
+        }} size="small" type="text" />
         <Title>{listName}</Title>
       </TitleSection>
 

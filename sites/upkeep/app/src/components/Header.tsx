@@ -7,6 +7,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "../backend";
 import { useAppContext } from "../context";
 import { getCurrentListId } from "../firestore";
+import { appStorage, StorageKeys } from "../storage";
 
 const HeaderContainer = styled.header`
   display: flex;
@@ -37,18 +38,19 @@ const RightSection = styled.div`
 `;
 
 const IconButton = styled(Button)`
-  &.ant-btn {
-    color: white;
-    border-color: rgba(255, 255, 255, 0.3);
+  &&.ant-btn {
+    color: white !important;
+    background: transparent !important;
+    border-color: rgba(255, 255, 255, 0.3) !important;
 
     .anticon {
-      color: white;
+      color: white !important;
     }
 
     &:hover {
-      color: white;
-      border-color: rgba(255, 255, 255, 0.6);
-      background: rgba(255, 255, 255, 0.1);
+      color: white !important;
+      border-color: rgba(255, 255, 255, 0.6) !important;
+      background: rgba(255, 255, 255, 0.1) !important;
     }
   }
 `;
@@ -100,7 +102,10 @@ export function Header({ onAddTask }: HeaderProps) {
         <LeftSection>
           <IconButton
             icon={<ArrowLeftOutlined />}
-            onClick={() => navigate("/")}
+            onClick={() => {
+              appStorage.remove(StorageKeys.LAST_LIST);
+              navigate("/");
+            }}
           />
           <Title>{state.list?.name || "Tasks"}</Title>
         </LeftSection>

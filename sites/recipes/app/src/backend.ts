@@ -47,3 +47,4 @@ export const getRecipes = httpsCallable(functions, 'getRecipes');
 export const addBoxOwner = httpsCallable(functions, 'addBoxOwner');
 export const addRecipeOwner = httpsCallable(functions, 'addRecipeOwner');
 export const generateRecipe = httpsCallable<{ prompt: string }, { recipeJson: string }>(functions, 'generateRecipe');
+export const enrichRecipeManual = httpsCallable<{ boxId: string, recipeId: string }, { success: boolean, enrichment: unknown }>(functions, 'enrichRecipeManual');

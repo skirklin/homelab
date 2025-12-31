@@ -30,6 +30,22 @@ const EnrichmentSection = styled(Section)`
   margin-bottom: var(--space-sm);
 `
 
+const StepIngredientsPreview = styled.div`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+`
+
+const StepPreviewItem = styled.div`
+  margin: var(--space-xs) 0;
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--color-border);
+`
+
+const StepNumber = styled.span`
+  font-weight: 600;
+  color: var(--color-primary);
+`
+
 const ButtonRow = styled.div`
   display: flex;
   gap: var(--space-sm);
@@ -79,6 +95,28 @@ function EnrichmentReview(props: RecipeCardProps) {
               <Tag key={idx} color="purple">{tag}</Tag>
             ))}
           </TagsContainer>
+        </EnrichmentSection>
+      )}
+
+      {enrichment.stepIngredients && Object.keys(enrichment.stepIngredients).length > 0 && (
+        <EnrichmentSection>
+          <SectionLabel>Per-step ingredients (visible in cooking mode):</SectionLabel>
+          <StepIngredientsPreview>
+            {Object.entries(enrichment.stepIngredients)
+              .sort(([a], [b]) => parseInt(a) - parseInt(b))
+              .slice(0, 3)  // Show first 3 steps as preview
+              .map(([stepIdx, ingredients]) => (
+                <StepPreviewItem key={stepIdx}>
+                  <StepNumber>Step {parseInt(stepIdx) + 1}:</StepNumber>{' '}
+                  {ingredients.join(', ') || '(no ingredients)'}
+                </StepPreviewItem>
+              ))}
+            {Object.keys(enrichment.stepIngredients).length > 3 && (
+              <StepPreviewItem>
+                ...and {Object.keys(enrichment.stepIngredients).length - 3} more steps
+              </StepPreviewItem>
+            )}
+          </StepIngredientsPreview>
         </EnrichmentSection>
       )}
 

@@ -5,6 +5,7 @@
   "targets": {
     "recipe-box-335721": {
       "hosting": {
+        "home": ["home-kirkl"],
         "recipes": ["recipe-box-335721"],
         "groceries": ["groceries-kirkl"],
         "homepage": ["scott-kirkl-in"],

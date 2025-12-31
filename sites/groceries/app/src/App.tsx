@@ -8,6 +8,10 @@ import { Auth } from "./components/Auth";
 import { GroceryList } from "./components/GroceryList";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
+import { appStorage } from "./storage";
+
+// Migrate legacy localStorage keys on startup
+appStorage.migrateFromLegacy();
 
 const theme = {
   token: {

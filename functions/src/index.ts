@@ -27,7 +27,7 @@ if (!globalThis.FormData) {
 const app = initializeApp();
 const db = getFirestore(app);
 
-// Define the secret
+// Define secrets
 const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 
 type RecipeWithContext = WithContext<Recipe>
@@ -354,12 +354,20 @@ Guidelines:
       enrichment.suggestedTags = enrichment.suggestedTags.map((t: string) => t.toLowerCase());
     }
 
+    // Convert stepIngredients from array of arrays to object (Firestore doesn't support nested arrays)
+    const stepIngredientsObj: Record<string, string[]> = {};
+    if (Array.isArray(enrichment.stepIngredients)) {
+      enrichment.stepIngredients.forEach((ingredients: string[], idx: number) => {
+        stepIngredientsObj[idx.toString()] = Array.isArray(ingredients) ? ingredients : [];
+      });
+    }
+
     // Save pending enrichment
     await recipeDoc.ref.update({
       pendingEnrichment: {
         description: enrichment.description || "",
         suggestedTags: enrichment.suggestedTags || [],
-        stepIngredients: enrichment.stepIngredients || [],
+        stepIngredients: stepIngredientsObj,
         reasoning: enrichment.reasoning || "",
         generatedAt: Timestamp.now(),
         model: CLAUDE_MODEL,
@@ -487,12 +495,20 @@ Guidelines:
           enrichment.suggestedTags = enrichment.suggestedTags.map((t: string) => t.toLowerCase());
         }
 
+        // Convert stepIngredients from array of arrays to object (Firestore doesn't support nested arrays)
+        const stepIngredientsObj: Record<string, string[]> = {};
+        if (Array.isArray(enrichment.stepIngredients)) {
+          enrichment.stepIngredients.forEach((ingredients: string[], idx: number) => {
+            stepIngredientsObj[idx.toString()] = Array.isArray(ingredients) ? ingredients : [];
+          });
+        }
+
         // Save pending enrichment
         await recipeDoc.ref.update({
           pendingEnrichment: {
             description: enrichment.description || "",
             suggestedTags: enrichment.suggestedTags || [],
-            stepIngredients: enrichment.stepIngredients || [],
+            stepIngredients: stepIngredientsObj,
             reasoning: enrichment.reasoning || "",
             generatedAt: Timestamp.now(),
             model: CLAUDE_MODEL,
@@ -632,12 +648,10 @@ export const sendHouseholdTaskNotifications = onSchedule(
 
       for (const token of tokens) {
         try {
+          // Use data-only message to let service worker control notification display
+          // (including notification payload causes FCM to auto-display, leading to duplicates)
           await messaging.send({
             token,
-            notification: {
-              title,
-              body,
-            },
             webpush: {
               fcmOptions: {
                 link: "https://upkeep.kirkl.in",
@@ -645,6 +659,8 @@ export const sendHouseholdTaskNotifications = onSchedule(
             },
             data: {
               type: "household_task_due",
+              title,
+              body,
               taskCount: String(taskCount),
             },
           });

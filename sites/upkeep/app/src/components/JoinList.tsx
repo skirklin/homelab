@@ -58,32 +58,70 @@ const Label = styled.label`
   text-align: left;
 `;
 
+const ErrorBox = styled.div`
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  color: #cf1322;
+  text-align: left;
+  width: 100%;
+  max-width: 400px;
+  word-break: break-word;
+`;
+
 export function JoinList() {
   const { listId } = useParams<{ listId: string }>();
   const navigate = useNavigate();
   const { state } = useAppContext();
   const [listName, setListName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [slug, setSlug] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     async function loadList() {
-      if (!listId) return;
-      const list = await getListById(listId);
-      if (list) {
-        setListName(list.name);
-        // Suggest a slug based on the list name
-        const suggested = list.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-        setSlug(suggested);
-      } else {
-        setNotFound(true);
+      if (!listId) {
+        setError("No list ID provided");
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      if (!state.authUser) {
+        // Wait for auth to be determined
+        if (state.authUser === undefined) return;
+        setError("You must be signed in to join a list");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        console.log("[JoinList] Loading list:", listId);
+        const list = await getListById(listId);
+        console.log("[JoinList] List result:", list);
+        if (list) {
+          setListName(list.name);
+          // Suggest a slug based on the list name
+          const suggested = list.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          setSlug(suggested);
+        } else {
+          setError("List not found. It may have been deleted.");
+        }
+      } catch (err) {
+        console.error("[JoinList] Error loading list:", err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (errorMessage.includes("permission") || errorMessage.includes("Permission")) {
+          setError(`Permission denied. Please make sure you're signed in. (${errorMessage})`);
+        } else {
+          setError(`Failed to load list: ${errorMessage}`);
+        }
+      } finally {
+        setLoading(false);
+      }
     }
     loadList();
-  }, [listId]);
+  }, [listId, state.authUser]);
 
   const handleJoin = async () => {
     if (!slug.trim() || !listId || !state.authUser) return;
@@ -96,12 +134,17 @@ export function JoinList() {
     }
 
     setSubmitting(true);
+    setError(null);
     try {
+      console.log("[JoinList] Joining list:", listId, "with slug:", cleanSlug);
       await setUserSlug(state.authUser.uid, cleanSlug, listId);
+      console.log("[JoinList] Successfully joined list");
       navigate(`/${cleanSlug}`);
-    } catch (error) {
-      console.error("Failed to join list:", error);
-      message.error("Failed to join list");
+    } catch (err) {
+      console.error("[JoinList] Failed to join list:", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(`Failed to join list: ${errorMessage}`);
+      message.error("Failed to join list - see error below");
     } finally {
       setSubmitting(false);
     }
@@ -115,19 +158,23 @@ export function JoinList() {
         </Header>
         <Content>
           <Spin size="large" />
+          <Description>Loading list...</Description>
         </Content>
       </Container>
     );
   }
 
-  if (notFound) {
+  if (error && !listName) {
     return (
       <Container>
         <Header>
-          <Title>List Not Found</Title>
+          <Title>Cannot Join List</Title>
         </Header>
         <Content>
-          <Description>This list doesn't exist or may have been deleted.</Description>
+          <ErrorBox>{error}</ErrorBox>
+          <Description style={{ fontSize: "12px", marginTop: "8px" }}>
+            List ID: {listId || "none"}
+          </Description>
           <Button type="primary" onClick={() => navigate("/")}>
             Go to My Lists
           </Button>
@@ -144,6 +191,7 @@ export function JoinList() {
       <Content>
         <ListName>{listName}</ListName>
         <Description>Choose a URL for this list</Description>
+        {error && <ErrorBox>{error}</ErrorBox>}
         <Form>
           <Label>Your URL</Label>
           <Input

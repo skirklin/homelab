@@ -1,6 +1,7 @@
 import React, { useReducer } from 'react';
 import { recipeBoxReducer, initState, Context } from './context';
 import { AppState, ActionType } from './types';
+import { CookingModeProvider } from './CookingModeContext';
 import Router from './Router';
 
 
@@ -9,7 +10,9 @@ function App() {
 
   return (
     <Context.Provider value={{ state, dispatch }}>
-      <Router />
+      <CookingModeProvider>
+        <Router />
+      </CookingModeProvider>
     </Context.Provider>
   )
 }

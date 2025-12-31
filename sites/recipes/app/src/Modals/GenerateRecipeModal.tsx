@@ -88,8 +88,16 @@ function GenerateRecipeModal(props: GenerateRecipeModalProps) {
     if (!generatedRecipe || !boxId || !user) return;
 
     const now = new Date();
+    const recipeWithAuthor = {
+      ...generatedRecipe,
+      author: {
+        '@type': 'Person' as const,
+        name: 'Claude',
+        url: 'https://claude.ai',
+      },
+    };
     const recipeEntry = new RecipeEntry(
-      generatedRecipe,
+      recipeWithAuthor,
       [user.id],
       Visibility.private,
       user.id,

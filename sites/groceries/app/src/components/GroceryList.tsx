@@ -4,6 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Spin, Button } from "antd";
 import { DndContext, DragOverlay, MeasuringStrategy, pointerWithin, type DragEndEvent, type DragStartEvent, type Modifier } from "@dnd-kit/core";
 import styled from "styled-components";
+import { appStorage, StorageKeys } from "../storage";
 
 // Custom modifier: only snap Y axis to cursor center, keep original X offset
 const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, transform }) => {
@@ -114,7 +115,7 @@ export function GroceryList() {
   // Save last-used list
   useEffect(() => {
     if (slug && listId) {
-      localStorage.setItem("groceries-last-list", slug);
+      appStorage.set(StorageKeys.LAST_LIST, slug);
     }
   }, [slug, listId]);
 
