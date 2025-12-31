@@ -84,7 +84,7 @@ export function Auth() {
             { type: "email", message: "Please enter a valid email" },
           ]}
         >
-          <Input prefix={<MailOutlined />} placeholder="Email" size="large" />
+          <Input prefix={<MailOutlined />} placeholder="Email" size="large" data-testid="email-input" />
         </Form.Item>
 
         <Form.Item
@@ -94,11 +94,11 @@ export function Auth() {
             { min: 6, message: "Password must be at least 6 characters" },
           ]}
         >
-          <Input.Password placeholder="Password" size="large" />
+          <Input.Password placeholder="Password" size="large" data-testid="password-input" />
         </Form.Item>
 
         <Form.Item>
-          <Button type="primary" htmlType="submit" loading={loading} block size="large">
+          <Button type="primary" htmlType="submit" loading={loading} block size="large" data-testid="email-sign-in">
             {isSignUp ? "Sign Up" : "Sign In"}
           </Button>
         </Form.Item>
