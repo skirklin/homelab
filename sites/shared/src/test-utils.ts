@@ -410,6 +410,120 @@ export async function createTestEntry(
 }
 
 // =============================================================================
+// Recipes Test Helpers
+// =============================================================================
+
+export interface CreateBoxOptions {
+  name?: string;
+  owners?: string[];
+  visibility?: string;
+}
+
+export async function createTestBox(
+  ctx: TestContext,
+  cleanup: TestCleanup,
+  options: CreateBoxOptions = {}
+): Promise<DocumentReference> {
+  const boxId = testId("box");
+  const boxRef = doc(ctx.db, "boxes", boxId);
+  const now = Timestamp.now();
+
+  await setDoc(boxRef, {
+    data: { name: options.name ?? "Test Box" },
+    owners: options.owners ?? [ctx.auth.currentUser!.uid],
+    visibility: options.visibility ?? "private",
+    creator: ctx.auth.currentUser!.uid,
+    created: now,
+    updated: now,
+    lastUpdatedBy: ctx.auth.currentUser!.uid,
+  });
+
+  cleanup.track(boxRef);
+  return boxRef;
+}
+
+export interface CreateRecipeOptions {
+  name?: string;
+  description?: string;
+  owners?: string[];
+  visibility?: string;
+  ingredients?: string[];
+  instructions?: string[];
+}
+
+export async function createTestRecipe(
+  ctx: TestContext,
+  boxId: string,
+  cleanup: TestCleanup,
+  options: CreateRecipeOptions = {}
+): Promise<DocumentReference> {
+  const recipeRef = doc(collection(ctx.db, "boxes", boxId, "recipes"));
+  const now = Timestamp.now();
+
+  await setDoc(recipeRef, {
+    data: {
+      "@type": "Recipe",
+      name: options.name ?? "Test Recipe",
+      description: options.description ?? "A test recipe",
+      recipeIngredient: options.ingredients ?? ["1 cup flour", "2 eggs"],
+      recipeInstructions: (options.instructions ?? ["Mix ingredients", "Bake"]).map(
+        (text, i) => ({ "@type": "HowToStep", position: i + 1, text })
+      ),
+    },
+    owners: options.owners ?? [ctx.auth.currentUser!.uid],
+    visibility: options.visibility ?? "private",
+    creator: ctx.auth.currentUser!.uid,
+    created: now,
+    updated: now,
+    lastUpdatedBy: ctx.auth.currentUser!.uid,
+    enrichmentStatus: "needed",
+  });
+
+  cleanup.track(recipeRef);
+  return recipeRef;
+}
+
+/**
+ * Create a recipes user document with boxes array
+ */
+export async function createTestRecipesUser(
+  ctx: TestContext,
+  cleanup: TestCleanup,
+  boxIds: string[] = []
+): Promise<DocumentReference> {
+  const userRef = doc(ctx.db, "users", ctx.auth.currentUser!.uid);
+  const now = Timestamp.now();
+
+  await setDoc(userRef, {
+    name: ctx.auth.currentUser!.displayName ?? "Test User",
+    visibility: "private",
+    boxes: boxIds.map((id) => doc(ctx.db, "boxes", id)),
+    lastSeen: now,
+    newSeen: now,
+    cookingModeSeen: false,
+    lastSeenUpdateVersion: 0,
+  });
+
+  cleanup.track(userRef);
+  return userRef;
+}
+
+/**
+ * Add a box to a user's boxes array
+ */
+export async function addBoxToUser(
+  ctx: TestContext,
+  userId: string,
+  boxId: string
+): Promise<void> {
+  const userRef = doc(ctx.db, "users", userId);
+  const { arrayUnion, updateDoc } = await import("firebase/firestore");
+  await updateDoc(userRef, {
+    boxes: arrayUnion(doc(ctx.db, "boxes", boxId)),
+  });
+}
+
+// =============================================================================
 // Multi-user Test Helper
 // =============================================================================
 

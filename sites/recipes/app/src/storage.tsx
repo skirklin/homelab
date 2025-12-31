@@ -259,10 +259,10 @@ export const userConverter = {
     },
     fromFirestore: (snapshot: DocumentSnapshot, options: SnapshotOptions) => {
         const data = snapshot.data(options) as UserStoreType
-        const boxIds = data.boxes.map(b => b.id)
+        const boxIds = (data.boxes ?? []).map(b => b.id)
         return new UserEntry(
-            data.name,
-            data.visibility,
+            data.name ?? "",
+            data.visibility ?? "private",
             boxIds,
             (data.lastSeen  || DUMMY_FIRST_TIMESTAMP).toDate(),
             (data.newSeen  || DUMMY_FIRST_TIMESTAMP).toDate(),
