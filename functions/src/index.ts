@@ -210,14 +210,16 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact format:
   "recipeCategory": ["category1", "category2"],
   "recipeYield": "4 servings",
   "prepTime": "PT15M",
-  "cookTime": "PT30M"
+  "cookTime": "PT30M",
+  "notes": "Tips, variations, storage info, and serving suggestions"
 }
 
 Guidelines:
 - Use clear, concise ingredient measurements
 - Write instructions as complete sentences
 - Include relevant categories (cuisine type, meal type, dietary info)
-- Be creative but practical`;
+- Be creative but practical
+- Notes should include: tips/variations, make-ahead/storage instructions, and serving suggestions`;
 
     try {
       const response = await anthropic.messages.create({

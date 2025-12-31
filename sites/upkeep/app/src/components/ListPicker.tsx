@@ -232,7 +232,7 @@ export function ListPicker() {
         ) : lists.length === 0 ? (
           <EmptyState>
             <p>No task lists yet.</p>
-            <p>Create a new list to start tracking your household tasks!</p>
+            <p>Create a new list to start tracking your up tasks!</p>
           </EmptyState>
         ) : (
           <List
