@@ -5,8 +5,8 @@ import type { MenuProps } from "antd";
 import { LogoutOutlined, CheckOutlined, HistoryOutlined, ArrowLeftOutlined, SettingOutlined, ShareAltOutlined, MenuOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { signOut } from "firebase/auth";
-import { auth } from "../backend";
-import { useAppContext } from "../context";
+import { getBackend } from "@kirkl/shared";
+import { useGroceriesContext } from "../groceries-context";
 import { clearCheckedItems } from "../firestore";
 import { getItemsFromState } from "../subscription";
 import { appStorage, StorageKeys } from "../storage";
@@ -84,7 +84,7 @@ interface Props {
 
 export function Header({ listId, onShowHistory, onShowSettings }: Props) {
   const navigate = useNavigate();
-  const { state } = useAppContext();
+  const { state } = useGroceriesContext();
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const items = getItemsFromState(state);
   const checkedCount = items.filter((item) => item.checked).length;
@@ -108,6 +108,7 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
   };
 
   const handleSignOut = () => {
+    const { auth } = getBackend();
     signOut(auth);
   };
 
@@ -124,7 +125,7 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
       <TitleSection>
         <Button icon={<ArrowLeftOutlined />} onClick={() => {
           appStorage.remove(StorageKeys.LAST_LIST);
-          navigate("/");
+          navigate(".");
         }} size="small" type="text" />
         <Title>{listName}</Title>
       </TitleSection>

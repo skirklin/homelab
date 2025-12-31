@@ -27,6 +27,7 @@ import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../sta
 import { canUpdateRecipe } from '../utils';
 import { addRecipeOwner, enrichRecipeManual } from '../backend';
 import EditButton from '../Buttons/EditRecipe';
+import { useAuth } from '@kirkl/shared';
 
 const RecipeContainer = styled.article`
   max-width: 800px;
@@ -66,9 +67,9 @@ const ActionButtonsRow = styled.div`
   margin-bottom: var(--space-md);
 `
 
-export function getEditableSetter(state: AppState, recipeId: RecipeId, boxId: BoxId, setEditable: (value: boolean) => void) {
+export function getEditableSetter(state: AppState, recipeId: RecipeId, boxId: BoxId, setEditable: (value: boolean) => void, userId: string | undefined) {
   return (value: boolean) => {
-    const user = getAppUserFromState(state)
+    const user = getAppUserFromState(state, userId)
     const recipe = getRecipeFromState(state, boxId, recipeId)
     const box = getBoxFromState(state, boxId)
     if (state.writeable && canUpdateRecipe(recipe, box, user)) {
@@ -96,7 +97,8 @@ const MadeItButton = styled(Button)`
 function QuickMadeIt(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
-  const user = getAppUserFromState(state);
+  const { user: authUser } = useAuth();
+  const user = getAppUserFromState(state, authUser?.uid);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);

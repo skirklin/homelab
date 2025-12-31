@@ -9,8 +9,10 @@ import {
   Timestamp,
   type UpdateData,
 } from "firebase/firestore";
-import { db } from "../../shared/backend";
+import { getBackend } from "@kirkl/shared";
 import type { ActivityType, LogEntryStore, LifeLogStore } from "../../shared/types";
+
+const { db } = getBackend();
 
 let currentLogId: string | null = null;
 

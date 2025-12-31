@@ -1,8 +1,9 @@
 {
-  "name": "upkeep",
+  "name": "@kirkl/upkeep",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "src/module.tsx",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,6 +12,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@kirkl/shared": "*",
     "@ant-design/icons": "^5.6.1",
     "antd": "^5.29.3",
     "firebase": "^11.0.0",

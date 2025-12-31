@@ -3,7 +3,8 @@ import { AutoComplete, Button } from "antd";
 import type { BaseSelectRef } from "rc-select";
 import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useAuth } from "@kirkl/shared";
+import { useGroceriesContext } from "../groceries-context";
 import { addItem } from "../firestore";
 import { getItemsFromState } from "../subscription";
 
@@ -23,7 +24,8 @@ const InputWrapper = styled.div`
 `;
 
 export function AddItem() {
-  const { state } = useAppContext();
+  const { user } = useAuth();
+  const { state } = useGroceriesContext();
   const [name, setName] = useState("");
   const inputRef = useRef<BaseSelectRef>(null);
 
@@ -55,7 +57,7 @@ export function AddItem() {
 
   const submitItem = () => {
     const trimmedName = name.trim();
-    if (!trimmedName || !state.authUser) return;
+    if (!trimmedName || !user) return;
 
     // Check for duplicates (case-insensitive)
     const existingItems = getItemsFromState(state);
@@ -75,7 +77,7 @@ export function AddItem() {
     inputRef.current?.focus();
 
     // Fire and forget - addItem will lookup category from history
-    addItem(trimmedName, state.authUser.uid).catch((error) => {
+    addItem(trimmedName, user.uid).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };

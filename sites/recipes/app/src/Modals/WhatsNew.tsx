@@ -4,6 +4,7 @@ import styled from 'styled-components';
 import { Context } from '../context';
 import { getAppUserFromState } from '../state';
 import { setLastSeenUpdateVersion } from '../firestore';
+import { useAuth } from '@kirkl/shared';
 
 // Increment this when adding new updates
 export const CURRENT_UPDATE_VERSION = 1;
@@ -30,7 +31,8 @@ const UpdateTitle = styled.h4`
 function WhatsNew() {
   const [isOpen, setIsOpen] = useState(false);
   const { state } = useContext(Context);
-  const user = getAppUserFromState(state);
+  const { user: authUser } = useAuth();
+  const user = getAppUserFromState(state, authUser?.uid);
 
   useEffect(() => {
     if (user && user.lastSeenUpdateVersion < CURRENT_UPDATE_VERSION) {

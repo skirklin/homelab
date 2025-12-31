@@ -1,8 +1,7 @@
 import { getAuth, signOut } from 'firebase/auth';
-import React from 'react';
 import { Recipe } from "schema-dts"
 import { BoxEntry, RecipeEntry, UserEntry } from './storage';
-import { ActionType, Visibility } from './types';
+import { Visibility } from './types';
 
 export function createNewRecipe(user: UserEntry) {
   const owners = [user.id];
@@ -73,9 +72,8 @@ function makeTextFile(text: string) {
   return textFile;
 }
 
-export function userSignOut(dispatch: React.Dispatch<ActionType>) {
+export function userSignOut() {
   signOut(getAuth());
-  dispatch({ type: "SET_AUTH_USER", authUser: null })
 }
 
 export function canUpdateRecipe(recipe: RecipeEntry | undefined, box: BoxEntry | undefined, user: UserEntry | undefined) {

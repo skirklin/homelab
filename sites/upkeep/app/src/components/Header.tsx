@@ -5,7 +5,8 @@ import { SettingOutlined, ShareAltOutlined, LogoutOutlined, ArrowLeftOutlined, P
 import styled from "styled-components";
 import { signOut } from "firebase/auth";
 import { auth } from "../backend";
-import { useAppContext } from "../context";
+import { useUpkeepContext } from "../upkeep-context";
+import { useAuth } from "@kirkl/shared";
 import { getCurrentListId } from "../firestore";
 import { appStorage, StorageKeys } from "../storage";
 
@@ -60,7 +61,7 @@ interface HeaderProps {
 }
 
 export function Header({ onAddTask }: HeaderProps) {
-  const { state } = useAppContext();
+  const { state } = useUpkeepContext();
   const navigate = useNavigate();
   const [shareModalOpen, setShareModalOpen] = useState(false);
 
@@ -75,7 +76,7 @@ export function Header({ onAddTask }: HeaderProps) {
 
   const handleSignOut = async () => {
     await signOut(auth);
-    navigate("/");
+    navigate(".");
   };
 
   const menuItems = [
@@ -104,7 +105,7 @@ export function Header({ onAddTask }: HeaderProps) {
             icon={<ArrowLeftOutlined />}
             onClick={() => {
               appStorage.remove(StorageKeys.LAST_LIST);
-              navigate("/");
+              navigate(".");
             }}
           />
           <Title>{state.list?.name || "Tasks"}</Title>

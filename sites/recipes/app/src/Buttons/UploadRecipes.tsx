@@ -7,6 +7,7 @@ import { ActionButton } from "../StyledComponents";
 import { BoxId } from "../types";
 import { Menu } from "antd";
 import { Context } from "../context";
+import { useAuth } from '@kirkl/shared';
 
 
 interface UploadProps {
@@ -19,7 +20,8 @@ export default function UploadButton(props: UploadProps) {
     const { boxId, disabled, element } = props;
     const { executeWithBox, BoxPickerModal } = useBoxAction(boxId);
     const { state } = useContext(Context)
-    const user = getAppUserFromState(state)
+    const { user: authUser } = useAuth();
+    const user = getAppUserFromState(state, authUser?.uid)
 
     if (process.env.NODE_ENV !== "development") {
         return null

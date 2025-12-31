@@ -1,24 +1,10 @@
 import { onSnapshot, query, orderBy, limit, type Unsubscribe } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./backend";
 import { getListRef, getItemsRef, getHistoryRef, getTripsRef, ensureListExists, setCurrentListId, getUserSlugs, getUserRef } from "./firestore";
 import type { GroceryItemStore, GroceryListStore, ItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
 import { itemFromStore, listFromStore } from "./types";
-import type { AppState, Action } from "./context";
+import type { GroceriesState, GroceriesAction } from "./groceries-context";
 
-type Dispatch = React.Dispatch<Action>;
-
-export function subscribeToAuth(dispatch: Dispatch): Unsubscribe {
-  return onAuthStateChanged(auth, (user) => {
-    dispatch({ type: "SET_AUTH_USER", user });
-    if (!user) {
-      dispatch({ type: "SET_LIST", list: null });
-      dispatch({ type: "CLEAR_ITEMS" });
-      dispatch({ type: "SET_USER_SLUGS", slugs: {} });
-      dispatch({ type: "SET_LOADING", loading: false });
-    }
-  });
-}
+type Dispatch = React.Dispatch<GroceriesAction>;
 
 export async function loadUserSlugs(userId: string, dispatch: Dispatch) {
   const slugs = await getUserSlugs(userId);
@@ -147,11 +133,11 @@ export async function subscribeToList(
   return unsubscribers;
 }
 
-export function getItemsFromState(state: AppState) {
+export function getItemsFromState(state: GroceriesState) {
   return Array.from(state.items.values());
 }
 
-export function getItemsByCategoryId(state: AppState) {
+export function getItemsByCategoryId(state: GroceriesState) {
   const items = getItemsFromState(state);
   const grouped = new Map<string, typeof items>();
 

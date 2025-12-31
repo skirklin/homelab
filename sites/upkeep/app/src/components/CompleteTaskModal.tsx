@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Input, message } from "antd";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useAuth } from "@kirkl/shared";
 import { completeTask } from "../firestore";
 import type { Task } from "../types";
 import { formatFrequency } from "../types";
@@ -42,7 +42,7 @@ interface CompleteTaskModalProps {
 }
 
 export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProps) {
-  const { state } = useAppContext();
+  const { user } = useAuth();
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,11 +54,11 @@ export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProp
   }, [open]);
 
   const handleComplete = async () => {
-    if (!task || !state.authUser) return;
+    if (!task || !user) return;
 
     setSubmitting(true);
     try {
-      await completeTask(task.id, state.authUser.uid, notes.trim());
+      await completeTask(task.id, user.uid, notes.trim());
       message.success(`"${task.name}" marked as done!`);
       onClose();
     } catch (error) {

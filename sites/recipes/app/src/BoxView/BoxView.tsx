@@ -1,5 +1,6 @@
 import { useContext } from "react";
 import styled from "styled-components";
+import { useAuth } from "@kirkl/shared";
 import { Context } from "../context";
 
 import { setBoxVisibility } from "../firestore";
@@ -41,11 +42,12 @@ export interface BoxProps {
 export default function BoxView(props: BoxProps) {
   const { boxId } = props;
   const { state } = useContext(Context)
-  const { writeable, authUser } = state
+  const { writeable } = state
+  const { user } = useAuth();
 
   const box = getBoxFromState(state, boxId)
 
-  if (authUser === null) {
+  if (!user) {
     return null
   }
 
@@ -79,7 +81,7 @@ export default function BoxView(props: BoxProps) {
             boxId={boxId}
             handleChange={handleVisiblityChange}
             handleAddOwner={handleAddOwner}
-            disabled={!(writeable && box.owners.includes(authUser.uid))}
+            disabled={!(writeable && box.owners.includes(user.uid))}
           />
           <DeleteBox boxId={boxId} element="button" />
         </RecipeActionGroup>
@@ -89,7 +91,7 @@ export default function BoxView(props: BoxProps) {
         <ClearButton {...props} />
       </ActionButtonsRow>
       <Divider />
-      <RecipeTable recipes={data} writeable={writeable && box.owners.includes(authUser.uid)} boxId={boxId} />
+      <RecipeTable recipes={data} writeable={writeable && box.owners.includes(user.uid)} boxId={boxId} />
     </BoxContainer>
   )
 }

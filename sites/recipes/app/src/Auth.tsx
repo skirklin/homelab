@@ -1,17 +1,15 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import styled from 'styled-components';
 import { Button, Form, Input, Divider, message } from 'antd';
 import { GoogleOutlined, MailOutlined } from '@ant-design/icons';
 
 import {
   GoogleAuthProvider,
-  onAuthStateChanged,
-  getAuth,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { Context } from './context';
+import { useAuth, getBackend } from '@kirkl/shared';
 
 const SignInCard = styled.div`
   margin: 40px auto;
@@ -30,34 +28,24 @@ const Title = styled.h1`
 const googleProvider = new GoogleAuthProvider();
 
 function Auth(props: { children: React.ReactNode }) {
-  const { dispatch, state } = useContext(Context)
-  const { authUser } = state;
+  const { user, loading } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const unregisterAuthObserver = onAuthStateChanged(getAuth(), authUser => {
-      dispatch({ type: "SET_AUTH_USER", authUser })
-    });
-    return () => {
-      dispatch({ type: "SET_AUTH_USER", authUser: null });
-      unregisterAuthObserver();
-    }
-  }, [dispatch]);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleGoogleSignIn = async () => {
-    setLoading(true);
+    setSubmitting(true);
     try {
-      await signInWithPopup(getAuth(), googleProvider);
+      const { auth } = getBackend();
+      await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       message.error(error.message || 'Failed to sign in with Google');
     }
-    setLoading(false);
+    setSubmitting(false);
   };
 
   const handleEmailAuth = async (values: { email: string; password: string }) => {
-    setLoading(true);
-    const auth = getAuth();
+    setSubmitting(true);
+    const { auth } = getBackend();
     try {
       if (isSignUp) {
         await createUserWithEmailAndPassword(auth, values.email, values.password);
@@ -67,16 +55,16 @@ function Auth(props: { children: React.ReactNode }) {
     } catch (error: any) {
       message.error(error.message || 'Authentication failed');
     }
-    setLoading(false);
+    setSubmitting(false);
   };
 
   // Still checking auth state - show nothing to avoid flash
-  if (authUser === undefined) {
+  if (loading) {
     return null;
   }
 
   // Not logged in - show login form
-  if (authUser === null) {
+  if (!user) {
     return (
       <SignInCard>
         <Title>Recipe Book</Title>
@@ -84,7 +72,7 @@ function Auth(props: { children: React.ReactNode }) {
         <Button
           icon={<GoogleOutlined />}
           onClick={handleGoogleSignIn}
-          loading={loading}
+          loading={submitting}
           block
           size="large"
           style={{ marginBottom: 16 }}
@@ -126,7 +114,7 @@ function Auth(props: { children: React.ReactNode }) {
             <Button
               type="primary"
               htmlType="submit"
-              loading={loading}
+              loading={submitting}
               block
               size="large"
             >

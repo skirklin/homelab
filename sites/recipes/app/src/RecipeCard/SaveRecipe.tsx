@@ -10,6 +10,7 @@ import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../sta
 import { canUpdateRecipe } from '../utils';
 import { RecipeCardProps } from './RecipeCard';
 import _ from 'lodash';
+import { useAuth } from '@kirkl/shared';
 
 const StyledButton = styled(Button)`
   background-color: lightgreen;
@@ -17,10 +18,11 @@ const StyledButton = styled(Button)`
 
 function SaveButton(props: RecipeCardProps) {
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
   const { recipeId, boxId } = props;
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
   const navigate = useNavigate()
 
   if (recipe === undefined || box === undefined) {
@@ -42,7 +44,7 @@ function SaveButton(props: RecipeCardProps) {
       docRef = await addRecipe(boxId, newRecipe)
       newRecipe.created = newRecipe.updated
       dispatch({type: "REMOVE_RECIPE", recipeId, boxId}) // removes the local-only version of the recipe
-      navigate(`/boxes/${boxId}/recipes/${docRef.id}`)
+      navigate(`boxes/${boxId}/recipes/${docRef.id}`)
     } else {
       docRef = await saveRecipe(boxId, recipeId, newRecipe)
     }

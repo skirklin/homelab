@@ -2,14 +2,18 @@ import { useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import styled from "styled-components";
-import { useAppContext } from "./context";
-import { subscribeToAuth, subscribeToUserSlugs } from "./subscription";
+import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
+import { UpkeepProvider, useUpkeepContext } from "./upkeep-context";
+import { subscribeToUserSlugs } from "./subscription";
 import { Auth } from "./components/Auth";
 import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "./messaging";
 import { appStorage } from "./storage";
+
+// Initialize backend for standalone mode
+initializeBackend("upkeep.kirkl.in");
 
 // Migrate legacy localStorage keys on startup
 appStorage.migrateFromLegacy();
@@ -34,18 +38,14 @@ const AppWrapper = styled.div`
 `;
 
 function AppContent() {
-  const { state, dispatch } = useAppContext();
+  const { user, loading } = useAuth();
+  const { dispatch } = useUpkeepContext();
   const slugsUnsubRef = useRef<(() => void) | null>(null);
-
-  useEffect(() => {
-    const unsubscribe = subscribeToAuth(dispatch);
-    return () => unsubscribe();
-  }, [dispatch]);
 
   // Subscribe to user's slugs when authenticated
   useEffect(() => {
-    if (state.authUser) {
-      slugsUnsubRef.current = subscribeToUserSlugs(state.authUser.uid, dispatch);
+    if (user) {
+      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch);
     }
     return () => {
       if (slugsUnsubRef.current) {
@@ -53,25 +53,25 @@ function AppContent() {
         slugsUnsubRef.current = null;
       }
     };
-  }, [state.authUser, dispatch]);
+  }, [user, dispatch]);
 
   // Request notification permission when authenticated
   useEffect(() => {
-    if (state.authUser && isNotificationSupported()) {
+    if (user && isNotificationSupported()) {
       requestNotificationPermission().then((permission) => {
         if (permission === "granted") {
-          getFcmToken(state.authUser!.uid);
+          getFcmToken(user.uid);
         }
       });
     }
-  }, [state.authUser]);
+  }, [user]);
 
   // Still determining auth state
-  if (state.authUser === undefined) {
+  if (loading) {
     return null;
   }
 
-  if (!state.authUser) {
+  if (!user) {
     return <Auth />;
   }
 
@@ -86,13 +86,17 @@ function AppContent() {
 
 function App() {
   return (
-    <ConfigProvider theme={theme}>
-      <BrowserRouter>
-        <AppWrapper>
-          <AppContent />
-        </AppWrapper>
-      </BrowserRouter>
-    </ConfigProvider>
+    <AuthProvider>
+      <UpkeepProvider>
+        <ConfigProvider theme={theme}>
+          <BrowserRouter>
+            <AppWrapper>
+              <AppContent />
+            </AppWrapper>
+          </BrowserRouter>
+        </ConfigProvider>
+      </UpkeepProvider>
+    </AuthProvider>
   );
 }
 

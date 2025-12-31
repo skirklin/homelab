@@ -7,6 +7,7 @@ import { getAppUserFromState, getRecipeFromState, getUserFromState } from '../st
 import { RecipeCardProps } from './RecipeCard';
 import { CookingLogEntry } from '../types';
 import { updateCookingLogEntry, deleteCookingLogEntry } from '../firestore';
+import { useAuth } from '@kirkl/shared';
 
 const LogContainer = styled.div`
   margin-top: var(--space-md);
@@ -104,10 +105,11 @@ function formatDate(date: Date): string {
 function CookingLog(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
+  const { user: authUser } = useAuth();
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const recipe = getRecipeFromState(state, boxId, recipeId);
-  const currentUser = getAppUserFromState(state);
+  const currentUser = getAppUserFromState(state, authUser?.uid);
 
   if (!recipe) {
     return null;

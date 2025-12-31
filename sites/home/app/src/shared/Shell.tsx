@@ -10,7 +10,7 @@ import {
   LogoutOutlined,
 } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
-import { auth } from "./backend";
+import { getBackend } from "@kirkl/shared";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -71,35 +71,6 @@ const Content = styled.main`
   background: var(--color-bg-subtle);
 `;
 
-const ExternalLinks = styled.div`
-  display: flex;
-  gap: var(--space-xs);
-  margin-left: var(--space-md);
-  padding-left: var(--space-md);
-  border-left: 1px solid rgba(255, 255, 255, 0.3);
-`;
-
-const ExternalLink = styled.a`
-  color: white;
-  opacity: 0.8;
-  text-decoration: none;
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-
-  &:hover {
-    opacity: 1;
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .anticon {
-    color: white;
-  }
-`;
-
 export function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -107,6 +78,7 @@ export function Shell() {
   const isActive = (path: string) => location.pathname.startsWith(path);
 
   const handleSignOut = async () => {
+    const { auth } = getBackend();
     await signOut(auth);
     navigate("/");
   };
@@ -138,17 +110,27 @@ export function Shell() {
           >
             Life
           </NavButton>
-          <ExternalLinks>
-            <ExternalLink href="https://recipes.kirkl.in" target="_blank">
-              <ShoppingCartOutlined /> Recipes
-            </ExternalLink>
-            <ExternalLink href="https://groceries.kirkl.in" target="_blank">
-              <ShoppingCartOutlined /> Groceries
-            </ExternalLink>
-            <ExternalLink href="https://upkeep.kirkl.in" target="_blank">
-              <CheckSquareOutlined /> Upkeep
-            </ExternalLink>
-          </ExternalLinks>
+          <NavButton
+            icon={<ShoppingCartOutlined />}
+            $active={isActive("/recipes")}
+            onClick={() => navigate("/recipes")}
+          >
+            Recipes
+          </NavButton>
+          <NavButton
+            icon={<ShoppingCartOutlined />}
+            $active={isActive("/groceries")}
+            onClick={() => navigate("/groceries")}
+          >
+            Groceries
+          </NavButton>
+          <NavButton
+            icon={<CheckSquareOutlined />}
+            $active={isActive("/upkeep")}
+            onClick={() => navigate("/upkeep")}
+          >
+            Upkeep
+          </NavButton>
         </Nav>
         <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
           <IconButton icon={<SettingOutlined />} />

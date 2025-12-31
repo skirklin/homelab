@@ -1,0 +1,11 @@
+{
+  "name": "firebase-monorepo",
+  "private": true,
+  "workspaces": [
+    "sites/shared",
+    "sites/home/app",
+    "sites/groceries/app",
+    "sites/upkeep/app",
+    "sites/recipes/app"
+  ]
+}

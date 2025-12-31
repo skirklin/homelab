@@ -11,6 +11,7 @@ import { ActionButton } from '../StyledComponents';
 import { RecipeCardProps } from '../RecipeCard/RecipeCard';
 import { BoxId } from '../types';
 import { Menu } from 'antd';
+import { useAuth } from '@kirkl/shared';
 
 interface ForkProps extends RecipeCardProps {
   targetBoxId?: string
@@ -20,9 +21,10 @@ interface ForkProps extends RecipeCardProps {
 export default function ForkButton(props: ForkProps) {
   const { boxId, recipeId, targetBoxId, element } = props;
   const { state, dispatch } = useContext(Context)
+  const { user: authUser } = useAuth();
   const navigate = useNavigate()
   const [isModalVisible, setIsModalVisible] = useState(false)
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined || user === undefined) return null
 
@@ -30,7 +32,7 @@ export default function ForkButton(props: ForkProps) {
     const clone = _.cloneDeep(recipe);
     clone.owners = [user.id]
     const recipeRef = await addRecipe(boxId, clone)
-    navigate(`/boxes/${boxId}/recipes/${recipeRef.id}`)
+    navigate(`boxes/${boxId}/recipes/${recipeRef.id}`)
   }
 
   async function newRecipe(boxId: BoxId) {

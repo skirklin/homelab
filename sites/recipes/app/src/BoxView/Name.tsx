@@ -5,6 +5,7 @@ import { Title } from '../StyledComponents';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import { BoxProps } from './BoxView';
 import { Input } from 'antd';
+import { useAuth } from '@kirkl/shared';
 
 const EditableTitle = styled(Input)`
   font-size: 2em;
@@ -22,10 +23,11 @@ function BoxName(props: BoxProps) {
   const { boxId } = props;
   const [editable, setEditablePrimitive] = useState(false);
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
   const box = getBoxFromState(state, boxId)
 
   const setEditable = (value: boolean) => {
-    const user = getAppUserFromState(state)
+    const user = getAppUserFromState(state, authUser?.uid)
     if (state.writeable && user && box && box.owners.includes(user.id)) {
       setEditablePrimitive(value)
     }

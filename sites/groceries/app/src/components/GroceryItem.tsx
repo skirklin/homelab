@@ -2,8 +2,8 @@ import { Checkbox, Button } from "antd";
 import { DeleteOutlined, HolderOutlined } from "@ant-design/icons";
 import { useDraggable } from "@dnd-kit/core";
 import styled from "styled-components";
+import { useAuth } from "@kirkl/shared";
 import type { GroceryItem as GroceryItemType } from "../types";
-import { useAppContext } from "../context";
 import { toggleItem, deleteItem } from "../firestore";
 
 const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
@@ -52,15 +52,15 @@ interface Props {
 }
 
 export function GroceryItemRow({ item }: Props) {
-  const { state } = useAppContext();
+  const { user } = useAuth();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: item.id,
     data: { item },
   });
 
   const handleToggle = () => {
-    if (state.authUser) {
-      toggleItem(item, state.authUser.uid);
+    if (user) {
+      toggleItem(item, user.uid);
     }
   };
 

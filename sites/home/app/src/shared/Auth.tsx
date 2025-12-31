@@ -8,7 +8,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { auth } from "./backend";
+import { getBackend } from "@kirkl/shared";
 
 const SignInCard = styled.div`
   margin: 40px auto;
@@ -32,6 +32,7 @@ export function Auth() {
   const [loading, setLoading] = useState(false);
 
   const handleGoogleSignIn = async () => {
+    const { auth } = getBackend();
     setLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
@@ -43,6 +44,7 @@ export function Auth() {
   };
 
   const handleEmailAuth = async (values: { email: string; password: string }) => {
+    const { auth } = getBackend();
     setLoading(true);
     try {
       if (isSignUp) {

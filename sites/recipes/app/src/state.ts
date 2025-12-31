@@ -25,11 +25,11 @@ export function setBoxInState(state: AppState, boxId: BoxId, box: BoxEntry) {
   state.boxes.set(boxId, box);
 }
 
-export function getAppUserFromState(state: AppState) {
-  if (state.authUser === null) {
+export function getAppUserFromState(state: AppState, userId: string | undefined) {
+  if (!userId) {
     return undefined
   }
-  return state.users.get(state.authUser.uid)
+  return state.users.get(userId)
 }
 
 export function getUserFromState(state: AppState, userId: UserId) {

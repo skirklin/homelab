@@ -7,6 +7,7 @@ import { deleteBox } from '../firestore';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import { BoxId } from '../types';
+import { useAuth } from '@kirkl/shared';
 
 
 interface DeleteProps {
@@ -16,20 +17,21 @@ interface DeleteProps {
 
 function DeleteButton(props: DeleteProps) {
   const { state, dispatch } = useContext(Context)
+  const { user: authUser } = useAuth();
   const { writeable } = state;
   const navigate = useNavigate()
 
   const { boxId, element } = props;
   const box = getBoxFromState(state, boxId);
-  const user = getAppUserFromState(state);
+  const user = getAppUserFromState(state, authUser?.uid);
 
   if (box === undefined || user === undefined || !box.owners.includes(user.id)) {
     return null
   }
 
   async function del() {
-    deleteBox(state, boxId, dispatch)
-    navigate(`/`)
+    deleteBox(boxId, dispatch)
+    navigate(".")
   }
 
   let elt;

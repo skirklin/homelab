@@ -7,6 +7,7 @@ import { deleteRecipe } from '../firestore';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import { BoxId, RecipeId } from '../types';
+import { useAuth } from '@kirkl/shared';
 
 
 interface DeleteProps {
@@ -17,6 +18,7 @@ interface DeleteProps {
 
 function DeleteButton(props: DeleteProps) {
   const { state, dispatch } = useContext(Context)
+  const { user: authUser } = useAuth();
   const { writeable } = state;
   const box = getBoxFromState(state, props.boxId)
   const recipe = getRecipeFromState(state, props.boxId, props.recipeId)
@@ -24,7 +26,7 @@ function DeleteButton(props: DeleteProps) {
   const navigate = useNavigate()
 
   const { recipeId, boxId, element } = props;
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
 
   if (recipe === undefined || box === undefined || user === undefined) {
     return null
@@ -35,8 +37,8 @@ function DeleteButton(props: DeleteProps) {
 
 
   async function del() {
-    deleteRecipe(state, boxId, recipeId, dispatch).then(
-      () => navigate(`/boxes/${boxId}`)
+    deleteRecipe(state.boxes, boxId, recipeId, dispatch).then(
+      () => navigate(`boxes/${boxId}`)
     )
   }
 

@@ -1,29 +1,10 @@
 import { onSnapshot, query, orderBy, limit, type Unsubscribe } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./backend";
-import { getListRef, getTasksRef, getCompletionsRef, ensureListExists, setCurrentListId, getUserSlugs, getUserRef } from "./firestore";
+import { getListRef, getTasksRef, getCompletionsRef, ensureListExists, setCurrentListId, getUserRef } from "./firestore";
 import type { TaskStore, TaskListStore, CompletionStore, UserProfileStore } from "./types";
 import { taskFromStore, listFromStore, completionFromStore, getUrgencyLevel } from "./types";
-import type { AppState, Action } from "./context";
+import type { UpkeepState, UpkeepAction } from "./upkeep-context";
 
-type Dispatch = React.Dispatch<Action>;
-
-export function subscribeToAuth(dispatch: Dispatch): Unsubscribe {
-  return onAuthStateChanged(auth, (user) => {
-    dispatch({ type: "SET_AUTH_USER", user });
-    if (!user) {
-      dispatch({ type: "SET_LIST", list: null });
-      dispatch({ type: "CLEAR_TASKS" });
-      dispatch({ type: "SET_USER_SLUGS", slugs: {} });
-      dispatch({ type: "SET_LOADING", loading: false });
-    }
-  });
-}
-
-export async function loadUserSlugs(userId: string, dispatch: Dispatch) {
-  const slugs = await getUserSlugs(userId);
-  dispatch({ type: "SET_USER_SLUGS", slugs });
-}
+type Dispatch = React.Dispatch<UpkeepAction>;
 
 export function subscribeToUserSlugs(userId: string, dispatch: Dispatch): Unsubscribe {
   return onSnapshot(
@@ -121,11 +102,11 @@ export async function subscribeToList(
   return unsubscribers;
 }
 
-export function getTasksFromState(state: AppState) {
+export function getTasksFromState(state: UpkeepState) {
   return Array.from(state.tasks.values());
 }
 
-export function getTasksByUrgency(state: AppState) {
+export function getTasksByUrgency(state: UpkeepState) {
   const tasks = getTasksFromState(state);
   const grouped = {
     overdue: [] as typeof tasks,
@@ -154,7 +135,7 @@ export function getTasksByUrgency(state: AppState) {
   return grouped;
 }
 
-export function getTasksByRoom(state: AppState) {
+export function getTasksByRoom(state: UpkeepState) {
   const tasks = getTasksFromState(state);
   const grouped = new Map<string, typeof tasks>();
 

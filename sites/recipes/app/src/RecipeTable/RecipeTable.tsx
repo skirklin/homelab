@@ -143,12 +143,12 @@ export function RecipeTable(props: RecipeTableProps) {
 
   const onNameCell = (record: RowType, rowIndex: number | undefined) => {
     return {
-      onClick: () => navigate(`/boxes/${record.box.id}/recipes/${record.recipe.id}`),
+      onClick: () => navigate(`boxes/${record.box.id}/recipes/${record.recipe.id}`),
     }
   }
   const onBoxCell = (record: RowType, rowIndex: number | undefined) => {
     return {
-      onClick: () => navigate(`/boxes/${record.box.id}`),
+      onClick: () => navigate(`boxes/${record.box.id}`),
     }
   }
 
@@ -157,7 +157,7 @@ export function RecipeTable(props: RecipeTableProps) {
   async function del() {
     selectedRows.forEach(
       (value: RowType) => {
-        deleteRecipe(state, value.box.id, value.recipe.id, dispatch)
+        deleteRecipe(state.boxes, value.box.id, value.recipe.id, dispatch)
       }
     )
     setSelectedRowKeys([])
@@ -170,7 +170,7 @@ export function RecipeTable(props: RecipeTableProps) {
         addRecipe(boxId, _.cloneDeep(value.recipe))
       }
     )
-    navigate(`/boxes/${boxId}`)
+    navigate(`boxes/${boxId}`)
   }
 
   function handleVisiblityChange(e: { key: string }) {

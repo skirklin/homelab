@@ -5,6 +5,7 @@ import { getAppUserFromState } from '../state';
 import { Context } from "../context";
 import { DocumentReference } from "firebase/firestore";
 import { BoxEntry } from "../storage";
+import { useAuth } from '@kirkl/shared';
 
 interface NewBoxModalProps {
   isVisible: boolean
@@ -15,9 +16,10 @@ interface NewBoxModalProps {
 function NewBoxModal(props: NewBoxModalProps) {
   const { isVisible, setIsVisible, afterNewBox } = props;
   const { dispatch, state } = useContext(Context)
+  const { user: authUser } = useAuth();
   const [newBoxName, setNewBoxName] = useState<string>();
   const [confirmLoading, setConfirmLoading] = useState(false);
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
 
   if (user === undefined) { 
     return null

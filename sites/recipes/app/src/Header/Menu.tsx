@@ -56,7 +56,7 @@ function Menu() {
       <UserName>{user.displayName}</UserName>
       <CookingMode />
       <Tooltip title="Manage boxes">
-        <IconButton onClick={() => navigate('/boxes')} icon={<InboxOutlined />} />
+        <IconButton onClick={() => navigate('boxes')} icon={<InboxOutlined />} />
       </Tooltip>
       <Tooltip title="Sign out">
         <IconButton onClick={() => signOut(getAuth())} icon={<LogoutOutlined />} />

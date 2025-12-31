@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Input, Spin, message } from "antd";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useAuth } from "@kirkl/shared";
+import { useGroceriesContext } from "../groceries-context";
 import { getListById, setUserSlug } from "../firestore";
 
 const Container = styled.div`
@@ -61,7 +62,8 @@ const Label = styled.label`
 export function JoinList() {
   const { listId } = useParams<{ listId: string }>();
   const navigate = useNavigate();
-  const { state } = useAppContext();
+  const { user } = useAuth();
+  const { state } = useGroceriesContext();
   const [listName, setListName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -86,7 +88,7 @@ export function JoinList() {
   }, [listId]);
 
   const handleJoin = async () => {
-    if (!slug.trim() || !listId || !state.authUser) return;
+    if (!slug.trim() || !listId || !user) return;
 
     const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
@@ -97,8 +99,8 @@ export function JoinList() {
 
     setSubmitting(true);
     try {
-      await setUserSlug(state.authUser.uid, cleanSlug, listId);
-      navigate(`/${cleanSlug}`);
+      await setUserSlug(user.uid, cleanSlug, listId);
+      navigate(cleanSlug);
     } catch (error) {
       console.error("Failed to join list:", error);
       message.error("Failed to join list");
@@ -128,7 +130,7 @@ export function JoinList() {
         </Header>
         <Content>
           <Description>This list doesn't exist or may have been deleted.</Description>
-          <Button type="primary" onClick={() => navigate("/")}>
+          <Button type="primary" onClick={() => navigate(".")}>
             Go to My Lists
           </Button>
         </Content>
@@ -162,7 +164,7 @@ export function JoinList() {
           >
             Add to My Lists
           </Button>
-          <Button onClick={() => navigate("/")}>
+          <Button onClick={() => navigate(".")}>
             Cancel
           </Button>
         </Form>

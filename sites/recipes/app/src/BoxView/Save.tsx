@@ -10,6 +10,7 @@ import { getAppUserFromState, getBoxFromState } from '../state';
 import _ from 'lodash';
 import { boxConverter } from '../storage';
 import { BoxProps } from './BoxView';
+import { useAuth } from '@kirkl/shared';
 
 const StyledButton = styled(Button)`
   background-color: lightgreen;
@@ -17,9 +18,10 @@ const StyledButton = styled(Button)`
 
 function SaveButton(props: BoxProps) {
   const { state } = useContext(Context);
+  const { user: authUser } = useAuth();
   const { boxId } = props;
   const box = getBoxFromState(state, boxId)
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
 
   if (box === undefined) {
     return null

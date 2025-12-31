@@ -86,7 +86,7 @@ export function BoxTable(props: BoxTableProps) {
 
   const onRow = (record: RowType, rowIndex: number | undefined) => {
     return {
-      onClick: () => navigate(`/boxes/${record.boxId}`),
+      onClick: () => navigate(`boxes/${record.boxId}`),
     }
   }
 
@@ -106,7 +106,7 @@ export function BoxTable(props: BoxTableProps) {
   async function del() {
     selectedRows.forEach(
       (value: RowType) => {
-        deleteBox(state, value.boxId, dispatch)
+        deleteBox(value.boxId, dispatch)
       }
     )
     setSelectedRowKeys([]);

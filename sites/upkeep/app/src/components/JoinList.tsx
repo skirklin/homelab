@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Input, Spin, message } from "antd";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useUpkeepContext } from "../upkeep-context";
+import { useAuth } from "@kirkl/shared";
 import { getListById, setUserSlug } from "../firestore";
 
 const Container = styled.div`
@@ -73,7 +74,8 @@ const ErrorBox = styled.div`
 export function JoinList() {
   const { listId } = useParams<{ listId: string }>();
   const navigate = useNavigate();
-  const { state } = useAppContext();
+  const { state } = useUpkeepContext();
+  const { user } = useAuth();
   const [listName, setListName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,9 +90,9 @@ export function JoinList() {
         return;
       }
 
-      if (!state.authUser) {
+      if (!user) {
         // Wait for auth to be determined
-        if (state.authUser === undefined) return;
+        if (user === undefined) return;
         setError("You must be signed in to join a list");
         setLoading(false);
         return;
@@ -121,10 +123,10 @@ export function JoinList() {
       }
     }
     loadList();
-  }, [listId, state.authUser]);
+  }, [listId, user]);
 
   const handleJoin = async () => {
-    if (!slug.trim() || !listId || !state.authUser) return;
+    if (!slug.trim() || !listId || !user) return;
 
     const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
@@ -137,9 +139,9 @@ export function JoinList() {
     setError(null);
     try {
       console.log("[JoinList] Joining list:", listId, "with slug:", cleanSlug);
-      await setUserSlug(state.authUser.uid, cleanSlug, listId);
+      await setUserSlug(user.uid, cleanSlug, listId);
       console.log("[JoinList] Successfully joined list");
-      navigate(`/${cleanSlug}`);
+      navigate(cleanSlug);
     } catch (err) {
       console.error("[JoinList] Failed to join list:", err);
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -175,7 +177,7 @@ export function JoinList() {
           <Description style={{ fontSize: "12px", marginTop: "8px" }}>
             List ID: {listId || "none"}
           </Description>
-          <Button type="primary" onClick={() => navigate("/")}>
+          <Button type="primary" onClick={() => navigate(".")}>
             Go to My Lists
           </Button>
         </Content>
@@ -210,7 +212,7 @@ export function JoinList() {
           >
             Add to My Lists
           </Button>
-          <Button onClick={() => navigate("/")}>
+          <Button onClick={() => navigate(".")}>
             Cancel
           </Button>
         </Form>

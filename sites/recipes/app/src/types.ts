@@ -1,4 +1,3 @@
-import { User } from 'firebase/auth';
 import { DocumentReference, Timestamp, Unsubscribe } from 'firebase/firestore';
 import { Comment, Recipe } from 'schema-dts';
 import { BoxEntry, RecipeEntry, UserEntry } from './storage';
@@ -72,7 +71,6 @@ export type UserStoreType = {
 export type AppState = {
   boxes: Map<string, BoxEntry>
   users: Map<string, UserEntry>
-  authUser: User | null | undefined  // undefined = still checking auth
   writeable: boolean
   loading: number
   subscriptionsReady: boolean  // true once initial subscription loading completes
@@ -86,7 +84,6 @@ export type ActionType = {
   box?: BoxEntry
   userId?: UserId
   user?: UserEntry
-  authUser?: User | null
   payload?: RecipeEntry
   | BoxEntry
   | Map<string, BoxEntry>

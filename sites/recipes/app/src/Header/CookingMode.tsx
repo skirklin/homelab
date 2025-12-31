@@ -6,6 +6,7 @@ import { Context } from '../context';
 import { getAppUserFromState } from '../state';
 import { setCookingModeSeen } from '../firestore';
 import { useCookingMode } from '../CookingModeContext';
+import { useAuth } from '@kirkl/shared';
 
 const IconButton = styled(Button)<{ $active?: boolean; $highlight?: boolean }>`
   background-color: ${props => props.$active ? 'var(--color-accent)' : 'transparent'};
@@ -53,7 +54,8 @@ function CookingMode() {
   const [isSupported, setIsSupported] = useState(false);
   const [showPopover, setShowPopover] = useState(false);
   const { state } = useContext(Context);
-  const user = getAppUserFromState(state);
+  const { user: authUser } = useAuth();
+  const user = getAppUserFromState(state, authUser?.uid);
   const { isCookingMode: isActive, enableCookingMode: enableCookingModeContext, disableCookingMode: disableCookingModeContext } = useCookingMode();
 
   useEffect(() => {

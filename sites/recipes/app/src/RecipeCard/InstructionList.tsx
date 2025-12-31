@@ -7,6 +7,7 @@ import { Context } from '../context';
 import { getEditableSetter, RecipeCardProps } from './RecipeCard';
 import { StyledTextArea } from '../StyledComponents';
 import { useCookingMode } from '../CookingModeContext';
+import { useAuth } from '@kirkl/shared';
 
 const InstructionsSection = styled.div``
 
@@ -61,6 +62,7 @@ function InstructionList(props: RecipeCardProps) {
   const [editable, setEditablePrimitive] = useState(false);
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
   const { isCookingMode } = useCookingMode();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) {
@@ -103,7 +105,7 @@ function InstructionList(props: RecipeCardProps) {
   }
 
   if (recipe === undefined) { return null }
-  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive)
+  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive, authUser?.uid)
 
   const instructions = recipe.changed ? recipe.changed.recipeInstructions : recipe.data.recipeInstructions;
 

@@ -7,6 +7,7 @@ import { canUpdateRecipe } from '../utils';
 import { Context } from '../context';
 import { RecipeCardProps } from './RecipeCard';
 import { StyledTextArea } from '../StyledComponents';
+import { useAuth } from '@kirkl/shared';
 
 const IngredientsSection = styled.div`
   background-color: var(--color-bg-subtle);
@@ -49,6 +50,7 @@ function IngredientList(props: RecipeCardProps) {
   const [editable, setEditablePrimitive] = useState(false);
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
 
@@ -57,7 +59,7 @@ function IngredientList(props: RecipeCardProps) {
   }
 
   const setEditable = (value: boolean) => {
-    const user = getAppUserFromState(state)
+    const user = getAppUserFromState(state, authUser?.uid)
     if (state.writeable && canUpdateRecipe(recipe, box, user)) {
       setEditablePrimitive(value)
     }

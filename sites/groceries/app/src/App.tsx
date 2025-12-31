@@ -1,17 +1,14 @@
-import { useEffect, useRef } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+/**
+ * Standalone Groceries App
+ * Uses shared auth provider and renders the GroceriesModule
+ */
+
+import { BrowserRouter } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import styled from "styled-components";
-import { useAppContext } from "./context";
-import { subscribeToAuth, subscribeToUserSlugs } from "./subscription";
+import { AuthProvider, useAuth } from "@kirkl/shared";
+import { GroceriesModule } from "./module";
 import { Auth } from "./components/Auth";
-import { GroceryList } from "./components/GroceryList";
-import { ListPicker } from "./components/ListPicker";
-import { JoinList } from "./components/JoinList";
-import { appStorage } from "./storage";
-
-// Migrate legacy localStorage keys on startup
-appStorage.migrateFromLegacy();
 
 const theme = {
   token: {
@@ -33,52 +30,28 @@ const AppWrapper = styled.div`
 `;
 
 function AppContent() {
-  const { state, dispatch } = useAppContext();
-  const slugsUnsubRef = useRef<(() => void) | null>(null);
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    const unsubscribe = subscribeToAuth(dispatch);
-    return () => unsubscribe();
-  }, [dispatch]);
-
-  // Subscribe to user's slugs when authenticated
-  useEffect(() => {
-    if (state.authUser) {
-      slugsUnsubRef.current = subscribeToUserSlugs(state.authUser.uid, dispatch);
-    }
-    return () => {
-      if (slugsUnsubRef.current) {
-        slugsUnsubRef.current();
-        slugsUnsubRef.current = null;
-      }
-    };
-  }, [state.authUser, dispatch]);
-
-  // Still determining auth state
-  if (state.authUser === undefined) {
+  if (loading) {
     return null;
   }
 
-  if (!state.authUser) {
+  if (!user) {
     return <Auth />;
   }
 
-  return (
-    <Routes>
-      <Route path="/" element={<ListPicker />} />
-      <Route path="/join/:listId" element={<JoinList />} />
-      <Route path="/:slug" element={<GroceryList />} />
-    </Routes>
-  );
+  return <GroceriesModule />;
 }
 
 function App() {
   return (
     <ConfigProvider theme={theme}>
       <BrowserRouter>
-        <AppWrapper>
-          <AppContent />
-        </AppWrapper>
+        <AuthProvider>
+          <AppWrapper>
+            <AppContent />
+          </AppWrapper>
+        </AuthProvider>
       </BrowserRouter>
     </ConfigProvider>
   );

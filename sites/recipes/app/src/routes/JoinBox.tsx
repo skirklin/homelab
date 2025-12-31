@@ -3,9 +3,11 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button, Spin, message } from "antd";
 import styled from "styled-components";
 import { doc, getDoc, updateDoc, arrayUnion } from "firebase/firestore";
+import { useAuth } from "@kirkl/shared";
 import { db } from "../backend";
 import { Context } from "../context";
 import { boxConverter } from "../storage";
+import { getAppUserFromState } from "../state";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -58,6 +60,8 @@ export default function JoinBox() {
   const { boxId } = useParams<{ boxId: string }>();
   const navigate = useNavigate();
   const { state } = useContext(Context);
+  const { user } = useAuth();
+  const appUser = getAppUserFromState(state, user?.uid);
   const [boxName, setBoxName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -85,16 +89,16 @@ export default function JoinBox() {
   }, [boxId]);
 
   const handleJoin = async () => {
-    if (!boxId || !state.authUser || !state.user) return;
+    if (!boxId || !user || !appUser) return;
 
     setSubmitting(true);
     try {
       const boxRef = doc(db, "boxes", boxId);
-      const userRef = doc(db, "users", state.authUser.uid);
+      const userRef = doc(db, "users", user.uid);
 
       // Add user as owner of the box
       await updateDoc(boxRef, {
-        owners: arrayUnion(state.authUser.uid)
+        owners: arrayUnion(user.uid)
       });
 
       // Add box to user's boxes
@@ -103,7 +107,7 @@ export default function JoinBox() {
       });
 
       message.success("Box added to your collection!");
-      navigate(`/boxes/${boxId}`);
+      navigate(`boxes/${boxId}`);
     } catch (error) {
       console.error("Failed to join box:", error);
       message.error("Failed to join box. You may not have permission.");
@@ -133,7 +137,7 @@ export default function JoinBox() {
         </Header>
         <Content>
           <Description>This box doesn't exist or may have been deleted.</Description>
-          <Button type="primary" onClick={() => navigate("/")}>
+          <Button type="primary" onClick={() => navigate(".")}>
             Go Home
           </Button>
         </Content>
@@ -158,7 +162,7 @@ export default function JoinBox() {
           >
             Add to My Boxes
           </Button>
-          <Button onClick={() => navigate("/")}>
+          <Button onClick={() => navigate(".")}>
             Cancel
           </Button>
         </ButtonGroup>

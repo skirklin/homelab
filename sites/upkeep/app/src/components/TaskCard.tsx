@@ -3,7 +3,7 @@ import { CheckOutlined, EditOutlined, BellOutlined, BellFilled } from "@ant-desi
 import styled from "styled-components";
 import type { Task } from "../types";
 import { formatDueDate } from "../types";
-import { useAppContext } from "../context";
+import { useAuth } from "@kirkl/shared";
 import { toggleTaskNotification } from "../firestore";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "../messaging";
 
@@ -56,8 +56,8 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, onEdit, onComplete }: TaskCardProps) {
-  const { state } = useAppContext();
-  const userId = state.authUser?.uid;
+  const { user } = useAuth();
+  const userId = user?.uid;
   const isNotified = userId ? task.notifyUsers.includes(userId) : false;
 
   const handleToggleNotification = async () => {

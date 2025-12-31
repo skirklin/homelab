@@ -7,6 +7,7 @@ import { canUpdateRecipe } from '../utils';
 import { ActionButton } from '../StyledComponents';
 import { RecipeCardProps } from '../RecipeCard/RecipeCard';
 import { Menu } from 'antd';
+import { useAuth } from '@kirkl/shared';
 
 interface EditProps extends RecipeCardProps {
   element: "menu" | "button"
@@ -15,9 +16,10 @@ interface EditProps extends RecipeCardProps {
 export default function EditButton(props: EditProps) {
   const { boxId, recipeId, element } = props;
   const { state, dispatch } = useContext(Context)
+  const { user: authUser } = useAuth();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
   if (recipe === undefined || box === undefined || user === undefined || recipe.editing) {
     return null
   }

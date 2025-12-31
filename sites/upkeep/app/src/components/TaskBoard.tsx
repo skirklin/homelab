@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useUpkeepContext } from "../upkeep-context";
+import { useAuth } from "@kirkl/shared";
 import { subscribeToList, getTasksByUrgency } from "../subscription";
 import { Header } from "./Header";
 import { KanbanColumn } from "./KanbanColumn";
@@ -55,7 +56,8 @@ const NotFoundContainer = styled.div`
 export function TaskBoard() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { state, dispatch } = useAppContext();
+  const { state, dispatch } = useUpkeepContext();
+  const { user } = useAuth();
   const unsubscribersRef = useRef<(() => void)[]>([]);
 
   // Modal state
@@ -75,10 +77,10 @@ export function TaskBoard() {
   }, [slug, listId]);
 
   useEffect(() => {
-    if (!listId || !state.authUser) return;
+    if (!listId || !user) return;
 
     // Subscribe to list data
-    subscribeToList(listId, state.authUser.uid, dispatch).then((unsubs) => {
+    subscribeToList(listId, user.uid, dispatch).then((unsubs) => {
       unsubscribersRef.current = unsubs;
     });
 
@@ -86,7 +88,7 @@ export function TaskBoard() {
       unsubscribersRef.current.forEach((unsub) => unsub());
       unsubscribersRef.current = [];
     };
-  }, [listId, state.authUser, dispatch]);
+  }, [listId, user, dispatch]);
 
   const handleAddTask = () => {
     setEditingTask(null);
@@ -114,13 +116,13 @@ export function TaskBoard() {
   };
 
   // If slug doesn't exist in user's slugs
-  if (slug && state.authUser && !state.loading && !listId) {
+  if (slug && user && !state.loading && !listId) {
     return (
       <Container>
         <NotFoundContainer>
           <h2>List not found</h2>
           <p>The list "{slug}" doesn't exist in your account.</p>
-          <button onClick={() => navigate("/")}>Go to My Lists</button>
+          <button onClick={() => navigate(".")}>Go to My Lists</button>
         </NotFoundContainer>
       </Container>
     );

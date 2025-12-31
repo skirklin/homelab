@@ -1,11 +1,17 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
-import { AuthProvider, useAuth } from "./shared/AuthContext";
+import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
+import { GroceriesModule } from "@kirkl/groceries";
+import { RecipesModule } from "@kirkl/recipes";
+import { UpkeepModule } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
 import { Dashboard } from "./shared/Dashboard";
 import { LifeProvider } from "./modules/life/context";
 import { LifeModule } from "./modules/life";
+
+// Initialize shared backend
+initializeBackend("home.kirkl.in");
 
 const antTheme = {
   token: {
@@ -38,6 +44,9 @@ function AppRoutes() {
             </LifeProvider>
           }
         />
+        <Route path="/groceries/*" element={<GroceriesModule />} />
+        <Route path="/recipes/*" element={<RecipesModule />} />
+        <Route path="/upkeep/*" element={<UpkeepModule />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

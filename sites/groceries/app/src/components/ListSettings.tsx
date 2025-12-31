@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Button, Input, Modal, message } from "antd";
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useAuth } from "@kirkl/shared";
+import { useGroceriesContext } from "../groceries-context";
 import { renameList, renameUserSlug, removeUserSlug, deleteList, updateCategories } from "../firestore";
 import type { CategoryDef } from "../types";
 
@@ -117,7 +118,8 @@ interface Props {
 
 export function ListSettings({ slug, listId, onBack }: Props) {
   const navigate = useNavigate();
-  const { state } = useAppContext();
+  const { user } = useAuth();
+  const { state } = useGroceriesContext();
 
   // Handle Escape key to go back
   useEffect(() => {
@@ -212,7 +214,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   };
 
   const handleChangeSlug = async () => {
-    if (!newSlug.trim() || !state.authUser) return;
+    if (!newSlug.trim() || !user) return;
 
     const cleanSlug = newSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
@@ -228,9 +230,9 @@ export function ListSettings({ slug, listId, onBack }: Props) {
 
     setSubmitting(true);
     try {
-      await renameUserSlug(state.authUser.uid, slug, cleanSlug);
+      await renameUserSlug(user.uid, slug, cleanSlug);
       setSlugModalOpen(false);
-      navigate(`/${cleanSlug}`, { replace: true });
+      navigate(cleanSlug, { replace: true });
       message.success("URL updated");
     } catch (error) {
       console.error("Failed to change slug:", error);
@@ -241,7 +243,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   };
 
   const handleRemoveFromMyLists = async () => {
-    if (!state.authUser) return;
+    if (!user) return;
 
     Modal.confirm({
       title: "Remove from My Lists?",
@@ -249,15 +251,15 @@ export function ListSettings({ slug, listId, onBack }: Props) {
       okText: "Remove",
       okButtonProps: { danger: true },
       onOk: async () => {
-        await removeUserSlug(state.authUser!.uid, slug);
-        navigate("/");
+        await removeUserSlug(user!.uid, slug);
+        navigate(".");
         message.success("List removed from your account");
       },
     });
   };
 
   const handleDeleteList = async () => {
-    if (!state.authUser) return;
+    if (!user) return;
 
     Modal.confirm({
       title: "Delete List Forever?",
@@ -265,9 +267,9 @@ export function ListSettings({ slug, listId, onBack }: Props) {
       okText: "Delete Forever",
       okButtonProps: { danger: true },
       onOk: async () => {
-        await removeUserSlug(state.authUser!.uid, slug);
+        await removeUserSlug(user!.uid, slug);
         await deleteList(listId);
-        navigate("/");
+        navigate(".");
         message.success("List deleted");
       },
     });

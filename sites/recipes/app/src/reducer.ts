@@ -9,7 +9,6 @@ export function initState(): AppState {
       boxes: new Map<string, BoxEntry>(),
       writeable: true,
       users: new Map<string, UserEntry>(),
-      authUser: undefined,  // undefined until Firebase auth check completes
       loading: 0,
       subscriptionsReady: false,
     }
@@ -68,14 +67,8 @@ export function recipeBoxReducer(prevState: AppState, action: ActionType): AppSt
         subscriptionsReady: prevState.subscriptionsReady || newLoading === 0
       }
     }
-    case "SET_AUTH_USER": {
-      const authUser = action.authUser
-      // authUser can be: undefined (not checked yet), null (logged out), or User (logged in)
-      if (authUser !== prevState.authUser) {
-        return { ...initState(), authUser }
-      } else {
-        return prevState
-      }
+    case "RESET_STATE": {
+      return initState();
     }
     case "ADD_USER": {
       const user = action.user

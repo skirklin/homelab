@@ -1,20 +1,28 @@
-import React, { useReducer } from 'react';
-import { recipeBoxReducer, initState, Context } from './context';
-import { AppState, ActionType } from './types';
+import React from 'react';
+import { BrowserRouter } from 'react-router-dom';
+import { AuthProvider, initializeBackend } from '@kirkl/shared';
+import { RecipesProvider } from './context';
 import { CookingModeProvider } from './CookingModeContext';
-import Router from './Router';
+import Auth from './Auth';
+import { RecipesRoutes } from './RecipesRoutes';
 
+// Initialize backend for standalone mode
+initializeBackend('recipes.kirkl.in');
 
 function App() {
-  const [state, dispatch] = useReducer<React.Reducer<AppState, ActionType>>(recipeBoxReducer, initState())
-
   return (
-    <Context.Provider value={{ state, dispatch }}>
-      <CookingModeProvider>
-        <Router />
-      </CookingModeProvider>
-    </Context.Provider>
-  )
+    <AuthProvider>
+      <RecipesProvider>
+        <CookingModeProvider>
+          <Auth>
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <RecipesRoutes />
+            </BrowserRouter>
+          </Auth>
+        </CookingModeProvider>
+      </RecipesProvider>
+    </AuthProvider>
+  );
 }
 
-export default App
+export default App;

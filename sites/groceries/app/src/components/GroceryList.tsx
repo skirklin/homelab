@@ -4,6 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Spin, Button } from "antd";
 import { DndContext, DragOverlay, MeasuringStrategy, pointerWithin, type DragEndEvent, type DragStartEvent, type Modifier } from "@dnd-kit/core";
 import styled from "styled-components";
+import { useAuth } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
 
 // Custom modifier: only snap Y axis to cursor center, keep original X offset
@@ -20,7 +21,7 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
     y: transform.y + offsetY - draggingNodeRect.height / 2,
   };
 };
-import { useAppContext } from "../context";
+import { useGroceriesContext } from "../groceries-context";
 import { subscribeToList, getItemsByCategoryId } from "../subscription";
 import { updateItemCategory } from "../firestore";
 import { Header } from "./Header";
@@ -102,7 +103,8 @@ type View = "list" | "history" | "settings";
 export function GroceryList() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { state, dispatch } = useAppContext();
+  const { user } = useAuth();
+  const { state, dispatch } = useGroceriesContext();
   const currentListIdRef = useRef<string | null>(null);
   const unsubscribersRef = useRef<(() => void)[]>([]);
   const [view, setView] = useState<View>("list");
@@ -120,7 +122,7 @@ export function GroceryList() {
   }, [slug, listId]);
 
   useEffect(() => {
-    if (!state.authUser || !listId) return;
+    if (!user || !listId) return;
 
     // Only resubscribe if the list ID changed
     if (currentListIdRef.current === listId) return;
@@ -131,14 +133,14 @@ export function GroceryList() {
 
     currentListIdRef.current = listId;
 
-    subscribeToList(listId, state.authUser.uid, dispatch).then((unsubs) => {
+    subscribeToList(listId, user.uid, dispatch).then((unsubs) => {
       unsubscribersRef.current = unsubs;
     });
 
     return () => {
       unsubscribersRef.current.forEach((unsub) => unsub());
     };
-  }, [state.authUser, listId, dispatch]);
+  }, [user, listId, dispatch]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const item = event.active.data.current?.item as GroceryItem;
@@ -182,7 +184,7 @@ export function GroceryList() {
           <NotFoundText>
             You don't have a list called "/{slug}"
           </NotFoundText>
-          <Button type="primary" onClick={() => navigate("/")}>
+          <Button type="primary" onClick={() => navigate(".")}>
             Go to My Lists
           </Button>
         </NotFoundContent>
@@ -195,7 +197,7 @@ export function GroceryList() {
       <ShoppingTrips
         trips={state.trips}
         categories={state.list?.categories || []}
-        userId={state.authUser?.uid || ""}
+        userId={user?.uid || ""}
         onBack={() => setView("list")}
       />
     );

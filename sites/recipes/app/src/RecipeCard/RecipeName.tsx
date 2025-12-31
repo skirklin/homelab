@@ -6,6 +6,7 @@ import { Title } from '../StyledComponents';
 import { getRecipeFromState } from '../state';
 import { getEditableSetter, RecipeCardProps } from './RecipeCard';
 import { Input } from 'antd';
+import { useAuth } from '@kirkl/shared';
 
 const EditableTitle = styled(Input)`
   font-size: 2em;
@@ -22,12 +23,13 @@ const EditableTitle = styled(Input)`
 function RecipeName(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const [editable, setEditablePrimitive] = useState(false);
 
   const name = recipe ? recipe.getName() : undefined
   const [value, setValue] = useState(name);
-  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive)
+  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive, authUser?.uid)
   if (recipe === undefined) {
     return null
   }

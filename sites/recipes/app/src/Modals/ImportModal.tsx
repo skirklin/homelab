@@ -10,6 +10,7 @@ import { RecipeEntry } from '../storage';
 import { BoxId, Visibility } from '../types';
 import { addRecipe } from '../firestore';
 import { getAppUserFromState } from '../state';
+import { useAuth } from '@kirkl/shared';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -40,8 +41,9 @@ function ImportModal(props: ImportProps) {
   const [value, setValue] = useState<string>();
   const [discovered, setDiscovered] = useState<RecipeEntry[]>([])
   const { dispatch, state } = useContext(Context)
+  const { user: authUser } = useAuth();
 
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
   async function import_() {
     setSpinning(true)
     if (boxId === undefined || value === "") {

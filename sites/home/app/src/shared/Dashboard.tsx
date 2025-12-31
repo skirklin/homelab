@@ -58,31 +58,27 @@ const apps = [
     icon: <ExperimentOutlined />,
     color: "#7c3aed",
     path: "/life",
-    external: false,
   },
   {
     name: "Recipes",
     description: "Your recipe collection",
     icon: <BookOutlined />,
     color: "#2ca6a4",
-    path: "https://recipes.kirkl.in",
-    external: true,
+    path: "/recipes",
   },
   {
     name: "Groceries",
     description: "Shopping lists",
     icon: <ShoppingCartOutlined />,
     color: "#2ca6a4",
-    path: "https://groceries.kirkl.in",
-    external: true,
+    path: "/groceries",
   },
   {
     name: "Upkeep",
     description: "Household tasks",
     icon: <CheckSquareOutlined />,
     color: "#5c7cfa",
-    path: "https://upkeep.kirkl.in",
-    external: true,
+    path: "/upkeep",
   },
 ];
 
@@ -90,11 +86,7 @@ export function Dashboard() {
   const navigate = useNavigate();
 
   const handleClick = (app: typeof apps[0]) => {
-    if (app.external) {
-      window.open(app.path, "_blank");
-    } else {
-      navigate(app.path);
-    }
+    navigate(app.path);
   };
 
   return (

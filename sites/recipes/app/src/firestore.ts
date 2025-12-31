@@ -3,14 +3,14 @@ import React from 'react';
 import { Recipe } from "schema-dts"
 import { db } from './backend';
 import { boxConverter, BoxEntry, recipeConverter, RecipeEntry, userConverter, UserEntry } from './storage';
-import { ActionType, AppState, BoxId, EnrichmentStatus, RecipeId, UserId, Visibility } from './types';
+import { ActionType, BoxId, EnrichmentStatus, RecipeId, UserId, Visibility } from './types';
 
-export async function getRecipe(state: AppState, boxId: BoxId | undefined, recipeId: RecipeId | undefined) {
+export async function getRecipe(boxes: Map<string, BoxEntry>, boxId: BoxId | undefined, recipeId: RecipeId | undefined) {
   let recipe: RecipeEntry | undefined
   if (boxId === undefined || recipeId === undefined) {
     return undefined
   }
-  const box = state.boxes.get(boxId);
+  const box = boxes.get(boxId);
   if (box !== undefined) {
     recipe = box.recipes.get(recipeId)
   } else {
@@ -20,18 +20,17 @@ export async function getRecipe(state: AppState, boxId: BoxId | undefined, recip
   return recipe
 }
 
-export async function getRecipes(state: AppState, box: BoxEntry) {
-  const user = state.authUser;
+export async function getRecipes(box: BoxEntry, userId: string | null) {
   const recipes = new Map<string, RecipeEntry>()
-  if (user === null) {
+  if (userId === null) {
     return recipes
   }
   const colRef = collection(db, "boxes", box.id as string, "recipes").withConverter(recipeConverter)
-  if (box.visibility === "public" || box.owners.includes(user.uid)) {
+  if (box.visibility === "public" || box.owners.includes(userId)) {
     (await getDocs(colRef))
       .docs.forEach(doc => recipes.set(doc.id, doc.data()));
   } else {
-    (await getDocs(query(colRef, where("owners", "array-contains", user.uid))))
+    (await getDocs(query(colRef, where("owners", "array-contains", userId))))
       .docs.forEach(doc => recipes.set(doc.id, doc.data()));
     (await getDocs(query(colRef, where("visibility", "==", "public"))))
       .docs.forEach(doc => recipes.set(doc.id, doc.data()));
@@ -39,18 +38,18 @@ export async function getRecipes(state: AppState, box: BoxEntry) {
   return recipes
 }
 
-export async function getBox(state: AppState, boxId: BoxId) {
+export async function getBox(boxId: BoxId, userId: string | null) {
   const boxRef = doc(db, "boxes", boxId).withConverter(boxConverter)
   const boxDoc = await getDoc(boxRef)
   if (!boxDoc.exists() || boxDoc.data() === undefined) {
     return undefined
   }
   const box = boxDoc.data()
-  box.recipes = await getRecipes(state, box)
+  box.recipes = await getRecipes(box, userId)
   return box
 }
 
-export async function getUser(state: AppState, userId: UserId) {
+export async function getUser(userId: UserId) {
   const userRef = doc(db, "users", userId).withConverter(userConverter)
   const userDoc = await getDoc(userRef)
   if (!userDoc.exists() || userDoc.data() === undefined) {
@@ -128,9 +127,9 @@ export async function addBox(user: UserEntry, name: string) {
   return boxRef
 }
 
-export async function deleteRecipe(state: AppState, boxId: BoxId, recipeId: RecipeId, dispatch: React.Dispatch<ActionType>) {
+export async function deleteRecipe(boxes: Map<string, BoxEntry>, boxId: BoxId, recipeId: RecipeId, dispatch: React.Dispatch<ActionType>) {
   if (recipeId.startsWith("uniqueId=")) {
-    const box = state.boxes.get(boxId)
+    const box = boxes.get(boxId)
     if (box !== undefined) {
       box.recipes.delete(recipeId)
     }
@@ -150,7 +149,7 @@ export async function saveRecipe(boxId: BoxId, recipeId: RecipeId, recipe: Recip
   return docRef
 }
 
-export async function deleteBox(state: AppState, boxId: BoxId, dispatch: React.Dispatch<ActionType>) {
+export async function deleteBox(boxId: BoxId, dispatch: React.Dispatch<ActionType>) {
   dispatch({ type: "REMOVE_BOX", boxId })
   deleteDoc(doc(db, "boxes", boxId))
 }

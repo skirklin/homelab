@@ -7,7 +7,8 @@ import { parseCategories, formatCategories } from '../converters';
 import { getRecipeFromState, getAppUserFromState, getBoxFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
 import { RecipeCardProps } from './RecipeCard';
-import { useMediaQuery } from 'react-responsive'
+import { useMediaQuery } from 'react-responsive';
+import { useAuth } from '@kirkl/shared';
 
 
 const TagsArea = styled.div`
@@ -46,6 +47,7 @@ function Tags(props: RecipeCardProps) {
   const [editableTag, setEditableTag] = useState<number>();
   const [inputValue, setInputValue] = useState("");
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
 
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
@@ -59,7 +61,7 @@ function Tags(props: RecipeCardProps) {
     dispatch({ type: "SET_CATEGORIES", recipeId, boxId, payload: formatCategories(tags) })
   }
 
-  const user = getAppUserFromState(state);
+  const user = getAppUserFromState(state, authUser?.uid);
   const editable = (state.writeable && canUpdateRecipe(recipe, box, user))
 
   function onClose(idx: number) {

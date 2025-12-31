@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Modal, Input, InputNumber, Select, Button, message } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useAuth } from "@kirkl/shared";
 import { addTask, updateTask, deleteTask } from "../firestore";
 import type { Task, Frequency, FrequencyUnit } from "../types";
 
@@ -46,7 +46,7 @@ interface TaskModalProps {
 }
 
 export function TaskModal({ open, task, onClose }: TaskModalProps) {
-  const { state } = useAppContext();
+  const { user } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [frequencyValue, setFrequencyValue] = useState(1);
@@ -73,7 +73,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
   }, [open, task]);
 
   const handleSubmit = async () => {
-    if (!name.trim() || !state.authUser) return;
+    if (!name.trim() || !user) return;
 
     const frequency: Frequency = {
       value: frequencyValue,
@@ -98,7 +98,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
           frequency,
           lastCompleted: null,
           notifyUsers: [],
-          createdBy: state.authUser.uid,
+          createdBy: user.uid,
           createdAt: now,
           updatedAt: now,
         });

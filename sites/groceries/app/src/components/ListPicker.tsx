@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, List, Modal, Spin } from "antd";
 import { PlusOutlined, LinkOutlined, RightOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAppContext } from "../context";
+import { useAuth } from "@kirkl/shared";
+import { useGroceriesContext } from "../groceries-context";
 import { createList, setUserSlug, getListById } from "../firestore";
 import { appStorage, StorageKeys } from "../storage";
 
@@ -90,7 +91,8 @@ interface ListInfo {
 }
 
 export function ListPicker() {
-  const { state } = useAppContext();
+  const { user } = useAuth();
+  const { state } = useGroceriesContext();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [lists, setLists] = useState<ListInfo[]>([]);
@@ -115,7 +117,7 @@ export function ListPicker() {
 
     // Only auto-navigate if we have a saved last-used list that still exists
     if (lastUsed && slugs.includes(lastUsed)) {
-      navigate(`/${lastUsed}`, { replace: true });
+      navigate(lastUsed, { replace: true });
     }
   }, [state.userSlugs, navigate, searchParams]);
 
@@ -148,7 +150,7 @@ export function ListPicker() {
   }, [state.userSlugs]);
 
   const handleCreateList = async () => {
-    if (!newName.trim() || !state.authUser) return;
+    if (!newName.trim() || !user) return;
 
     const name = newName.trim();
     const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
@@ -161,10 +163,10 @@ export function ListPicker() {
 
     setSubmitting(true);
     try {
-      await createList(name, slug, state.authUser.uid);
+      await createList(name, slug, user.uid);
       setCreateModalOpen(false);
       setNewName("");
-      navigate(`/${slug}`);
+      navigate(slug);
     } catch (error) {
       console.error("Failed to create list:", error);
     } finally {
@@ -173,7 +175,7 @@ export function ListPicker() {
   };
 
   const handleAddSharedList = async () => {
-    if (!sharedListSlug.trim() || !sharedListId.trim() || !state.authUser) return;
+    if (!sharedListSlug.trim() || !sharedListId.trim() || !user) return;
 
     const slug = sharedListSlug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
@@ -193,11 +195,11 @@ export function ListPicker() {
         return;
       }
 
-      await setUserSlug(state.authUser.uid, slug, sharedListId.trim());
+      await setUserSlug(user.uid, slug, sharedListId.trim());
       setAddModalOpen(false);
       setSharedListSlug("");
       setSharedListId("");
-      navigate(`/${slug}`);
+      navigate(slug);
     } catch (error) {
       console.error("Failed to add shared list:", error);
     } finally {
@@ -206,7 +208,7 @@ export function ListPicker() {
   };
 
   const handleSelectList = (slug: string) => {
-    navigate(`/${slug}`);
+    navigate(slug);
   };
 
   return (

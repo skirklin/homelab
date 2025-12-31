@@ -2,9 +2,9 @@ import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
+import { useAuth } from "@kirkl/shared";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { useLife } from "./context";
-import { useAuth } from "../../shared/AuthContext";
 import { getOrCreateUserLog, setCurrentLogId } from "./firestore";
 import { logFromStore } from "../../shared/types";
 

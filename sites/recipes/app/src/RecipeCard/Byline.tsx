@@ -5,6 +5,7 @@ import { Context } from '../context';
 import { authorToStr, strToAuthor } from '../converters';
 import { getRecipeFromState } from '../state';
 import { getEditableSetter, RecipeCardProps } from './RecipeCard';
+import { useAuth } from '@kirkl/shared';
 
 const EditableByline = styled(Input)`
   font-size: var(--font-size-sm);
@@ -34,10 +35,11 @@ function Byline(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const [editable, setEditablePrimitive] = useState(false);
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) { return null }
 
-  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive)
+  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive, authUser?.uid)
 
   const rd = recipe.changed ? recipe.changed : recipe.data
   const byline = authorToStr(rd.author)

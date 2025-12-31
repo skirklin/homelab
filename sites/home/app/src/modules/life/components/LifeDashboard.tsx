@@ -2,7 +2,7 @@ import { useState } from "react";
 import styled from "styled-components";
 import { Button } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import { useAuth } from "../../../shared/AuthContext";
+import { useAuth } from "@kirkl/shared";
 import { useLife } from "../context";
 import { useEntriesSubscription } from "../subscription";
 import { ActivityCard } from "./ActivityCard";

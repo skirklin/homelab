@@ -9,6 +9,7 @@ import { addRecipe } from '../firestore';
 import { RecipeEntry } from '../storage';
 import { getAppUserFromState } from '../state';
 import { BoxId, Visibility } from '../types';
+import { useAuth } from '@kirkl/shared';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -62,8 +63,9 @@ function GenerateRecipeModal(props: GenerateRecipeModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [generatedRecipe, setGeneratedRecipe] = useState<Recipe | null>(null);
   const { dispatch, state } = useContext(Context);
+  const { user: authUser } = useAuth();
 
-  const user = getAppUserFromState(state);
+  const user = getAppUserFromState(state, authUser?.uid);
 
   async function handleGenerate() {
     if (!prompt.trim()) return;

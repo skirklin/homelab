@@ -4,6 +4,7 @@ import { subscribeToBox, unsubscribeFromBox } from '../firestore';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import { BoxId } from '../types';
+import { useAuth } from '@kirkl/shared';
 
 interface DeleteProps {
   boxId: BoxId
@@ -11,12 +12,13 @@ interface DeleteProps {
 
 function SubscribeButton(props: DeleteProps) {
   const { state } = useContext(Context)
+  const { user: authUser } = useAuth();
   const { writeable } = state;
 
   const { boxId } = props;
   const box = getBoxFromState(state, boxId)
 
-  const user = getAppUserFromState(state)
+  const user = getAppUserFromState(state, authUser?.uid)
 
   if (box === undefined || user === undefined) {
     return null

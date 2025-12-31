@@ -5,6 +5,7 @@ import { Context } from '../context';
 import { getEditableSetter, RecipeCardProps } from './RecipeCard';
 import styled from 'styled-components';
 import { StyledTextArea } from '../StyledComponents';
+import { useAuth } from '@kirkl/shared';
 
 const NotesSection = styled.div`
   margin-top: var(--space-md);
@@ -38,12 +39,13 @@ function Notes(props: RecipeCardProps) {
   const [editable, setEditablePrimitive] = useState(false);
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
+  const { user: authUser } = useAuth();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) {
     return null
   }
 
-  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive)
+  const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive, authUser?.uid)
 
   const rd = recipe.changed ? recipe.changed : recipe.data
   const comment = commentToStr(rd.comment)

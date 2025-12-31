@@ -3,7 +3,7 @@ import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, create
 import { Button, Input, message } from "antd";
 import { GoogleOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { auth } from "../backend";
+import { useAuth, getBackend } from "@kirkl/shared";
 
 const Container = styled.div`
   display: flex;
@@ -48,6 +48,7 @@ export function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const { auth } = getBackend();
 
   const handleGoogleSignIn = async () => {
     const provider = new GoogleAuthProvider();

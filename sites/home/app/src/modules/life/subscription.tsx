@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { collection, query, onSnapshot, orderBy, limit } from "firebase/firestore";
-import { db } from "../../shared/backend";
+import { getBackend } from "@kirkl/shared";
 import { useLife } from "./context";
 import { setCurrentLogId, getCurrentLogId } from "./firestore";
 import type { LogEntry, LogEntryStore } from "../../shared/types";
@@ -30,6 +30,7 @@ export function useEntriesSubscription(logId: string | null) {
     // Set current log ID for firestore operations
     setCurrentLogId(logId);
 
+    const { db } = getBackend();
     const entriesRef = collection(db, "lifeLogs", logId, "entries");
     const q = query(entriesRef, orderBy("startTime", "desc"), limit(100));
 
