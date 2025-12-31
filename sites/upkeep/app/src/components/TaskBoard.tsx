@@ -69,7 +69,7 @@ export function TaskBoard() {
   // Save last-used list
   useEffect(() => {
     if (slug && listId) {
-      localStorage.setItem("household-last-list", slug);
+      localStorage.setItem("upkeep-last-list", slug);
     }
   }, [slug, listId]);
 

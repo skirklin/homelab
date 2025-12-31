@@ -4,7 +4,7 @@ import { initializeFirestore, connectFirestoreEmulator, persistentLocalCache, pe
 
 const firebaseConfig = {
   apiKey: "AIzaSyDnTpynPmWemzfi-AHzPEgu2TqZ0e-8UUA",
-  authDomain: "household.kirkl.in",
+  authDomain: "upkeep.kirkl.in",
   projectId: "recipe-box-335721",
   storageBucket: "recipe-box-335721.appspot.com",
   messagingSenderId: "779965064363",

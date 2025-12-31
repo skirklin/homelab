@@ -109,7 +109,7 @@ export function ListPicker() {
   useEffect(() => {
     const slugs = Object.keys(state.userSlugs);
     if (slugs.length > 0) {
-      const lastUsed = localStorage.getItem("household-last-list");
+      const lastUsed = localStorage.getItem("upkeep-last-list");
       const targetSlug = lastUsed && slugs.includes(lastUsed) ? lastUsed : slugs[0];
       navigate(`/${targetSlug}`, { replace: true });
     }
@@ -208,7 +208,7 @@ export function ListPicker() {
   return (
     <Container>
       <Header>
-        <Title>Household Tasks</Title>
+        <Title>Upkeep</Title>
       </Header>
       <Content>
         <Actions>

@@ -4,7 +4,7 @@ importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compa
 
 firebase.initializeApp({
   apiKey: "AIzaSyDnTpynPmWemzfi-AHzPEgu2TqZ0e-8UUA",
-  authDomain: "household.kirkl.in",
+  authDomain: "upkeep.kirkl.in",
   projectId: "recipe-box-335721",
   storageBucket: "recipe-box-335721.appspot.com",
   messagingSenderId: "779965064363",
@@ -17,12 +17,12 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message:', payload);
 
-  const notificationTitle = payload.notification?.title || 'Household Task Due';
+  const notificationTitle = payload.notification?.title || 'Upkeep Task Due';
   const notificationOptions = {
     body: payload.notification?.body || 'A task needs your attention',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
-    tag: payload.data?.taskId || 'household-notification',
+    tag: payload.data?.taskId || 'upkeep-notification',
     data: payload.data,
   };
 
@@ -39,7 +39,7 @@ self.addEventListener('notificationclick', (event) => {
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // If a window is already open, focus it
       for (const client of clientList) {
-        if (client.url.includes('household') && 'focus' in client) {
+        if (client.url.includes('upkeep') && 'focus' in client) {
           return client.focus();
         }
       }

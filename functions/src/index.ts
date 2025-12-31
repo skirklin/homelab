@@ -516,7 +516,7 @@ export const sendHouseholdTaskNotifications = onSchedule(
             },
             webpush: {
               fcmOptions: {
-                link: "https://household.kirkl.in",
+                link: "https://upkeep.kirkl.in",
               },
             },
             data: {

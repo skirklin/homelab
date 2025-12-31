@@ -25,11 +25,11 @@
       "ignore": ["firebase.json", "**/.*"]
     },
     {
-      "target": "household",
-      "public": "sites/household/app/dist",
+      "target": "upkeep",
+      "public": "sites/upkeep/app/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
       "rewrites": [{ "source": "**", "destination": "/index.html" }],
-      "predeploy": ["npm --prefix sites/household/app run build"]
+      "predeploy": ["npm --prefix sites/upkeep/app run build"]
     }
   ],
   "firestore": {
