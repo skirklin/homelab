@@ -27,6 +27,9 @@ const Title = styled.h1`
 const Content = styled.main`
   flex: 1;
   padding: var(--space-md);
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
 `;
 
 const Actions = styled.div`
@@ -106,7 +109,7 @@ export function ListPicker() {
   useEffect(() => {
     const slugs = Object.keys(state.userSlugs);
     if (slugs.length > 0) {
-      const lastUsed = localStorage.getItem("groceries-last-list");
+      const lastUsed = localStorage.getItem("household-last-list");
       const targetSlug = lastUsed && slugs.includes(lastUsed) ? lastUsed : slugs[0];
       navigate(`/${targetSlug}`, { replace: true });
     }
@@ -205,7 +208,7 @@ export function ListPicker() {
   return (
     <Container>
       <Header>
-        <Title>My Lists</Title>
+        <Title>Household Tasks</Title>
       </Header>
       <Content>
         <Actions>
@@ -214,7 +217,7 @@ export function ListPicker() {
             icon={<PlusOutlined />}
             onClick={() => setCreateModalOpen(true)}
           >
-            New List
+            New Task List
           </Button>
           <Button
             icon={<LinkOutlined />}
@@ -228,8 +231,8 @@ export function ListPicker() {
           <EmptyState><Spin /></EmptyState>
         ) : lists.length === 0 ? (
           <EmptyState>
-            <p>No lists yet.</p>
-            <p>Create a new list to get started!</p>
+            <p>No task lists yet.</p>
+            <p>Create a new list to start tracking your household tasks!</p>
           </EmptyState>
         ) : (
           <List
@@ -249,7 +252,7 @@ export function ListPicker() {
 
       {/* Create New List Modal */}
       <Modal
-        title="Create New List"
+        title="Create New Task List"
         open={createModalOpen}
         onOk={handleCreateList}
         onCancel={() => {
@@ -263,7 +266,7 @@ export function ListPicker() {
         <Input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder="Groceries"
+          placeholder="Home Maintenance"
           onPressEnter={handleCreateList}
           autoFocus
         />
@@ -297,7 +300,7 @@ export function ListPicker() {
             <Input
               value={sharedListSlug}
               onChange={(e) => setSharedListSlug(e.target.value)}
-              placeholder="Groceries"
+              placeholder="home"
             />
           </FormField>
         </ModalForm>

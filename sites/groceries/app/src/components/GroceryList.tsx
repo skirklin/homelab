@@ -111,6 +111,13 @@ export function GroceryList() {
   // Look up listId from user's slugs
   const listId = slug ? state.userSlugs[slug] : undefined;
 
+  // Save last-used list
+  useEffect(() => {
+    if (slug && listId) {
+      localStorage.setItem("groceries-last-list", slug);
+    }
+  }, [slug, listId]);
+
   useEffect(() => {
     if (!state.authUser || !listId) return;
 

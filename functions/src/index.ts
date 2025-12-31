@@ -6,6 +6,7 @@ import * as jsdom from 'jsdom';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 import Anthropic from '@anthropic-ai/sdk';
 import { defineSecret } from "firebase-functions/params";
 // Polyfill fetch globals for Anthropic SDK
@@ -380,5 +381,170 @@ Tags should be lowercase and include: cuisine type, meal type, main protein/ingr
         console.error(`Error enriching recipe ${recipeDoc.id}:`, error);
       }
     }
+  }
+)
+
+// ===== Household Task Notifications =====
+
+interface TaskFrequency {
+  value: number;
+  unit: "days" | "weeks" | "months";
+}
+
+interface TaskData {
+  name: string;
+  frequency: TaskFrequency;
+  lastCompleted: Timestamp | null;
+  notifyUsers: string[];
+}
+
+function calculateDueDate(lastCompleted: Date, frequency: TaskFrequency): Date {
+  const due = new Date(lastCompleted);
+  switch (frequency.unit) {
+    case "days":
+      due.setDate(due.getDate() + frequency.value);
+      break;
+    case "weeks":
+      due.setDate(due.getDate() + frequency.value * 7);
+      break;
+    case "months":
+      due.setMonth(due.getMonth() + frequency.value);
+      break;
+  }
+  return due;
+}
+
+function isDateToday(date: Date): boolean {
+  const today = new Date();
+  return (
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  );
+}
+
+// Run every 5 minutes for testing (change back to "0 8 * * *" for production)
+export const sendHouseholdTaskNotifications = onSchedule(
+  {
+    schedule: "*/5 * * * *", // Every 5 minutes for testing
+    timeZone: "America/Los_Angeles",
+  },
+  async () => {
+    console.log("Starting household task notification check");
+
+    const messaging = getMessaging();
+
+    // Get all tasks from all task lists
+    const tasksSnapshot = await db.collectionGroup("tasks").get();
+
+    if (tasksSnapshot.empty) {
+      console.log("No tasks found");
+      return;
+    }
+
+    // Group notifications by user
+    const userNotifications: Map<string, { taskName: string; listId: string }[]> = new Map();
+
+    for (const taskDoc of tasksSnapshot.docs) {
+      const task = taskDoc.data() as TaskData;
+
+      // Skip if no one wants notifications for this task
+      if (!task.notifyUsers || task.notifyUsers.length === 0) {
+        continue;
+      }
+
+      // Calculate if task is due today
+      let isDueToday = false;
+
+      if (!task.lastCompleted) {
+        // Never completed = overdue, should have been notified already
+        // But notify if someone just subscribed
+        isDueToday = true;
+      } else {
+        const dueDate = calculateDueDate(task.lastCompleted.toDate(), task.frequency);
+        isDueToday = isDateToday(dueDate);
+      }
+
+      if (isDueToday) {
+        // Extract list ID from path: taskLists/{listId}/tasks/{taskId}
+        const listId = taskDoc.ref.parent.parent?.id || "unknown";
+
+        for (const userId of task.notifyUsers) {
+          if (!userNotifications.has(userId)) {
+            userNotifications.set(userId, []);
+          }
+          userNotifications.get(userId)!.push({ taskName: task.name, listId });
+        }
+      }
+    }
+
+    console.log(`Found ${userNotifications.size} users with due tasks`);
+
+    // Send notifications to each user
+    for (const [userId, tasks] of userNotifications) {
+      // Get user's FCM tokens
+      const userDoc = await db.doc(`users/${userId}`).get();
+      const userData = userDoc.data();
+
+      if (!userData?.fcmTokens || userData.fcmTokens.length === 0) {
+        console.log(`No FCM tokens for user ${userId}`);
+        continue;
+      }
+
+      // Build notification message
+      const taskCount = tasks.length;
+      const title = taskCount === 1
+        ? `${tasks[0].taskName} is due today`
+        : `${taskCount} household tasks due today`;
+
+      const body = taskCount === 1
+        ? "Tap to view details"
+        : tasks.slice(0, 3).map(t => t.taskName).join(", ") +
+          (taskCount > 3 ? ` and ${taskCount - 3} more` : "");
+
+      // Send to all tokens
+      const tokens = userData.fcmTokens as string[];
+      const invalidTokens: string[] = [];
+
+      for (const token of tokens) {
+        try {
+          await messaging.send({
+            token,
+            notification: {
+              title,
+              body,
+            },
+            webpush: {
+              fcmOptions: {
+                link: "https://household.kirkl.in",
+              },
+            },
+            data: {
+              type: "household_task_due",
+              taskCount: String(taskCount),
+            },
+          });
+          console.log(`Sent notification to user ${userId}`);
+        } catch (error: unknown) {
+          const fcmError = error as { code?: string };
+          if (fcmError.code === "messaging/registration-token-not-registered" ||
+              fcmError.code === "messaging/invalid-registration-token") {
+            invalidTokens.push(token);
+          } else {
+            console.error(`Error sending to user ${userId}:`, error);
+          }
+        }
+      }
+
+      // Clean up invalid tokens
+      if (invalidTokens.length > 0) {
+        await db.doc(`users/${userId}`).update({
+          fcmTokens: FieldValue.arrayRemove(...invalidTokens),
+        });
+        console.log(`Removed ${invalidTokens.length} invalid tokens for user ${userId}`);
+      }
+    }
+
+    console.log("Household task notification check complete");
   }
 )

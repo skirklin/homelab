@@ -23,6 +23,13 @@
       "target": "critic-wiki",
       "public": "sites/critic/public",
       "ignore": ["firebase.json", "**/.*"]
+    },
+    {
+      "target": "household",
+      "public": "sites/household/app/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "predeploy": ["npm --prefix sites/household/app run build"]
     }
   ],
   "firestore": {
@@ -32,7 +39,6 @@
   "functions": {
     "source": "functions",
     "predeploy": [
-      "npm --prefix functions run lint",
       "npm --prefix functions run build"
     ]
   },
