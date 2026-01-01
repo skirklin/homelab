@@ -1,9 +1,9 @@
 import _ from 'lodash';
 import { useContext, useEffect, useState } from 'react';
 import { Popconfirm, Table, Tooltip } from 'antd';
-import { ColumnsType } from 'antd/es/table';
+import type { ColumnsType } from 'antd/es/table';
 
-import { Key, TableRowSelection } from 'antd/es/table/interface';
+import type { Key, TableRowSelection } from 'antd/es/table/interface';
 import { DeleteOutlined, CopyOutlined, RobotOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import Filterbox from './Filterbox';
@@ -17,8 +17,8 @@ import { PickBoxModal } from '../Modals/PickBoxModal';
 import BatchEnrichmentModal from '../Modals/BatchEnrichmentModal';
 import { ActionButton } from '../StyledComponents';
 import './RecipeTable.css'
-import { BoxEntry, RecipeEntry } from '../storage';
-import { BoxId, Visibility } from '../types';
+import type { BoxEntry, RecipeEntry } from '../storage';
+import { type BoxId, Visibility } from '../types';
 import styled from 'styled-components';
 import { useMediaQuery } from 'react-responsive'
 import VisibilityControl from '../Buttons/Visibility';
@@ -141,12 +141,12 @@ export function RecipeTable(props: RecipeTableProps) {
     onChange: onSelectChange,
   };
 
-  const onNameCell = (record: RowType, rowIndex: number | undefined) => {
+  const onNameCell = (record: RowType, _rowIndex: number | undefined) => {
     return {
       onClick: () => navigate(`boxes/${record.box.id}/recipes/${record.recipe.id}`),
     }
   }
-  const onBoxCell = (record: RowType, rowIndex: number | undefined) => {
+  const onBoxCell = (record: RowType, _rowIndex: number | undefined) => {
     return {
       onClick: () => navigate(`boxes/${record.box.id}`),
     }
@@ -193,7 +193,7 @@ export function RecipeTable(props: RecipeTableProps) {
     {
       key: 'name',
       title: 'Name',
-      render: (value, record) => (
+      render: (_value, record) => (
         <NameCell>
           <RecipeName>{record.recipe.getName()}</RecipeName>
           {record.recipe.pendingEnrichment && (
@@ -216,7 +216,7 @@ export function RecipeTable(props: RecipeTableProps) {
         key: 'box',
         title: 'Box',
         onCell: onBoxCell,
-        render: (value, record) => <BoxName>{record.box.getName()}</BoxName>,
+        render: (_value, record) => <BoxName>{record.box.getName()}</BoxName>,
         className: "recipe-table-clickable-column",
         width: 150,
       }
@@ -229,7 +229,7 @@ export function RecipeTable(props: RecipeTableProps) {
       {
         key: 'description',
         title: 'Description',
-        render: (value, record) => <Description>{record.recipe.getDescription()}</Description>,
+        render: (_value, record) => <Description>{record.recipe.getDescription()}</Description>,
         ellipsis: true,
       }
     )

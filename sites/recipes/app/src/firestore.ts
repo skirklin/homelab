@@ -1,9 +1,9 @@
 import { addDoc, arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
-import React from 'react';
-import { Recipe } from "schema-dts"
+import type React from 'react';
+import type { Recipe } from "schema-dts"
 import { db } from './backend';
 import { boxConverter, BoxEntry, recipeConverter, RecipeEntry, userConverter, UserEntry } from './storage';
-import { ActionType, BoxId, EnrichmentStatus, RecipeId, UserId, Visibility } from './types';
+import { type ActionType, type BoxId, EnrichmentStatus, type RecipeId, type UserId, Visibility } from './types';
 
 export async function getRecipe(boxes: Map<string, BoxEntry>, boxId: BoxId | undefined, recipeId: RecipeId | undefined) {
   let recipe: RecipeEntry | undefined
@@ -81,14 +81,14 @@ export async function unsubscribeFromBox(user: UserEntry | null, boxId: BoxId) {
 }
 
 export async function uploadRecipes(boxId: BoxId, user: UserEntry) {
-  const fileHandles = await window.showOpenFilePicker({
+  const fileHandles = await (window as unknown as { showOpenFilePicker: (opts: { multiple: boolean }) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker({
     multiple: true,
   })
   if (user === null) {
     return
   }
   for (const fh of fileHandles) {
-    fh.getFile().then(f => {
+    fh.getFile().then((f: File) => {
       f.text().then(
         (text: string) => {
           const jsonobj = JSON.parse(text) as Recipe
@@ -191,7 +191,8 @@ export async function applyEnrichment(
   const existingTags = Array.isArray(currentTags) ? currentTags : [currentTags].filter(Boolean);
   const mergedTags = [...new Set([...existingTags, ...enrichment.suggestedTags].map(t => t.toLowerCase()))];
 
-  const updates: Record<string, unknown> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updates: Record<string, any> = {
     pendingEnrichment: deleteField(),
     enrichmentStatus: EnrichmentStatus.done,
   };

@@ -5,7 +5,7 @@ import styled from 'styled-components';
 import { Context } from '../context';
 import { applyEnrichment, rejectEnrichment } from '../firestore';
 import { RecipeEntry } from '../storage';
-import { BoxId, RecipeId } from '../types';
+import type { BoxId, RecipeId } from '../types';
 import { Section, SectionLabel, SuggestedDescription, TagsContainer, Reasoning } from './EnrichmentStyles';
 
 const EnrichmentList = styled.div`

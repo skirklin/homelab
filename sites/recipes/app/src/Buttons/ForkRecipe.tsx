@@ -8,8 +8,8 @@ import { useNavigate } from 'react-router-dom';
 import { addRecipe } from '../firestore';
 import { getAppUserFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
-import { RecipeCardProps } from '../RecipeCard/RecipeCard';
-import { BoxId } from '../types';
+import type { RecipeCardProps } from '../RecipeCard/RecipeCard';
+import type { BoxId } from '../types';
 import { Menu } from 'antd';
 import { useAuth } from '@kirkl/shared';
 
@@ -20,7 +20,7 @@ interface ForkProps extends RecipeCardProps {
 
 export default function ForkButton(props: ForkProps) {
   const { boxId, recipeId, targetBoxId, element } = props;
-  const { state, dispatch } = useContext(Context)
+  const { state } = useContext(Context)
   const { user: authUser } = useAuth();
   const navigate = useNavigate()
   const [isModalVisible, setIsModalVisible] = useState(false)

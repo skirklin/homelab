@@ -1,5 +1,5 @@
-import { BoxEntry, RecipeEntry } from './storage';
-import { AppState, BoxId, RecipeId, UserId } from './types';
+import type { BoxEntry, RecipeEntry } from './storage';
+import type { AppState, BoxId, RecipeId, UserId } from './types';
 
 export function getRecipeFromState(state: AppState, boxId: BoxId, recipeId: RecipeId) {
   const box = state.boxes.get(boxId);

@@ -1,10 +1,11 @@
-import React, { useContext, useState } from 'react';
+import type React from 'react';
+import { useContext, useState } from 'react';
 import styled from 'styled-components';
 import { LinkOutlined } from '@ant-design/icons';
 import { Context } from '../context';
 import { Title } from '../StyledComponents';
 import { getRecipeFromState } from '../state';
-import { getEditableSetter, RecipeCardProps } from './RecipeCard';
+import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import { Input } from 'antd';
 import { useAuth } from '@kirkl/shared';
 

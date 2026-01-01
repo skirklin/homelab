@@ -1,14 +1,14 @@
 import { RobotOutlined } from '@ant-design/icons';
 import { Button, Modal, Spin, Space, Typography, Input, Alert } from 'antd';
 import { useContext, useState } from 'react';
-import { Recipe } from 'schema-dts';
+import type { Recipe } from 'schema-dts';
 import styled from 'styled-components';
 import { generateRecipe } from '../backend';
 import { Context } from '../context';
 import { addRecipe } from '../firestore';
 import { RecipeEntry } from '../storage';
 import { getAppUserFromState } from '../state';
-import { BoxId, Visibility } from '../types';
+import { type BoxId, Visibility } from '../types';
 import { useAuth } from '@kirkl/shared';
 
 const { Text } = Typography;
@@ -62,7 +62,7 @@ function GenerateRecipeModal(props: GenerateRecipeModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatedRecipe, setGeneratedRecipe] = useState<Recipe | null>(null);
-  const { dispatch, state } = useContext(Context);
+  const { state } = useContext(Context);
   const { user: authUser } = useAuth();
 
   const user = getAppUserFromState(state, authUser?.uid);

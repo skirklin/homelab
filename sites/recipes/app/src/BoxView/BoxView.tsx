@@ -5,9 +5,9 @@ import { Context } from "../context";
 
 import { setBoxVisibility } from "../firestore";
 import { getBoxFromState } from "../state";
-import { RecipeTable, RowType } from "../RecipeTable/RecipeTable"
+import { RecipeTable, type RowType } from "../RecipeTable/RecipeTable"
 import { Divider, RecipeActionGroup } from "../StyledComponents";
-import { BoxId, Visibility } from "../types";
+import { type BoxId, Visibility } from "../types";
 import DeleteBox from '../Buttons/DeleteBox';
 import SubscribeButton from "../Buttons/Subscribe";
 import VisibilityControl from "../Buttons/Visibility";

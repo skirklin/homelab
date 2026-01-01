@@ -4,7 +4,7 @@ import { useBoxAction } from "../hooks/useBoxAction";
 import { uploadRecipes } from "../firestore";
 import { getAppUserFromState } from "../state";
 import { ActionButton } from "../StyledComponents";
-import { BoxId } from "../types";
+import type { BoxId } from "../types";
 import { Menu } from "antd";
 import { Context } from "../context";
 import { useAuth } from '@kirkl/shared';

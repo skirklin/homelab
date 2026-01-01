@@ -15,3 +15,8 @@ export function RecipesModule() {
     </RecipesProvider>
   );
 }
+
+// Export providers and routes separately for home app integration
+export { RecipesProvider, useRecipesContext } from "./context";
+export { CookingModeProvider } from "./CookingModeContext";
+export { RecipesRoutes } from "./RecipesRoutes";

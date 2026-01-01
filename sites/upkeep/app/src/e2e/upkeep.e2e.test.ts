@@ -86,7 +86,7 @@ describe("Upkeep E2E Tests", () => {
         roomDefs: [{ id: "bathroom", name: "Bathroom", color: "#3b82f6" }],
       });
 
-      // Create a task with lastCompleted 2 days ago (making it overdue for daily task)
+      // Create a task with lastCompleted 2 days ago (past due for daily task)
       const twoDaysAgo = new Date();
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
 
@@ -127,17 +127,17 @@ describe("Upkeep E2E Tests", () => {
   });
 
   describe("Task Urgency Calculation", () => {
-    it("should correctly identify overdue, today, this week, and later tasks", async () => {
+    it("should correctly identify today, this week, and later tasks", async () => {
       const listRef = await createTestTaskList(ctx, cleanup, {
         name: "Urgency Test",
       });
 
-      // Overdue task (last completed 3 days ago, due daily)
+      // Past due task (last completed 3 days ago, due daily) - shows in "today" column
       const threeDaysAgo = new Date();
       threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
       await createTestTask(ctx, listRef.id, cleanup, {
-        name: "Overdue Task",
+        name: "Past Due Task",
         frequency: { value: 1, unit: "days" },
         lastCompleted: Timestamp.fromDate(threeDaysAgo),
       });

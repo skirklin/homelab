@@ -3,7 +3,7 @@ import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, create
 import { Button, Input, message } from "antd";
 import { GoogleOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth, getBackend } from "@kirkl/shared";
+import { getBackend } from "@kirkl/shared";
 
 const Container = styled.div`
   display: flex;

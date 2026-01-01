@@ -3,8 +3,8 @@ import { useContext, useState } from "react"
 import { addBox } from '../firestore';
 import { getAppUserFromState } from '../state';
 import { Context } from "../context";
-import { DocumentReference } from "firebase/firestore";
-import { BoxEntry } from "../storage";
+import type { DocumentReference } from "firebase/firestore";
+import type { BoxEntry } from "../storage";
 import { useAuth } from '@kirkl/shared';
 
 interface NewBoxModalProps {
@@ -15,7 +15,7 @@ interface NewBoxModalProps {
 
 function NewBoxModal(props: NewBoxModalProps) {
   const { isVisible, setIsVisible, afterNewBox } = props;
-  const { dispatch, state } = useContext(Context)
+  const { state } = useContext(Context)
   const { user: authUser } = useAuth();
   const [newBoxName, setNewBoxName] = useState<string>();
   const [confirmLoading, setConfirmLoading] = useState(false);

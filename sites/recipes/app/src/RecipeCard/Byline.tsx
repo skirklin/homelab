@@ -4,7 +4,7 @@ import styled from 'styled-components';
 import { Context } from '../context';
 import { authorToStr, strToAuthor } from '../converters';
 import { getRecipeFromState } from '../state';
-import { getEditableSetter, RecipeCardProps } from './RecipeCard';
+import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import { useAuth } from '@kirkl/shared';
 
 const EditableByline = styled(Input)`

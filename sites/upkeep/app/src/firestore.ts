@@ -83,22 +83,33 @@ export async function deleteTask(taskId: string) {
 export async function completeTask(
   taskId: string,
   userId: string,
-  notes: string = ""
+  notes: string = "",
+  completedAt?: Date
 ): Promise<void> {
+  const completionTime = completedAt ? Timestamp.fromDate(completedAt) : Timestamp.now();
   const now = Timestamp.now();
 
-  // Update task's lastCompleted
+  // Get current task to check if this completion is the latest
   const taskRef = getTaskRef(taskId);
-  await updateDoc(taskRef, {
-    lastCompleted: now,
-    updatedAt: now,
-  });
+  const taskSnap = await getDoc(taskRef);
+  const taskData = taskSnap.data();
+
+  // Only update lastCompleted if this completion is more recent than current
+  const shouldUpdateLastCompleted = !taskData?.lastCompleted ||
+    completionTime.toMillis() > taskData.lastCompleted.toMillis();
+
+  if (shouldUpdateLastCompleted) {
+    await updateDoc(taskRef, {
+      lastCompleted: completionTime,
+      updatedAt: now,
+    });
+  }
 
   // Create completion record
   const completionData: CompletionStore = {
     taskId,
     completedBy: userId,
-    completedAt: now,
+    completedAt: completionTime,
     notes,
   };
   await addDoc(getCompletionsRef(), completionData);

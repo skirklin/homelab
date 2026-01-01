@@ -76,9 +76,15 @@ test.describe("Navigation", () => {
   });
 
   test("can navigate back to Home from module", async ({ page }) => {
+    // Clear saved path to avoid auto-redirect
+    await page.evaluate(() => localStorage.removeItem("home:lastPath"));
+
     // Go to groceries
     await page.getByRole("button", { name: /groceries/i }).click();
     await expect(page).toHaveURL(/\/groceries/);
+
+    // Clear saved path again before going home
+    await page.evaluate(() => localStorage.removeItem("home:lastPath"));
 
     // Go back to home
     await page.getByRole("button", { name: /home/i }).click();
@@ -107,65 +113,54 @@ test.describe("Groceries Module", () => {
     await expect(page).toHaveURL(/\/groceries/);
   });
 
-  test("shows list picker or list", async ({ page }) => {
-    // Should see either "My Lists" header or a list
-    const content = page.locator("body");
-    await expect(content).toBeVisible();
+  test("shows list picker with New List button", async ({ page }) => {
+    // Should see "My Lists" title and New List button
+    await expect(page.getByText("My Lists")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: /new list/i })).toBeVisible();
   });
 
-  test("can create a new list", async ({ page }) => {
+  test("can create a new list and navigate into it", async ({ page }) => {
+    // Wait for list picker to load
+    await expect(page.getByRole("button", { name: /new list/i })).toBeVisible({ timeout: 5000 });
+
     // Click New List button
-    const newListButton = page.getByRole("button", { name: /new list/i });
-    if (await newListButton.isVisible()) {
-      await newListButton.click();
+    await page.getByRole("button", { name: /new list/i }).click();
 
-      // Fill in the modal
-      const nameInput = page.getByPlaceholder("Groceries");
-      await nameInput.fill("Test Groceries");
+    // Fill in the modal - use unique name to avoid conflicts
+    const listName = `Test ${Date.now()}`;
+    const expectedSlug = listName.toLowerCase().replace(/\s+/g, "-");
+    await page.getByPlaceholder("Groceries").fill(listName);
 
-      // Create
-      await page.getByRole("button", { name: "Create" }).click();
-      await page.waitForTimeout(1000);
+    // Create
+    await page.getByRole("button", { name: "Create" }).click();
 
-      // Should navigate to the new list (URL should have the slug)
-      await expect(page).toHaveURL(/\/groceries\/test-groceries/);
-    }
+    // Should navigate to the new list
+    await expect(page).toHaveURL(new RegExp(`/groceries/${expectedSlug}`), { timeout: 5000 });
   });
 
-  test("navigating into a list stays within groceries module", async ({ page }) => {
-    // Create or find a list
-    const newListButton = page.getByRole("button", { name: /new list/i });
-    if (await newListButton.isVisible()) {
-      await newListButton.click();
-      await page.getByPlaceholder("Groceries").fill("Nav Test");
-      await page.getByRole("button", { name: "Create" }).click();
-      await page.waitForTimeout(1000);
-    }
+  test("back button from list navigates to list picker", async ({ page }) => {
+    // Wait for list picker and create a list
+    await expect(page.getByRole("button", { name: /new list/i })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: /new list/i }).click();
 
-    // URL should still be under /groceries
-    const url = page.url();
-    expect(url).toContain("/groceries");
-  });
+    const listName = `Back Test ${Date.now()}`;
+    await page.getByPlaceholder("Groceries").fill(listName);
+    await page.getByRole("button", { name: "Create" }).click();
 
-  test("back button from list goes to list picker, not home", async ({ page }) => {
-    // Create a list first
-    const newListButton = page.getByRole("button", { name: /new list/i });
-    if (await newListButton.isVisible()) {
-      await newListButton.click();
-      await page.getByPlaceholder("Groceries").fill("Back Test");
-      await page.getByRole("button", { name: "Create" }).click();
-      await page.waitForTimeout(1000);
+    // Wait until we're in the list (URL has slug)
+    await expect(page).toHaveURL(/\/groceries\/back-test-/, { timeout: 5000 });
 
-      // Now we should be in the list, find back button
-      const backButton = page.locator('button').filter({ has: page.locator('[aria-label="arrow-left"], .anticon-arrow-left') }).first();
-      if (await backButton.isVisible()) {
-        await backButton.click();
-        await page.waitForTimeout(500);
+    // Find and click back button (arrow-left icon button)
+    const backButton = page.locator('button').filter({ has: page.locator('.anticon-arrow-left') });
+    await expect(backButton).toBeVisible({ timeout: 5000 });
+    await backButton.click();
 
-        // Should go to /groceries (list picker), not / (home)
-        await expect(page).toHaveURL(/\/groceries(\?|$)/);
-      }
-    }
+    // CRITICAL: Should go to /groceries (list picker), NOT stay at the list or go home
+    // The URL should be exactly /groceries or /groceries?pick=true
+    await expect(page).toHaveURL(/\/groceries\/?(\?|$)/, { timeout: 5000 });
+
+    // Verify we see the list picker content
+    await expect(page.getByText("My Lists")).toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -202,39 +197,46 @@ test.describe("Upkeep Module", () => {
     await expect(page).toHaveURL(/\/upkeep/);
   });
 
-  test("shows upkeep content", async ({ page }) => {
-    const content = page.locator("body");
-    await expect(content).toBeVisible();
+  test("shows list picker with New Task List button", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: /upkeep/i })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: /new task list/i })).toBeVisible();
   });
 
-  test("can create a task list", async ({ page }) => {
-    const newListButton = page.getByRole("button", { name: /new list/i });
-    if (await newListButton.isVisible()) {
-      await newListButton.click();
+  test("can create a task list and navigate into it", async ({ page }) => {
+    await expect(page.getByRole("button", { name: /new task list/i })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: /new task list/i }).click();
 
-      const nameInput = page.locator('input').first();
-      await nameInput.fill("Test Tasks");
+    const listName = `Tasks ${Date.now()}`;
+    const expectedSlug = listName.toLowerCase().replace(/\s+/g, "-");
+    await page.getByPlaceholder(/home/i).fill(listName);
+    await page.getByRole("button", { name: /create/i }).click();
 
-      await page.getByRole("button", { name: /create/i }).click();
-      await page.waitForTimeout(1000);
-
-      // Should navigate to the new list within upkeep
-      const url = page.url();
-      expect(url).toContain("/upkeep");
-    }
+    // Should navigate to the new list
+    await expect(page).toHaveURL(new RegExp(`/upkeep/${expectedSlug}`), { timeout: 5000 });
   });
 
-  test("navigating into a task list stays within upkeep module", async ({ page }) => {
-    const newListButton = page.getByRole("button", { name: /new list/i });
-    if (await newListButton.isVisible()) {
-      await newListButton.click();
-      await page.locator('input').first().fill("Upkeep Nav Test");
-      await page.getByRole("button", { name: /create/i }).click();
-      await page.waitForTimeout(1000);
-    }
+  test("back button from task list navigates to list picker", async ({ page }) => {
+    // Wait for list picker and create a list
+    await expect(page.getByRole("button", { name: /new task list/i })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: /new task list/i }).click();
 
-    const url = page.url();
-    expect(url).toContain("/upkeep");
+    const listName = `Upkeep Back ${Date.now()}`;
+    await page.getByPlaceholder(/home/i).fill(listName);
+    await page.getByRole("button", { name: /create/i }).click();
+
+    // Wait until we're in the list
+    await expect(page).toHaveURL(/\/upkeep\/upkeep-back-/, { timeout: 5000 });
+
+    // Find and click back button
+    const backButton = page.locator('button').filter({ has: page.locator('.anticon-arrow-left') });
+    await expect(backButton).toBeVisible({ timeout: 5000 });
+    await backButton.click();
+
+    // CRITICAL: Should go to /upkeep (list picker), NOT stay at the list or go home
+    await expect(page).toHaveURL(/\/upkeep\/?(\?|$)/, { timeout: 5000 });
+
+    // Verify we see the list picker content (heading says "Upkeep")
+    await expect(page.getByRole("heading", { name: /upkeep/i })).toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -256,53 +258,71 @@ test.describe("Cross-module Navigation Regression", () => {
     await signIn(page);
   });
 
-  test("clicking list in groceries does not redirect to home", async ({ page }) => {
+  test("navigating into groceries list and back stays in module", async ({ page }) => {
+    // Go to groceries
+    await page.getByRole("button", { name: /groceries/i }).click();
+    await expect(page).toHaveURL(/\/groceries/);
+    await expect(page.getByRole("button", { name: /new list/i })).toBeVisible({ timeout: 5000 });
+
+    // Create a list
+    await page.getByRole("button", { name: /new list/i }).click();
+    await page.getByPlaceholder("Groceries").fill(`Cross Test ${Date.now()}`);
+    await page.getByRole("button", { name: "Create" }).click();
+
+    // Verify we're in a list (URL has slug)
+    await expect(page).toHaveURL(/\/groceries\/cross-test-/, { timeout: 5000 });
+
+    // Click back
+    const backButton = page.locator('button').filter({ has: page.locator('.anticon-arrow-left') });
+    await backButton.click();
+
+    // MUST stay in groceries, not go to home
+    await expect(page).toHaveURL(/\/groceries\/?(\?|$)/, { timeout: 5000 });
+    await expect(page.getByText("My Lists")).toBeVisible();
+  });
+
+  test("navigating into upkeep list and back stays in module", async ({ page }) => {
+    // Go to upkeep
+    await page.getByRole("button", { name: /upkeep/i }).click();
+    await expect(page).toHaveURL(/\/upkeep/);
+    await expect(page.getByRole("button", { name: /new task list/i })).toBeVisible({ timeout: 5000 });
+
+    // Create a list
+    await page.getByRole("button", { name: /new task list/i }).click();
+    await page.getByPlaceholder(/home/i).fill(`Cross Upkeep ${Date.now()}`);
+    await page.getByRole("button", { name: /create/i }).click();
+
+    // Verify we're in a list
+    await expect(page).toHaveURL(/\/upkeep\/cross-upkeep-/, { timeout: 5000 });
+
+    // Click back
+    const backButton = page.locator('button').filter({ has: page.locator('.anticon-arrow-left') });
+    await backButton.click();
+
+    // MUST stay in upkeep, not go to home
+    await expect(page).toHaveURL(/\/upkeep\/?(\?|$)/, { timeout: 5000 });
+    await expect(page.getByRole("heading", { name: /upkeep/i })).toBeVisible();
+  });
+
+  test("rapid navigation between modules preserves correct URLs", async ({ page }) => {
+    // Navigate through multiple modules quickly
     await page.getByRole("button", { name: /groceries/i }).click();
     await expect(page).toHaveURL(/\/groceries/);
 
-    // Try to interact with a list
-    const listItem = page.locator('[class*="List"]').first();
-    if (await listItem.isVisible()) {
-      await listItem.click();
-      await page.waitForTimeout(500);
-
-      // Should NOT be at home
-      expect(page.url()).not.toBe("http://localhost:5173/");
-      expect(page.url()).toContain("/groceries");
-    }
-  });
-
-  test("clicking recipe does not redirect to home", async ({ page }) => {
     await page.getByRole("button", { name: /recipes/i }).click();
     await expect(page).toHaveURL(/\/recipes/);
 
-    // Try to interact with a recipe table row (not nav buttons)
-    const tableRow = page.locator('table tbody tr').first();
-    if (await tableRow.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await tableRow.click();
-      await page.waitForTimeout(500);
-
-      // Should NOT be at home and should stay in recipes
-      expect(page.url()).not.toBe("http://localhost:5173/");
-      expect(page.url()).toContain("/recipes");
-    }
-    // If no table rows, just verify we're still in recipes
-    expect(page.url()).toContain("/recipes");
-  });
-
-  test("clicking task in upkeep does not redirect to home", async ({ page }) => {
     await page.getByRole("button", { name: /upkeep/i }).click();
     await expect(page).toHaveURL(/\/upkeep/);
 
-    // Try to interact with a task
-    const clickable = page.locator('[class*="Task"], [class*="Card"]').first();
-    if (await clickable.isVisible()) {
-      await clickable.click();
-      await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /life/i }).click();
+    await expect(page).toHaveURL(/\/life/);
 
-      // Should NOT be at home
-      expect(page.url()).not.toBe("http://localhost:5173/");
-      expect(page.url()).toContain("/upkeep");
-    }
+    // Clear saved path before going home (the app saves last-used module)
+    await page.evaluate(() => localStorage.removeItem("home:lastPath"));
+
+    // Go back to home
+    await page.getByRole("button", { name: /home/i }).click();
+    await expect(page).toHaveURL("/");
   });
 });

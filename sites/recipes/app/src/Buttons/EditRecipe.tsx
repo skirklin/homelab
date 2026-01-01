@@ -5,7 +5,7 @@ import { Context } from '../context';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
 import { ActionButton } from '../StyledComponents';
-import { RecipeCardProps } from '../RecipeCard/RecipeCard';
+import type { RecipeCardProps } from '../RecipeCard/RecipeCard';
 import { Menu } from 'antd';
 import { useAuth } from '@kirkl/shared';
 

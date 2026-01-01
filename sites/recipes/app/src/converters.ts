@@ -1,5 +1,5 @@
 import _ from 'lodash';
-import { Comment, Recipe } from "schema-dts"
+import type { Comment, Recipe } from "schema-dts"
 
 /* helper functions for converting between structured data and text. */
 export function strToIngredients(str: string): Recipe["recipeIngredient"] {

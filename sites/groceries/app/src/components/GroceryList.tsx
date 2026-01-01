@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import { Spin, Button } from "antd";
@@ -22,7 +22,7 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
   };
 };
 import { useGroceriesContext } from "../groceries-context";
-import { subscribeToList, getItemsByCategoryId } from "../subscription";
+import { getItemsByCategoryId } from "../subscription";
 import { updateItemCategory } from "../firestore";
 import { Header } from "./Header";
 import { AddItem } from "./AddItem";
@@ -104,9 +104,7 @@ export function GroceryList() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { state, dispatch } = useGroceriesContext();
-  const currentListIdRef = useRef<string | null>(null);
-  const unsubscribersRef = useRef<(() => void)[]>([]);
+  const { state, setCurrentList } = useGroceriesContext();
   const [view, setView] = useState<View>("list");
   const [draggedItem, setDraggedItem] = useState<GroceryItem | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -114,33 +112,13 @@ export function GroceryList() {
   // Look up listId from user's slugs
   const listId = slug ? state.userSlugs[slug] : undefined;
 
-  // Save last-used list
+  // Save last-used list and subscribe to list data
   useEffect(() => {
     if (slug && listId) {
       appStorage.set(StorageKeys.LAST_LIST, slug);
+      setCurrentList(listId);
     }
-  }, [slug, listId]);
-
-  useEffect(() => {
-    if (!user || !listId) return;
-
-    // Only resubscribe if the list ID changed
-    if (currentListIdRef.current === listId) return;
-
-    // Cleanup previous subscriptions
-    unsubscribersRef.current.forEach((unsub) => unsub());
-    unsubscribersRef.current = [];
-
-    currentListIdRef.current = listId;
-
-    subscribeToList(listId, user.uid, dispatch).then((unsubs) => {
-      unsubscribersRef.current = unsubs;
-    });
-
-    return () => {
-      unsubscribersRef.current.forEach((unsub) => unsub());
-    };
-  }, [user, listId, dispatch]);
+  }, [slug, listId, setCurrentList]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const item = event.active.data.current?.item as GroceryItem;
@@ -184,7 +162,7 @@ export function GroceryList() {
           <NotFoundText>
             You don't have a list called "/{slug}"
           </NotFoundText>
-          <Button type="primary" onClick={() => navigate(".")}>
+          <Button type="primary" onClick={() => navigate("..")}>
             Go to My Lists
           </Button>
         </NotFoundContent>

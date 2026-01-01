@@ -2,7 +2,9 @@
  * Groceries-specific state management (no auth - that comes from shared)
  */
 
-import { createContext, useContext, useReducer, type ReactNode } from "react";
+import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useAuth } from "@kirkl/shared";
+import { subscribeToUserSlugs, subscribeToList } from "./subscription";
 import type { GroceryItem, GroceryList, ItemHistory, ShoppingTrip } from "./types";
 
 export interface GroceriesState {
@@ -73,15 +75,53 @@ const initialState: GroceriesState = {
 interface ContextType {
   state: GroceriesState;
   dispatch: React.Dispatch<GroceriesAction>;
+  setCurrentList: (listId: string) => void;
 }
 
 const GroceriesContext = createContext<ContextType | null>(null);
 
 export function GroceriesProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const { user } = useAuth();
+  const slugsUnsubRef = useRef<(() => void) | null>(null);
+  const listUnsubsRef = useRef<(() => void)[]>([]);
+  const currentListIdRef = useRef<string | null>(null);
+
+  // Subscribe to user's slugs when authenticated
+  useEffect(() => {
+    if (user) {
+      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch);
+    }
+    return () => {
+      if (slugsUnsubRef.current) {
+        slugsUnsubRef.current();
+        slugsUnsubRef.current = null;
+      }
+      // Also cleanup list subscriptions
+      listUnsubsRef.current.forEach((unsub) => unsub());
+      listUnsubsRef.current = [];
+    };
+  }, [user]);
+
+  // Function to subscribe to a specific list (called by components)
+  const setCurrentList = useCallback((listId: string) => {
+    if (!user) return;
+
+    // Already subscribed to this list
+    if (currentListIdRef.current === listId) return;
+
+    // Cleanup previous list subscriptions
+    listUnsubsRef.current.forEach((unsub) => unsub());
+    listUnsubsRef.current = [];
+    currentListIdRef.current = listId;
+
+    subscribeToList(listId, user.uid, dispatch).then((unsubs) => {
+      listUnsubsRef.current = unsubs;
+    });
+  }, [user]);
 
   return (
-    <GroceriesContext.Provider value={{ state, dispatch }}>
+    <GroceriesContext.Provider value={{ state, dispatch, setCurrentList }}>
       {children}
     </GroceriesContext.Provider>
   );

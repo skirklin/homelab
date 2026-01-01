@@ -1,9 +1,10 @@
-import React, { useContext, useState } from 'react';
+import type React from 'react';
+import { useContext, useState } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
 import { Title } from '../StyledComponents';
 import { getAppUserFromState, getBoxFromState } from '../state';
-import { BoxProps } from './BoxView';
+import type { BoxProps } from './BoxView';
 import { Input } from 'antd';
 import { useAuth } from '@kirkl/shared';
 

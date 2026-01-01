@@ -4,8 +4,8 @@ import styled from 'styled-components';
 import { Button, Input, Popconfirm, message } from 'antd';
 import { Context } from '../context';
 import { getAppUserFromState, getRecipeFromState, getUserFromState } from '../state';
-import { RecipeCardProps } from './RecipeCard';
-import { CookingLogEntry } from '../types';
+import type { RecipeCardProps } from './RecipeCard';
+import type { CookingLogEntry } from '../types';
 import { updateCookingLogEntry, deleteCookingLogEntry } from '../firestore';
 import { useAuth } from '@kirkl/shared';
 

@@ -1,8 +1,9 @@
 import { Input } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import _ from "lodash";
-import { Recipe } from "schema-dts";
-import { RowType } from "./RecipeTable";
+import type { Recipe } from "schema-dts";
+import type { RowType } from "./RecipeTable";
+// @ts-expect-error - flexsearch doesn't have type declarations
 import Document from "flexsearch/dist/module/document";
 import styled from "styled-components";
 

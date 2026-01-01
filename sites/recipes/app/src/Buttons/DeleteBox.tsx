@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { deleteBox } from '../firestore';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
-import { BoxId } from '../types';
+import type { BoxId } from '../types';
 import { useAuth } from '@kirkl/shared';
 
 

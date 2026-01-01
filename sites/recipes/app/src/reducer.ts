@@ -1,6 +1,6 @@
 import _ from 'lodash';
 import { BoxEntry, RecipeEntry, UserEntry } from './storage';
-import { ActionType, AppState } from './types';
+import type { ActionType, AppState } from './types';
 import { getBoxFromState, getRecipeFromState, setBoxInState, setRecipeInState } from './state';
 
 export function initState(): AppState {

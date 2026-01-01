@@ -1,12 +1,13 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { Input, Tag } from 'antd';
-import React, { useContext, useState } from 'react';
+import type React from 'react';
+import { useContext, useState } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
 import { parseCategories, formatCategories } from '../converters';
 import { getRecipeFromState, getAppUserFromState, getBoxFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
-import { RecipeCardProps } from './RecipeCard';
+import type { RecipeCardProps } from './RecipeCard';
 import { useMediaQuery } from 'react-responsive';
 import { useAuth } from '@kirkl/shared';
 

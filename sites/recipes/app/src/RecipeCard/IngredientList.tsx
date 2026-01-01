@@ -1,11 +1,11 @@
 import { useState, useContext } from 'react';
 import styled from 'styled-components';
-import { Recipe } from 'schema-dts';
+import type { Recipe } from 'schema-dts';
 import { ingredientsToStr, strToIngredients, decodeStr } from '../converters';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
 import { Context } from '../context';
-import { RecipeCardProps } from './RecipeCard';
+import type { RecipeCardProps } from './RecipeCard';
 import { StyledTextArea } from '../StyledComponents';
 import { useAuth } from '@kirkl/shared';
 

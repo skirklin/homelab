@@ -6,7 +6,7 @@ import { useContext, useEffect, useState } from 'react';
 import NewBoxModal from './NewBoxModal';
 import { Context } from '../context';
 import { BoxEntry } from '../storage';
-import { BoxId } from '../types';
+import type { BoxId } from '../types';
 
 const ADD_NEW_VALUE = '__add_new__';
 

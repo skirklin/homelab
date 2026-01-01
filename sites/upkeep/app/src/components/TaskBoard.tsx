@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
 import { useUpkeepContext } from "../upkeep-context";
 import { useAuth } from "@kirkl/shared";
-import { subscribeToList, getTasksByUrgency } from "../subscription";
+import { getTasksByUrgency } from "../subscription";
 import { Header } from "./Header";
 import { KanbanColumn } from "./KanbanColumn";
 import { TaskModal } from "./TaskModal";
@@ -22,11 +22,11 @@ const BoardContainer = styled.main`
   flex: 1;
   padding: var(--space-sm);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-sm);
   overflow-x: auto;
 
-  @media (max-width: 1024px) {
+  @media (max-width: 900px) {
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -56,9 +56,8 @@ const NotFoundContainer = styled.div`
 export function TaskBoard() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { state, dispatch } = useUpkeepContext();
+  const { state, setCurrentList } = useUpkeepContext();
   const { user } = useAuth();
-  const unsubscribersRef = useRef<(() => void)[]>([]);
 
   // Modal state
   const [taskModalOpen, setTaskModalOpen] = useState(false);
@@ -69,26 +68,13 @@ export function TaskBoard() {
   // Get list ID from slug
   const listId = slug ? state.userSlugs[slug] : null;
 
-  // Save last-used list
+  // Save last-used list and subscribe to list data
   useEffect(() => {
     if (slug && listId) {
       appStorage.set(StorageKeys.LAST_LIST, slug);
+      setCurrentList(listId);
     }
-  }, [slug, listId]);
-
-  useEffect(() => {
-    if (!listId || !user) return;
-
-    // Subscribe to list data
-    subscribeToList(listId, user.uid, dispatch).then((unsubs) => {
-      unsubscribersRef.current = unsubs;
-    });
-
-    return () => {
-      unsubscribersRef.current.forEach((unsub) => unsub());
-      unsubscribersRef.current = [];
-    };
-  }, [listId, user, dispatch]);
+  }, [slug, listId, setCurrentList]);
 
   const handleAddTask = () => {
     setEditingTask(null);
@@ -122,7 +108,7 @@ export function TaskBoard() {
         <NotFoundContainer>
           <h2>List not found</h2>
           <p>The list "{slug}" doesn't exist in your account.</p>
-          <button onClick={() => navigate(".")}>Go to My Lists</button>
+          <button onClick={() => navigate("..")}>Go to My Lists</button>
         </NotFoundContainer>
       </Container>
     );
@@ -146,13 +132,6 @@ export function TaskBoard() {
     <Container>
       <Header onAddTask={handleAddTask} />
       <BoardContainer>
-        <KanbanColumn
-          title="Overdue"
-          urgency="overdue"
-          tasks={tasksByUrgency.overdue}
-          onEditTask={handleEditTask}
-          onCompleteTask={handleCompleteTask}
-        />
         <KanbanColumn
           title="Due Today"
           urgency="today"

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { PickBoxModal } from "../Modals/PickBoxModal";
-import { BoxId } from "../types";
+import type { BoxId } from "../types";
 
 /**
  * Hook that handles operations requiring a box selection.

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Dropdown } from "antd";
@@ -11,6 +12,8 @@ import {
 } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
 import { getBackend } from "@kirkl/shared";
+
+const LAST_PATH_KEY = "home:lastPath";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -74,6 +77,15 @@ const Content = styled.main`
 export function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Save current path when navigating to a sub-app
+  useEffect(() => {
+    const subApps = ["/life", "/groceries", "/recipes", "/upkeep"];
+    const isSubApp = subApps.some(app => location.pathname.startsWith(app));
+    if (isSubApp) {
+      localStorage.setItem(LAST_PATH_KEY, location.pathname);
+    }
+  }, [location.pathname]);
 
   const isActive = (path: string) => location.pathname.startsWith(path);
 

@@ -5,7 +5,7 @@ import { Visibility } from "../types";
 import { useState, useContext } from "react";
 import { Context } from "../context";
 import { AddOwnerModal } from "../Modals/AddOwnerModal";
-import { MenuProps } from "antd";
+import type { MenuProps } from "antd";
 
 interface VisibilityProps {
     element: "menu" | "button"

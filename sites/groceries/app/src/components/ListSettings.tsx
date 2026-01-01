@@ -252,7 +252,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
       okButtonProps: { danger: true },
       onOk: async () => {
         await removeUserSlug(user!.uid, slug);
-        navigate(".");
+        navigate("..");
         message.success("List removed from your account");
       },
     });
@@ -269,7 +269,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
       onOk: async () => {
         await removeUserSlug(user!.uid, slug);
         await deleteList(listId);
-        navigate(".");
+        navigate("..");
         message.success("List deleted");
       },
     });

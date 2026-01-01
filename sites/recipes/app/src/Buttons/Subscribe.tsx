@@ -3,7 +3,7 @@ import { Context } from '../context';
 import { subscribeToBox, unsubscribeFromBox } from '../firestore';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
-import { BoxId } from '../types';
+import type { BoxId } from '../types';
 import { useAuth } from '@kirkl/shared';
 
 interface DeleteProps {

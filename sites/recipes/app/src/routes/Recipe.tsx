@@ -4,7 +4,7 @@ import { Spin } from 'antd';
 import { Context } from '../context';
 import RecipeCard from '../RecipeCard/RecipeCard';
 import { getRecipeFromState } from '../state';
-import { BoxId, RecipeId } from '../types';
+import type { BoxId, RecipeId } from '../types';
 
 interface RecipeProps {
   boxId: BoxId

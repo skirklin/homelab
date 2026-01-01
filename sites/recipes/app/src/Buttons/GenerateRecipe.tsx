@@ -4,7 +4,7 @@ import { Tooltip } from "antd";
 import { useBoxAction } from "../hooks/useBoxAction";
 import GenerateRecipeModal from "../Modals/GenerateRecipeModal";
 import { ActionButton } from "../StyledComponents";
-import { BoxId } from "../types";
+import type { BoxId } from "../types";
 
 interface GenerateProps {
     boxId?: string

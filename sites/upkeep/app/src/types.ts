@@ -90,7 +90,7 @@ export interface UserProfileStore {
 }
 
 // Urgency levels for Kanban columns
-export type UrgencyLevel = "overdue" | "today" | "thisWeek" | "later";
+export type UrgencyLevel = "today" | "thisWeek" | "later";
 
 // Conversion functions
 export function taskFromStore(id: string, data: TaskStore): Task {
@@ -167,15 +167,14 @@ export function getUrgencyLevel(task: Task): UrgencyLevel {
   const now = new Date();
   const dueDate = calculateDueDate(task);
 
-  // Never completed = overdue
-  if (!dueDate) return "overdue";
+  // Never completed = due today (most urgent)
+  if (!dueDate) return "today";
 
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
   const diffDays = Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays < 0) return "overdue";
-  if (diffDays === 0) return "today";
+  if (diffDays <= 0) return "today"; // Past due or due today
   if (diffDays <= 7) return "thisWeek";
   return "later";
 }

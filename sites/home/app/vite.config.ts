@@ -6,4 +6,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
+  resolve: {
+    dedupe: ['react', 'react-dom', 'react-router-dom'],
+  },
 })

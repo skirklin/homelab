@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { Context } from '../context';
 import { StyledTextArea } from '../StyledComponents';
 import { getRecipeFromState } from '../state';
-import { getEditableSetter, RecipeCardProps } from './RecipeCard';
+import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import { useAuth } from '@kirkl/shared';
 
 

@@ -3,11 +3,6 @@ import { TaskCard } from "./TaskCard";
 import type { Task, UrgencyLevel } from "../types";
 
 const urgencyStyles = {
-  overdue: {
-    bg: "var(--color-overdue-bg)",
-    border: "var(--color-overdue)",
-    headerColor: "var(--color-overdue)",
-  },
   today: {
     bg: "var(--color-today-bg)",
     border: "var(--color-today)",

@@ -1,8 +1,8 @@
-import { doc, DocumentSnapshot, SnapshotOptions, Timestamp } from "firebase/firestore";
+import { doc, Timestamp, type DocumentSnapshot, type SnapshotOptions } from "firebase/firestore";
 import _ from "lodash";
-import { Recipe } from "schema-dts";
+import type { Recipe } from "schema-dts";
 import { db } from "./backend";
-import { BoxType, BoxStoreType, RecipeStoreType, Visibility, UserStoreType, BoxId, UserId, PendingEnrichment, CookingLogEntry, EnrichmentStatus, StepIngredients } from "./types";
+import { type BoxType, type BoxStoreType, type RecipeStoreType, Visibility, type UserStoreType, type BoxId, type UserId, type PendingEnrichment, type CookingLogEntry, EnrichmentStatus, type StepIngredients } from "./types";
 import { decodeStr } from "./converters";
 
 const DUMMY_FIRST_DATE = new Date(2022, 0, 0)

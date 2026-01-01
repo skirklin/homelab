@@ -6,7 +6,7 @@ import { useBoxAction } from "../hooks/useBoxAction";
 import { getAppUserFromState } from "../state";
 import { createNewRecipe, getUniqueId } from "../utils";
 import { PrimaryButton } from "../StyledComponents";
-import { BoxId } from "../types";
+import type { BoxId } from "../types";
 import { Menu } from "antd";
 import { useAuth } from '@kirkl/shared';
 

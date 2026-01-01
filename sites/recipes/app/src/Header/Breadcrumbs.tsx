@@ -1,14 +1,14 @@
 import { Breadcrumb, Dropdown } from 'antd';
 import { useContext } from 'react';
-import { Link, Params, useLocation, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams, type Params } from 'react-router-dom';
 import styled from 'styled-components';
 import { Context } from '../context';
 import { useMediaQuery } from 'react-responsive'
 
 import './Header.css';
-import { AppState } from '../types';
+import type { AppState } from '../types';
 import { EllipsisOutlined } from '@ant-design/icons';
-import { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
+import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
 
 const LogoLink = styled(Link)`
   display: flex;

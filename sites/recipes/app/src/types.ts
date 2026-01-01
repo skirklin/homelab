@@ -1,6 +1,6 @@
-import { DocumentReference, Timestamp, Unsubscribe } from 'firebase/firestore';
-import { Comment, Recipe } from 'schema-dts';
-import { BoxEntry, RecipeEntry, UserEntry } from './storage';
+import type { DocumentReference, Timestamp, Unsubscribe } from 'firebase/firestore';
+import type { Comment, Recipe } from 'schema-dts';
+import type { BoxEntry, RecipeEntry, UserEntry } from './storage';
 
 export type BoxId = string
 export type RecipeId = string

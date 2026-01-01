@@ -1,7 +1,7 @@
 import { Input, Modal } from 'antd';
 
 import { useState } from 'react';
-import { BoxId } from '../types';
+import type { BoxId } from '../types';
 
 
 interface PickBoxModalProps {

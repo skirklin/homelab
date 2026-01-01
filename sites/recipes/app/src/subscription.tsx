@@ -1,8 +1,8 @@
-import React from 'react';
-import { User } from "firebase/auth";
-import { getDoc, onSnapshot, doc, setDoc, DocumentSnapshot, collection, QuerySnapshot, updateDoc, arrayRemove } from "firebase/firestore";
+import type React from 'react';
+import type { User } from "firebase/auth";
+import { getDoc, onSnapshot, doc, setDoc, collection, updateDoc, arrayRemove, type DocumentSnapshot, type QuerySnapshot } from "firebase/firestore";
 
-import { ActionType, BoxId, UnsubMap, Visibility } from './types';
+import { type ActionType, type BoxId, type UnsubMap, Visibility } from './types';
 
 import { db } from './backend'
 import { addBox, subscribeToBox } from './firestore';
@@ -168,7 +168,7 @@ async function handleRecipesSnapshot(snapshot: QuerySnapshot<RecipeEntry>, dispa
 async function handleBoxSnapshot(
   snapshot: DocumentSnapshot<BoxEntry>,
   dispatch: React.Dispatch<ActionType>,
-  unsubMap: UnsubMap,
+  _unsubMap: UnsubMap,
 ) {
   const box = snapshot.data()
 

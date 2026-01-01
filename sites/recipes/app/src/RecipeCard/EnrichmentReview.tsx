@@ -5,7 +5,7 @@ import styled from 'styled-components';
 import { Context } from '../context';
 import { applyEnrichment, rejectEnrichment } from '../firestore';
 import { getRecipeFromState } from '../state';
-import { RecipeCardProps } from './RecipeCard';
+import type { RecipeCardProps } from './RecipeCard';
 import { Section, SectionLabel, SuggestedDescription, TagsContainer, Reasoning } from '../Modals/EnrichmentStyles';
 
 const EnrichmentBanner = styled.div`
@@ -108,7 +108,7 @@ function EnrichmentReview(props: RecipeCardProps) {
               .map(([stepIdx, ingredients]) => (
                 <StepPreviewItem key={stepIdx}>
                   <StepNumber>Step {parseInt(stepIdx) + 1}:</StepNumber>{' '}
-                  {ingredients.join(', ') || '(no ingredients)'}
+                  {ingredients.join(' · ') || '(no ingredients)'}
                 </StepPreviewItem>
               ))}
             {Object.keys(enrichment.stepIngredients).length > 3 && (

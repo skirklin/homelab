@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useNavigate, useLocation, Outlet } from "react-router-dom";
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 
 // Mock Firebase and shared auth to avoid real Firebase calls
 vi.mock("@kirkl/shared", () => ({

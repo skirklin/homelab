@@ -1,6 +1,6 @@
 import { Popconfirm, Table, Tooltip } from "antd";
-import { ColumnsType } from "antd/es/table";
-import { Key, TableRowSelection } from "antd/es/table/interface";
+import type { ColumnsType } from "antd/es/table";
+import type { Key, TableRowSelection } from "antd/es/table/interface";
 import { useContext, useState } from "react";
 import { useNavigate } from 'react-router-dom';
 import styled from "styled-components";
@@ -11,8 +11,8 @@ import './BoxTable.css';
 import { Context } from "../context";
 import { deleteBox, setBoxVisibility } from "../firestore";
 import { DeleteOutlined } from "@ant-design/icons";
-import { BoxId, Visibility } from "../types";
-import { UserEntry } from "../storage";
+import { type BoxId, Visibility } from "../types";
+import type { UserEntry } from "../storage";
 import VisibilityControl from "../Buttons/Visibility";
 import { addBoxOwner } from "../backend";
 
@@ -84,7 +84,7 @@ export function BoxTable(props: BoxTableProps) {
   const { rows } = props;
   const navigate = useNavigate();
 
-  const onRow = (record: RowType, rowIndex: number | undefined) => {
+  const onRow = (record: RowType, _rowIndex: number | undefined) => {
     return {
       onClick: () => navigate(`boxes/${record.boxId}`),
     }

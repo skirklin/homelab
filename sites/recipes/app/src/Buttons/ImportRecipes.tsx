@@ -3,7 +3,7 @@ import { useBoxAction } from "../hooks/useBoxAction";
 import ImportModal from "../Modals/ImportModal";
 import { ImportOutlined } from "@ant-design/icons";
 import { ActionButton } from "../StyledComponents";
-import { BoxId } from "../types";
+import type { BoxId } from "../types";
 import { Menu } from "antd";
 
 interface ImportProps {

@@ -1,7 +1,7 @@
 import { useContext } from 'react';
 import styled from 'styled-components';
 
-import { RecipeTable, RowType } from '../RecipeTable/RecipeTable'
+import { RecipeTable, type RowType } from '../RecipeTable/RecipeTable'
 import { Context } from '../context';
 
 const PageContainer = styled.div`

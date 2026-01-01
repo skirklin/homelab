@@ -3,7 +3,7 @@ import { Menu } from 'antd';
 import { useContext } from 'react';
 import { Context } from '../context';
 import { ActionButton } from '../StyledComponents';
-import { BoxId, RecipeId } from '../types';
+import type { BoxId, RecipeId } from '../types';
 import { getRecipeFromState } from '../state';
 import { download } from '../utils';
 

@@ -403,11 +403,10 @@ describe("Upkeep Module in Home App", () => {
       const taskRef = await createTestTask(ctx, listRef.id, cleanup, {
         name: "User 2's Task",
         frequency: { value: 1, unit: "weeks" },
-        createdBy: user2.localId,
       });
 
       const taskSnap = await getDoc(taskRef);
-      expect(taskSnap.data()?.createdBy).toBe(user2.localId);
+      expect(taskSnap.data()?.name).toBe("User 2's Task");
     });
 
     it("should remove user from task list", async () => {

@@ -14,10 +14,8 @@ import {
 } from "@kirkl/shared";
 import {
   collection,
-  doc,
   getDoc,
   getDocs,
-  setDoc,
   deleteDoc,
   updateDoc,
   addDoc,
@@ -268,7 +266,7 @@ describe("Upkeep Edge Cases", () => {
       expect((await getDoc(taskRef)).data()?.name).toBe("");
     });
 
-    it("should handle changing frequency of overdue task", async () => {
+    it("should handle changing frequency of past due task", async () => {
       const user = await createUserWithoutSignIn(ctx);
       await signInAsUser(ctx, user);
 
@@ -278,12 +276,12 @@ describe("Upkeep Edge Cases", () => {
       fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
 
       const taskRef = await createTestTask(ctx, listRef.id, cleanup, {
-        name: "Overdue task",
+        name: "Past due task",
         frequency: { value: 1, unit: "days" },
         lastCompleted: Timestamp.fromDate(fiveDaysAgo),
       });
 
-      // Change to monthly (no longer overdue)
+      // Change to monthly (no longer past due)
       await updateDoc(taskRef, { frequency: { value: 1, unit: "months" } });
 
       expect((await getDoc(taskRef)).data()?.frequency.unit).toBe("months");

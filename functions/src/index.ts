@@ -94,7 +94,7 @@ export function getRecipesFromPage(doc: Document, url: string): Recipe[] {
 }
 
 export const getRecipes = onCall({
-  cors: ["https://recipes.kirkl.in", "https://kirkl.in", "http://localhost:5000"],
+  cors: ["https://recipes.kirkl.in", "https://home.kirkl.in", "https://kirkl.in", "http://localhost:5000", "http://localhost:5173"],
   invoker: "public",
 }, async (request) => {
   if (!request.auth) {
@@ -135,7 +135,7 @@ async function updateOwners(docRef: FirebaseFirestore.DocumentReference<Firebase
 }
 
 export const addRecipeOwner = onCall({
-  cors: ["https://recipes.kirkl.in", "https://kirkl.in", "http://localhost:5000"],
+  cors: ["https://recipes.kirkl.in", "https://home.kirkl.in", "https://kirkl.in", "http://localhost:5000", "http://localhost:5173"],
   invoker: "public",
 }, async (request) => {
   if (!request.auth) {
@@ -152,7 +152,7 @@ export const addRecipeOwner = onCall({
 
 
 export const addBoxOwner = onCall({
-  cors: ["https://recipes.kirkl.in", "https://kirkl.in", "http://localhost:5000"],
+  cors: ["https://recipes.kirkl.in", "https://home.kirkl.in", "https://kirkl.in", "http://localhost:5000", "http://localhost:5173"],
   invoker: "public",
 }, async (request) => {
   if (!request.auth) {
@@ -173,7 +173,7 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-5-20251101";
 export const generateRecipe = onCall(
   {
     secrets: [anthropicApiKey],
-    cors: ["https://recipes.kirkl.in", "https://kirkl.in", "http://localhost:5000"],
+    cors: ["https://recipes.kirkl.in", "https://home.kirkl.in", "https://kirkl.in", "http://localhost:5000", "http://localhost:5173"],
     invoker: "public",
   },
   async (request) => {
@@ -267,7 +267,7 @@ Guidelines:
 export const enrichRecipeManual = onCall(
   {
     secrets: [anthropicApiKey],
-    cors: ["https://recipes.kirkl.in", "https://kirkl.in", "http://localhost:5000"],
+    cors: ["https://recipes.kirkl.in", "https://home.kirkl.in", "https://kirkl.in", "http://localhost:5000", "http://localhost:5173"],
     invoker: "public",
   },
   async (request) => {

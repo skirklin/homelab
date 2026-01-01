@@ -130,7 +130,7 @@ export function JoinList() {
         </Header>
         <Content>
           <Description>This list doesn't exist or may have been deleted.</Description>
-          <Button type="primary" onClick={() => navigate(".")}>
+          <Button type="primary" onClick={() => navigate("..")}>
             Go to My Lists
           </Button>
         </Content>
@@ -164,7 +164,7 @@ export function JoinList() {
           >
             Add to My Lists
           </Button>
-          <Button onClick={() => navigate(".")}>
+          <Button onClick={() => navigate("..")}>
             Cancel
           </Button>
         </Form>

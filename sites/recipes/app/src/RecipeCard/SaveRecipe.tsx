@@ -8,7 +8,7 @@ import { Context } from '../context';
 import { addRecipe, saveRecipe } from '../firestore';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
-import { RecipeCardProps } from './RecipeCard';
+import type { RecipeCardProps } from './RecipeCard';
 import _ from 'lodash';
 import { useAuth } from '@kirkl/shared';
 

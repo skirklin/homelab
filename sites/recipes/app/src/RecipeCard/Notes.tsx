@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import { commentToStr, strToComment } from '../converters';
 import { getRecipeFromState } from '../state';
 import { Context } from '../context';
-import { getEditableSetter, RecipeCardProps } from './RecipeCard';
+import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import styled from 'styled-components';
 import { StyledTextArea } from '../StyledComponents';
 import { useAuth } from '@kirkl/shared';

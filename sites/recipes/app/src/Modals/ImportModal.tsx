@@ -3,11 +3,11 @@ import { Button, Modal, Spin, Space, Typography, Input } from 'antd';
 import _ from 'lodash';
 
 import { useContext, useState } from 'react';
-import { Recipe } from 'schema-dts';
+import type { Recipe } from 'schema-dts';
 import { getRecipes } from '../backend';
 import { Context } from '../context';
 import { RecipeEntry } from '../storage';
-import { BoxId, Visibility } from '../types';
+import { type BoxId, Visibility } from '../types';
 import { addRecipe } from '../firestore';
 import { getAppUserFromState } from '../state';
 import { useAuth } from '@kirkl/shared';
@@ -40,7 +40,7 @@ function ImportModal(props: ImportProps) {
   const [spinning, setSpinning] = useState(false)
   const [value, setValue] = useState<string>();
   const [discovered, setDiscovered] = useState<RecipeEntry[]>([])
-  const { dispatch, state } = useContext(Context)
+  const { state } = useContext(Context)
   const { user: authUser } = useAuth();
 
   const user = getAppUserFromState(state, authUser?.uid)
@@ -74,7 +74,7 @@ function ImportModal(props: ImportProps) {
 
   function makeRemover(i: number) {
     const remover = () => {
-      setDiscovered(_.filter(discovered, (x, id) => id !== i))
+      setDiscovered(_.filter(discovered, (_x, id) => id !== i))
     }
     return remover
   }

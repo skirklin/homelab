@@ -1,17 +1,39 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
-import { GroceriesModule } from "@kirkl/groceries";
-import { RecipesModule } from "@kirkl/recipes";
-import { UpkeepModule } from "@kirkl/upkeep";
+import { GroceriesProvider, GroceriesRoutes } from "@kirkl/groceries";
+import { LifeProvider, LifeRoutes } from "@kirkl/life";
+import { RecipesProvider, CookingModeProvider, RecipesRoutes } from "@kirkl/recipes";
+import { UpkeepProvider, UpkeepRoutes } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
 import { Dashboard } from "./shared/Dashboard";
-import { LifeProvider } from "./modules/life/context";
-import { LifeModule } from "./modules/life";
 
 // Initialize shared backend
 initializeBackend("home.kirkl.in");
+
+const LAST_PATH_KEY = "home:lastPath";
+
+// Wrapper that redirects to last used sub-app on initial load
+function DashboardWithRestore() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    // Only redirect on initial mount when at exactly "/"
+    if (!checked && location.pathname === "/") {
+      const lastPath = localStorage.getItem(LAST_PATH_KEY);
+      if (lastPath && lastPath !== "/") {
+        navigate(lastPath, { replace: true });
+      }
+      setChecked(true);
+    }
+  }, [checked, location.pathname, navigate]);
+
+  return <Dashboard />;
+}
 
 const antTheme = {
   token: {
@@ -35,18 +57,11 @@ function AppRoutes() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route
-          path="/life/*"
-          element={
-            <LifeProvider>
-              <LifeModule />
-            </LifeProvider>
-          }
-        />
-        <Route path="/groceries/*" element={<GroceriesModule />} />
-        <Route path="/recipes/*" element={<RecipesModule />} />
-        <Route path="/upkeep/*" element={<UpkeepModule />} />
+        <Route path="/" element={<DashboardWithRestore />} />
+        <Route path="/life/*" element={<LifeRoutes />} />
+        <Route path="/groceries/*" element={<GroceriesRoutes />} />
+        <Route path="/recipes/*" element={<RecipesRoutes />} />
+        <Route path="/upkeep/*" element={<UpkeepRoutes />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
@@ -58,7 +73,17 @@ export function App() {
     <ConfigProvider theme={antTheme}>
       <BrowserRouter>
         <AuthProvider>
-          <AppRoutes />
+          <GroceriesProvider>
+            <LifeProvider>
+              <RecipesProvider>
+                <CookingModeProvider>
+                  <UpkeepProvider>
+                    <AppRoutes />
+                  </UpkeepProvider>
+                </CookingModeProvider>
+              </RecipesProvider>
+            </LifeProvider>
+          </GroceriesProvider>
         </AuthProvider>
       </BrowserRouter>
     </ConfigProvider>

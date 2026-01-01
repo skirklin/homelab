@@ -109,7 +109,6 @@ export function getTasksFromState(state: UpkeepState) {
 export function getTasksByUrgency(state: UpkeepState) {
   const tasks = getTasksFromState(state);
   const grouped = {
-    overdue: [] as typeof tasks,
     today: [] as typeof tasks,
     thisWeek: [] as typeof tasks,
     later: [] as typeof tasks,
@@ -127,7 +126,6 @@ export function getTasksByUrgency(state: UpkeepState) {
     return aDate - bDate; // Earlier last completed = more overdue
   };
 
-  grouped.overdue.sort(sortByDue);
   grouped.today.sort(sortByDue);
   grouped.thisWeek.sort(sortByDue);
   grouped.later.sort(sortByDue);

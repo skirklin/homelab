@@ -6,7 +6,7 @@ import { Context } from "../context";
 
 import { getBox } from "../firestore";
 import { getBoxFromState } from "../state";
-import { BoxId } from "../types";
+import type { BoxId } from "../types";
 import BoxView from '../BoxView/BoxView'
 
 interface BoxProps {

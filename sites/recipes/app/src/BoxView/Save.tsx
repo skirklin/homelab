@@ -9,7 +9,7 @@ import { Context } from '../context';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import _ from 'lodash';
 import { boxConverter } from '../storage';
-import { BoxProps } from './BoxView';
+import type { BoxProps } from './BoxView';
 import { useAuth } from '@kirkl/shared';
 
 const StyledButton = styled(Button)`

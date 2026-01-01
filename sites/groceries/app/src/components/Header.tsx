@@ -125,7 +125,7 @@ export function Header({ listId, onShowHistory, onShowSettings }: Props) {
       <TitleSection>
         <Button icon={<ArrowLeftOutlined />} onClick={() => {
           appStorage.remove(StorageKeys.LAST_LIST);
-          navigate(".");
+          navigate("..");
         }} size="small" type="text" />
         <Title>{listName}</Title>
       </TitleSection>

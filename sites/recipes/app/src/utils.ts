@@ -1,5 +1,5 @@
 import { getAuth, signOut } from 'firebase/auth';
-import { Recipe } from "schema-dts"
+import type { Recipe } from "schema-dts"
 import { BoxEntry, RecipeEntry, UserEntry } from './storage';
 import { Visibility } from './types';
 
