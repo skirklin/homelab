@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
 import { GroceriesProvider, GroceriesRoutes } from "@kirkl/groceries";
@@ -8,31 +7,18 @@ import { RecipesProvider, CookingModeProvider, RecipesRoutes } from "@kirkl/reci
 import { UpkeepProvider, UpkeepRoutes } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
-import { Dashboard } from "./shared/Dashboard";
 
 // Initialize shared backend
 initializeBackend("home.kirkl.in");
 
 const LAST_PATH_KEY = "home:lastPath";
+const DEFAULT_APP = "/recipes";
 
-// Wrapper that redirects to last used sub-app on initial load
-function DashboardWithRestore() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [checked, setChecked] = useState(false);
-
-  useEffect(() => {
-    // Only redirect on initial mount when at exactly "/"
-    if (!checked && location.pathname === "/") {
-      const lastPath = localStorage.getItem(LAST_PATH_KEY);
-      if (lastPath && lastPath !== "/") {
-        navigate(lastPath, { replace: true });
-      }
-      setChecked(true);
-    }
-  }, [checked, location.pathname, navigate]);
-
-  return <Dashboard />;
+// Redirect to last used sub-app or default
+function RedirectToLastApp() {
+  const lastPath = localStorage.getItem(LAST_PATH_KEY);
+  const target = lastPath && lastPath !== "/" ? lastPath : DEFAULT_APP;
+  return <Navigate to={target} replace />;
 }
 
 const antTheme = {
@@ -57,7 +43,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route path="/" element={<DashboardWithRestore />} />
+        <Route path="/" element={<RedirectToLastApp />} />
         <Route path="/life/*" element={<LifeRoutes />} />
         <Route path="/groceries/*" element={<GroceriesRoutes />} />
         <Route path="/recipes/*" element={<RecipesRoutes />} />

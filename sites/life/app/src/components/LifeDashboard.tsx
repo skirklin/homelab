@@ -59,11 +59,6 @@ const SectionTitle = styled.h2`
   color: var(--color-text);
 `;
 
-const HeaderButtons = styled.div`
-  display: flex;
-  gap: var(--space-sm);
-`;
-
 const ActionButtons = styled.div`
   display: flex;
   gap: var(--space-sm);

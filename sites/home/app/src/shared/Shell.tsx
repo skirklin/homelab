@@ -3,12 +3,12 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Dropdown } from "antd";
 import {
-  HomeOutlined,
   ExperimentOutlined,
   ShoppingCartOutlined,
   CheckSquareOutlined,
   SettingOutlined,
   LogoutOutlined,
+  BookOutlined,
 } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
 import { getBackend } from "@kirkl/shared";
@@ -33,6 +33,14 @@ const Header = styled.header`
 const Nav = styled.nav`
   display: flex;
   gap: var(--space-xs);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+
+  /* Hide scrollbar but keep functionality */
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 `;
 
 const NavButton = styled(Button)<{ $active?: boolean }>`
@@ -40,6 +48,7 @@ const NavButton = styled(Button)<{ $active?: boolean }>`
     color: ${props => props.$active ? 'var(--color-primary)' : 'white'};
     background: ${props => props.$active ? 'white' : 'transparent'};
     border: none;
+    flex-shrink: 0;
 
     &:hover {
       color: ${props => props.$active ? 'var(--color-primary)' : 'white'};
@@ -48,6 +57,17 @@ const NavButton = styled(Button)<{ $active?: boolean }>`
 
     .anticon {
       color: inherit;
+    }
+  }
+
+  /* On narrow screens, hide text and show only icons */
+  @media (max-width: 480px) {
+    &.ant-btn {
+      padding: var(--space-sm);
+    }
+
+    span:not(.anticon) {
+      display: none;
     }
   }
 `;
@@ -109,13 +129,6 @@ export function Shell() {
       <Header>
         <Nav>
           <NavButton
-            icon={<HomeOutlined />}
-            $active={location.pathname === "/"}
-            onClick={() => navigate("/")}
-          >
-            Home
-          </NavButton>
-          <NavButton
             icon={<ExperimentOutlined />}
             $active={isActive("/life")}
             onClick={() => navigate("/life")}
@@ -123,7 +136,7 @@ export function Shell() {
             Life
           </NavButton>
           <NavButton
-            icon={<ShoppingCartOutlined />}
+            icon={<BookOutlined />}
             $active={isActive("/recipes")}
             onClick={() => navigate("/recipes")}
           >

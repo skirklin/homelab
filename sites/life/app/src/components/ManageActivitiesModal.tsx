@@ -13,15 +13,6 @@ const ActivityItem = styled.div`
   padding: var(--space-sm) 0;
 `;
 
-const ColorSwatch = styled.div<{ $color: string }>`
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  background: ${(props) => props.$color};
-  cursor: pointer;
-  border: 2px solid rgba(0, 0, 0, 0.1);
-`;
-
 const IconInput = styled(Input)`
   width: 60px;
   text-align: center;
