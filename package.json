@@ -5,6 +5,7 @@
     "sites/shared",
     "sites/home/app",
     "sites/groceries/app",
+    "sites/life/app",
     "sites/upkeep/app",
     "sites/recipes/app"
   ]
