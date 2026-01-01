@@ -26,3 +26,8 @@ __pycache__/
 # Caches
 .critic-cache/
 .ruff_cache/
+
+# Test artifacts
+test-results/
+playwright-report/
+.last-run.json

@@ -1,18 +1,9 @@
 # Upkeep - Improvements
 
-## Pending
-
-- [ ] Simplify task states: remove "overdue" distinction, just show "due"
-  - Currently tasks show as "due" then "overdue" after some threshold
-  - Users don't need this distinction - if it's due, it's due
-
-- [ ] Allow items to have custom entries with custom timestamps
-  - Currently entries are auto-created when completing an item
-  - Should allow users to manually add past entries (e.g., "I actually did this yesterday")
-  - Requires UI for entering custom date/time when marking complete
-
 ## Completed
 
+- [x] Allow manual completion entries with custom timestamps (date picker in CompleteTaskModal)
+- [x] Remove "overdue" distinction - past due tasks now show in "Due Today" column
 - [x] List sharing functionality with proper Firestore permissions
 - [x] Unit tests for join flow
 - [x] Integration tests with Firebase emulator
