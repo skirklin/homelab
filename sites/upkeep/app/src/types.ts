@@ -1,4 +1,7 @@
 import { Timestamp } from "firebase/firestore";
+import type { Event, EventStore } from "@kirkl/shared";
+export type { Event, EventStore };
+export { eventFromStore, eventToStore } from "@kirkl/shared";
 
 // Room/area definition for organizing tasks
 export interface RoomDef {
@@ -42,21 +45,29 @@ export interface TaskStore {
   updatedAt: Timestamp;
 }
 
-// Completion record as used in the app
-export interface Completion {
-  id: string;
-  taskId: string;
-  completedBy: string;
-  completedAt: Date;
-  notes: string;
-}
+// Completion record (now uses unified Event type)
+// Event.subjectId is the taskId
+// Event.data contains { notes?: string }
+// Event.timestamp is when the task was completed
+// Event.createdBy is who completed it
+export type Completion = Event;
 
-// Completion as stored in Firestore
+// Legacy completion format stored in Firestore (for migration)
 export interface CompletionStore {
   taskId: string;
   completedBy: string;
   completedAt: Timestamp;
   notes: string;
+}
+
+// Helper to get taskId from completion event
+export function getTaskId(completion: Event): string {
+  return completion.subjectId;
+}
+
+// Helper to get notes from completion event
+export function getCompletionNotes(completion: Event): string {
+  return (completion.data.notes as string) ?? "";
 }
 
 // Task list (container)
@@ -122,13 +133,15 @@ export function taskToStore(task: Omit<Task, "id">): TaskStore {
   };
 }
 
+// Kept for backward compatibility during migration - converts legacy format to Event
 export function completionFromStore(id: string, data: CompletionStore): Completion {
   return {
     id,
-    taskId: data.taskId,
-    completedBy: data.completedBy,
-    completedAt: data.completedAt.toDate(),
-    notes: data.notes || "",
+    subjectId: data.taskId,
+    createdBy: data.completedBy,
+    timestamp: data.completedAt.toDate(),
+    createdAt: data.completedAt.toDate(),
+    data: { notes: data.notes || "" },
   };
 }
 

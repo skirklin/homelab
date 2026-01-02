@@ -14,7 +14,7 @@ import DownloadButton from '../Buttons/DownloadRecipe';
 import VisibilityControl from '../Buttons/Visibility';
 import ForkButton from '../Buttons/ForkRecipe';
 import { type AppState, type BoxId, type RecipeId, Visibility } from '../types';
-import { addCookingLogEntry } from '../firestore';
+import { addCookingLogEvent } from '../firestore';
 import { Divider, RecipeActionGroup } from '../StyledComponents';
 import ByLine from './Byline';
 import Tags from './Tags';
@@ -108,7 +108,7 @@ function QuickMadeIt(props: RecipeCardProps) {
   const handleMadeIt = async () => {
     setLoading(true);
     try {
-      await addCookingLogEntry(boxId, recipeId, user.id, note.trim() || undefined);
+      await addCookingLogEvent(boxId, recipeId, user.id, note.trim() || undefined);
       setNote('');
       setIsModalOpen(false);
       message.success('Added to cooking log!');

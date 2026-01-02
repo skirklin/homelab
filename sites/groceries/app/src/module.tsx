@@ -16,7 +16,12 @@ import { appStorage } from "./storage";
 // Migrate legacy localStorage keys on startup
 appStorage.migrateFromLegacy();
 
-export function GroceriesRoutes() {
+interface GroceriesRoutesProps {
+  /** When true, hides sign-out and other account actions (handled by parent shell) */
+  embedded?: boolean;
+}
+
+export function GroceriesRoutes({ embedded = false }: GroceriesRoutesProps) {
   const { user } = useAuth();
 
   if (!user) {
@@ -27,7 +32,7 @@ export function GroceriesRoutes() {
     <Routes>
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
-      <Route path="/:slug" element={<GroceryList />} />
+      <Route path="/:slug" element={<GroceryList embedded={embedded} />} />
     </Routes>
   );
 }

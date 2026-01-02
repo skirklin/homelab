@@ -1,7 +1,8 @@
 import { onSnapshot, query, orderBy, limit, type Unsubscribe } from "firebase/firestore";
-import { getListRef, getTasksRef, getCompletionsRef, ensureListExists, setCurrentListId, getUserRef } from "./firestore";
-import type { TaskStore, TaskListStore, CompletionStore, UserProfileStore } from "./types";
-import { taskFromStore, listFromStore, completionFromStore, getUrgencyLevel } from "./types";
+import { getListRef, getTasksRef, getEventsRef, ensureListExists, setCurrentListId, getUserRef } from "./firestore";
+import { eventFromStore, type EventStore } from "@kirkl/shared";
+import type { TaskStore, TaskListStore, UserProfileStore, Completion } from "./types";
+import { taskFromStore, listFromStore, getUrgencyLevel } from "./types";
 import type { UpkeepState, UpkeepAction } from "./upkeep-context";
 
 type Dispatch = React.Dispatch<UpkeepAction>;
@@ -83,13 +84,13 @@ export async function subscribeToList(
   unsubscribers.push(tasksUnsub);
 
   // Subscribe to recent completions (most recent 100)
-  const completionsQuery = query(getCompletionsRef(), orderBy("completedAt", "desc"), limit(100));
-  const completionsUnsub = onSnapshot(
-    completionsQuery,
+  const eventsQuery = query(getEventsRef(), orderBy("timestamp", "desc"), limit(100));
+  const eventsUnsub = onSnapshot(
+    eventsQuery,
     (snapshot) => {
-      const completions = snapshot.docs.map((doc) => {
-        const data = doc.data() as CompletionStore;
-        return completionFromStore(doc.id, data);
+      const completions: Completion[] = snapshot.docs.map((doc) => {
+        const data = doc.data() as EventStore;
+        return eventFromStore(doc.id, data);
       });
       dispatch({ type: "SET_COMPLETIONS", completions });
     },
@@ -97,7 +98,7 @@ export async function subscribeToList(
       console.error("Completions subscription error:", error);
     }
   );
-  unsubscribers.push(completionsUnsub);
+  unsubscribers.push(eventsUnsub);
 
   return unsubscribers;
 }

@@ -8,12 +8,16 @@ import { Spin } from 'antd';
 import ErrorBoundary from './ErrorBoundary';
 import WhatsNew from './Modals/WhatsNew';
 
-function Main() {
+interface MainProps {
+  embedded?: boolean;
+}
+
+function Main({ embedded = false }: MainProps) {
   const { state } = useContext(Context)
 
   return (
     <>
-      <Header />
+      <Header embedded={embedded} />
       <WhatsNew />
       <Spin spinning={state.loading > 0}>
         <ErrorBoundary>

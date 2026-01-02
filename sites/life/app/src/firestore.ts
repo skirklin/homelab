@@ -7,11 +7,10 @@ import {
   deleteDoc,
   addDoc,
   Timestamp,
-  type UpdateData,
 } from "firebase/firestore";
-import { getBackend } from "@kirkl/shared";
-import type { LogEntryStore, LifeLogStore, ActivityDef } from "./types";
-import { DEFAULT_ACTIVITIES } from "./types";
+import { getBackend, type EventStore } from "@kirkl/shared";
+import type { LifeLogStore, LifeManifest } from "./types";
+import { DEFAULT_MANIFEST } from "./types";
 
 const { db } = getBackend();
 
@@ -25,17 +24,16 @@ export function getCurrentLogId(): string | null {
   return currentLogId;
 }
 
-// Collection references
-function getEntriesRef(logId?: string) {
+function getEventsRef(logId?: string) {
   const id = logId ?? currentLogId;
   if (!id) throw new Error("No log ID set");
-  return collection(db, "lifeLogs", id, "entries");
+  return collection(db, "lifeLogs", id, "events");
 }
 
-function getEntryRef(entryId: string, logId?: string) {
+function getEventRef(eventId: string, logId?: string) {
   const id = logId ?? currentLogId;
   if (!id) throw new Error("No log ID set");
-  return doc(db, "lifeLogs", id, "entries", entryId);
+  return doc(db, "lifeLogs", id, "events", eventId);
 }
 
 function getLogRef(logId?: string) {
@@ -44,12 +42,10 @@ function getLogRef(logId?: string) {
   return doc(db, "lifeLogs", id);
 }
 
-// Get or create the user's life log
 export async function getOrCreateUserLog(userId: string): Promise<{ id: string; data: LifeLogStore }> {
   const userRef = doc(db, "users", userId);
   const userDoc = await getDoc(userRef);
 
-  // Check if user already has a life log
   if (userDoc.exists() && userDoc.data()?.lifeLogId) {
     const logId = userDoc.data().lifeLogId;
     const logDoc = await getDoc(doc(db, "lifeLogs", logId));
@@ -58,18 +54,16 @@ export async function getOrCreateUserLog(userId: string): Promise<{ id: string; 
     }
   }
 
-  // Create a new log for this user with default activities
   const logRef = doc(collection(db, "lifeLogs"));
   const logData: LifeLogStore = {
     name: "Life Log",
     owners: [userId],
-    activities: DEFAULT_ACTIVITIES,
+    manifest: DEFAULT_MANIFEST,
     created: Timestamp.now(),
     updated: Timestamp.now(),
   };
   await setDoc(logRef, logData);
 
-  // Save the log ID to the user's profile
   if (userDoc.exists()) {
     await updateDoc(userRef, { lifeLogId: logRef.id });
   } else {
@@ -79,143 +73,124 @@ export async function getOrCreateUserLog(userId: string): Promise<{ id: string; 
   return { id: logRef.id, data: logData };
 }
 
-// Activity management
-export async function updateActivities(activities: ActivityDef[], logId?: string): Promise<void> {
+// Manifest Operations
+
+export async function updateManifest(manifest: LifeManifest, logId?: string): Promise<void> {
   const logRef = getLogRef(logId);
   await updateDoc(logRef, {
-    activities,
+    manifest,
     updated: Timestamp.now(),
   });
 }
 
-export async function addActivity(activity: ActivityDef, logId?: string): Promise<void> {
-  const logRef = getLogRef(logId);
-  const logDoc = await getDoc(logRef);
-  if (!logDoc.exists()) return;
-
-  const data = logDoc.data() as LifeLogStore;
-  const activities = [...(data.activities ?? DEFAULT_ACTIVITIES), activity];
-  await updateDoc(logRef, {
-    activities,
-    updated: Timestamp.now(),
-  });
-}
-
-export async function removeActivity(activityId: string, logId?: string): Promise<void> {
-  const logRef = getLogRef(logId);
-  const logDoc = await getDoc(logRef);
-  if (!logDoc.exists()) return;
-
-  const data = logDoc.data() as LifeLogStore;
-  const activities = (data.activities ?? DEFAULT_ACTIVITIES).filter(a => a.id !== activityId);
-  await updateDoc(logRef, {
-    activities,
-    updated: Timestamp.now(),
-  });
-}
-
-// Entry operations
-export async function startActivity(
-  activityId: string,
-  userId: string,
-  logId?: string
-): Promise<string> {
-  const entriesRef = getEntriesRef(logId);
-  const entryData: LogEntryStore = {
-    activityId,
-    startTime: Timestamp.now(),
-    endTime: null,
-    duration: null,
-    notes: "",
-    createdBy: userId,
-    createdAt: Timestamp.now(),
-  };
-  const docRef = await addDoc(entriesRef, entryData);
-  return docRef.id;
-}
-
-export async function stopActivity(entryId: string, logId?: string): Promise<void> {
-  const entryRef = getEntryRef(entryId, logId);
-  const entryDoc = await getDoc(entryRef);
-
-  if (!entryDoc.exists()) return;
-
-  const data = entryDoc.data() as LogEntryStore;
-  const endTime = Timestamp.now();
-  const duration = Math.round((endTime.toMillis() - data.startTime.toMillis()) / 60000);
-
-  await updateDoc(entryRef, { endTime, duration });
-}
+// Event Operations
 
 export async function addEntry(
-  activityId: string,
-  startTime: Date,
-  endTime: Date | null,
-  notes: string,
+  widgetId: string,
+  data: Record<string, unknown>,
   userId: string,
-  logId?: string
+  options?: {
+    timestamp?: Date;
+    notes?: string;
+    source?: "manual" | "sample";
+    logId?: string;
+  }
 ): Promise<string> {
-  const entriesRef = getEntriesRef(logId);
+  const eventsRef = getEventsRef(options?.logId);
 
-  let duration: number | null = null;
-  if (endTime) {
-    duration = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
+  // Build event data - notes and source go inside data field
+  const eventData: Record<string, unknown> = { ...data };
+  if (options?.source) {
+    eventData.source = options.source;
+  }
+  if (options?.notes) {
+    eventData.notes = options.notes;
   }
 
-  const entryData: LogEntryStore = {
-    activityId,
-    startTime: Timestamp.fromDate(startTime),
-    endTime: endTime ? Timestamp.fromDate(endTime) : null,
-    duration,
-    notes,
+  const eventStore: EventStore = {
+    subjectId: widgetId,
+    timestamp: options?.timestamp ? Timestamp.fromDate(options.timestamp) : Timestamp.now(),
+    data: eventData,
     createdBy: userId,
     createdAt: Timestamp.now(),
   };
 
-  const docRef = await addDoc(entriesRef, entryData);
+  const docRef = await addDoc(eventsRef, eventStore);
   return docRef.id;
 }
 
 export async function updateEntry(
-  entryId: string,
+  eventId: string,
   updates: Partial<{
-    startTime: Date;
-    endTime: Date | null;
+    timestamp: Date;
+    data: Record<string, unknown>;
     notes: string;
   }>,
   logId?: string
 ): Promise<void> {
-  const entryRef = getEntryRef(entryId, logId);
+  const eventRef = getEventRef(eventId, logId);
 
-  const updateData: UpdateData<LogEntryStore> = {};
+  const updateData: Record<string, unknown> = {};
 
-  if (updates.startTime !== undefined) {
-    updateData.startTime = Timestamp.fromDate(updates.startTime);
+  if (updates.timestamp !== undefined) {
+    updateData.timestamp = Timestamp.fromDate(updates.timestamp);
   }
-  if (updates.endTime !== undefined) {
-    updateData.endTime = updates.endTime ? Timestamp.fromDate(updates.endTime) : null;
-  }
-  if (updates.notes !== undefined) {
-    updateData.notes = updates.notes;
-  }
-
-  // Recalculate duration if times changed
-  if (updates.startTime !== undefined || updates.endTime !== undefined) {
-    const entryDoc = await getDoc(entryRef);
-    if (entryDoc.exists()) {
-      const data = entryDoc.data() as LogEntryStore;
-      const start = updates.startTime ?? data.startTime.toDate();
-      const end = updates.endTime ?? data.endTime?.toDate();
-      if (end) {
-        updateData.duration = Math.round((end.getTime() - start.getTime()) / 60000);
-      }
+  if (updates.data !== undefined) {
+    // Merge notes into data if updating data
+    const newData = { ...updates.data };
+    if (updates.notes !== undefined) {
+      newData.notes = updates.notes;
     }
+    updateData.data = newData;
+  } else if (updates.notes !== undefined) {
+    // Only updating notes - need to update data.notes
+    updateData["data.notes"] = updates.notes;
   }
 
-  await updateDoc(entryRef, updateData);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await updateDoc(eventRef, updateData as any);
 }
 
-export async function deleteEntry(entryId: string, logId?: string): Promise<void> {
-  const entryRef = getEntryRef(entryId, logId);
-  await deleteDoc(entryRef);
+export async function deleteEntry(eventId: string, logId?: string): Promise<void> {
+  const eventRef = getEventRef(eventId, logId);
+  await deleteDoc(eventRef);
+}
+
+// Sample Response
+
+export async function addSampleResponse(
+  responses: Record<string, unknown>,
+  userId: string,
+  logId?: string
+): Promise<string> {
+  const eventsRef = getEventsRef(logId);
+
+  const eventStore: EventStore = {
+    subjectId: "__sample__",
+    timestamp: Timestamp.now(),
+    data: { ...responses, source: "sample" },
+    createdBy: userId,
+    createdAt: Timestamp.now(),
+  };
+
+  const docRef = await addDoc(eventsRef, eventStore);
+  return docRef.id;
+}
+
+// FCM Token Management
+
+export async function saveFcmToken(userId: string, token: string): Promise<void> {
+  const userRef = doc(db, "users", userId);
+  const userDoc = await getDoc(userRef);
+
+  if (userDoc.exists()) {
+    await updateDoc(userRef, { fcmToken: token });
+  } else {
+    await setDoc(userRef, { fcmToken: token });
+  }
+}
+
+export async function removeFcmToken(userId: string): Promise<void> {
+  const userRef = doc(db, "users", userId);
+  await updateDoc(userRef, { fcmToken: null });
 }

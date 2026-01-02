@@ -19,7 +19,12 @@ const LoadingContainer = styled.div`
   min-height: 200px;
 `;
 
-function LifeRoutesInner() {
+interface LifeRoutesProps {
+  /** When true, hides sign-out and other account actions (handled by parent shell) */
+  embedded?: boolean;
+}
+
+function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   const { user } = useAuth();
   const { state, dispatch } = useLife();
 
@@ -45,18 +50,18 @@ function LifeRoutesInner() {
 
   return (
     <Routes>
-      <Route path="/" element={<LifeDashboard />} />
-      <Route path="*" element={<LifeDashboard />} />
+      <Route path="/" element={<LifeDashboard embedded={embedded} />} />
+      <Route path="*" element={<LifeDashboard embedded={embedded} />} />
     </Routes>
   );
 }
 
-export function LifeRoutes() {
+export function LifeRoutes({ embedded = false }: LifeRoutesProps) {
   const { user } = useAuth();
 
   if (!user) return null;
 
-  return <LifeRoutesInner />;
+  return <LifeRoutesInner embedded={embedded} />;
 }
 
 export function LifeModule() {
@@ -68,4 +73,4 @@ export function LifeModule() {
 }
 
 export { LifeProvider, useLife, useLifeContext } from "./life-context";
-export type { ActivityDef, LogEntry, LifeLog } from "./types";
+export type { LogEntry, LifeLog, Widget, LifeManifest } from "./types";

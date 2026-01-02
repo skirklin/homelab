@@ -7,6 +7,7 @@ import { RecipesProvider, CookingModeProvider, RecipesRoutes } from "@kirkl/reci
 import { UpkeepProvider, UpkeepRoutes } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
+import { Timeline } from "./shared/Timeline";
 
 // Initialize shared backend
 initializeBackend("home.kirkl.in");
@@ -44,10 +45,11 @@ function AppRoutes() {
     <Routes>
       <Route element={<Shell />}>
         <Route path="/" element={<RedirectToLastApp />} />
-        <Route path="/life/*" element={<LifeRoutes />} />
-        <Route path="/groceries/*" element={<GroceriesRoutes />} />
-        <Route path="/recipes/*" element={<RecipesRoutes />} />
-        <Route path="/upkeep/*" element={<UpkeepRoutes />} />
+        <Route path="/timeline" element={<Timeline />} />
+        <Route path="/life/*" element={<LifeRoutes embedded />} />
+        <Route path="/groceries/*" element={<GroceriesRoutes embedded />} />
+        <Route path="/recipes/*" element={<RecipesRoutes embedded />} />
+        <Route path="/upkeep/*" element={<UpkeepRoutes embedded />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

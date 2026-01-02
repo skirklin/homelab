@@ -10,7 +10,7 @@
   border: none;
   box-shadow: none;
   background-color: transparent;
-  color: white;
+  color: var(--color-text);
   font-size: var(--font-size-lg);
   display: inline-flex;
   align-items: center;
@@ -21,8 +21,8 @@
 }
 
 .recipes-btn:hover {
-  background-color: rgba(255, 255, 255, 0.15);
-  color: white;
+  background-color: var(--color-bg-muted);
+  color: var(--color-text);
 }
 
 .recipes-breadcrumb {
@@ -31,16 +31,15 @@
 }
 
 .recipes-breadcrumb a {
-  color: white;
+  color: var(--color-primary);
   transition: opacity 0.2s ease;
 }
 
 .recipes-breadcrumb a:hover {
-  color: white;
-  opacity: 0.85;
+  color: var(--color-primary-hover);
 }
 
 /* Breadcrumb separator */
 .recipes-breadcrumb .ant-breadcrumb-separator {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
 }

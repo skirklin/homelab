@@ -100,7 +100,11 @@ const NotFoundText = styled.p`
 
 type View = "list" | "history" | "settings";
 
-export function GroceryList() {
+interface GroceryListProps {
+  embedded?: boolean;
+}
+
+export function GroceryList({ embedded = false }: GroceryListProps) {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -208,6 +212,7 @@ export function GroceryList() {
           listId={listId || ""}
           onShowHistory={() => setView("history")}
           onShowSettings={() => setView("settings")}
+          embedded={embedded}
         />
         <AddItem />
       </StickyTop>

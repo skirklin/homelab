@@ -1,99 +1,205 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import styled from "styled-components";
-import { Button, Dropdown, message } from "antd";
-import { PlusOutlined, SettingOutlined, DownloadOutlined } from "@ant-design/icons";
-import { useAuth } from "@kirkl/shared";
+import { Button, Dropdown, Switch, message, Tooltip, DatePicker } from "antd";
+import { SettingOutlined, DownloadOutlined, BellOutlined, CalendarOutlined, LogoutOutlined } from "@ant-design/icons";
+import { signOut } from "firebase/auth";
+import dayjs from "dayjs";
+import {
+  useAuth,
+  getBackend,
+  PageContainer,
+  SectionHeader,
+  SectionTitle,
+  Section,
+  ActionGroup,
+  WidgetGrid,
+  AppHeader,
+} from "@kirkl/shared";
 import { useLife } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
-import { ActivityCard } from "./ActivityCard";
-import { LogEntryModal } from "./LogEntryModal";
+import { WidgetRenderer } from "./widgets";
 import { RecentEntries } from "./RecentEntries";
-import { ManageActivitiesModal } from "./ManageActivitiesModal";
-import { exportEntriesToCSV, exportEntriesToJSON, downloadFile } from "../stats";
-import type { LogEntry, ActivityDef } from "../types";
+import { ManifestEditor } from "./ManifestEditor";
+import { SampleResponseModal } from "./SampleResponseModal";
+import type { LifeManifest } from "../types";
+import { DEFAULT_MANIFEST } from "../types";
+import {
+  initializeMessaging,
+  requestNotificationPermission,
+  disableNotifications,
+  onForegroundMessage,
+  listenForServiceWorkerMessages,
+  getNotificationPermissionStatus,
+} from "../messaging";
 
-const Container = styled.div`
-  padding: var(--space-lg);
-  max-width: 800px;
-  margin: 0 auto;
-`;
-
-const Header = styled.div`
+const NotificationToggle = styled.div`
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--space-lg);
+  gap: var(--space-xs);
+  font-size: var(--font-size-sm);
 `;
 
-const Title = styled.h1`
-  margin: 0;
-  color: var(--color-text);
-`;
-
-
-const ActivityGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-md);
-  margin-bottom: var(--space-xl);
-
-  @media (min-width: 600px) {
-    grid-template-columns: repeat(4, 1fr);
-  }
-`;
-
-const Section = styled.section`
-  margin-bottom: var(--space-xl);
-`;
-
-const SectionHeader = styled.div`
+const DateSelector = styled.div`
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--space-md);
-`;
-
-const SectionTitle = styled.h2`
-  margin: 0;
-  font-size: var(--font-size-lg);
-  color: var(--color-text);
-`;
-
-const ActionButtons = styled.div`
-  display: flex;
   gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  flex-wrap: wrap;
 `;
 
-export function LifeDashboard() {
+const DateLabel = styled.span`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+`;
+
+const DateButton = styled(Button)<{ $active?: boolean }>`
+  ${props => props.$active && `
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+
+    &:hover {
+      background: var(--color-primary);
+      color: white;
+      border-color: var(--color-primary);
+      opacity: 0.9;
+    }
+  `}
+`;
+
+type DateMode = "today" | "yesterday" | "custom";
+
+interface LifeDashboardProps {
+  /** When true, hides sign-out (handled by parent shell) */
+  embedded?: boolean;
+}
+
+export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const { user } = useAuth();
   const { state, dispatch } = useLife();
-  const [showAddEntry, setShowAddEntry] = useState(false);
-  const [editingEntry, setEditingEntry] = useState<LogEntry | null>(null);
-  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
-  const [showManageActivities, setShowManageActivities] = useState(false);
+  const [showManifestEditor, setShowManifestEditor] = useState(false);
+  const [showSampleModal, setShowSampleModal] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [dateMode, setDateMode] = useState<DateMode>("today");
+  const [customDate, setCustomDate] = useState<dayjs.Dayjs | null>(null);
+
+  const getSelectedTimestamp = (): Date | undefined => {
+    if (dateMode === "today") return undefined; // Use current time
+    if (dateMode === "yesterday") {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(12, 0, 0, 0); // Noon yesterday
+      return yesterday;
+    }
+    if (dateMode === "custom" && customDate) {
+      return customDate.toDate();
+    }
+    return undefined;
+  };
 
   // Subscribe to entries
   useEntriesSubscription(state.log?.id ?? null);
 
-  const activities = state.log?.activities ?? [];
+  const manifest = state.log?.manifest ?? DEFAULT_MANIFEST;
   const allEntries = Array.from(state.entries.values());
+
+  // Check notification status on mount
+  useEffect(() => {
+    const status = getNotificationPermissionStatus();
+    setNotificationsEnabled(status === "granted");
+  }, []);
+
+  // Initialize messaging and listen for foreground messages
+  useEffect(() => {
+    initializeMessaging();
+
+    const unsubscribeForeground = onForegroundMessage(() => {
+      setShowSampleModal(true);
+    });
+
+    const unsubscribeSW = listenForServiceWorkerMessages((data) => {
+      if (data.type === "SAMPLE_REQUESTED") {
+        setShowSampleModal(true);
+      }
+    });
+
+    // Check URL for sample parameter
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("sample") === "true") {
+      setShowSampleModal(true);
+      // Clean up URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    return () => {
+      unsubscribeForeground?.();
+      unsubscribeSW?.();
+    };
+  }, []);
+
+  const handleNotificationToggle = async (enabled: boolean) => {
+    if (!user?.uid) return;
+
+    setNotificationLoading(true);
+    try {
+      if (enabled) {
+        const success = await requestNotificationPermission(user.uid);
+        if (success) {
+          setNotificationsEnabled(true);
+          message.success("Notifications enabled");
+        } else {
+          message.error("Failed to enable notifications");
+        }
+      } else {
+        await disableNotifications(user.uid);
+        setNotificationsEnabled(false);
+        message.success("Notifications disabled");
+      }
+    } catch (error) {
+      console.error("Failed to toggle notifications:", error);
+      message.error("Failed to update notification settings");
+    } finally {
+      setNotificationLoading(false);
+    }
+  };
 
   const handleExport = (format: "csv" | "json") => {
     const sortedEntries = [...allEntries].sort(
-      (a, b) => b.startTime.getTime() - a.startTime.getTime()
+      (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
     );
 
-    if (format === "csv") {
-      const content = exportEntriesToCSV(sortedEntries, activities);
-      const date = new Date().toISOString().split("T")[0];
-      downloadFile(content, `life-tracker-export-${date}.csv`, "text/csv");
-      message.success("Exported to CSV");
-    } else {
-      const content = exportEntriesToJSON(sortedEntries, activities);
+    if (format === "json") {
+      const content = JSON.stringify(sortedEntries, null, 2);
       const date = new Date().toISOString().split("T")[0];
       downloadFile(content, `life-tracker-export-${date}.json`, "application/json");
       message.success("Exported to JSON");
+    } else {
+      const headers = ["timestamp", "widget", "data", "source", "notes"];
+      const rows = sortedEntries.map(e => [
+        e.timestamp.toISOString(),
+        e.subjectId,
+        JSON.stringify(e.data),
+        (e.data.source as string) || "manual",
+        (e.data.notes as string) || "",
+      ]);
+      const csv = [headers.join(","), ...rows.map(r => r.map(c => `"${c}"`).join(","))].join("\n");
+      const date = new Date().toISOString().split("T")[0];
+      downloadFile(csv, `life-tracker-export-${date}.csv`, "text/csv");
+      message.success("Exported to CSV");
     }
+  };
+
+  const downloadFile = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const exportMenuItems = [
@@ -101,106 +207,146 @@ export function LifeDashboard() {
     { key: "json", label: "Export as JSON", onClick: () => handleExport("json") },
   ];
 
-  const handleEditEntry = (entry: LogEntry) => {
-    setEditingEntry(entry);
-    setSelectedActivityId(entry.activityId);
-    setShowAddEntry(true);
+  const handleManifestUpdated = (updatedManifest: LifeManifest) => {
+    dispatch({ type: "UPDATE_MANIFEST", manifest: updatedManifest });
   };
 
-  const handleCloseModal = () => {
-    setShowAddEntry(false);
-    setEditingEntry(null);
-    setSelectedActivityId(null);
+  const recentEntries = [...allEntries]
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .slice(0, 20);
+
+  const samplingEnabled = manifest.randomSamples?.enabled;
+
+  const handleSignOut = () => {
+    const { auth } = getBackend();
+    signOut(auth);
   };
 
-  const handleActivitiesUpdated = (updatedActivities: ActivityDef[]) => {
-    if (state.log) {
-      dispatch({
-        type: "SET_LOG",
-        log: { ...state.log, activities: updatedActivities },
-      });
-    }
-  };
+  // Only show sign-out in standalone mode
+  const menuItems = !embedded ? [
+    { type: "divider" as const },
+    { key: "logout", icon: <LogoutOutlined />, label: "Sign Out", onClick: handleSignOut },
+  ] : [];
 
-  // Find active entries (started but not stopped)
-  const activeEntries = Array.from(state.entries.values()).filter(
-    (e) => e.endTime === null
+  const desktopActions = (
+    <>
+      {samplingEnabled && (
+        <Tooltip title={notificationsEnabled ? "Notifications on" : "Enable notifications for random sampling"}>
+          <NotificationToggle>
+            <BellOutlined />
+            <Switch
+              size="small"
+              checked={notificationsEnabled}
+              loading={notificationLoading}
+              onChange={handleNotificationToggle}
+            />
+          </NotificationToggle>
+        </Tooltip>
+      )}
+    </>
   );
 
-  // Get recent entries
-  const recentEntries = Array.from(state.entries.values())
-    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
-    .slice(0, 10);
-
   return (
-    <Container>
-      <Header>
-        <Title>Life Tracker</Title>
-      </Header>
+    <>
+      <AppHeader
+        title="Life Tracker"
+        primaryAction={{
+          label: "Configure",
+          icon: <SettingOutlined />,
+          onClick: () => setShowManifestEditor(true),
+        }}
+        menuItems={menuItems}
+        desktopActions={desktopActions}
+      />
 
-      <Section>
-        <SectionHeader>
-          <SectionTitle>Activities</SectionTitle>
-          <Button
-            icon={<SettingOutlined />}
-            onClick={() => setShowManageActivities(true)}
+      <PageContainer>
+        <Section>
+        <SectionTitle>Track</SectionTitle>
+        <DateSelector>
+          <DateLabel>Log for:</DateLabel>
+          <DateButton
             size="small"
+            $active={dateMode === "today"}
+            onClick={() => setDateMode("today")}
           >
-            Manage
-          </Button>
-        </SectionHeader>
-        <ActivityGrid>
-          {activities.map((activity) => (
-            <ActivityCard
-              key={activity.id}
-              activity={activity}
-              activeEntry={activeEntries.find((e) => e.activityId === activity.id)}
+            Today
+          </DateButton>
+          <DateButton
+            size="small"
+            $active={dateMode === "yesterday"}
+            onClick={() => setDateMode("yesterday")}
+          >
+            Yesterday
+          </DateButton>
+          {dateMode === "custom" ? (
+            <DatePicker
+              size="small"
+              value={customDate}
+              onChange={(date) => {
+                setCustomDate(date);
+                if (!date) setDateMode("today");
+              }}
+              disabledDate={(current) => current && current.isAfter(dayjs(), 'day')}
+              format="MMM D"
+              allowClear
+            />
+          ) : (
+            <DateButton
+              size="small"
+              icon={<CalendarOutlined />}
+              onClick={() => setDateMode("custom")}
+            >
+              Other
+            </DateButton>
+          )}
+        </DateSelector>
+        <WidgetGrid>
+          {manifest.widgets.map((widget) => (
+            <WidgetRenderer
+              key={widget.id}
+              widget={widget}
+              entries={allEntries}
               userId={user?.uid ?? ""}
               logId={state.log?.id}
+              timestamp={getSelectedTimestamp()}
             />
           ))}
-        </ActivityGrid>
+        </WidgetGrid>
       </Section>
 
       <Section>
         <SectionHeader>
           <SectionTitle>Recent Entries</SectionTitle>
-          <ActionButtons>
+          <ActionGroup>
             <Dropdown menu={{ items: exportMenuItems }} trigger={["click"]}>
               <Button icon={<DownloadOutlined />}>Export</Button>
             </Dropdown>
-            <Button
-              icon={<PlusOutlined />}
-              onClick={() => setShowAddEntry(true)}
-            >
-              Add Entry
-            </Button>
-          </ActionButtons>
+          </ActionGroup>
         </SectionHeader>
         <RecentEntries
           entries={recentEntries}
-          activities={activities}
-          onEdit={handleEditEntry}
+          manifest={manifest}
+          logId={state.log?.id}
         />
       </Section>
 
-      <LogEntryModal
-        open={showAddEntry}
-        onClose={handleCloseModal}
-        entry={editingEntry}
-        defaultActivityId={selectedActivityId}
-        activities={activities}
+      </PageContainer>
+
+      <ManifestEditor
+        open={showManifestEditor}
+        onClose={() => setShowManifestEditor(false)}
+        manifest={manifest}
         logId={state.log?.id}
-        userId={user?.uid ?? ""}
+        onManifestUpdated={handleManifestUpdated}
       />
 
-      <ManageActivitiesModal
-        open={showManageActivities}
-        onClose={() => setShowManageActivities(false)}
-        activities={activities}
+      <SampleResponseModal
+        open={showSampleModal}
+        onClose={() => setShowSampleModal(false)}
+        config={manifest.randomSamples}
+        userId={user?.uid ?? ""}
         logId={state.log?.id}
-        onActivitiesUpdated={handleActivitiesUpdated}
       />
-    </Container>
+    </>
   );
 }

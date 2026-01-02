@@ -9,13 +9,18 @@ This is a Firebase monorepo containing multiple sites that share a single Fireba
 ```
 firebase/
 ├── sites/
+│   ├── home/             # React app - unified home with all apps embedded
 │   ├── recipes/          # React app - recipe collection
 │   ├── groceries/        # React app - grocery lists
+│   ├── life/             # React app - life tracker (widgets, sampling)
+│   ├── upkeep/           # React app - household task management
+│   ├── shared/           # Shared React components and utilities
 │   ├── critic/           # React + Python - manuscript analysis
 │   └── homepage/         # Static personal site
 ├── functions/            # Cloud Functions (Node.js/TypeScript)
 ├── firestore.rules       # Shared security rules
 ├── firestore.indexes.json
+├── SCHEMA.md             # Firestore data model documentation
 └── firebase.json
 ```
 
@@ -47,6 +52,8 @@ firebase emulators:start
 - `firebase.json` - All hosting targets, functions config, emulator ports
 - `.firebaserc` - Project ID and hosting target mappings
 - `firestore.rules` - Security rules for all collections
+- `firestore.indexes.json` - Composite indexes for queries
+- `SCHEMA.md` - Firestore data model documentation
 - `functions/src/index.ts` - Cloud function definitions
 
 ## Working in This Repo

@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, type ReactNode, type Dispatch } from "react";
-import type { LogEntry, LifeLog } from "./types";
+import type { LogEntry, LifeLog, LifeManifest } from "./types";
 
 export interface LifeState {
   log: LifeLog | null;
@@ -9,6 +9,7 @@ export interface LifeState {
 
 export type LifeAction =
   | { type: "SET_LOG"; log: LifeLog | null }
+  | { type: "UPDATE_MANIFEST"; manifest: LifeManifest }
   | { type: "SET_ENTRY"; entry: LogEntry }
   | { type: "SET_ENTRIES"; entries: LogEntry[] }
   | { type: "REMOVE_ENTRY"; entryId: string }
@@ -25,6 +26,12 @@ function reducer(state: LifeState, action: LifeAction): LifeState {
   switch (action.type) {
     case "SET_LOG":
       return { ...state, log: action.log };
+    case "UPDATE_MANIFEST":
+      if (!state.log) return state;
+      return {
+        ...state,
+        log: { ...state.log, manifest: action.manifest },
+      };
     case "SET_ENTRY": {
       const entries = new Map(state.entries);
       entries.set(action.entry.id, action.entry);

@@ -12,11 +12,16 @@ import RoutedRecipe from './routes/Recipe';
 import MissingPage from './routes/MissingPage';
 import JoinBox from './routes/JoinBox';
 
-export function RecipesRoutes() {
+interface RecipesRoutesProps {
+  /** When true, hides sign-out and other account actions (handled by parent shell) */
+  embedded?: boolean;
+}
+
+export function RecipesRoutes({ embedded = false }: RecipesRoutesProps) {
   return (
     <Routes>
       <Route path="/join/:boxId" element={<JoinBox />} />
-      <Route path="/" element={<Main />}>
+      <Route path="/" element={<Main embedded={embedded} />}>
         <Route index element={<Contents />} />
         <Route path="settings" element={<Settings />} />
         <Route path="boxes" element={<Boxes />} />

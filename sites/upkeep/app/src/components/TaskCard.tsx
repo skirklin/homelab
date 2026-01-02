@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Tooltip, message } from "antd";
-import { CheckOutlined, EditOutlined, BellOutlined, BellFilled, InfoCircleOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
+import { CheckOutlined, EditOutlined, BellOutlined, BellFilled, InfoCircleOutlined, DownOutlined, UpOutlined, HistoryOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import type { Task } from "../types";
 import { formatDueDate } from "../types";
@@ -109,9 +109,10 @@ interface TaskCardProps {
   task: Task;
   onEdit: () => void;
   onComplete: () => void;
+  onViewHistory: () => void;
 }
 
-export function TaskCard({ task, onEdit, onComplete }: TaskCardProps) {
+export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardProps) {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const userId = user?.uid;
@@ -160,6 +161,9 @@ export function TaskCard({ task, onEdit, onComplete }: TaskCardProps) {
         <Actions>
           <Tooltip title="Mark done">
             <IconBtn type="text" icon={<CheckOutlined />} onClick={onComplete} />
+          </Tooltip>
+          <Tooltip title="History">
+            <IconBtn type="text" icon={<HistoryOutlined />} onClick={onViewHistory} />
           </Tooltip>
           <Tooltip title="Edit">
             <IconBtn type="text" icon={<EditOutlined />} onClick={onEdit} />

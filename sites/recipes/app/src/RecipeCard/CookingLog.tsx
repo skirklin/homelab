@@ -1,13 +1,12 @@
 import { CheckCircleOutlined, DeleteOutlined } from '@ant-design/icons';
-import { useContext, useState } from 'react';
+import { useContext, useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { Button, Input, Popconfirm, message } from 'antd';
+import { Button, Input, Popconfirm, message, Spin } from 'antd';
 import { Context } from '../context';
-import { getAppUserFromState, getRecipeFromState, getUserFromState } from '../state';
+import { getAppUserFromState, getUserFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';
-import type { CookingLogEntry } from '../types';
-import { updateCookingLogEntry, deleteCookingLogEntry } from '../firestore';
-import { useAuth } from '@kirkl/shared';
+import { getCookingLogEvents, updateCookingLogEvent, deleteCookingLogEvent } from '../firestore';
+import { useAuth, type Event } from '@kirkl/shared';
 
 const LogContainer = styled.div`
   margin-top: var(--space-md);
@@ -106,43 +105,70 @@ function CookingLog(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
   const { user: authUser } = useAuth();
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const recipe = getRecipeFromState(state, boxId, recipeId);
   const currentUser = getAppUserFromState(state, authUser?.uid);
 
-  if (!recipe) {
-    return null;
-  }
+  // Fetch events from subcollection
+  useEffect(() => {
+    let cancelled = false;
 
-  const cookingLog = recipe.cookingLog || [];
+    const fetchEvents = async () => {
+      setLoading(true);
+      try {
+        const fetchedEvents = await getCookingLogEvents(boxId, recipeId);
+        if (!cancelled) {
+          setEvents(fetchedEvents);
+        }
+      } catch (error) {
+        console.error('Failed to fetch cooking log:', error);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchEvents();
+    return () => { cancelled = true; };
+  }, [boxId, recipeId]);
 
   const getUserName = (userId: string): string => {
     const logUser = getUserFromState(state, userId);
     return logUser?.name || 'Someone';
   };
 
-  const canEdit = (entry: CookingLogEntry): boolean => {
-    return currentUser?.id === entry.madeBy;
+  const canEdit = (event: Event): boolean => {
+    return currentUser?.id === event.createdBy;
   };
 
-  const handleStartEdit = (actualIndex: number) => {
-    setEditingIndex(actualIndex);
+  const handleStartEdit = (eventId: string) => {
+    setEditingId(eventId);
   };
 
-  const handleSaveEdit = async (actualIndex: number, newNote: string) => {
+  const handleSaveEdit = async (eventId: string, newNote: string) => {
     try {
-      await updateCookingLogEntry(boxId, recipeId, actualIndex, newNote);
-      setEditingIndex(null);
+      await updateCookingLogEvent(boxId, eventId, newNote);
+      // Update local state
+      setEvents(prev => prev.map(e =>
+        e.id === eventId
+          ? { ...e, data: { ...e.data, notes: newNote.trim() || undefined } }
+          : e
+      ));
+      setEditingId(null);
     } catch (error) {
       console.error('Failed to update note:', error);
       message.error('Failed to update note');
     }
   };
 
-  const handleDelete = async (actualIndex: number) => {
+  const handleDelete = async (eventId: string) => {
     try {
-      await deleteCookingLogEntry(boxId, recipeId, actualIndex);
+      await deleteCookingLogEvent(boxId, eventId);
+      // Update local state
+      setEvents(prev => prev.filter(e => e.id !== eventId));
       message.success('Entry deleted');
     } catch (error) {
       console.error('Failed to delete entry:', error);
@@ -150,7 +176,16 @@ function CookingLog(props: RecipeCardProps) {
     }
   };
 
-  if (cookingLog.length === 0) {
+  if (loading) {
+    return (
+      <LogContainer>
+        <LogTitle>Cooking Log</LogTitle>
+        <Spin size="small" />
+      </LogContainer>
+    );
+  }
+
+  if (events.length === 0) {
     return (
       <LogContainer>
         <LogTitle>Cooking Log</LogTitle>
@@ -163,49 +198,48 @@ function CookingLog(props: RecipeCardProps) {
     <LogContainer>
       <LogTitle>Cooking Log</LogTitle>
       <LogList>
-        {[...cookingLog].reverse().map((entry: CookingLogEntry, displayIndex: number) => {
-          const actualIndex = cookingLog.length - 1 - displayIndex;
-          const editable = canEdit(entry);
-          const isEditing = editingIndex === actualIndex;
+        {events.map((event: Event) => {
+          const editable = canEdit(event);
+          const isEditing = editingId === event.id;
 
           return (
-            <LogEntryContainer key={displayIndex}>
+            <LogEntryContainer key={event.id}>
               <LogIcon><CheckCircleOutlined /></LogIcon>
               <LogContent>
                 <LogMeta>
-                  {getUserName(entry.madeBy)} made this on {formatDate(entry.madeAt)}
+                  {getUserName(event.createdBy)} made this on {formatDate(event.timestamp)}
                 </LogMeta>
                 {isEditing ? (
                   <NoteInput
                     autoFocus
                     autoSize
-                    defaultValue={entry.note || ''}
+                    defaultValue={(event.data.notes as string) || ''}
                     placeholder="Add a note about how it turned out..."
-                    onBlur={(e) => handleSaveEdit(actualIndex, e.target.value)}
+                    onBlur={(e) => handleSaveEdit(event.id, e.target.value)}
                     onKeyUp={(e) => {
                       if (e.key === 'Escape') {
-                        handleSaveEdit(actualIndex, e.currentTarget.value);
+                        handleSaveEdit(event.id, e.currentTarget.value);
                       }
                     }}
                   />
-                ) : entry.note ? (
+                ) : event.data.notes ? (
                   <LogNote
                     $editable={editable}
-                    onDoubleClick={editable ? () => handleStartEdit(actualIndex) : undefined}
+                    onDoubleClick={editable ? () => handleStartEdit(event.id) : undefined}
                   >
-                    "{entry.note}"
+                    "{String(event.data.notes)}"
                   </LogNote>
-                ) : editable && (
-                  <AddNoteHint onDoubleClick={() => handleStartEdit(actualIndex)}>
+                ) : editable ? (
+                  <AddNoteHint onDoubleClick={() => handleStartEdit(event.id)}>
                     Double-click to add a note
                   </AddNoteHint>
-                )}
+                ) : null}
               </LogContent>
               {editable && (
                 <LogActions>
                   <Popconfirm
                     title="Delete this entry?"
-                    onConfirm={() => handleDelete(actualIndex)}
+                    onConfirm={() => handleDelete(event.id)}
                     okText="Delete"
                     cancelText="Cancel"
                   >

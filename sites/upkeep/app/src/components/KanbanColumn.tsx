@@ -80,9 +80,10 @@ interface KanbanColumnProps {
   tasks: Task[];
   onEditTask: (task: Task) => void;
   onCompleteTask: (task: Task) => void;
+  onViewHistory: (task: Task) => void;
 }
 
-export function KanbanColumn({ title, urgency, tasks, onEditTask, onCompleteTask }: KanbanColumnProps) {
+export function KanbanColumn({ title, urgency, tasks, onEditTask, onCompleteTask, onViewHistory }: KanbanColumnProps) {
   return (
     <Column $urgency={urgency}>
       <ColumnHeader $urgency={urgency}>
@@ -101,6 +102,7 @@ export function KanbanColumn({ title, urgency, tasks, onEditTask, onCompleteTask
               task={task}
               onEdit={() => onEditTask(task)}
               onComplete={() => onCompleteTask(task)}
+              onViewHistory={() => onViewHistory(task)}
             />
           ))}
         </TaskList>

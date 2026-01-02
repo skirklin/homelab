@@ -6,7 +6,7 @@ import { useAuth } from "@kirkl/shared";
 import { completeTask } from "../firestore";
 import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Completion } from "../types";
-import { formatFrequency } from "../types";
+import { formatFrequency, getCompletionNotes } from "../types";
 
 const TaskInfo = styled.div`
   margin-bottom: var(--space-md);
@@ -76,6 +76,7 @@ interface CompleteTaskModalProps {
   open: boolean;
   task: Task | null;
   onClose: () => void;
+  initialTab?: "complete" | "history";
 }
 
 function formatDate(date: Date): string {
@@ -100,12 +101,12 @@ function formatDate(date: Date): string {
   }) + ` at ${timeStr}`;
 }
 
-export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProps) {
+export function CompleteTaskModal({ open, task, onClose, initialTab = "complete" }: CompleteTaskModalProps) {
   const { user } = useAuth();
   const { state } = useUpkeepContext();
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState("complete");
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [useCustomDate, setUseCustomDate] = useState(false);
   const [customDate, setCustomDate] = useState<dayjs.Dayjs | null>(null);
 
@@ -113,11 +114,11 @@ export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProp
   useEffect(() => {
     if (open) {
       setNotes("");
-      setActiveTab("complete");
+      setActiveTab(initialTab);
       setUseCustomDate(false);
       setCustomDate(null);
     }
-  }, [open]);
+  }, [open, initialTab]);
 
   const handleComplete = async () => {
     if (!task || !user) return;
@@ -141,8 +142,8 @@ export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProp
 
   // Get completions for this task, sorted by date (newest first)
   const taskCompletions = state.completions
-    .filter(c => c.taskId === task.id)
-    .sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
+    .filter(c => c.subjectId === task.id)
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
   const tabItems = [
     {
@@ -198,9 +199,9 @@ export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProp
               renderItem={(completion: Completion) => (
                 <List.Item>
                   <HistoryItem>
-                    <HistoryDate>{formatDate(completion.completedAt)}</HistoryDate>
-                    {completion.notes && (
-                      <HistoryNotes>"{completion.notes}"</HistoryNotes>
+                    <HistoryDate>{formatDate(completion.timestamp)}</HistoryDate>
+                    {getCompletionNotes(completion) && (
+                      <HistoryNotes>"{getCompletionNotes(completion)}"</HistoryNotes>
                     )}
                   </HistoryItem>
                 </List.Item>
@@ -212,9 +213,11 @@ export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProp
     },
   ];
 
+  const modalTitle = activeTab === "history" ? "Task History" : "Mark Task Complete";
+
   return (
     <Modal
-      title="Mark Task Complete"
+      title={modalTitle}
       open={open}
       onOk={handleComplete}
       onCancel={onClose}
@@ -229,7 +232,7 @@ export function CompleteTaskModal({ open, task, onClose }: CompleteTaskModalProp
 
       <Tabs
         activeKey={activeTab}
-        onChange={setActiveTab}
+        onChange={(key) => setActiveTab(key as "complete" | "history")}
         items={tabItems}
       />
     </Modal>

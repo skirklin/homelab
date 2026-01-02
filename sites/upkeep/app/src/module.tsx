@@ -13,7 +13,12 @@ import { appStorage } from "./storage";
 // Migrate legacy localStorage keys on startup
 appStorage.migrateFromLegacy();
 
-export function UpkeepRoutes() {
+interface UpkeepRoutesProps {
+  /** When true, hides sign-out and other account actions (handled by parent shell) */
+  embedded?: boolean;
+}
+
+export function UpkeepRoutes({ embedded = false }: UpkeepRoutesProps) {
   const { user } = useAuth();
 
   if (!user) return null;
@@ -22,7 +27,7 @@ export function UpkeepRoutes() {
     <Routes>
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
-      <Route path="/:slug" element={<TaskBoard />} />
+      <Route path="/:slug" element={<TaskBoard embedded={embedded} />} />
     </Routes>
   );
 }

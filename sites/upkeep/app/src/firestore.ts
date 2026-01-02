@@ -11,7 +11,8 @@ import {
   arrayRemove,
 } from "firebase/firestore";
 import { db } from "./backend";
-import type { Task, TaskStore, RoomDef, CompletionStore, UserProfileStore } from "./types";
+import { type EventStore } from "@kirkl/shared";
+import type { Task, TaskStore, RoomDef, UserProfileStore } from "./types";
 import { taskToStore } from "./types";
 
 // Current list ID - set by the router
@@ -37,8 +38,13 @@ export function getTaskRef(taskId: string, listId?: string) {
   return doc(db, "taskLists", listId || currentListId, "tasks", taskId);
 }
 
+export function getEventsRef(listId?: string) {
+  return collection(db, "taskLists", listId || currentListId, "events");
+}
+
+// Alias for backward compatibility
 export function getCompletionsRef(listId?: string) {
-  return collection(db, "taskLists", listId || currentListId, "completions");
+  return getEventsRef(listId);
 }
 
 export function getUserRef(userId: string) {
@@ -105,14 +111,15 @@ export async function completeTask(
     });
   }
 
-  // Create completion record
-  const completionData: CompletionStore = {
-    taskId,
-    completedBy: userId,
-    completedAt: completionTime,
-    notes,
+  // Create completion event using unified Event format
+  const eventData: EventStore = {
+    subjectId: taskId,
+    timestamp: completionTime,
+    createdAt: now,
+    createdBy: userId,
+    data: { notes },
   };
-  await addDoc(getCompletionsRef(), completionData);
+  await addDoc(getEventsRef(), eventData);
 }
 
 export async function updateRooms(rooms: RoomDef[]) {

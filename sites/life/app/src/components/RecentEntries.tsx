@@ -1,12 +1,13 @@
+import { useState } from "react";
 import styled from "styled-components";
-import { List, Tag } from "antd";
-import { EditOutlined } from "@ant-design/icons";
-import type { ActivityDef, LogEntry } from "../types";
-import { getActivity } from "../types";
+import { List, Tag, Popconfirm, Button, message } from "antd";
+import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
+import type { LogEntry, Widget, LifeManifest } from "../types";
+import { getWidget, getSource, getNotes } from "../types";
+import { deleteEntry } from "../firestore";
+import { EditEntryModal } from "./EditEntryModal";
 
 const EntryItem = styled(List.Item)`
-  cursor: pointer;
-
   &:hover {
     background: var(--color-bg-subtle);
   }
@@ -22,25 +23,21 @@ const EntryContent = styled.div`
 const EntryTime = styled.div`
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  min-width: 140px;
+  min-width: 100px;
 `;
 
-const EntryDuration = styled.div`
-  font-weight: 500;
-  min-width: 60px;
-`;
-
-const EntryNotes = styled.div`
+const EntryData = styled.div`
   flex: 1;
-  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 `;
 
-const EditIcon = styled(EditOutlined)`
-  color: var(--color-text-secondary);
+const ActionButtons = styled.div`
+  display: flex;
+  gap: 4px;
   opacity: 0;
 
   ${EntryItem}:hover & {
@@ -58,11 +55,13 @@ const EmptyState = styled.div`
 
 interface RecentEntriesProps {
   entries: LogEntry[];
-  activities: ActivityDef[];
-  onEdit: (entry: LogEntry) => void;
+  manifest: LifeManifest;
+  logId: string | undefined;
 }
 
-export function RecentEntries({ entries, activities, onEdit }: RecentEntriesProps) {
+export function RecentEntries({ entries, manifest, logId }: RecentEntriesProps) {
+  const [editingEntry, setEditingEntry] = useState<LogEntry | null>(null);
+
   const formatTime = (date: Date): string => {
     const now = new Date();
     const isToday = date.toDateString() === now.toDateString();
@@ -81,16 +80,55 @@ export function RecentEntries({ entries, activities, onEdit }: RecentEntriesProp
     return date.toLocaleDateString([], { month: "short", day: "numeric" }) + ` ${timeStr}`;
   };
 
-  const formatDuration = (entry: LogEntry): string => {
-    if (entry.duration === null) {
-      return "In progress";
+  const formatData = (entry: LogEntry, widget: Widget | undefined): string => {
+    if (!widget) {
+      return "";
     }
-    if (entry.duration < 60) {
-      return `${entry.duration}m`;
+
+    switch (widget.type) {
+      case "counter":
+        return "";
+      case "number": {
+        const value = entry.data.value as number;
+        const unit = widget.unit ? ` ${widget.unit}` : "";
+        return `${value}${unit}`;
+      }
+      case "rating": {
+        const rating = entry.data.rating as number;
+        return "★".repeat(rating) + "☆".repeat(widget.max - rating);
+      }
+      case "text":
+        return entry.data.text as string;
+      case "combo": {
+        const parts: string[] = [];
+        for (const field of widget.fields) {
+          const fieldValue = entry.data[field.id];
+          if (fieldValue !== undefined && fieldValue !== null && fieldValue !== "") {
+            if (field.type === "rating") {
+              parts.push(`${field.label}: ${"★".repeat(fieldValue as number)}`);
+            } else if (field.type === "number" && field.unit) {
+              parts.push(`${field.label}: ${fieldValue}${field.unit}`);
+            } else {
+              parts.push(`${field.label}: ${fieldValue}`);
+            }
+          }
+        }
+        return parts.join(" · ");
+      }
+      default:
+        return "";
     }
-    const hours = Math.floor(entry.duration / 60);
-    const mins = entry.duration % 60;
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  };
+
+  const handleDelete = async (entry: LogEntry) => {
+    if (!logId) return;
+    try {
+      await deleteEntry(entry.id, logId);
+      message.success("Entry deleted");
+    } catch (error) {
+      console.error("Failed to delete:", error);
+      message.error("Failed to delete");
+    }
   };
 
   if (entries.length === 0) {
@@ -98,27 +136,60 @@ export function RecentEntries({ entries, activities, onEdit }: RecentEntriesProp
   }
 
   return (
+    <>
     <List
       dataSource={entries}
       renderItem={(entry) => {
-        const activity = getActivity(activities, entry.activityId);
-        const label = activity?.label ?? "Unknown";
-        // Convert hex color to antd tag color name (approximate)
-        const tagColor = activity?.color ?? "#888";
+        const widget = getWidget(manifest, entry.subjectId);
+        const label = widget?.label ?? (entry.subjectId === "__sample__" ? "Sample Response" : "Unknown");
+        const isSample = getSource(entry) === "sample";
+        const notes = getNotes(entry);
+
         return (
-          <EntryItem onClick={() => onEdit(entry)}>
+          <EntryItem>
             <EntryContent>
-              <Tag style={{ background: tagColor, color: "white", border: "none" }}>
-                {activity?.icon} {label}
+              <Tag color={isSample ? "purple" : "blue"}>
+                {label}
               </Tag>
-              <EntryTime>{formatTime(entry.startTime)}</EntryTime>
-              <EntryDuration>{formatDuration(entry)}</EntryDuration>
-              <EntryNotes>{entry.notes}</EntryNotes>
-              <EditIcon />
+              <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
+              <EntryData>{formatData(entry, widget)}</EntryData>
+              {notes && (
+                <EntryData style={{ fontStyle: "italic" }}>{notes}</EntryData>
+              )}
+              <ActionButtons>
+                <Button
+                  icon={<EditOutlined />}
+                  size="small"
+                  type="text"
+                  onClick={() => setEditingEntry(entry)}
+                />
+                <Popconfirm
+                  title="Delete this entry?"
+                  onConfirm={() => handleDelete(entry)}
+                  okText="Delete"
+                  cancelText="Cancel"
+                >
+                  <Button
+                    icon={<DeleteOutlined />}
+                    danger
+                    size="small"
+                    type="text"
+                  />
+                </Popconfirm>
+              </ActionButtons>
             </EntryContent>
           </EntryItem>
         );
       }}
     />
+
+    <EditEntryModal
+      open={editingEntry !== null}
+      onClose={() => setEditingEntry(null)}
+      entry={editingEntry}
+      manifest={manifest}
+      logId={logId}
+    />
+  </>
   );
 }

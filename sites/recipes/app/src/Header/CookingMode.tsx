@@ -10,7 +10,7 @@ import { useAuth } from '@kirkl/shared';
 
 const IconButton = styled(Button)<{ $active?: boolean; $highlight?: boolean }>`
   background-color: ${props => props.$active ? 'var(--color-accent)' : 'transparent'};
-  color: ${props => props.$active ? 'white' : 'white'};
+  color: ${props => props.$active ? 'white' : 'var(--color-text)'};
   border: none;
   width: 36px;
   height: 36px;
@@ -24,8 +24,8 @@ const IconButton = styled(Button)<{ $active?: boolean; $highlight?: boolean }>`
   `}
 
   &:hover {
-    color: white;
-    background-color: ${props => props.$active ? 'var(--color-accent)' : 'rgba(255, 255, 255, 0.15)'};
+    color: ${props => props.$active ? 'white' : 'var(--color-text)'};
+    background-color: ${props => props.$active ? 'var(--color-accent)' : 'var(--color-bg-muted)'};
   }
 
   @keyframes pulse {

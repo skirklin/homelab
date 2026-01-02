@@ -1,7 +1,6 @@
 import { Breadcrumb, Dropdown } from 'antd';
 import { useContext } from 'react';
 import { Link, useLocation, useParams, type Params } from 'react-router-dom';
-import styled from 'styled-components';
 import { Context } from '../context';
 import { useMediaQuery } from 'react-responsive'
 
@@ -9,17 +8,6 @@ import './Header.css';
 import type { AppState } from '../types';
 import { EllipsisOutlined } from '@ant-design/icons';
 import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
-
-const LogoLink = styled(Link)`
-  display: flex;
-  align-items: center;
-  gap: 6px;
-`;
-
-const LogoIcon = styled.img`
-  width: 20px;
-  height: 20px;
-`;
 
 function getPartMap(params: Readonly<Params<string>>, state: AppState) {
 
@@ -43,22 +31,32 @@ function getPartMap(params: Readonly<Params<string>>, state: AppState) {
   return partMap
 }
 
+// Filter out the app's base path segment (e.g., "recipes" when embedded at /recipes)
+function getContentParts(pathname: string): string[] {
+  const parts = pathname.split('/').filter(i => i);
+  // Skip the "recipes" prefix if present (when embedded in home app)
+  if (parts[0] === 'recipes') {
+    return parts.slice(1);
+  }
+  return parts;
+}
+
 function FullBreadcrumbs() {
   const location = useLocation();
   const params = useParams();
   const { state } = useContext(Context);
   const partMap = getPartMap(params, state)
 
-  const pathParts = location.pathname.split('/').filter(i => i);
+  const contentParts = getContentParts(location.pathname);
 
   const items: ItemType[] = [
     {
       key: 'home',
       className: 'recipes-breadcrumb',
-      title: <LogoLink to="/"><LogoIcon src="/favicon.svg" alt="" />Recipe box</LogoLink>,
+      title: <Link to="/">Recipes</Link>,
     },
-    ...pathParts.map((part, index) => {
-      const url = `/${pathParts.slice(0, index + 1).join('/')}`;
+    ...contentParts.map((part, index) => {
+      const url = `/${contentParts.slice(0, index + 1).join('/')}`;
       return {
         key: url,
         className: 'recipes-breadcrumb',
@@ -75,10 +73,10 @@ function CollapsedBreadcrumbs() {
   const params = useParams();
   const { state } = useContext(Context);
   const partMap = getPartMap(params, state)
-  const pathParts = location.pathname.split('/').filter(i => i);
+  const contentParts = getContentParts(location.pathname);
 
-  const menuItems = pathParts.map((part, index) => {
-    const url = `/${pathParts.slice(0, index + 1).join('/')}`;
+  const menuItems = contentParts.map((part, index) => {
+    const url = `/${contentParts.slice(0, index + 1).join('/')}`;
     return {
       key: url,
       label: <Link to={url}>{partMap.get(part) || part} /</Link>,
@@ -89,7 +87,7 @@ function CollapsedBreadcrumbs() {
     {
       key: 'home',
       className: 'recipes-breadcrumb',
-      title: <LogoLink to="/"><LogoIcon src="/favicon.svg" alt="" />Recipes</LogoLink>,
+      title: <Link to="/">Recipes</Link>,
     },
     {
       key: 'ellipsis',

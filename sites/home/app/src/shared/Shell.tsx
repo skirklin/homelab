@@ -1,14 +1,14 @@
 import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Button, Dropdown } from "antd";
+import { Tooltip } from "antd";
 import {
   ExperimentOutlined,
   ShoppingCartOutlined,
   CheckSquareOutlined,
-  SettingOutlined,
   LogoutOutlined,
   BookOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
 import { getBackend } from "@kirkl/shared";
@@ -43,49 +43,66 @@ const Nav = styled.nav`
   }
 `;
 
-const NavButton = styled(Button)<{ $active?: boolean }>`
-  &.ant-btn {
-    color: ${props => props.$active ? 'var(--color-primary)' : 'white'};
-    background: ${props => props.$active ? 'white' : 'transparent'};
-    border: none;
-    flex-shrink: 0;
+const NavButton = styled.button<{ $active?: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
 
-    &:hover {
-      color: ${props => props.$active ? 'var(--color-primary)' : 'white'};
-      background: ${props => props.$active ? 'white' : 'rgba(255, 255, 255, 0.15)'};
-    }
+  color: ${props => props.$active ? '#6366f1' : '#ffffff'};
+  background: ${props => props.$active ? '#ffffff' : 'transparent'};
 
-    .anticon {
-      color: inherit;
-    }
+  &:hover, &:focus {
+    background: ${props => props.$active ? '#ffffff' : 'rgba(255, 255, 255, 0.15)'};
+    outline: none;
   }
 
   /* On narrow screens, hide text and show only icons */
   @media (max-width: 480px) {
-    &.ant-btn {
-      padding: var(--space-sm);
-    }
+    padding: 8px 12px;
 
-    span:not(.anticon) {
+    .nav-label {
       display: none;
     }
   }
 `;
 
-const IconButton = styled(Button)`
-  &.ant-btn {
-    color: white;
-    background: transparent;
-    border: none;
+const NavIcon = styled.span<{ $active?: boolean }>`
+  display: inline-flex;
+  font-size: 20px;
 
-    &:hover {
-      color: white;
-      background: rgba(255, 255, 255, 0.15);
-    }
+  .anticon {
+    color: ${props => props.$active ? '#6366f1' : '#ffffff'};
+  }
 
-    .anticon {
-      color: white;
-    }
+  .anticon svg {
+    fill: ${props => props.$active ? '#6366f1' : '#ffffff'};
+  }
+`;
+
+const SignOutButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  font-size: 18px;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.15);
   }
 `;
 
@@ -115,51 +132,51 @@ export function Shell() {
     navigate("/");
   };
 
-  const menuItems = [
-    {
-      key: "signout",
-      icon: <LogoutOutlined />,
-      label: "Sign Out",
-      onClick: handleSignOut,
-    },
-  ];
-
   return (
     <Container>
       <Header>
         <Nav>
           <NavButton
-            icon={<ExperimentOutlined />}
             $active={isActive("/life")}
             onClick={() => navigate("/life")}
           >
-            Life
+            <NavIcon $active={isActive("/life")}><ExperimentOutlined /></NavIcon>
+            <span className="nav-label">Life</span>
           </NavButton>
           <NavButton
-            icon={<BookOutlined />}
             $active={isActive("/recipes")}
             onClick={() => navigate("/recipes")}
           >
-            Recipes
+            <NavIcon $active={isActive("/recipes")}><BookOutlined /></NavIcon>
+            <span className="nav-label">Recipes</span>
           </NavButton>
           <NavButton
-            icon={<ShoppingCartOutlined />}
             $active={isActive("/groceries")}
             onClick={() => navigate("/groceries")}
           >
-            Groceries
+            <NavIcon $active={isActive("/groceries")}><ShoppingCartOutlined /></NavIcon>
+            <span className="nav-label">Groceries</span>
           </NavButton>
           <NavButton
-            icon={<CheckSquareOutlined />}
             $active={isActive("/upkeep")}
             onClick={() => navigate("/upkeep")}
           >
-            Upkeep
+            <NavIcon $active={isActive("/upkeep")}><CheckSquareOutlined /></NavIcon>
+            <span className="nav-label">Upkeep</span>
+          </NavButton>
+          <NavButton
+            $active={isActive("/timeline")}
+            onClick={() => navigate("/timeline")}
+          >
+            <NavIcon $active={isActive("/timeline")}><HistoryOutlined /></NavIcon>
+            <span className="nav-label">Timeline</span>
           </NavButton>
         </Nav>
-        <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-          <IconButton icon={<SettingOutlined />} />
-        </Dropdown>
+        <Tooltip title="Sign out">
+          <SignOutButton onClick={handleSignOut}>
+            <LogoutOutlined />
+          </SignOutButton>
+        </Tooltip>
       </Header>
       <Content>
         <Outlet />

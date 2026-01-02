@@ -53,7 +53,11 @@ const NotFoundContainer = styled.div`
   color: var(--color-text-secondary);
 `;
 
-export function TaskBoard() {
+interface TaskBoardProps {
+  embedded?: boolean;
+}
+
+export function TaskBoard({ embedded = false }: TaskBoardProps) {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { state, setCurrentList } = useUpkeepContext();
@@ -64,6 +68,7 @@ export function TaskBoard() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
   const [completingTask, setCompletingTask] = useState<Task | null>(null);
+  const [completeModalTab, setCompleteModalTab] = useState<"complete" | "history">("complete");
 
   // Get list ID from slug
   const listId = slug ? state.userSlugs[slug] : null;
@@ -88,6 +93,13 @@ export function TaskBoard() {
 
   const handleCompleteTask = (task: Task) => {
     setCompletingTask(task);
+    setCompleteModalTab("complete");
+    setCompleteModalOpen(true);
+  };
+
+  const handleViewHistory = (task: Task) => {
+    setCompletingTask(task);
+    setCompleteModalTab("history");
     setCompleteModalOpen(true);
   };
 
@@ -118,7 +130,7 @@ export function TaskBoard() {
   if (state.loading || !state.list) {
     return (
       <Container>
-        <Header onAddTask={handleAddTask} />
+        <Header onAddTask={handleAddTask} embedded={embedded} />
         <LoadingContainer>
           <Spin size="large" />
         </LoadingContainer>
@@ -130,7 +142,7 @@ export function TaskBoard() {
 
   return (
     <Container>
-      <Header onAddTask={handleAddTask} />
+      <Header onAddTask={handleAddTask} embedded={embedded} />
       <BoardContainer>
         <KanbanColumn
           title="Due Today"
@@ -138,6 +150,7 @@ export function TaskBoard() {
           tasks={tasksByUrgency.today}
           onEditTask={handleEditTask}
           onCompleteTask={handleCompleteTask}
+          onViewHistory={handleViewHistory}
         />
         <KanbanColumn
           title="This Week"
@@ -145,6 +158,7 @@ export function TaskBoard() {
           tasks={tasksByUrgency.thisWeek}
           onEditTask={handleEditTask}
           onCompleteTask={handleCompleteTask}
+          onViewHistory={handleViewHistory}
         />
         <KanbanColumn
           title="Later"
@@ -152,6 +166,7 @@ export function TaskBoard() {
           tasks={tasksByUrgency.later}
           onEditTask={handleEditTask}
           onCompleteTask={handleCompleteTask}
+          onViewHistory={handleViewHistory}
         />
       </BoardContainer>
 
@@ -165,6 +180,7 @@ export function TaskBoard() {
         open={completeModalOpen}
         task={completingTask}
         onClose={handleCloseCompleteModal}
+        initialTab={completeModalTab}
       />
     </Container>
   );

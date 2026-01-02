@@ -1,7 +1,8 @@
-import { addDoc, arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
+import { addDoc, arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, orderBy, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 import type React from 'react';
 import type { Recipe } from "schema-dts"
 import { db } from './backend';
+import { type Event, type EventStore, eventFromStore } from '@kirkl/shared';
 import { boxConverter, BoxEntry, recipeConverter, RecipeEntry, userConverter, UserEntry } from './storage';
 import { type ActionType, type BoxId, EnrichmentStatus, type RecipeId, type UserId, Visibility } from './types';
 
@@ -220,6 +221,82 @@ export async function rejectEnrichment(boxId: BoxId, recipeId: RecipeId) {
     enrichmentStatus: EnrichmentStatus.skipped,
   });
 }
+
+// ============================================
+// Event-based Cooking Log (subcollection)
+// ============================================
+
+/**
+ * Get all cooking log events for a recipe
+ */
+export async function getCookingLogEvents(
+  boxId: BoxId,
+  recipeId: RecipeId
+): Promise<Event[]> {
+  const eventsRef = collection(db, "boxes", boxId, "events");
+  const q = query(
+    eventsRef,
+    where("subjectId", "==", recipeId),
+    orderBy("timestamp", "desc")
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => eventFromStore(doc.id, doc.data() as EventStore));
+}
+
+/**
+ * Add a new cooking log event
+ */
+export async function addCookingLogEvent(
+  boxId: BoxId,
+  recipeId: RecipeId,
+  userId: string,
+  notes?: string
+): Promise<string> {
+  const eventsRef = collection(db, "boxes", boxId, "events");
+  const now = Timestamp.now();
+  const eventData: EventStore = {
+    subjectId: recipeId,
+    timestamp: now,
+    createdAt: now,
+    createdBy: userId,
+    data: notes ? { notes } : {},
+  };
+  const docRef = await addDoc(eventsRef, eventData);
+  return docRef.id;
+}
+
+/**
+ * Update a cooking log event's notes
+ */
+export async function updateCookingLogEvent(
+  boxId: BoxId,
+  eventId: string,
+  notes: string
+): Promise<void> {
+  const eventRef = doc(db, "boxes", boxId, "events", eventId);
+  const trimmed = notes.trim();
+  if (trimmed) {
+    await updateDoc(eventRef, { "data.notes": trimmed });
+  } else {
+    await updateDoc(eventRef, { "data.notes": deleteField() });
+  }
+}
+
+/**
+ * Delete a cooking log event
+ */
+export async function deleteCookingLogEvent(
+  boxId: BoxId,
+  eventId: string
+): Promise<void> {
+  const eventRef = doc(db, "boxes", boxId, "events", eventId);
+  await deleteDoc(eventRef);
+}
+
+// ============================================
+// Legacy cooking log functions (array-based)
+// Keep for migration/backwards compatibility
+// ============================================
 
 export async function addCookingLogEntry(
   boxId: BoxId,

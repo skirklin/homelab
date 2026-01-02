@@ -8,5 +8,8 @@
     "sites/life/app",
     "sites/upkeep/app",
     "sites/recipes/app"
-  ]
+  ],
+  "devDependencies": {
+    "firebase-admin": "^13.6.0"
+  }
 }
