@@ -75,16 +75,27 @@ const countSizeStyles = {
   `,
 };
 
-const CountDisplay = styled.div<{ $hasCount: boolean; $size: WidgetSize }>`
+const CountDisplay = styled.button<{ $size: WidgetSize }>`
   border-radius: 50%;
-  background: ${(props) => (props.$hasCount ? "var(--color-primary)" : "var(--color-bg-muted)")};
-  color: ${(props) => (props.$hasCount ? "white" : "var(--color-text-secondary)")};
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 600;
   flex-shrink: 0;
+  border: none;
+  cursor: pointer;
   ${(props) => countSizeStyles[props.$size]}
+
+  &:active {
+    opacity: 0.7;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
 `;
 
 const CountButton = styled.button<{ $size: WidgetSize }>`
@@ -164,18 +175,18 @@ export function CounterWidget({ widget, entries, userId, logId, timestamp, size 
 
   return (
     <Card $size={size}>
+      {count > 0 ? (
+        <EntriesPopover entries={dayEntries} logId={logId}>
+          <CountButton $size={size}>
+            {count}
+          </CountButton>
+        </EntriesPopover>
+      ) : (
+        <CountDisplay $size={size} onClick={handleAdd} disabled={saving || !logId}>
+          <PlusOutlined />
+        </CountDisplay>
+      )}
       <AddButton onClick={handleAdd} disabled={saving || !logId}>
-        {count > 0 ? (
-          <EntriesPopover entries={dayEntries} logId={logId}>
-            <CountButton $size={size} onClick={(e) => e.stopPropagation()}>
-              {count}
-            </CountButton>
-          </EntriesPopover>
-        ) : (
-          <CountDisplay $hasCount={false} $size={size}>
-            <PlusOutlined />
-          </CountDisplay>
-        )}
         <Content>
           <Label $size={size}>{widget.label}</Label>
           <Hint $size={size}>Tap to log</Hint>

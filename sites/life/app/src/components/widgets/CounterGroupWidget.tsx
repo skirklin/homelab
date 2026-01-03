@@ -168,14 +168,13 @@ export function CounterGroupWidget({ widget, entries, userId, logId, timestamp, 
             >
               {counter.label}
               {count > 0 && (
-                <EntriesPopover entries={counterEntries} logId={logId}>
-                  <CountBadge
-                    $size={size}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {count}
-                  </CountBadge>
-                </EntriesPopover>
+                <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                  <EntriesPopover entries={counterEntries} logId={logId}>
+                    <CountBadge $size={size}>
+                      {count}
+                    </CountBadge>
+                  </EntriesPopover>
+                </span>
               )}
             </CounterButton>
           );
