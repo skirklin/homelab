@@ -8,9 +8,11 @@ import { Spin } from "antd";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { LifeProvider, useLife } from "./life-context";
+import { DisplaySettingsProvider } from "./display-settings";
 import { getOrCreateUserLog, setCurrentLogId } from "./firestore";
 import { logFromStore } from "./types";
 import { LifeDashboard } from "./components/LifeDashboard";
+import { Visualizations } from "./components/Visualizations";
 
 const LoadingContainer = styled.div`
   display: flex;
@@ -49,10 +51,13 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<LifeDashboard embedded={embedded} />} />
-      <Route path="*" element={<LifeDashboard embedded={embedded} />} />
-    </Routes>
+    <DisplaySettingsProvider>
+      <Routes>
+        <Route path="/" element={<LifeDashboard embedded={embedded} />} />
+        <Route path="/insights" element={<Visualizations />} />
+        <Route path="*" element={<LifeDashboard embedded={embedded} />} />
+      </Routes>
+    </DisplaySettingsProvider>
   );
 }
 

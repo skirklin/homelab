@@ -62,11 +62,17 @@ function EnrichmentReview(props: RecipeCardProps) {
   }
 
   const enrichment = recipe.pendingEnrichment;
-  const currentDescription = recipe.getData().description;
+  const recipeData = recipe.getData();
+  const currentDescription = recipeData.description;
+  const currentTags = recipeData.recipeCategory;
   const hasNewDescription = enrichment.description && enrichment.description !== currentDescription;
 
   async function handleAccept() {
-    await applyEnrichment(boxId, recipeId, enrichment);
+    const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
+    await applyEnrichment(boxId, recipeId, enrichment, {
+      description: typeof currentDescription === 'string' ? currentDescription : undefined,
+      tags,
+    });
   }
 
   async function handleReject() {

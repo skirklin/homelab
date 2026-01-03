@@ -1,12 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Spin, Empty, Tag } from "antd";
 import {
   CheckCircleOutlined,
   HeartOutlined,
   ExperimentOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import { useAuth, db } from "@kirkl/shared";
+import { useRecipesContext } from "@kirkl/recipes";
+import { useUpkeepContext } from "@kirkl/upkeep";
 import {
   collection,
   query,
@@ -18,6 +22,18 @@ import {
   getDoc,
   Timestamp,
 } from "firebase/firestore";
+
+interface UserProfile {
+  householdSlugs?: Record<string, string>;
+}
+
+// Module-level cache to prevent double-fetch from StrictMode
+const timelineCache = {
+  fetching: false,
+  userId: null as string | null,
+  events: null as TimelineEvent[] | null,
+  slugMap: null as Map<string, string> | null,
+};
 
 const Container = styled.div`
   max-width: 600px;
@@ -43,13 +59,24 @@ const TimelineList = styled.div`
   gap: var(--space-sm);
 `;
 
-const EventCard = styled.div`
+const EventCard = styled.div<{ $clickable?: boolean }>`
   display: flex;
   gap: var(--space-md);
   padding: var(--space-md);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  cursor: ${(props) => (props.$clickable ? "pointer" : "default")};
+  transition: background 0.15s, border-color 0.15s;
+
+  ${(props) =>
+    props.$clickable &&
+    `
+    &:hover {
+      background: var(--color-bg-muted);
+      border-color: var(--color-primary);
+    }
+  `}
 `;
 
 const EventIcon = styled.div<{ $color: string }>`
@@ -92,6 +119,14 @@ const EventNote = styled.p`
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   font-style: italic;
+`;
+
+const EventArrow = styled.div`
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
 `;
 
 const DateHeader = styled.div`
@@ -178,25 +213,79 @@ function groupEventsByDate(events: TimelineEvent[]): Map<string, TimelineEvent[]
 
 export function Timeline() {
   const { user } = useAuth();
-  const [events, setEvents] = useState<TimelineEvent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const { state: recipesState } = useRecipesContext();
+  const { state: upkeepState } = useUpkeepContext();
+  const [events, setEvents] = useState<TimelineEvent[]>(() => timelineCache.events || []);
+  const [loading, setLoading] = useState(() => !timelineCache.events);
   const [subjectNames, setSubjectNames] = useState<Map<string, string>>(new Map());
+  const [upkeepSlugMap, setUpkeepSlugMap] = useState<Map<string, string>>(() => timelineCache.slugMap || new Map());
+
+  // Build recipe name lookup from recipes context (already loaded by RecipesProvider)
+  const recipeNames = useMemo(() => {
+    const names = new Map<string, string>();
+    // Recipes are nested inside boxes: boxes -> box.recipes
+    for (const box of recipesState.boxes.values()) {
+      for (const [recipeId, recipe] of box.recipes) {
+        const name = recipe.data?.name;
+        if (name) {
+          names.set(recipeId, name);
+        }
+      }
+    }
+    return names;
+  }, [recipesState.boxes]);
+
+  // Build task name lookup from upkeep context
+  const taskNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const [taskId, task] of upkeepState.tasks) {
+      if (task.name) {
+        names.set(taskId, task.name);
+      }
+    }
+    return names;
+  }, [upkeepState.tasks]);
 
   useEffect(() => {
     if (!user) return;
 
+    // Use cached data if available for this user
+    if (timelineCache.userId === user.uid && timelineCache.events) {
+      return;
+    }
+
+    // Prevent concurrent fetches (React StrictMode double-invokes effects)
+    if (timelineCache.fetching) return;
+    timelineCache.fetching = true;
+
     const fetchEvents = async () => {
       setLoading(true);
       const allEvents: TimelineEvent[] = [];
-      const names = new Map<string, string>();
+      const startTime = performance.now();
 
       try {
-        // Fetch all containers in parallel
-        const [boxesSnapshot, lifeLogsSnapshot, taskListsSnapshot] = await Promise.all([
-          getDocs(query(collection(db, "boxes"), where("owners", "array-contains", user.uid))),
-          getDocs(query(collection(db, "lifeLogs"), where("owners", "array-contains", user.uid))),
-          getDocs(query(collection(db, "taskLists"), where("owners", "array-contains", user.uid))),
+        // Phase 1: Fetch user profile AND containers in parallel
+        const [userProfileDoc, boxesSnapshot, lifeLogsSnapshot, taskListsSnapshot] = await Promise.all([
+          getDoc(doc(db, "users", user.uid)),
+          getDocs(query(collection(db, "boxes"), where("owners", "array-contains", user.uid), limit(10))),
+          getDocs(query(collection(db, "lifeLogs"), where("owners", "array-contains", user.uid), limit(5))),
+          getDocs(query(collection(db, "taskLists"), where("owners", "array-contains", user.uid), limit(5))),
         ]);
+        console.log(`Timeline: phase 1 took ${(performance.now() - startTime).toFixed(0)}ms - found ${boxesSnapshot.size} boxes, ${lifeLogsSnapshot.size} lifeLogs, ${taskListsSnapshot.size} taskLists`);
+
+        // Process user profile for slug mappings
+        if (userProfileDoc.exists()) {
+          const profile = userProfileDoc.data() as UserProfile;
+          if (profile.householdSlugs) {
+            const slugMap = new Map<string, string>();
+            for (const [slug, listId] of Object.entries(profile.householdSlugs)) {
+              slugMap.set(listId, slug);
+            }
+            setUpkeepSlugMap(slugMap);
+            timelineCache.slugMap = slugMap;
+          }
+        }
 
         // Store widget labels from life logs (already in the container doc)
         const widgetLabels = new Map<string, string>();
@@ -207,7 +296,8 @@ export function Timeline() {
           }
         }
 
-        // Phase 1: Fetch all events in parallel (no name lookups yet)
+        // Phase 2: Fetch all events in parallel
+        const phase2Start = performance.now();
         const eventQueries: Promise<void>[] = [];
 
         // Recipe events
@@ -218,7 +308,7 @@ export function Timeline() {
                 collection(db, "boxes", boxDoc.id, "events"),
                 where("createdBy", "==", user.uid),
                 orderBy("timestamp", "desc"),
-                limit(20)
+                limit(15)
               ));
 
               for (const eventDoc of eventsSnapshot.docs) {
@@ -237,7 +327,7 @@ export function Timeline() {
           );
         }
 
-        // Life tracker events (unified events collection)
+        // Life tracker events
         for (const logDoc of lifeLogsSnapshot.docs) {
           eventQueries.push(
             (async () => {
@@ -245,7 +335,7 @@ export function Timeline() {
                 collection(db, "lifeLogs", logDoc.id, "events"),
                 where("createdBy", "==", user.uid),
                 orderBy("timestamp", "desc"),
-                limit(20)
+                limit(15)
               ));
 
               for (const eventDoc of eventsSnapshot.docs) {
@@ -265,7 +355,7 @@ export function Timeline() {
           );
         }
 
-        // Upkeep events (unified events collection)
+        // Upkeep events
         for (const listDoc of taskListsSnapshot.docs) {
           eventQueries.push(
             (async () => {
@@ -273,7 +363,7 @@ export function Timeline() {
                 collection(db, "taskLists", listDoc.id, "events"),
                 where("createdBy", "==", user.uid),
                 orderBy("timestamp", "desc"),
-                limit(20)
+                limit(15)
               ));
 
               for (const eventDoc of eventsSnapshot.docs) {
@@ -293,68 +383,124 @@ export function Timeline() {
         }
 
         await Promise.all(eventQueries);
+        console.log(`Timeline: phase 2 took ${(performance.now() - phase2Start).toFixed(0)}ms - fetched ${allEvents.length} events`);
 
-        // Phase 2: Fetch only the specific names we need
-        const recipeIds = new Set<string>();
-        const taskIds = new Map<string, string>(); // taskId -> containerId
-
-        for (const event of allEvents) {
-          if (event.type === "recipe") {
-            recipeIds.add(`${event.containerId}/${event.subjectId}`);
-          } else if (event.type === "upkeep" && !event.subjectName) {
-            taskIds.set(event.subjectId, event.containerId);
-          }
-        }
-
-        // Fetch recipe names (only the ones we need)
-        const nameQueries: Promise<void>[] = [];
-        for (const key of recipeIds) {
-          const [boxId, recipeId] = key.split("/");
-          nameQueries.push(
-            (async () => {
-              const recipeDoc = await getDoc(doc(db, "boxes", boxId, "recipes", recipeId));
-              if (recipeDoc.exists()) {
-                names.set(recipeId, recipeDoc.data().data?.name || "Recipe");
-              }
-            })()
-          );
-        }
-
-        // Fetch task names (only the ones we need)
-        for (const [taskId, listId] of taskIds) {
-          nameQueries.push(
-            (async () => {
-              const taskDoc = await getDoc(doc(db, "taskLists", listId, "tasks", taskId));
-              if (taskDoc.exists()) {
-                names.set(taskId, taskDoc.data().name || "Task");
-              }
-            })()
-          );
-        }
-
-        await Promise.all(nameQueries);
-
-        // Apply names to events
-        for (const event of allEvents) {
-          if (!event.subjectName && names.has(event.subjectId)) {
-            event.subjectName = names.get(event.subjectId);
-          }
-        }
-
-        setSubjectNames(names);
-
-        // Sort all events by timestamp descending
+        // Sort events
         allEvents.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-        setEvents(allEvents.slice(0, 100));
+        const topEvents = allEvents.slice(0, 100);
+
+        // Apply names from context immediately (no network needed)
+        for (const event of topEvents) {
+          if (event.type === "recipe" && !event.subjectName) {
+            const name = recipeNames.get(event.subjectId);
+            if (name) event.subjectName = name;
+          } else if (event.type === "upkeep" && !event.subjectName) {
+            const name = taskNames.get(event.subjectId);
+            if (name) event.subjectName = name;
+          }
+        }
+
+        setEvents(topEvents);
+        setLoading(false);
+
+        // Update cache
+        timelineCache.userId = user.uid;
+        timelineCache.events = topEvents;
+        timelineCache.fetching = false;
+        console.log(`Timeline: total ${(performance.now() - startTime).toFixed(0)}ms - applied ${recipeNames.size} recipe names, ${taskNames.size} task names from context`);
+
+        // Phase 3: Only fetch names we couldn't find in context
+        const missingRecipes: string[] = [];
+        const missingTasks: Array<[string, string]> = [];
+
+        for (const event of topEvents) {
+          if (event.type === "recipe" && !event.subjectName && missingRecipes.length < 5) {
+            const key = `${event.containerId}/${event.subjectId}`;
+            if (!missingRecipes.includes(key)) {
+              missingRecipes.push(key);
+            }
+          } else if (event.type === "upkeep" && !event.subjectName && missingTasks.length < 5) {
+            if (!missingTasks.some(([id]) => id === event.subjectId)) {
+              missingTasks.push([event.subjectId, event.containerId]);
+            }
+          }
+        }
+
+        // Only make network requests if we have missing names
+        if (missingRecipes.length > 0 || missingTasks.length > 0) {
+          setTimeout(async () => {
+            const names = new Map<string, string>();
+
+            const queries = [
+              ...missingRecipes.map(async (key) => {
+                const [boxId, recipeId] = key.split("/");
+                try {
+                  const recipeDoc = await getDoc(doc(db, "boxes", boxId, "recipes", recipeId));
+                  if (recipeDoc.exists()) {
+                    names.set(recipeId, recipeDoc.data().data?.name || "Recipe");
+                  }
+                } catch { /* ignore */ }
+              }),
+              ...missingTasks.map(async ([taskId, listId]) => {
+                try {
+                  const taskDoc = await getDoc(doc(db, "taskLists", listId, "tasks", taskId));
+                  if (taskDoc.exists()) {
+                    names.set(taskId, taskDoc.data().name || "Task");
+                  }
+                } catch { /* ignore */ }
+              }),
+            ];
+
+            await Promise.all(queries);
+
+            if (names.size > 0) {
+              setSubjectNames(prev => new Map([...prev, ...names]));
+              setEvents(prevEvents => prevEvents.map(event => ({
+                ...event,
+                subjectName: event.subjectName || names.get(event.subjectId),
+              })));
+            }
+          }, 50);
+        }
       } catch (error) {
         console.error("Failed to fetch timeline:", error);
-      } finally {
         setLoading(false);
+        timelineCache.fetching = false;
       }
     };
 
     fetchEvents();
+
+    return () => {
+      // Don't reset cache - it survives component unmount/remount
+    };
   }, [user]);
+
+  // Re-apply names when context data becomes available
+  useEffect(() => {
+    if (events.length === 0) return;
+    if (recipeNames.size === 0 && taskNames.size === 0) return;
+
+    let updated = false;
+    const updatedEvents = events.map(event => {
+      if (!event.subjectName) {
+        const name = event.type === "recipe"
+          ? recipeNames.get(event.subjectId)
+          : event.type === "upkeep"
+            ? taskNames.get(event.subjectId)
+            : null;
+        if (name) {
+          updated = true;
+          return { ...event, subjectName: name };
+        }
+      }
+      return event;
+    });
+
+    if (updated) {
+      setEvents(updatedEvents);
+    }
+  }, [events.length, recipeNames, taskNames]);
 
   if (loading) {
     return (
@@ -378,6 +524,29 @@ export function Timeline() {
 
   const groupedEvents = groupEventsByDate(events);
 
+  // Get URL for an event based on its type
+  const getEventUrl = (event: TimelineEvent): string | null => {
+    switch (event.type) {
+      case "recipe":
+        return `/recipes/boxes/${event.containerId}/recipes/${event.subjectId}`;
+      case "upkeep": {
+        const slug = upkeepSlugMap.get(event.containerId);
+        return slug ? `/upkeep/${slug}` : null;
+      }
+      case "life":
+        return `/life`;
+      default:
+        return null;
+    }
+  };
+
+  const handleEventClick = (event: TimelineEvent) => {
+    const url = getEventUrl(event);
+    if (url) {
+      navigate(url);
+    }
+  };
+
   return (
     <Container>
       <Title>Timeline</Title>
@@ -390,9 +559,15 @@ export function Timeline() {
               const name =
                 event.subjectName || subjectNames.get(event.subjectId) || event.subjectId;
               const notes = event.data.notes as string | undefined;
+              const url = getEventUrl(event);
+              const isClickable = url !== null;
 
               return (
-                <EventCard key={`${event.type}-${event.id}`}>
+                <EventCard
+                  key={`${event.type}-${event.id}`}
+                  $clickable={isClickable}
+                  onClick={isClickable ? () => handleEventClick(event) : undefined}
+                >
                   <EventIcon $color={config.color}>{config.icon}</EventIcon>
                   <EventContent>
                     <EventHeader>
@@ -402,6 +577,11 @@ export function Timeline() {
                     </EventHeader>
                     {notes && <EventNote>"{notes}"</EventNote>}
                   </EventContent>
+                  {isClickable && (
+                    <EventArrow>
+                      <RightOutlined />
+                    </EventArrow>
+                  )}
                 </EventCard>
               );
             })}

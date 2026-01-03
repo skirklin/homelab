@@ -76,8 +76,15 @@ export function AddItem() {
     // Return focus to input for rapid entry
     inputRef.current?.focus();
 
-    // Fire and forget - addItem will lookup category from history
-    addItem(trimmedName, user.uid).catch((error) => {
+    // Look up category from local history (already loaded via subscription)
+    const normalizedName = trimmedName.toLowerCase();
+    const historyEntry = state.history.find(
+      (h) => h.name.toLowerCase() === normalizedName
+    );
+    const categoryId = historyEntry?.categoryId || "uncategorized";
+
+    // Fire and forget - pass category to skip network lookup
+    addItem(trimmedName, user.uid, { categoryId }).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };

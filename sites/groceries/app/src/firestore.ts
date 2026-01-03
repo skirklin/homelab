@@ -70,15 +70,22 @@ export async function ensureListExists(userId: string) {
 
 export async function addItem(
   name: string,
-  userId: string
+  userId: string,
+  options?: { itemId?: string; categoryId?: string }
 ) {
-  // Look up categoryId from history, default to "uncategorized"
-  const historyRef = doc(getHistoryRef(), normalizeItemName(name));
-  const historySnap = await getDoc(historyRef);
-  const historyData = historySnap.exists() ? historySnap.data() : null;
-  const categoryId = historyData?.categoryId || "uncategorized";
+  // Use provided categoryId or look up from history
+  let categoryId = options?.categoryId;
+  if (!categoryId) {
+    const historyRef = doc(getHistoryRef(), normalizeItemName(name));
+    const historySnap = await getDoc(historyRef);
+    const historyData = historySnap.exists() ? historySnap.data() : null;
+    categoryId = historyData?.categoryId || "uncategorized";
+  }
 
-  const itemRef = doc(getItemsRef());
+  // Use provided itemId or generate new one
+  const itemRef = options?.itemId
+    ? doc(getItemsRef(), options.itemId)
+    : doc(getItemsRef());
   const itemData: GroceryItemStore = {
     name,
     categoryId,
@@ -89,6 +96,7 @@ export async function addItem(
   await setDoc(itemRef, itemData);
 
   // Save to history for autocomplete (preserves the name with correct casing)
+  const historyRef = doc(getHistoryRef(), normalizeItemName(name));
   const newHistoryData: ItemHistoryStore = { name, categoryId, lastAdded: Timestamp.now() };
   await setDoc(historyRef, newHistoryData);
 }

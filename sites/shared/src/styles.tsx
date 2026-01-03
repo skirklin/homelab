@@ -323,4 +323,9 @@ export const WidgetGrid = styled.div`
   @media (min-width: 600px) {
     grid-template-columns: repeat(3, 1fr);
   }
+
+  /* Prevent grid items from overflowing */
+  & > * {
+    min-width: 0;
+  }
 `;

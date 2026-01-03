@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Dropdown, Switch, message, Tooltip, DatePicker } from "antd";
-import { SettingOutlined, DownloadOutlined, BellOutlined, CalendarOutlined, LogoutOutlined } from "@ant-design/icons";
+import { SettingOutlined, DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
 import dayjs from "dayjs";
 import {
@@ -21,6 +22,7 @@ import { WidgetRenderer } from "./widgets";
 import { RecentEntries } from "./RecentEntries";
 import { ManifestEditor } from "./ManifestEditor";
 import { SampleResponseModal } from "./SampleResponseModal";
+import { SettingsModal } from "./SettingsModal";
 import type { LifeManifest } from "../types";
 import { DEFAULT_MANIFEST } from "../types";
 import {
@@ -77,7 +79,9 @@ interface LifeDashboardProps {
 export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const { user } = useAuth();
   const { state, dispatch } = useLife();
+  const navigate = useNavigate();
   const [showManifestEditor, setShowManifestEditor] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
@@ -230,6 +234,18 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
   const desktopActions = (
     <>
+      <Button
+        icon={<LineChartOutlined />}
+        onClick={() => navigate("insights")}
+      >
+        Insights
+      </Button>
+      <Button
+        icon={<ControlOutlined />}
+        onClick={() => setShowSettings(true)}
+      >
+        Display
+      </Button>
       {samplingEnabled && (
         <Tooltip title={notificationsEnabled ? "Notifications on" : "Enable notifications for random sampling"}>
           <NotificationToggle>
@@ -267,38 +283,42 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
           <DateButton
             size="small"
             $active={dateMode === "today"}
-            onClick={() => setDateMode("today")}
+            onClick={() => { setDateMode("today"); setCustomDate(null); }}
           >
             Today
           </DateButton>
           <DateButton
             size="small"
             $active={dateMode === "yesterday"}
-            onClick={() => setDateMode("yesterday")}
+            onClick={() => { setDateMode("yesterday"); setCustomDate(null); }}
           >
             Yesterday
           </DateButton>
-          {dateMode === "custom" ? (
-            <DatePicker
-              size="small"
-              value={customDate}
-              onChange={(date) => {
+          <DatePicker
+            size="small"
+            value={customDate}
+            onChange={(date) => {
+              if (date) {
                 setCustomDate(date);
-                if (!date) setDateMode("today");
-              }}
-              disabledDate={(current) => current && current.isAfter(dayjs(), 'day')}
-              format="MMM D"
-              allowClear
-            />
-          ) : (
-            <DateButton
-              size="small"
-              icon={<CalendarOutlined />}
-              onClick={() => setDateMode("custom")}
-            >
-              Other
-            </DateButton>
-          )}
+                setDateMode("custom");
+              } else {
+                setCustomDate(null);
+                setDateMode("today");
+              }
+            }}
+            onOpenChange={(open) => {
+              // When picker opens without a value, default to 2 days ago
+              if (open && !customDate) {
+                const twoDaysAgo = dayjs().subtract(2, 'day');
+                setCustomDate(twoDaysAgo);
+              }
+            }}
+            disabledDate={(current) => current && current.isAfter(dayjs(), 'day')}
+            format="MMM D"
+            allowClear
+            placeholder="Other"
+            style={{ width: 95 }}
+          />
         </DateSelector>
         <WidgetGrid>
           {manifest.widgets.map((widget) => (
@@ -346,6 +366,11 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         config={manifest.randomSamples}
         userId={user?.uid ?? ""}
         logId={state.log?.id}
+      />
+
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
       />
     </>
   );

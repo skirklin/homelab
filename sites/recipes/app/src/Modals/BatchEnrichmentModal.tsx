@@ -117,7 +117,13 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
         if (selectedIds.has(getKey(boxId, recipeId)) && recipe.pendingEnrichment) {
-          await applyEnrichment(boxId, recipeId, recipe.pendingEnrichment);
+          const recipeData = recipe.getData();
+          const currentTags = recipeData.recipeCategory;
+          const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
+          await applyEnrichment(boxId, recipeId, recipe.pendingEnrichment, {
+            description: typeof recipeData.description === 'string' ? recipeData.description : undefined,
+            tags,
+          });
         }
       }
       setSelectedIds(new Set());
@@ -145,7 +151,13 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
         if (recipe.pendingEnrichment) {
-          await applyEnrichment(boxId, recipeId, recipe.pendingEnrichment);
+          const recipeData = recipe.getData();
+          const currentTags = recipeData.recipeCategory;
+          const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
+          await applyEnrichment(boxId, recipeId, recipe.pendingEnrichment, {
+            description: typeof recipeData.description === 'string' ? recipeData.description : undefined,
+            tags,
+          });
         }
       }
     } finally {

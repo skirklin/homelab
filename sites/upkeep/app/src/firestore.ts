@@ -90,21 +90,18 @@ export async function completeTask(
   taskId: string,
   userId: string,
   notes: string = "",
-  completedAt?: Date
+  options?: { completedAt?: Date; currentLastCompleted?: Date }
 ): Promise<void> {
-  const completionTime = completedAt ? Timestamp.fromDate(completedAt) : Timestamp.now();
+  const completionTime = options?.completedAt ? Timestamp.fromDate(options.completedAt) : Timestamp.now();
   const now = Timestamp.now();
 
-  // Get current task to check if this completion is the latest
-  const taskRef = getTaskRef(taskId);
-  const taskSnap = await getDoc(taskRef);
-  const taskData = taskSnap.data();
-
   // Only update lastCompleted if this completion is more recent than current
-  const shouldUpdateLastCompleted = !taskData?.lastCompleted ||
-    completionTime.toMillis() > taskData.lastCompleted.toMillis();
+  // Uses local state passed in to avoid network read
+  const shouldUpdateLastCompleted = !options?.currentLastCompleted ||
+    completionTime.toMillis() > options.currentLastCompleted.getTime();
 
   if (shouldUpdateLastCompleted) {
+    const taskRef = getTaskRef(taskId);
     await updateDoc(taskRef, {
       lastCompleted: completionTime,
       updatedAt: now,
@@ -120,6 +117,29 @@ export async function completeTask(
     data: { notes },
   };
   await addDoc(getEventsRef(), eventData);
+}
+
+export async function updateCompletion(
+  eventId: string,
+  updates: { notes?: string; timestamp?: Date },
+  listId?: string
+): Promise<void> {
+  const eventRef = doc(db, "taskLists", listId || currentListId, "events", eventId);
+  const updateData: { "data.notes"?: string; timestamp?: Timestamp } = {};
+
+  if (updates.notes !== undefined) {
+    updateData["data.notes"] = updates.notes;
+  }
+  if (updates.timestamp !== undefined) {
+    updateData.timestamp = Timestamp.fromDate(updates.timestamp);
+  }
+
+  await updateDoc(eventRef, updateData);
+}
+
+export async function deleteCompletion(eventId: string, listId?: string): Promise<void> {
+  const eventRef = doc(db, "taskLists", listId || currentListId, "events", eventId);
+  await deleteDoc(eventRef);
 }
 
 export async function updateRooms(rooms: RoomDef[]) {

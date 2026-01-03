@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Modal, Input, message, Tabs, List, Empty, DatePicker, Switch } from "antd";
+import { Modal, Input, message, Tabs, List, Empty, DatePicker, Switch, Button, Popconfirm } from "antd";
+import { EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import dayjs from "dayjs";
 import { useAuth } from "@kirkl/shared";
-import { completeTask } from "../firestore";
+import { completeTask, updateCompletion, deleteCompletion } from "../firestore";
 import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Completion } from "../types";
 import { formatFrequency, getCompletionNotes } from "../types";
@@ -54,6 +55,14 @@ const HistoryItem = styled.div`
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
+`;
+
+const HistoryRow = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  width: 100%;
 `;
 
 const HistoryDate = styled.div`
@@ -67,9 +76,30 @@ const HistoryNotes = styled.div`
   font-style: italic;
 `;
 
+const HistoryActions = styled.div`
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+`;
+
 const HistoryList = styled.div`
   max-height: 300px;
   overflow-y: auto;
+`;
+
+const EditForm = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+`;
+
+const EditActions = styled.div`
+  display: flex;
+  gap: var(--space-xs);
+  justify-content: flex-end;
 `;
 
 interface CompleteTaskModalProps {
@@ -103,12 +133,18 @@ function formatDate(date: Date): string {
 
 export function CompleteTaskModal({ open, task, onClose, initialTab = "complete" }: CompleteTaskModalProps) {
   const { user } = useAuth();
-  const { state } = useUpkeepContext();
+  const { state, dispatch } = useUpkeepContext();
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState(initialTab);
   const [useCustomDate, setUseCustomDate] = useState(false);
   const [customDate, setCustomDate] = useState<dayjs.Dayjs | null>(null);
+
+  // Edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editNotes, setEditNotes] = useState("");
+  const [editDate, setEditDate] = useState<dayjs.Dayjs | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -117,8 +153,64 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
       setActiveTab(initialTab);
       setUseCustomDate(false);
       setCustomDate(null);
+      setEditingId(null);
     }
   }, [open, initialTab]);
+
+  const handleStartEdit = (completion: Completion) => {
+    setEditingId(completion.id);
+    setEditNotes(getCompletionNotes(completion) || "");
+    setEditDate(dayjs(completion.timestamp));
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditNotes("");
+    setEditDate(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingId || !editDate) return;
+
+    setSaving(true);
+    try {
+      await updateCompletion(editingId, {
+        notes: editNotes.trim(),
+        timestamp: editDate.toDate(),
+      });
+      // Update local state
+      dispatch({
+        type: "SET_COMPLETIONS",
+        completions: state.completions.map(c =>
+          c.id === editingId
+            ? { ...c, timestamp: editDate.toDate(), data: { ...c.data, notes: editNotes.trim() || undefined } }
+            : c
+        ),
+      });
+      message.success("Updated");
+      handleCancelEdit();
+    } catch (error) {
+      console.error("Failed to update:", error);
+      message.error("Failed to update");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (completionId: string) => {
+    try {
+      await deleteCompletion(completionId);
+      // Update local state
+      dispatch({
+        type: "SET_COMPLETIONS",
+        completions: state.completions.filter(c => c.id !== completionId),
+      });
+      message.success("Deleted");
+    } catch (error) {
+      console.error("Failed to delete:", error);
+      message.error("Failed to delete");
+    }
+  };
 
   const handleComplete = async () => {
     if (!task || !user) return;
@@ -126,7 +218,10 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
     setSubmitting(true);
     try {
       const completedAt = useCustomDate && customDate ? customDate.toDate() : undefined;
-      await completeTask(task.id, user.uid, notes.trim(), completedAt);
+      await completeTask(task.id, user.uid, notes.trim(), {
+        completedAt,
+        currentLastCompleted: task.lastCompleted ?? undefined,
+      });
       const dateMsg = completedAt ? ` (${formatDate(completedAt)})` : "";
       message.success(`"${task.name}" marked as done${dateMsg}!`);
       onClose();
@@ -198,12 +293,72 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
               dataSource={taskCompletions}
               renderItem={(completion: Completion) => (
                 <List.Item>
-                  <HistoryItem>
-                    <HistoryDate>{formatDate(completion.timestamp)}</HistoryDate>
-                    {getCompletionNotes(completion) && (
-                      <HistoryNotes>"{getCompletionNotes(completion)}"</HistoryNotes>
-                    )}
-                  </HistoryItem>
+                  {editingId === completion.id ? (
+                    <EditForm>
+                      <DatePicker
+                        showTime
+                        value={editDate}
+                        onChange={setEditDate}
+                        format="MMM D, YYYY h:mm A"
+                        style={{ width: "100%" }}
+                        disabledDate={(current) => current && current > dayjs()}
+                      />
+                      <Input.TextArea
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                        placeholder="Notes (optional)"
+                        rows={2}
+                      />
+                      <EditActions>
+                        <Button
+                          size="small"
+                          icon={<CloseOutlined />}
+                          onClick={handleCancelEdit}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<SaveOutlined />}
+                          onClick={handleSaveEdit}
+                          loading={saving}
+                        >
+                          Save
+                        </Button>
+                      </EditActions>
+                    </EditForm>
+                  ) : (
+                    <HistoryRow>
+                      <HistoryItem>
+                        <HistoryDate>{formatDate(completion.timestamp)}</HistoryDate>
+                        {getCompletionNotes(completion) && (
+                          <HistoryNotes>"{getCompletionNotes(completion)}"</HistoryNotes>
+                        )}
+                      </HistoryItem>
+                      <HistoryActions>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<EditOutlined />}
+                          onClick={() => handleStartEdit(completion)}
+                        />
+                        <Popconfirm
+                          title="Delete this entry?"
+                          onConfirm={() => handleDelete(completion.id)}
+                          okText="Delete"
+                          cancelText="Cancel"
+                        >
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                          />
+                        </Popconfirm>
+                      </HistoryActions>
+                    </HistoryRow>
+                  )}
                 </List.Item>
               )}
             />

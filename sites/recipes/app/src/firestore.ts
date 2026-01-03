@@ -65,10 +65,7 @@ export async function subscribeToBox(user: UserEntry | null, boxId: BoxId) {
     return undefined
   }
   const boxRef = doc(db, "boxes", boxId)
-  const boxDoc = await getDoc(boxRef)
-  if (!boxDoc.exists()) {
-    return undefined
-  }
+  // No need to verify box exists - updateDoc will fail if user lacks permission
   await updateDoc(doc(db, "users", user.id), { boxes: arrayUnion(boxRef) })
 }
 
@@ -174,19 +171,14 @@ export async function setLastSeenUpdateVersion(userId: UserId, version: number) 
 export async function applyEnrichment(
   boxId: BoxId,
   recipeId: RecipeId,
-  enrichment: { description: string; suggestedTags: string[]; stepIngredients?: Record<string, string[]> }
+  enrichment: { description: string; suggestedTags: string[]; stepIngredients?: Record<string, string[]> },
+  currentRecipe?: { description?: string; tags?: string[] }
 ) {
   const recipeRef = doc(db, "boxes", boxId, "recipes", recipeId);
-  const recipeDoc = await getDoc(recipeRef);
 
-  if (!recipeDoc.exists()) {
-    console.warn("Recipe not found");
-    return;
-  }
-
-  const recipeData = recipeDoc.data();
-  const currentDescription = recipeData.data?.description;
-  const currentTags = recipeData.data?.recipeCategory || [];
+  // Use passed-in recipe data to avoid network read
+  const currentDescription = currentRecipe?.description;
+  const currentTags = currentRecipe?.tags || [];
 
   // Merge suggested tags with existing tags (avoid duplicates, all lowercase)
   const existingTags = Array.isArray(currentTags) ? currentTags : [currentTags].filter(Boolean);

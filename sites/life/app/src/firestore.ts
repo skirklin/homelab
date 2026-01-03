@@ -181,13 +181,8 @@ export async function addSampleResponse(
 
 export async function saveFcmToken(userId: string, token: string): Promise<void> {
   const userRef = doc(db, "users", userId);
-  const userDoc = await getDoc(userRef);
-
-  if (userDoc.exists()) {
-    await updateDoc(userRef, { fcmToken: token });
-  } else {
-    await setDoc(userRef, { fcmToken: token });
-  }
+  // Use merge to handle both create and update without reading first
+  await setDoc(userRef, { fcmToken: token }, { merge: true });
 }
 
 export async function removeFcmToken(userId: string): Promise<void> {

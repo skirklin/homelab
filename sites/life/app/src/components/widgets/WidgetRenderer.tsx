@@ -1,4 +1,5 @@
 import type { Widget, LogEntry } from "../../types";
+import { useDisplaySettings, type WidgetSize } from "../../display-settings";
 import { CounterWidget } from "./CounterWidget";
 import { NumberWidget } from "./NumberWidget";
 import { RatingWidget } from "./RatingWidget";
@@ -13,7 +14,10 @@ interface WidgetRendererProps {
   timestamp?: Date;
 }
 
+export type { WidgetSize };
+
 export function WidgetRenderer({ widget, entries, userId, logId, timestamp }: WidgetRendererProps) {
+  const { widgetSize } = useDisplaySettings();
   const widgetEntries = entries.filter(e => e.subjectId === widget.id);
 
   const commonProps = {
@@ -21,6 +25,7 @@ export function WidgetRenderer({ widget, entries, userId, logId, timestamp }: Wi
     userId,
     logId,
     timestamp,
+    size: widgetSize,
   };
 
   switch (widget.type) {
