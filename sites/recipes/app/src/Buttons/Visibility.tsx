@@ -12,20 +12,29 @@ interface VisibilityProps {
     disabled?: boolean
     value: Visibility
     boxId?: string
+    recipeId?: string
     handleChange: (e: { key: string }) => void
     handleAddOwner: (newOwnerEmail: string) => void
 }
 
 export default function VisibilityControl(props: VisibilityProps) {
-    const { element, value, handleChange, disabled, handleAddOwner, boxId } = props;
+    const { element, value, handleChange, disabled, handleAddOwner, boxId, recipeId } = props;
     const { state } = useContext(Context);
     const [isAddOwnerVisible, setIsAddOwnerVisible] = useState(false);
 
-    const handleCopyLink = () => {
+    const handleCopyRecipeLink = () => {
+        if (boxId && recipeId) {
+            const recipeLink = `${window.location.origin}/recipe/${boxId}/${recipeId}`;
+            navigator.clipboard.writeText(recipeLink);
+            message.success("Recipe link copied!");
+        }
+    };
+
+    const handleCopyJoinLink = () => {
         if (boxId) {
             const joinLink = `${window.location.origin}/join/${boxId}`;
             navigator.clipboard.writeText(joinLink);
-            message.success("Share link copied!");
+            message.success("Join link copied!");
         }
     };
 
@@ -57,12 +66,27 @@ export default function VisibilityControl(props: VisibilityProps) {
 
     // Only add these options if writeable
     if (state.writeable) {
-        if (boxId) {
+        if (boxId && recipeId) {
+            // Recipe: show both public link and join link
             menuItems.push({
-                key: 'copyLink',
+                key: 'copyRecipeLink',
+                icon: <LinkOutlined />,
+                label: 'Copy recipe link',
+                onClick: handleCopyRecipeLink,
+            });
+            menuItems.push({
+                key: 'copyJoinLink',
+                icon: <ShareAltOutlined />,
+                label: 'Copy join link',
+                onClick: handleCopyJoinLink,
+            });
+        } else if (boxId) {
+            // Box: just show join link
+            menuItems.push({
+                key: 'copyJoinLink',
                 icon: <LinkOutlined />,
                 label: 'Copy share link',
-                onClick: handleCopyLink,
+                onClick: handleCopyJoinLink,
             });
         }
         menuItems.push({
