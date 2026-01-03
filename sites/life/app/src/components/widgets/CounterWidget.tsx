@@ -1,10 +1,10 @@
 import { useState } from "react";
 import styled, { css } from "styled-components";
 import { message } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { PlusOutlined, MinusOutlined } from "@ant-design/icons";
 import type { CounterWidget as CounterWidgetType, LogEntry } from "../../types";
-import { getCountForDate } from "../../types";
-import { addEntry } from "../../firestore";
+import { getEntriesForDate } from "../../types";
+import { addEntry, deleteEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {
@@ -25,24 +25,29 @@ const sizeStyles = {
   `,
 };
 
-const Card = styled.button<{ $size: WidgetSize }>`
+const Card = styled.div<{ $size: WidgetSize }>`
   display: flex;
   align-items: center;
   background: var(--color-bg);
   border: 2px solid var(--color-border);
   border-radius: var(--radius-lg);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  text-align: left;
   ${(props) => sizeStyles[props.$size]}
+`;
 
-  &:hover {
-    border-color: var(--color-primary);
-    background: var(--color-bg-subtle);
-  }
+const AddButton = styled.button`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  min-width: 0;
 
   &:active {
-    transform: scale(0.98);
+    opacity: 0.7;
   }
 
   &:disabled {
@@ -81,6 +86,34 @@ const CountDisplay = styled.div<{ $hasCount: boolean; $size: WidgetSize }>`
   ${(props) => countSizeStyles[props.$size]}
 `;
 
+const UndoButton = styled.button<{ $size: WidgetSize }>`
+  border-radius: 50%;
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  flex-shrink: 0;
+  border: none;
+  cursor: pointer;
+  ${(props) => countSizeStyles[props.$size]}
+
+  &:hover {
+    background: var(--color-error-light, #fff1f0);
+    color: var(--color-error, #ff4d4f);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
 const Content = styled.div`
   display: flex;
   flex-direction: column;
@@ -117,9 +150,10 @@ interface CounterWidgetProps {
 
 export function CounterWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: CounterWidgetProps) {
   const [saving, setSaving] = useState(false);
-  const count = getCountForDate(entries, widget.id, timestamp);
+  const dayEntries = getEntriesForDate(entries, widget.id, timestamp);
+  const count = dayEntries.length;
 
-  const handleTap = async () => {
+  const handleAdd = async () => {
     if (!logId || !userId) return;
 
     setSaving(true);
@@ -133,15 +167,46 @@ export function CounterWidget({ widget, entries, userId, logId, timestamp, size 
     }
   };
 
+  const handleUndo = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!logId || count === 0) return;
+
+    // Delete the most recent entry
+    const mostRecent = dayEntries[0]; // Entries are sorted by timestamp desc
+    if (!mostRecent) return;
+
+    setSaving(true);
+    try {
+      await deleteEntry(mostRecent.id, logId);
+    } catch (error) {
+      console.error("Failed to undo:", error);
+      message.error("Failed to undo");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <Card $size={size} onClick={handleTap} disabled={saving || !logId}>
-      <CountDisplay $hasCount={count > 0} $size={size}>
-        {count > 0 ? count : <PlusOutlined />}
-      </CountDisplay>
-      <Content>
-        <Label $size={size}>{widget.label}</Label>
-        <Hint $size={size}>Tap to log</Hint>
-      </Content>
+    <Card $size={size}>
+      <AddButton onClick={handleAdd} disabled={saving || !logId}>
+        <CountDisplay $hasCount={count > 0} $size={size}>
+          {count > 0 ? count : <PlusOutlined />}
+        </CountDisplay>
+        <Content>
+          <Label $size={size}>{widget.label}</Label>
+          <Hint $size={size}>Tap to log</Hint>
+        </Content>
+      </AddButton>
+      {count > 0 && (
+        <UndoButton
+          $size={size}
+          onClick={handleUndo}
+          disabled={saving || !logId}
+          title="Undo last"
+        >
+          <MinusOutlined />
+        </UndoButton>
+      )}
     </Card>
   );
 }

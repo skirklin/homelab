@@ -1,25 +1,22 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Button, Dropdown, Switch, message, Tooltip, DatePicker } from "antd";
-import { SettingOutlined, DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined } from "@ant-design/icons";
+import { Button, Switch, message, Tooltip } from "antd";
+import { SettingOutlined, DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
 import dayjs from "dayjs";
 import {
   useAuth,
   getBackend,
   PageContainer,
-  SectionHeader,
   SectionTitle,
   Section,
-  ActionGroup,
   WidgetGrid,
   AppHeader,
 } from "@kirkl/shared";
 import { useLife } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
 import { WidgetRenderer } from "./widgets";
-import { RecentEntries } from "./RecentEntries";
 import { ManifestEditor } from "./ManifestEditor";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
@@ -34,6 +31,18 @@ import {
   getNotificationPermissionStatus,
 } from "../messaging";
 
+// Helper to get date string for comparison (YYYY-MM-DD)
+function getDateString(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
+// Helper to get start of day
+function startOfDay(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 const NotificationToggle = styled.div`
   display: flex;
   align-items: center;
@@ -41,35 +50,32 @@ const NotificationToggle = styled.div`
   font-size: var(--font-size-sm);
 `;
 
-const DateSelector = styled.div`
+const DateNav = styled.div`
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
-  flex-wrap: wrap;
 `;
 
-const DateLabel = styled.span`
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
+const DateDisplay = styled.div`
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  color: var(--color-text);
+  min-width: 120px;
+  text-align: center;
 `;
 
-const DateButton = styled(Button)<{ $active?: boolean }>`
-  ${props => props.$active && `
-    background: var(--color-primary);
-    color: white;
-    border-color: var(--color-primary);
-
-    &:hover {
-      background: var(--color-primary);
-      color: white;
-      border-color: var(--color-primary);
-      opacity: 0.9;
-    }
-  `}
+const NavButton = styled(Button)`
+  &:disabled {
+    opacity: 0.3;
+  }
 `;
 
-type DateMode = "today" | "yesterday" | "custom";
+const SwipeContainer = styled.div`
+  touch-action: pan-y pinch-zoom;
+  user-select: none;
+`;
 
 interface LifeDashboardProps {
   /** When true, hides sign-out (handled by parent shell) */
@@ -85,21 +91,101 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
-  const [dateMode, setDateMode] = useState<DateMode>("today");
-  const [customDate, setCustomDate] = useState<dayjs.Dayjs | null>(null);
 
+  // Track selected date and what "today" was when we loaded
+  const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
+  const [todayDate, setTodayDate] = useState<string>(() => getDateString(new Date()));
+
+  // Swipe handling
+  const touchStartX = useRef<number | null>(null);
+  const swipeContainerRef = useRef<HTMLDivElement>(null);
+
+  // Check for day change every minute
+  useEffect(() => {
+    const checkDayChange = () => {
+      const currentToday = getDateString(new Date());
+      if (currentToday !== todayDate) {
+        setTodayDate(currentToday);
+        // If user was viewing "today", keep them on the new today
+        if (getDateString(selectedDate) === todayDate) {
+          setSelectedDate(startOfDay(new Date()));
+        }
+      }
+    };
+
+    const interval = setInterval(checkDayChange, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [todayDate, selectedDate]);
+
+  // Navigation helpers
+  const goToPrevDay = useCallback(() => {
+    setSelectedDate(prev => {
+      const newDate = new Date(prev);
+      newDate.setDate(newDate.getDate() - 1);
+      return newDate;
+    });
+  }, []);
+
+  const goToNextDay = useCallback(() => {
+    const tomorrow = startOfDay(new Date());
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    setSelectedDate(prev => {
+      const newDate = new Date(prev);
+      newDate.setDate(newDate.getDate() + 1);
+      // Don't go past today
+      if (newDate > startOfDay(new Date())) {
+        return startOfDay(new Date());
+      }
+      return newDate;
+    });
+  }, []);
+
+  const isToday = getDateString(selectedDate) === getDateString(new Date());
+  const canGoNext = !isToday;
+
+  // Swipe handlers
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartX.current - touchEndX;
+    const threshold = 50; // Minimum swipe distance
+
+    if (Math.abs(diff) > threshold) {
+      if (diff > 0 && canGoNext) {
+        // Swiped left -> go to next day
+        goToNextDay();
+      } else if (diff < 0) {
+        // Swiped right -> go to prev day
+        goToPrevDay();
+      }
+    }
+
+    touchStartX.current = null;
+  }, [canGoNext, goToNextDay, goToPrevDay]);
+
+  // Get timestamp for the selected date (noon to avoid timezone issues)
   const getSelectedTimestamp = (): Date | undefined => {
-    if (dateMode === "today") return undefined; // Use current time
-    if (dateMode === "yesterday") {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      yesterday.setHours(12, 0, 0, 0); // Noon yesterday
-      return yesterday;
+    if (isToday) return undefined; // Use current time for today
+    const timestamp = new Date(selectedDate);
+    timestamp.setHours(12, 0, 0, 0);
+    return timestamp;
+  };
+
+  // Format the date for display
+  const formatDateLabel = (): string => {
+    if (isToday) return "Today";
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (getDateString(selectedDate) === getDateString(yesterday)) {
+      return "Yesterday";
     }
-    if (dateMode === "custom" && customDate) {
-      return customDate.toDate();
-    }
-    return undefined;
+    return dayjs(selectedDate).format("ddd, MMM D");
   };
 
   // Subscribe to entries
@@ -206,18 +292,9 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     URL.revokeObjectURL(url);
   };
 
-  const exportMenuItems = [
-    { key: "csv", label: "Export as CSV", onClick: () => handleExport("csv") },
-    { key: "json", label: "Export as JSON", onClick: () => handleExport("json") },
-  ];
-
   const handleManifestUpdated = (updatedManifest: LifeManifest) => {
     dispatch({ type: "UPDATE_MANIFEST", manifest: updatedManifest });
   };
-
-  const recentEntries = [...allEntries]
-    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-    .slice(0, 20);
 
   const samplingEnabled = manifest.randomSamples?.enabled;
 
@@ -226,10 +303,13 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     signOut(auth);
   };
 
-  // Menu items - always include Insights and Display for mobile access
+  // Menu items - always include Insights, Display, and Export for mobile access
   const menuItems = [
     { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("insights") },
     { key: "display", icon: <ControlOutlined />, label: "Display Settings", onClick: () => setShowSettings(true) },
+    { type: "divider" as const },
+    { key: "export-csv", icon: <DownloadOutlined />, label: "Export CSV", onClick: () => handleExport("csv") },
+    { key: "export-json", icon: <DownloadOutlined />, label: "Export JSON", onClick: () => handleExport("json") },
     ...(!embedded ? [
       { type: "divider" as const },
       { key: "logout", icon: <LogoutOutlined />, label: "Sign Out", onClick: handleSignOut },
@@ -294,79 +374,40 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
       <PageContainer>
         <Section>
-        <SectionTitle>Track</SectionTitle>
-        <DateSelector>
-          <DateLabel>Log for:</DateLabel>
-          <DateButton
-            size="small"
-            $active={dateMode === "today"}
-            onClick={() => { setDateMode("today"); setCustomDate(null); }}
-          >
-            Today
-          </DateButton>
-          <DateButton
-            size="small"
-            $active={dateMode === "yesterday"}
-            onClick={() => { setDateMode("yesterday"); setCustomDate(null); }}
-          >
-            Yesterday
-          </DateButton>
-          <DatePicker
-            size="small"
-            value={customDate}
-            onChange={(date) => {
-              if (date) {
-                setCustomDate(date);
-                setDateMode("custom");
-              } else {
-                setCustomDate(null);
-                setDateMode("today");
-              }
-            }}
-            onOpenChange={(open) => {
-              // When picker opens without a value, default to 2 days ago
-              if (open && !customDate) {
-                const twoDaysAgo = dayjs().subtract(2, 'day');
-                setCustomDate(twoDaysAgo);
-              }
-            }}
-            disabledDate={(current) => current && current.isAfter(dayjs(), 'day')}
-            format="MMM D"
-            allowClear
-            placeholder="Other"
-            style={{ width: 95 }}
-          />
-        </DateSelector>
-        <WidgetGrid>
-          {manifest.widgets.map((widget) => (
-            <WidgetRenderer
-              key={widget.id}
-              widget={widget}
-              entries={allEntries}
-              userId={user?.uid ?? ""}
-              logId={state.log?.id}
-              timestamp={getSelectedTimestamp()}
+          <SectionTitle>Track</SectionTitle>
+          <DateNav>
+            <NavButton
+              type="text"
+              icon={<LeftOutlined />}
+              onClick={goToPrevDay}
             />
-          ))}
-        </WidgetGrid>
-      </Section>
-
-      <Section>
-        <SectionHeader>
-          <SectionTitle>Recent Entries</SectionTitle>
-          <ActionGroup>
-            <Dropdown menu={{ items: exportMenuItems }} trigger={["click"]}>
-              <Button icon={<DownloadOutlined />}>Export</Button>
-            </Dropdown>
-          </ActionGroup>
-        </SectionHeader>
-        <RecentEntries
-          entries={recentEntries}
-          manifest={manifest}
-          logId={state.log?.id}
-        />
-      </Section>
-
+            <DateDisplay>{formatDateLabel()}</DateDisplay>
+            <NavButton
+              type="text"
+              icon={<RightOutlined />}
+              onClick={goToNextDay}
+              disabled={!canGoNext}
+            />
+          </DateNav>
+          <SwipeContainer
+            ref={swipeContainerRef}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
+            <WidgetGrid>
+              {manifest.widgets.map((widget) => (
+                <WidgetRenderer
+                  key={widget.id}
+                  widget={widget}
+                  entries={allEntries}
+                  userId={user?.uid ?? ""}
+                  logId={state.log?.id}
+                  timestamp={getSelectedTimestamp()}
+                />
+              ))}
+            </WidgetGrid>
+          </SwipeContainer>
+        </Section>
       </PageContainer>
 
       <ManifestEditor
