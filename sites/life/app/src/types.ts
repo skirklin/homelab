@@ -7,7 +7,7 @@ export { eventFromStore, eventToStore } from "@kirkl/shared";
 // Widget Types
 // ============================================
 
-export type WidgetType = "counter" | "number" | "rating" | "text" | "combo";
+export type WidgetType = "counter" | "counter-group" | "number" | "rating" | "text" | "combo";
 
 export interface BaseWidget {
   id: string;
@@ -16,6 +16,16 @@ export interface BaseWidget {
 
 export interface CounterWidget extends BaseWidget {
   type: "counter";
+}
+
+export interface CounterGroupItem {
+  id: string;
+  label: string;
+}
+
+export interface CounterGroupWidget extends BaseWidget {
+  type: "counter-group";
+  counters: CounterGroupItem[];
 }
 
 export interface NumberWidget extends BaseWidget {
@@ -53,6 +63,7 @@ export interface ComboWidget extends BaseWidget {
 
 export type Widget =
   | CounterWidget
+  | CounterGroupWidget
   | NumberWidget
   | RatingWidget
   | TextWidget

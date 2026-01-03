@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import styled, { css } from "styled-components";
 import { message } from "antd";
 
 import type { RatingWidget as RatingWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry } from "../../firestore";
+import { addEntry, updateEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {
@@ -49,18 +49,6 @@ const Label = styled.span<{ $size: WidgetSize }>`
   font-weight: 500;
   color: var(--color-text);
   ${(props) => labelSizeStyles[props.$size]}
-`;
-
-const valueSizeStyles = {
-  compact: css`font-size: var(--font-size-sm);`,
-  normal: css`font-size: var(--font-size-base);`,
-  comfortable: css`font-size: var(--font-size-lg);`,
-};
-
-const TodayValue = styled.span<{ $size: WidgetSize }>`
-  color: var(--color-primary);
-  font-weight: 600;
-  ${(props) => valueSizeStyles[props.$size]}
 `;
 
 const NumberRow = styled.div`
@@ -130,15 +118,36 @@ interface RatingWidgetProps {
 
 export function RatingWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: RatingWidgetProps) {
   const [saving, setSaving] = useState(false);
+  const [currentRating, setCurrentRating] = useState<number | null>(null);
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
   const dayEntries = getEntriesForDate(entries, widget.id, timestamp);
+
+  // Initialize from existing entry
+  useEffect(() => {
+    if (dayEntries.length > 0) {
+      const latestEntry = dayEntries[0];
+      const rating = latestEntry.data.rating as number;
+      if (rating !== undefined && rating !== null) {
+        setCurrentRating(rating);
+      }
+      setCurrentEntryId(latestEntry.id);
+    } else {
+      setCurrentRating(null);
+      setCurrentEntryId(null);
+    }
+  }, [dayEntries.length, widget.id, timestamp?.getTime()]);
 
   const handleRate = async (value: number) => {
     if (!logId || !userId) return;
 
+    setCurrentRating(value);
     setSaving(true);
     try {
-      await addEntry(widget.id, { rating: value }, userId, { logId, timestamp });
-      message.success("Saved");
+      if (currentEntryId) {
+        await updateEntry(currentEntryId, { data: { rating: value } }, logId);
+      } else {
+        await addEntry(widget.id, { rating: value }, userId, { logId, timestamp });
+      }
     } catch (error) {
       console.error("Failed to save:", error);
       message.error("Failed to save");
@@ -149,14 +158,8 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
 
   const numbers = Array.from({ length: widget.max }, (_, i) => i + 1);
 
-  // Get the latest rating for today as stars
-  const latestRating = dayEntries.length > 0
-    ? (dayEntries[0].data.rating as number)
-    : null;
-  const latestStars = latestRating ? "★".repeat(latestRating) : null;
-
-  // Format all existing ratings
-  const existingRatings = dayEntries.map(e => {
+  // Format additional entries (after the first)
+  const existingRatings = dayEntries.slice(1).map(e => {
     const rating = e.data.rating as number;
     return "★".repeat(rating);
   });
@@ -165,13 +168,12 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
     <Card $size={size}>
       <Header $size={size}>
         <Label $size={size}>{widget.label}</Label>
-        {latestStars && <TodayValue $size={size}>{latestStars}</TodayValue>}
       </Header>
       <NumberRow>
         {numbers.map((n) => (
           <NumberButton
             key={n}
-            $selected={false}
+            $selected={currentRating !== null && n <= currentRating}
             $size={size}
             disabled={saving || !logId}
             onClick={() => handleRate(n)}
@@ -180,9 +182,9 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
           </NumberButton>
         ))}
       </NumberRow>
-      {existingRatings.length > 1 && (
+      {existingRatings.length > 0 && (
         <ExistingEntries $size={size}>
-          +{existingRatings.length - 1} more
+          +{existingRatings.length} more: {existingRatings.join(", ")}
         </ExistingEntries>
       )}
     </Card>

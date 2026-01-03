@@ -11,7 +11,7 @@ export interface ValidationResult {
   manifest?: LifeManifest;
 }
 
-const WIDGET_TYPES = ["counter", "number", "rating", "text", "combo"] as const;
+const WIDGET_TYPES = ["counter", "counter-group", "number", "rating", "text", "combo"] as const;
 const FIELD_TYPES = ["number", "rating", "text"] as const;
 
 function isNonEmptyString(value: unknown): value is string {
@@ -112,6 +112,22 @@ function validateWidget(widget: unknown, index: number): ValidationError[] {
     case "rating":
       if (w.max === undefined || !isPositiveNumber(w.max) || w.max > 10) {
         errors.push({ path: `${path}.max`, message: "max is required for rating and must be 1-10" });
+      }
+      break;
+
+    case "counter-group":
+      if (!Array.isArray(w.counters) || w.counters.length === 0) {
+        errors.push({ path: `${path}.counters`, message: "Counter group must have at least one counter" });
+      } else {
+        w.counters.forEach((counter, i) => {
+          const c = counter as Record<string, unknown>;
+          if (!isNonEmptyString(c?.id)) {
+            errors.push({ path: `${path}.counters[${i}].id`, message: "Counter id is required" });
+          }
+          if (!isNonEmptyString(c?.label)) {
+            errors.push({ path: `${path}.counters[${i}].label`, message: "Counter label is required" });
+          }
+        });
       }
       break;
 
@@ -222,7 +238,7 @@ export function validateManifest(input: unknown): ValidationResult {
   } else if (manifest.widgets.length === 0) {
     errors.push({ path: "widgets", message: "At least one widget is required" });
   } else {
-    // Check for duplicate IDs
+    // Check for duplicate IDs (including counter IDs within counter-groups)
     const ids = new Set<string>();
     manifest.widgets.forEach((w, i) => {
       const widget = w as Record<string, unknown>;
@@ -231,6 +247,18 @@ export function validateManifest(input: unknown): ValidationResult {
           errors.push({ path: `widgets[${i}].id`, message: `Duplicate widget id: ${widget.id}` });
         }
         ids.add(widget.id);
+      }
+      // Also check counter IDs within counter-groups
+      if (widget?.type === "counter-group" && Array.isArray(widget.counters)) {
+        widget.counters.forEach((c, j) => {
+          const counter = c as Record<string, unknown>;
+          if (typeof counter?.id === "string") {
+            if (ids.has(counter.id)) {
+              errors.push({ path: `widgets[${i}].counters[${j}].id`, message: `Duplicate id: ${counter.id}` });
+            }
+            ids.add(counter.id);
+          }
+        });
       }
       errors.push(...validateWidget(w, i));
     });

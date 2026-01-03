@@ -1,6 +1,7 @@
 import type { Widget, LogEntry } from "../../types";
 import { useDisplaySettings, type WidgetSize } from "../../display-settings";
 import { CounterWidget } from "./CounterWidget";
+import { CounterGroupWidget } from "./CounterGroupWidget";
 import { NumberWidget } from "./NumberWidget";
 import { RatingWidget } from "./RatingWidget";
 import { TextWidget } from "./TextWidget";
@@ -18,7 +19,11 @@ export type { WidgetSize };
 
 export function WidgetRenderer({ widget, entries, userId, logId, timestamp }: WidgetRendererProps) {
   const { widgetSize } = useDisplaySettings();
-  const widgetEntries = entries.filter(e => e.subjectId === widget.id);
+
+  // For counter-group, we need entries for all counter IDs in the group
+  const widgetEntries = widget.type === "counter-group"
+    ? entries.filter(e => widget.counters.some(c => c.id === e.subjectId))
+    : entries.filter(e => e.subjectId === widget.id);
 
   const commonProps = {
     entries: widgetEntries,
@@ -31,6 +36,8 @@ export function WidgetRenderer({ widget, entries, userId, logId, timestamp }: Wi
   switch (widget.type) {
     case "counter":
       return <CounterWidget widget={widget} {...commonProps} />;
+    case "counter-group":
+      return <CounterGroupWidget widget={widget} {...commonProps} />;
     case "number":
       return <NumberWidget widget={widget} {...commonProps} />;
     case "rating":

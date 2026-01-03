@@ -1,0 +1,169 @@
+import { useState } from "react";
+import styled, { css } from "styled-components";
+import { message } from "antd";
+import type { CounterGroupWidget as CounterGroupWidgetType, LogEntry } from "../../types";
+import { getCountForDate } from "../../types";
+import { addEntry } from "../../firestore";
+import { type WidgetSize } from "../../display-settings";
+
+const sizeStyles = {
+  compact: css`padding: var(--space-sm);`,
+  normal: css`padding: var(--space-md);`,
+  comfortable: css`padding: var(--space-lg);`,
+};
+
+const Card = styled.div<{ $size: WidgetSize }>`
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  ${(props) => sizeStyles[props.$size]}
+`;
+
+const labelSizeStyles = {
+  compact: css`font-size: var(--font-size-xs); margin-bottom: var(--space-xs);`,
+  normal: css`font-size: var(--font-size-sm); margin-bottom: var(--space-sm);`,
+  comfortable: css`font-size: var(--font-size-base); margin-bottom: var(--space-sm);`,
+};
+
+const GroupLabel = styled.div<{ $size: WidgetSize }>`
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  ${(props) => labelSizeStyles[props.$size]}
+`;
+
+const CountersRow = styled.div<{ $size: WidgetSize }>`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${(props) => props.$size === "compact" ? "var(--space-xs)" : "var(--space-sm)"};
+`;
+
+const buttonSizeStyles = {
+  compact: css`
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--font-size-sm);
+    min-width: 50px;
+  `,
+  normal: css`
+    padding: var(--space-sm) var(--space-md);
+    font-size: var(--font-size-base);
+    min-width: 60px;
+  `,
+  comfortable: css`
+    padding: var(--space-sm) var(--space-lg);
+    font-size: var(--font-size-lg);
+    min-width: 70px;
+  `,
+};
+
+const CounterButton = styled.button<{ $hasCount: boolean; $size: WidgetSize }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  border: 1px solid ${(props) => props.$hasCount ? "var(--color-primary)" : "var(--color-border)"};
+  border-radius: var(--radius-md);
+  background: ${(props) => props.$hasCount ? "var(--color-primary-light)" : "var(--color-bg)"};
+  color: ${(props) => props.$hasCount ? "var(--color-primary)" : "var(--color-text)"};
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-weight: 500;
+  ${(props) => buttonSizeStyles[props.$size]}
+
+  &:hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`;
+
+const badgeSizeStyles = {
+  compact: css`
+    min-width: 16px;
+    height: 16px;
+    font-size: 10px;
+  `,
+  normal: css`
+    min-width: 18px;
+    height: 18px;
+    font-size: 11px;
+  `,
+  comfortable: css`
+    min-width: 20px;
+    height: 20px;
+    font-size: 12px;
+  `,
+};
+
+const CountBadge = styled.span<{ $size: WidgetSize }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  color: white;
+  border-radius: 999px;
+  font-weight: 600;
+  padding: 0 4px;
+  ${(props) => badgeSizeStyles[props.$size]}
+`;
+
+interface CounterGroupWidgetProps {
+  widget: CounterGroupWidgetType;
+  entries: LogEntry[];
+  userId: string;
+  logId: string | undefined;
+  timestamp?: Date;
+  size?: WidgetSize;
+}
+
+export function CounterGroupWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: CounterGroupWidgetProps) {
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const handleTap = async (counterId: string) => {
+    if (!logId || !userId) return;
+
+    setSavingId(counterId);
+    try {
+      await addEntry(counterId, { count: 1 }, userId, { logId, timestamp });
+    } catch (error) {
+      console.error("Failed to log:", error);
+      message.error("Failed to log");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <Card $size={size}>
+      <GroupLabel $size={size}>{widget.label}</GroupLabel>
+      <CountersRow $size={size}>
+        {widget.counters.map((counter) => {
+          const count = getCountForDate(entries, counter.id, timestamp);
+          const isSaving = savingId === counter.id;
+
+          return (
+            <CounterButton
+              key={counter.id}
+              $hasCount={count > 0}
+              $size={size}
+              onClick={() => handleTap(counter.id)}
+              disabled={isSaving || !logId}
+            >
+              {counter.label}
+              {count > 0 && <CountBadge $size={size}>{count}</CountBadge>}
+            </CounterButton>
+          );
+        })}
+      </CountersRow>
+    </Card>
+  );
+}
