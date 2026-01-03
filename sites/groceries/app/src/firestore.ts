@@ -74,8 +74,8 @@ export async function addItem(
   options?: { itemId?: string; categoryId?: string }
 ) {
   // Use provided categoryId or look up from history
-  let categoryId = options?.categoryId;
-  if (!categoryId) {
+  let categoryId: string = options?.categoryId || "uncategorized";
+  if (!options?.categoryId) {
     const historyRef = doc(getHistoryRef(), normalizeItemName(name));
     const historySnap = await getDoc(historyRef);
     const historyData = historySnap.exists() ? historySnap.data() : null;

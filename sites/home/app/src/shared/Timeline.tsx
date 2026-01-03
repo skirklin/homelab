@@ -228,7 +228,7 @@ export function Timeline() {
     for (const box of recipesState.boxes.values()) {
       for (const [recipeId, recipe] of box.recipes) {
         const name = recipe.data?.name;
-        if (name) {
+        if (name && typeof name === "string") {
           names.set(recipeId, name);
         }
       }
