@@ -7,6 +7,8 @@ import { useAuth } from "@kirkl/shared";
 import { subscribeToUserSlugs, subscribeToList } from "./subscription";
 import type { GroceryItem, GroceryList, ItemHistory, ShoppingTrip } from "./types";
 
+export type SyncStatus = "synced" | "pending" | "offline";
+
 export interface GroceriesState {
   userSlugs: Record<string, string>; // { "groceries": "listId123" }
   list: GroceryList | null;
@@ -14,6 +16,7 @@ export interface GroceriesState {
   history: ItemHistory[];
   trips: ShoppingTrip[];
   loading: boolean;
+  syncStatus: SyncStatus;
 }
 
 export type GroceriesAction =
@@ -24,7 +27,8 @@ export type GroceriesAction =
   | { type: "CLEAR_ITEMS" }
   | { type: "SET_HISTORY"; history: ItemHistory[] }
   | { type: "SET_TRIPS"; trips: ShoppingTrip[] }
-  | { type: "SET_LOADING"; loading: boolean };
+  | { type: "SET_LOADING"; loading: boolean }
+  | { type: "SET_SYNC_STATUS"; status: SyncStatus };
 
 function reducer(state: GroceriesState, action: GroceriesAction): GroceriesState {
   switch (action.type) {
@@ -58,6 +62,9 @@ function reducer(state: GroceriesState, action: GroceriesAction): GroceriesState
     case "SET_LOADING":
       return { ...state, loading: action.loading };
 
+    case "SET_SYNC_STATUS":
+      return { ...state, syncStatus: action.status };
+
     default:
       return state;
   }
@@ -70,6 +77,7 @@ const initialState: GroceriesState = {
   history: [],
   trips: [],
   loading: true,
+  syncStatus: "synced",
 };
 
 interface ContextType {

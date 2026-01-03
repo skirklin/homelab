@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import styled from "styled-components";
 import { Button } from "antd";
 import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
@@ -8,6 +9,13 @@ import { useGroceriesContext } from "../groceries-context";
 import { clearCheckedItems } from "../firestore";
 import { getItemsFromState } from "../subscription";
 import { appStorage, StorageKeys } from "../storage";
+import { SyncIndicator } from "./SyncIndicator";
+
+const TitleWithStatus = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
 
 interface Props {
   listId: string;
@@ -24,6 +32,13 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
   const items = getItemsFromState(state);
   const checkedCount = items.filter((item) => item.checked).length;
   const listName = state.list?.name || "List";
+
+  const titleWithStatus = (
+    <TitleWithStatus>
+      {listName}
+      <SyncIndicator status={state.syncStatus} />
+    </TitleWithStatus>
+  );
 
   const shareUrl = `${window.location.origin}/join/${listId}`;
 
@@ -71,7 +86,7 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
   return (
     <>
       <AppHeader
-        title={listName}
+        title={titleWithStatus}
         onBack={() => {
           appStorage.remove(StorageKeys.LAST_LIST);
           navigate("..");

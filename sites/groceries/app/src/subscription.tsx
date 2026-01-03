@@ -63,11 +63,23 @@ export async function subscribeToList(
   );
   unsubscribers.push(listUnsub);
 
-  // Subscribe to items
+  // Subscribe to items (with metadata to track sync status)
   const itemsUnsub = onSnapshot(
     getItemsRef(),
+    { includeMetadataChanges: true },
     (snapshot) => {
+      // Update sync status based on metadata
+      const { fromCache, hasPendingWrites } = snapshot.metadata;
+      if (hasPendingWrites) {
+        dispatch({ type: "SET_SYNC_STATUS", status: "pending" });
+      } else if (fromCache) {
+        dispatch({ type: "SET_SYNC_STATUS", status: "offline" });
+      } else {
+        dispatch({ type: "SET_SYNC_STATUS", status: "synced" });
+      }
+
       snapshot.docChanges().forEach((change) => {
+        // Skip metadata-only changes (no actual doc changes)
         if (change.type === "added" || change.type === "modified") {
           const data = change.doc.data() as GroceryItemStore;
           dispatch({
