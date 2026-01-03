@@ -1,11 +1,12 @@
 import { useState } from "react";
 import styled, { css } from "styled-components";
 import { message } from "antd";
-import { PlusOutlined, MinusOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@ant-design/icons";
 import type { CounterWidget as CounterWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, deleteEntry } from "../../firestore";
+import { addEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
+import { EntriesPopover } from "./EntriesPopover";
 
 const sizeStyles = {
   compact: css`
@@ -86,10 +87,10 @@ const CountDisplay = styled.div<{ $hasCount: boolean; $size: WidgetSize }>`
   ${(props) => countSizeStyles[props.$size]}
 `;
 
-const UndoButton = styled.button<{ $size: WidgetSize }>`
+const CountButton = styled.button<{ $size: WidgetSize }>`
   border-radius: 50%;
-  background: var(--color-bg-muted);
-  color: var(--color-text-secondary);
+  background: var(--color-primary);
+  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -100,17 +101,11 @@ const UndoButton = styled.button<{ $size: WidgetSize }>`
   ${(props) => countSizeStyles[props.$size]}
 
   &:hover {
-    background: var(--color-error-light, #fff1f0);
-    color: var(--color-error, #ff4d4f);
+    opacity: 0.9;
   }
 
   &:active {
     transform: scale(0.95);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 `;
 
@@ -167,46 +162,25 @@ export function CounterWidget({ widget, entries, userId, logId, timestamp, size 
     }
   };
 
-  const handleUndo = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!logId || count === 0) return;
-
-    // Delete the most recent entry
-    const mostRecent = dayEntries[0]; // Entries are sorted by timestamp desc
-    if (!mostRecent) return;
-
-    setSaving(true);
-    try {
-      await deleteEntry(mostRecent.id, logId);
-    } catch (error) {
-      console.error("Failed to undo:", error);
-      message.error("Failed to undo");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <Card $size={size}>
       <AddButton onClick={handleAdd} disabled={saving || !logId}>
-        <CountDisplay $hasCount={count > 0} $size={size}>
-          {count > 0 ? count : <PlusOutlined />}
-        </CountDisplay>
+        {count > 0 ? (
+          <EntriesPopover entries={dayEntries} logId={logId}>
+            <CountButton $size={size} onClick={(e) => e.stopPropagation()}>
+              {count}
+            </CountButton>
+          </EntriesPopover>
+        ) : (
+          <CountDisplay $hasCount={false} $size={size}>
+            <PlusOutlined />
+          </CountDisplay>
+        )}
         <Content>
           <Label $size={size}>{widget.label}</Label>
           <Hint $size={size}>Tap to log</Hint>
         </Content>
       </AddButton>
-      {count > 0 && (
-        <UndoButton
-          $size={size}
-          onClick={handleUndo}
-          disabled={saving || !logId}
-          title="Undo last"
-        >
-          <MinusOutlined />
-        </UndoButton>
-      )}
     </Card>
   );
 }

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import styled, { css } from "styled-components";
 import { message } from "antd";
-import { MinusOutlined } from "@ant-design/icons";
 import type { CounterGroupWidget as CounterGroupWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, deleteEntry } from "../../firestore";
+import { addEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
+import { EntriesPopover } from "./EntriesPopover";
 
 const sizeStyles = {
   compact: css`padding: var(--space-sm);`,
@@ -105,7 +105,7 @@ const badgeSizeStyles = {
   `,
 };
 
-const CountBadge = styled.span<{ $size: WidgetSize }>`
+const CountBadge = styled.button<{ $size: WidgetSize }>`
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -114,25 +114,12 @@ const CountBadge = styled.span<{ $size: WidgetSize }>`
   border-radius: 999px;
   font-weight: 600;
   padding: 0 4px;
-  ${(props) => badgeSizeStyles[props.$size]}
-`;
-
-const UndoBadge = styled.button<{ $size: WidgetSize }>`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-bg-muted);
-  color: var(--color-text-secondary);
-  border-radius: 999px;
-  font-weight: 600;
-  padding: 0;
   border: none;
   cursor: pointer;
   ${(props) => badgeSizeStyles[props.$size]}
 
   &:hover {
-    background: var(--color-error-light, #fff1f0);
-    color: var(--color-error, #ff4d4f);
+    opacity: 0.9;
   }
 `;
 
@@ -162,25 +149,6 @@ export function CounterGroupWidget({ widget, entries, userId, logId, timestamp, 
     }
   };
 
-  const handleUndo = async (counterId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!logId) return;
-
-    const counterEntries = getEntriesForDate(entries, counterId, timestamp);
-    const mostRecent = counterEntries[0];
-    if (!mostRecent) return;
-
-    setSavingId(counterId);
-    try {
-      await deleteEntry(mostRecent.id, logId);
-    } catch (error) {
-      console.error("Failed to undo:", error);
-      message.error("Failed to undo");
-    } finally {
-      setSavingId(null);
-    }
-  };
-
   return (
     <Card $size={size}>
       <GroupLabel $size={size}>{widget.label}</GroupLabel>
@@ -199,16 +167,15 @@ export function CounterGroupWidget({ widget, entries, userId, logId, timestamp, 
               disabled={isSaving || !logId}
             >
               {counter.label}
-              {count > 0 && <CountBadge $size={size}>{count}</CountBadge>}
               {count > 0 && (
-                <UndoBadge
-                  $size={size}
-                  onClick={(e) => handleUndo(counter.id, e)}
-                  disabled={isSaving || !logId}
-                  title="Undo"
-                >
-                  <MinusOutlined style={{ fontSize: size === "compact" ? 8 : 10 }} />
-                </UndoBadge>
+                <EntriesPopover entries={counterEntries} logId={logId}>
+                  <CountBadge
+                    $size={size}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {count}
+                  </CountBadge>
+                </EntriesPopover>
               )}
             </CounterButton>
           );

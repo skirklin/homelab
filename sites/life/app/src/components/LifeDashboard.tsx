@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Button, Switch, message, Tooltip } from "antd";
+import { Button, Switch, message, Tooltip, DatePicker } from "antd";
 import { SettingOutlined, DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
 import dayjs from "dayjs";
@@ -58,12 +58,29 @@ const DateNav = styled.div`
   margin-bottom: var(--space-md);
 `;
 
-const DateDisplay = styled.div`
+const DateDisplay = styled.button`
   font-size: var(--font-size-base);
   font-weight: 500;
   color: var(--color-text);
   min-width: 120px;
   text-align: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+
+  &:hover {
+    background: var(--color-bg-muted);
+  }
+`;
+
+const HiddenDatePicker = styled(DatePicker)`
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
 `;
 
 const NavButton = styled(Button)`
@@ -95,6 +112,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // Track selected date and what "today" was when we loaded
   const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
   const [todayDate, setTodayDate] = useState<string>(() => getDateString(new Date()));
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
 
   // Swipe handling
   const touchStartX = useRef<number | null>(null);
@@ -381,7 +399,23 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
               icon={<LeftOutlined />}
               onClick={goToPrevDay}
             />
-            <DateDisplay>{formatDateLabel()}</DateDisplay>
+            <div style={{ position: "relative" }}>
+              <DateDisplay onClick={() => setDatePickerOpen(true)}>
+                {formatDateLabel()}
+              </DateDisplay>
+              <HiddenDatePicker
+                open={datePickerOpen}
+                onOpenChange={setDatePickerOpen}
+                value={dayjs(selectedDate)}
+                onChange={(date) => {
+                  if (date && typeof (date as dayjs.Dayjs).toDate === 'function') {
+                    setSelectedDate(startOfDay((date as dayjs.Dayjs).toDate()));
+                  }
+                  setDatePickerOpen(false);
+                }}
+                disabledDate={(current) => current && (current as dayjs.Dayjs).isAfter(dayjs(), 'day')}
+              />
+            </div>
             <NavButton
               type="text"
               icon={<RightOutlined />}
