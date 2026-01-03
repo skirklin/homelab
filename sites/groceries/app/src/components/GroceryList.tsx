@@ -2,7 +2,19 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import { Spin, Button } from "antd";
-import { DndContext, DragOverlay, MeasuringStrategy, pointerWithin, type DragEndEvent, type DragStartEvent, type Modifier } from "@dnd-kit/core";
+import {
+  DndContext,
+  DragOverlay,
+  MeasuringStrategy,
+  pointerWithin,
+  TouchSensor,
+  MouseSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  type Modifier,
+} from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
@@ -112,6 +124,20 @@ export function GroceryList({ embedded = false }: GroceryListProps) {
   const [view, setView] = useState<View>("list");
   const [draggedItem, setDraggedItem] = useState<GroceryItem | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+
+  // Configure sensors for both mouse and touch with activation delay
+  const mouseSensor = useSensor(MouseSensor, {
+    activationConstraint: {
+      distance: 10, // 10px movement required before drag starts
+    },
+  });
+  const touchSensor = useSensor(TouchSensor, {
+    activationConstraint: {
+      delay: 200, // 200ms hold before drag starts on touch
+      tolerance: 5, // 5px movement allowed during delay
+    },
+  });
+  const sensors = useSensors(mouseSensor, touchSensor);
 
   // Look up listId from user's slugs
   const listId = slug ? state.userSlugs[slug] : undefined;
@@ -223,6 +249,7 @@ export function GroceryList({ embedded = false }: GroceryListProps) {
           </LoadingContainer>
         ) : (
           <DndContext
+              sensors={sensors}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               collisionDetection={pointerWithin}

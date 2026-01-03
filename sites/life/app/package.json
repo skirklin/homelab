@@ -22,6 +22,7 @@
     "antd": "^5.29.3",
     "dayjs": "^1.11.10",
     "firebase": "^11.0.0",
+    "recharts": "^3.6.0",
     "styled-components": "^6.1.19"
   },
   "devDependencies": {
