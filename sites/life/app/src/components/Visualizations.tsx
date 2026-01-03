@@ -15,7 +15,15 @@ import {
   Area,
 } from "recharts";
 import { useLife } from "../life-context";
-import type { Widget, LogEntry } from "../types";
+import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType } from "../types";
+
+// Helper to get all entry IDs for a widget (expands counter-groups to their counter IDs)
+function getWidgetEntryIds(widget: Widget): string[] {
+  if (widget.type === "counter-group") {
+    return (widget as CounterGroupWidgetType).counters.map(c => c.id);
+  }
+  return [widget.id];
+}
 
 const Container = styled.div`
   max-width: 800px;
@@ -171,10 +179,11 @@ interface DayData {
   values: number[];
 }
 
-function getMonthData(entries: LogEntry[], widgetId: string, year: number, month: number): DayData[] {
+function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, month: number): DayData[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
+  const idSet = new Set(widgetIds);
 
   // Add empty cells for days before the first of the month
   for (let i = 0; i < firstDay.getDay(); i++) {
@@ -188,7 +197,7 @@ function getMonthData(entries: LogEntry[], widgetId: string, year: number, month
     const dayEnd = new Date(year, month, day, 23, 59, 59, 999);
 
     const dayEntries = entries.filter(
-      (e) => e.subjectId === widgetId && e.timestamp >= dayStart && e.timestamp <= dayEnd
+      (e) => idSet.has(e.subjectId) && e.timestamp >= dayStart && e.timestamp <= dayEnd
     );
 
     const values: number[] = [];
@@ -204,9 +213,10 @@ function getMonthData(entries: LogEntry[], widgetId: string, year: number, month
   return data;
 }
 
-function getLast30DaysData(entries: LogEntry[], widgetId: string): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: LogEntry[], widgetIds: string[]): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
   const today = new Date();
+  const idSet = new Set(widgetIds);
 
   for (let i = 29; i >= 0; i--) {
     const date = new Date(today);
@@ -216,7 +226,7 @@ function getLast30DaysData(entries: LogEntry[], widgetId: string): { date: strin
     dayEnd.setHours(23, 59, 59, 999);
 
     const dayEntries = entries.filter(
-      (e) => e.subjectId === widgetId && e.timestamp >= date && e.timestamp <= dayEnd
+      (e) => idSet.has(e.subjectId) && e.timestamp >= date && e.timestamp <= dayEnd
     );
 
     const values: number[] = [];
@@ -236,9 +246,10 @@ function getLast30DaysData(entries: LogEntry[], widgetId: string): { date: strin
   return data;
 }
 
-function getWeeklyData(entries: LogEntry[], widgetId: string): { week: string; total: number; avg: number }[] {
+function getWeeklyData(entries: LogEntry[], widgetIds: string[]): { week: string; total: number; avg: number }[] {
   const data: { week: string; total: number; avg: number }[] = [];
   const today = new Date();
+  const idSet = new Set(widgetIds);
 
   for (let w = 11; w >= 0; w--) {
     const weekStart = new Date(today);
@@ -250,7 +261,7 @@ function getWeeklyData(entries: LogEntry[], widgetId: string): { week: string; t
     weekEnd.setHours(23, 59, 59, 999);
 
     const weekEntries = entries.filter(
-      (e) => e.subjectId === widgetId && e.timestamp >= weekStart && e.timestamp <= weekEnd
+      (e) => idSet.has(e.subjectId) && e.timestamp >= weekStart && e.timestamp <= weekEnd
     );
 
     const values: number[] = [];
@@ -275,17 +286,17 @@ function getWeeklyData(entries: LogEntry[], widgetId: string): { week: string; t
 
 function CalendarHeatMap({
   entries,
-  widgetId,
+  widgetIds,
 }: {
   entries: LogEntry[];
-  widgetId: string;
+  widgetIds: string[];
   widget: Widget;
 }) {
   const [viewDate, setViewDate] = useState(new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
-  const monthData = useMemo(() => getMonthData(entries, widgetId, year, month), [entries, widgetId, year, month]);
+  const monthData = useMemo(() => getMonthData(entries, widgetIds, year, month), [entries, widgetIds, year, month]);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -369,14 +380,14 @@ function CalendarHeatMap({
 
 function TrendChart({
   entries,
-  widgetId,
+  widgetIds,
   widget,
 }: {
   entries: LogEntry[];
-  widgetId: string;
+  widgetIds: string[];
   widget: Widget;
 }) {
-  const data = useMemo(() => getLast30DaysData(entries, widgetId), [entries, widgetId]);
+  const data = useMemo(() => getLast30DaysData(entries, widgetIds), [entries, widgetIds]);
 
   // Calculate stats
   const values = data.filter((d) => d.value > 0).map((d) => d.value);
@@ -385,7 +396,7 @@ function TrendChart({
   const maxVal = Math.max(...values, 0);
 
   // Determine if this is a counter (show bar) or value (show line)
-  const isCounter = widget.type === "counter";
+  const isCounter = widget.type === "counter" || widget.type === "counter-group";
 
   return (
     <>
@@ -459,16 +470,16 @@ function TrendChart({
 
 function WeeklyChart({
   entries,
-  widgetId,
+  widgetIds,
   widget,
 }: {
   entries: LogEntry[];
-  widgetId: string;
+  widgetIds: string[];
   widget: Widget;
 }) {
-  const data = useMemo(() => getWeeklyData(entries, widgetId), [entries, widgetId]);
+  const data = useMemo(() => getWeeklyData(entries, widgetIds), [entries, widgetIds]);
 
-  const isCounter = widget.type === "counter";
+  const isCounter = widget.type === "counter" || widget.type === "counter-group";
   const dataKey = isCounter ? "total" : "avg";
 
   return (
@@ -504,6 +515,12 @@ export function Visualizations() {
   const widgetId = selectedWidget || widgets[0]?.id;
   const widget = widgets.find((w) => w.id === widgetId);
 
+  // Get the entry IDs for this widget (expands counter-groups to individual counter IDs)
+  const widgetIds = useMemo(() => {
+    if (!widget) return [];
+    return getWidgetEntryIds(widget);
+  }, [widget]);
+
   if (widgets.length === 0) {
     return (
       <Container>
@@ -526,21 +543,21 @@ export function Visualizations() {
       key: "trend",
       label: "Daily Trend",
       children: widget && (
-        <TrendChart entries={entries} widgetId={widgetId} widget={widget} />
+        <TrendChart entries={entries} widgetIds={widgetIds} widget={widget} />
       ),
     },
     {
       key: "weekly",
       label: "Weekly",
       children: widget && (
-        <WeeklyChart entries={entries} widgetId={widgetId} widget={widget} />
+        <WeeklyChart entries={entries} widgetIds={widgetIds} widget={widget} />
       ),
     },
     {
       key: "calendar",
       label: "Calendar",
       children: widget && (
-        <CalendarHeatMap entries={entries} widgetId={widgetId} widget={widget} />
+        <CalendarHeatMap entries={entries} widgetIds={widgetIds} widget={widget} />
       ),
     },
   ];

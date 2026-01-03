@@ -226,11 +226,15 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     signOut(auth);
   };
 
-  // Only show sign-out in standalone mode
-  const menuItems = !embedded ? [
-    { type: "divider" as const },
-    { key: "logout", icon: <LogoutOutlined />, label: "Sign Out", onClick: handleSignOut },
-  ] : [];
+  // Menu items - always include Insights and Display for mobile access
+  const menuItems = [
+    { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("insights") },
+    { key: "display", icon: <ControlOutlined />, label: "Display Settings", onClick: () => setShowSettings(true) },
+    ...(!embedded ? [
+      { type: "divider" as const },
+      { key: "logout", icon: <LogoutOutlined />, label: "Sign Out", onClick: handleSignOut },
+    ] : []),
+  ];
 
   const desktopActions = (
     <>
@@ -262,6 +266,18 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     </>
   );
 
+  const mobileActions = samplingEnabled ? (
+    <NotificationToggle>
+      <BellOutlined />
+      <Switch
+        size="small"
+        checked={notificationsEnabled}
+        loading={notificationLoading}
+        onChange={handleNotificationToggle}
+      />
+    </NotificationToggle>
+  ) : null;
+
   return (
     <>
       <AppHeader
@@ -273,6 +289,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         }}
         menuItems={menuItems}
         desktopActions={desktopActions}
+        mobileActions={mobileActions}
       />
 
       <PageContainer>
