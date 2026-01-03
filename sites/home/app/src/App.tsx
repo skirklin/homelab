@@ -3,7 +3,7 @@ import { ConfigProvider, theme } from "antd";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
 import { GroceriesProvider, GroceriesRoutes } from "@kirkl/groceries";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
-import { RecipesProvider, CookingModeProvider, RecipesRoutes } from "@kirkl/recipes";
+import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { UpkeepProvider, UpkeepRoutes } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
@@ -30,17 +30,7 @@ const antTheme = {
   algorithm: theme.defaultAlgorithm,
 };
 
-function AppRoutes() {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return null;
-  }
-
-  if (!user) {
-    return <Auth />;
-  }
-
+function AuthenticatedRoutes() {
   return (
     <Routes>
       <Route element={<Shell />}>
@@ -52,6 +42,32 @@ function AppRoutes() {
         <Route path="/upkeep/*" element={<UpkeepRoutes embedded />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function ProtectedRoute() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return null;
+  }
+
+  if (!user) {
+    return <Auth />;
+  }
+
+  return <AuthenticatedRoutes />;
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      {/* Public routes - accessible without authentication */}
+      <Route path="/recipe/:boxId/:recipeId" element={<PublicRecipe />} />
+
+      {/* All other routes require authentication */}
+      <Route path="/*" element={<ProtectedRoute />} />
     </Routes>
   );
 }
