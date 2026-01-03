@@ -6,7 +6,7 @@ let messaging: Messaging | null = null;
 
 // VAPID key for web push
 // You can get this from Firebase Console > Project Settings > Cloud Messaging
-const VAPID_KEY = "BEqK6d4PQMtDpH9M3BhV6OJG2WlzlO3QCLMrqZVtZqJ8W9qP5r3T1oJ0xH7k9n2L4cO8d6A3bG1yR5uQ0w7tI9U";
+const VAPID_KEY = "BCd5kDyxZ_F5NCGM60m35hjUYnXqUL53fPCZPk7V2O2KZ3DfiNFsy0NGVqe1oYNSGOIos5wLLFh1qpBC4TGGFEY";
 
 export async function initializeMessaging(): Promise<boolean> {
   if (!("Notification" in window)) {
