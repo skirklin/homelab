@@ -7,6 +7,8 @@ import {
   deleteDoc,
   addDoc,
   Timestamp,
+  arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 import { getBackend, type EventStore } from "@kirkl/shared";
 import type { LifeLogStore, LifeManifest } from "./types";
@@ -181,11 +183,18 @@ export async function addSampleResponse(
 
 export async function saveFcmToken(userId: string, token: string): Promise<void> {
   const userRef = doc(db, "users", userId);
-  // Use merge to handle both create and update without reading first
-  await setDoc(userRef, { fcmToken: token }, { merge: true });
+  try {
+    // Add to array of tokens (supports multiple devices)
+    await updateDoc(userRef, { fcmTokens: arrayUnion(token) });
+  } catch {
+    // User doc might not exist yet
+    await setDoc(userRef, { fcmTokens: [token] }, { merge: true });
+  }
 }
 
-export async function removeFcmToken(userId: string): Promise<void> {
+export async function removeFcmToken(userId: string, token?: string): Promise<void> {
   const userRef = doc(db, "users", userId);
-  await updateDoc(userRef, { fcmToken: null });
+  if (token) {
+    await updateDoc(userRef, { fcmTokens: arrayRemove(token) });
+  }
 }
