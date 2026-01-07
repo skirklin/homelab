@@ -767,14 +767,22 @@ export const sendLifeTrackerSamples = onSchedule(
       return;
     }
 
+    console.log(`Found ${logsSnapshot.docs.length} life logs`);
+
     for (const logDoc of logsSnapshot.docs) {
       const logData = logDoc.data() as LifeLogData;
       const config = logData.manifest?.randomSamples;
 
       // Skip if sampling not enabled
       if (!config?.enabled) {
+        console.log(`Log ${logDoc.id}: sampling not enabled`);
         continue;
       }
+
+      console.log(`Log ${logDoc.id}: sampling enabled, ${config.timesPerDay} times/day, hours ${config.activeHours?.join("-")}`);
+      console.log(`Log ${logDoc.id}: owners = ${logData.owners?.join(", ")}`);
+      console.log(`Log ${logDoc.id}: current schedule = ${JSON.stringify(logData.sampleSchedule)}`);
+      console.log(`Log ${logDoc.id}: now = ${now}, today = ${today}`);
 
       // Initialize or update schedule for today
       let schedule = logData.sampleSchedule;
@@ -802,11 +810,15 @@ export const sendLifeTrackerSamples = onSchedule(
         (t) => t <= now && !schedule!.sentTimes.includes(t)
       );
 
+      console.log(`Log ${logDoc.id}: schedule times = ${schedule.times.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
+      console.log(`Log ${logDoc.id}: sent times = ${schedule.sentTimes.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
+      console.log(`Log ${logDoc.id}: pending = ${pendingTimes.length}`);
+
       if (pendingTimes.length === 0) {
         continue;
       }
 
-      console.log(`Log ${logDoc.id} has ${pendingTimes.length} pending samples`);
+      console.log(`Log ${logDoc.id} has ${pendingTimes.length} pending samples at ${pendingTimes.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
 
       // Get FCM tokens for all owners
       const ownerTokens: { userId: string; token: string }[] = [];
@@ -814,12 +826,15 @@ export const sendLifeTrackerSamples = onSchedule(
       for (const ownerId of logData.owners || []) {
         const userDoc = await db.doc(`users/${ownerId}`).get();
         const userData = userDoc.data();
+        console.log(`Log ${logDoc.id}: checking user ${ownerId}, exists=${userDoc.exists}, hasToken=${!!userData?.fcmToken}, hasTokens=${!!userData?.fcmTokens}`);
 
         // Support both single token (fcmToken) and array (fcmTokens)
         if (userData?.fcmToken) {
+          console.log(`Log ${logDoc.id}: found fcmToken for ${ownerId}: ${userData.fcmToken.substring(0, 20)}...`);
           ownerTokens.push({ userId: ownerId, token: userData.fcmToken });
         }
         if (userData?.fcmTokens) {
+          console.log(`Log ${logDoc.id}: found ${(userData.fcmTokens as string[]).length} fcmTokens for ${ownerId}`);
           for (const token of userData.fcmTokens as string[]) {
             ownerTokens.push({ userId: ownerId, token });
           }
@@ -827,7 +842,7 @@ export const sendLifeTrackerSamples = onSchedule(
       }
 
       if (ownerTokens.length === 0) {
-        console.log(`No FCM tokens for log ${logDoc.id}`);
+        console.log(`No FCM tokens for log ${logDoc.id} - users may need to enable notifications`);
         // Still mark times as sent to avoid repeated attempts
         await logDoc.ref.update({
           "sampleSchedule.sentTimes": [...schedule.sentTimes, ...pendingTimes],
