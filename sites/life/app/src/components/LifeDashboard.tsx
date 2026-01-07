@@ -118,21 +118,43 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const touchStartX = useRef<number | null>(null);
   const swipeContainerRef = useRef<HTMLDivElement>(null);
 
-  // Check for day change every minute
+  // Check for day change - on interval, visibility change, and focus
   useEffect(() => {
     const checkDayChange = () => {
       const currentToday = getDateString(new Date());
       if (currentToday !== todayDate) {
-        setTodayDate(currentToday);
         // If user was viewing "today", keep them on the new today
-        if (getDateString(selectedDate) === todayDate) {
+        const wasViewingToday = getDateString(selectedDate) === todayDate;
+        setTodayDate(currentToday);
+        if (wasViewingToday) {
           setSelectedDate(startOfDay(new Date()));
         }
       }
     };
 
-    const interval = setInterval(checkDayChange, 60000); // Check every minute
-    return () => clearInterval(interval);
+    // Check periodically (backup for when app stays active)
+    const interval = setInterval(checkDayChange, 60000);
+
+    // Check when app becomes visible (handles mobile background/foreground)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        checkDayChange();
+      }
+    };
+
+    // Check on window focus (handles tab switching)
+    const handleFocus = () => {
+      checkDayChange();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [todayDate, selectedDate]);
 
   // Navigation helpers
