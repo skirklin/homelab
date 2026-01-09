@@ -17,18 +17,20 @@ import {
 import { useLife } from "../life-context";
 import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType, ComboWidget as ComboWidgetType } from "../types";
 
-// Helper to get all entry IDs for a widget (expands counter-groups to their counter IDs)
-function getWidgetEntryIds(widget: Widget): string[] {
-  if (widget.type === "counter-group") {
-    return (widget as CounterGroupWidgetType).counters.map(c => c.id);
-  }
-  return [widget.id];
-}
-
 // Helper to extract numeric values from an entry based on widget type
-function extractNumericValues(entry: LogEntry, widget: Widget): number[] {
+// fieldId is used when extracting a specific field from combo entries
+function extractNumericValues(entry: LogEntry, widget: Widget, fieldId?: string): number[] {
   const values: number[] = [];
   const data = entry.data;
+
+  // If fieldId is specified, extract that specific field (for combo-derived items)
+  if (fieldId) {
+    const fieldValue = data[fieldId];
+    if (typeof fieldValue === "number") {
+      values.push(fieldValue);
+    }
+    return values;
+  }
 
   switch (widget.type) {
     case "counter":
@@ -217,7 +219,7 @@ interface DayData {
   values: number[];
 }
 
-function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, month: number, widget: Widget): DayData[] {
+function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, month: number, widget: Widget, fieldId?: string): DayData[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
@@ -240,7 +242,7 @@ function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, mo
 
     const values: number[] = [];
     dayEntries.forEach((e) => {
-      values.push(...extractNumericValues(e, widget));
+      values.push(...extractNumericValues(e, widget, fieldId));
     });
 
     data.push({ date, count: dayEntries.length, values });
@@ -249,7 +251,7 @@ function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, mo
   return data;
 }
 
-function getLast30DaysData(entries: LogEntry[], widgetIds: string[], widget: Widget): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: LogEntry[], widgetIds: string[], widget: Widget, fieldId?: string): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
   const today = new Date();
   const idSet = new Set(widgetIds);
@@ -267,7 +269,7 @@ function getLast30DaysData(entries: LogEntry[], widgetIds: string[], widget: Wid
 
     const values: number[] = [];
     dayEntries.forEach((e) => {
-      values.push(...extractNumericValues(e, widget));
+      values.push(...extractNumericValues(e, widget, fieldId));
     });
 
     const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
@@ -281,7 +283,7 @@ function getLast30DaysData(entries: LogEntry[], widgetIds: string[], widget: Wid
   return data;
 }
 
-function getWeeklyData(entries: LogEntry[], widgetIds: string[], widget: Widget): { week: string; total: number; avg: number }[] {
+function getWeeklyData(entries: LogEntry[], widgetIds: string[], widget: Widget, fieldId?: string): { week: string; total: number; avg: number }[] {
   const data: { week: string; total: number; avg: number }[] = [];
   const today = new Date();
   const idSet = new Set(widgetIds);
@@ -301,7 +303,7 @@ function getWeeklyData(entries: LogEntry[], widgetIds: string[], widget: Widget)
 
     const values: number[] = [];
     weekEntries.forEach((e) => {
-      values.push(...extractNumericValues(e, widget));
+      values.push(...extractNumericValues(e, widget, fieldId));
     });
 
     const total = weekEntries.length;
@@ -321,16 +323,18 @@ function CalendarHeatMap({
   entries,
   widgetIds,
   widget,
+  fieldId,
 }: {
   entries: LogEntry[];
   widgetIds: string[];
   widget: Widget;
+  fieldId?: string;
 }) {
   const [viewDate, setViewDate] = useState(new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
-  const monthData = useMemo(() => getMonthData(entries, widgetIds, year, month, widget), [entries, widgetIds, year, month, widget]);
+  const monthData = useMemo(() => getMonthData(entries, widgetIds, year, month, widget, fieldId), [entries, widgetIds, year, month, widget, fieldId]);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -416,12 +420,14 @@ function TrendChart({
   entries,
   widgetIds,
   widget,
+  fieldId,
 }: {
   entries: LogEntry[];
   widgetIds: string[];
   widget: Widget;
+  fieldId?: string;
 }) {
-  const data = useMemo(() => getLast30DaysData(entries, widgetIds, widget), [entries, widgetIds, widget]);
+  const data = useMemo(() => getLast30DaysData(entries, widgetIds, widget, fieldId), [entries, widgetIds, widget, fieldId]);
 
   // Calculate stats
   const values = data.filter((d) => d.value > 0).map((d) => d.value);
@@ -506,12 +512,14 @@ function WeeklyChart({
   entries,
   widgetIds,
   widget,
+  fieldId,
 }: {
   entries: LogEntry[];
   widgetIds: string[];
   widget: Widget;
+  fieldId?: string;
 }) {
-  const data = useMemo(() => getWeeklyData(entries, widgetIds, widget), [entries, widgetIds, widget]);
+  const data = useMemo(() => getWeeklyData(entries, widgetIds, widget, fieldId), [entries, widgetIds, widget, fieldId]);
 
   const isCounter = widget.type === "counter" || widget.type === "counter-group";
   const dataKey = isCounter ? "total" : "avg";
@@ -537,25 +545,86 @@ function WeeklyChart({
   );
 }
 
+// Represents a selectable item for visualization
+interface VisualizableItem {
+  id: string;           // Unique ID for selection
+  label: string;        // Display name
+  widget: Widget;       // Parent widget (for type detection)
+  entryIds: string[];   // Entry IDs to filter by
+  fieldId?: string;     // For combo fields, the specific field to extract
+}
+
+// Build a flat list of all visualizable items (expands counter-groups and combo widgets)
+function buildVisualizableItems(widgets: Widget[]): VisualizableItem[] {
+  const items: VisualizableItem[] = [];
+
+  for (const widget of widgets) {
+    if (widget.type === "counter-group") {
+      const groupWidget = widget as CounterGroupWidgetType;
+      // Add the group itself (all counters combined)
+      items.push({
+        id: widget.id,
+        label: `${widget.label} (all)`,
+        widget,
+        entryIds: groupWidget.counters.map(c => c.id),
+      });
+      // Add each individual counter
+      for (const counter of groupWidget.counters) {
+        items.push({
+          id: `${widget.id}:${counter.id}`,
+          label: `${widget.label} › ${counter.label}`,
+          widget: { ...widget, type: "counter" } as Widget, // Treat as single counter for viz
+          entryIds: [counter.id],
+        });
+      }
+    } else if (widget.type === "combo") {
+      const comboWidget = widget as ComboWidgetType;
+      // Add each field as a separate visualizable item
+      for (const field of comboWidget.fields) {
+        // Create a virtual widget for this field based on field type
+        const virtualWidget: Widget = field.type === "number"
+          ? { id: `${widget.id}:${field.id}`, type: "number", label: field.label, min: field.min, max: field.max, unit: field.unit }
+          : field.type === "rating"
+          ? { id: `${widget.id}:${field.id}`, type: "rating", label: field.label, max: field.max || 5 }
+          : { id: `${widget.id}:${field.id}`, type: "text", label: field.label };
+
+        items.push({
+          id: `${widget.id}:${field.id}`,
+          label: `${widget.label} › ${field.label}`,
+          widget: virtualWidget,
+          entryIds: [widget.id], // Combo entries use the parent widget ID
+          fieldId: field.id,    // Track which field to extract
+        });
+      }
+    } else {
+      items.push({
+        id: widget.id,
+        label: widget.label,
+        widget,
+        entryIds: [widget.id],
+      });
+    }
+  }
+
+  return items;
+}
+
 export function Visualizations() {
   const { state } = useLife();
   const navigate = useNavigate();
-  const [selectedWidget, setSelectedWidget] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const widgets = state.log?.manifest.widgets || [];
   const entries = Array.from(state.entries.values());
 
-  // Auto-select first widget
-  const widgetId = selectedWidget || widgets[0]?.id;
-  const widget = widgets.find((w) => w.id === widgetId);
+  // Build flat list of visualizable items
+  const visualizableItems = useMemo(() => buildVisualizableItems(widgets), [widgets]);
 
-  // Get the entry IDs for this widget (expands counter-groups to individual counter IDs)
-  const widgetIds = useMemo(() => {
-    if (!widget) return [];
-    return getWidgetEntryIds(widget);
-  }, [widget]);
+  // Find selected item (default to first)
+  const currentId = selectedId || visualizableItems[0]?.id;
+  const selectedItem = visualizableItems.find(item => item.id === currentId);
 
-  if (widgets.length === 0) {
+  if (visualizableItems.length === 0) {
     return (
       <Container>
         <Header>
@@ -567,31 +636,31 @@ export function Visualizations() {
     );
   }
 
-  const widgetOptions = widgets.map((w) => ({
-    value: w.id,
-    label: w.label,
+  const widgetOptions = visualizableItems.map((item) => ({
+    value: item.id,
+    label: item.label,
   }));
 
   const tabItems = [
     {
       key: "trend",
       label: "Daily Trend",
-      children: widget && (
-        <TrendChart entries={entries} widgetIds={widgetIds} widget={widget} />
+      children: selectedItem && (
+        <TrendChart entries={entries} widgetIds={selectedItem.entryIds} widget={selectedItem.widget} fieldId={selectedItem.fieldId} />
       ),
     },
     {
       key: "weekly",
       label: "Weekly",
-      children: widget && (
-        <WeeklyChart entries={entries} widgetIds={widgetIds} widget={widget} />
+      children: selectedItem && (
+        <WeeklyChart entries={entries} widgetIds={selectedItem.entryIds} widget={selectedItem.widget} fieldId={selectedItem.fieldId} />
       ),
     },
     {
       key: "calendar",
       label: "Calendar",
-      children: widget && (
-        <CalendarHeatMap entries={entries} widgetIds={widgetIds} widget={widget} />
+      children: selectedItem && (
+        <CalendarHeatMap entries={entries} widgetIds={selectedItem.entryIds} widget={selectedItem.widget} fieldId={selectedItem.fieldId} />
       ),
     },
   ];
@@ -602,8 +671,8 @@ export function Visualizations() {
         <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("..")} />
         <Title>Insights</Title>
         <WidgetSelect
-          value={widgetId}
-          onChange={(value) => setSelectedWidget(value as string)}
+          value={currentId}
+          onChange={(value) => setSelectedId(value as string)}
           options={widgetOptions}
         />
       </Header>
