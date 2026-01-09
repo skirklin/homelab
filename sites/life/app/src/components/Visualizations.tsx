@@ -15,7 +15,7 @@ import {
   Area,
 } from "recharts";
 import { useLife } from "../life-context";
-import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType } from "../types";
+import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType, ComboWidget as ComboWidgetType } from "../types";
 
 // Helper to get all entry IDs for a widget (expands counter-groups to their counter IDs)
 function getWidgetEntryIds(widget: Widget): string[] {
@@ -23,6 +23,44 @@ function getWidgetEntryIds(widget: Widget): string[] {
     return (widget as CounterGroupWidgetType).counters.map(c => c.id);
   }
   return [widget.id];
+}
+
+// Helper to extract numeric values from an entry based on widget type
+function extractNumericValues(entry: LogEntry, widget: Widget): number[] {
+  const values: number[] = [];
+  const data = entry.data;
+
+  switch (widget.type) {
+    case "counter":
+    case "counter-group":
+      // Counter entries just count as 1 occurrence
+      values.push(1);
+      break;
+
+    case "number":
+      if (typeof data.value === "number") values.push(data.value);
+      break;
+
+    case "rating":
+      if (typeof data.rating === "number") values.push(data.rating);
+      break;
+
+    case "combo":
+      // Extract numeric values from combo fields
+      for (const field of (widget as ComboWidgetType).fields) {
+        const fieldValue = data[field.id];
+        if (typeof fieldValue === "number") {
+          values.push(fieldValue);
+        }
+      }
+      break;
+
+    case "text":
+      // Text entries don't have numeric values
+      break;
+  }
+
+  return values;
 }
 
 const Container = styled.div`
@@ -179,7 +217,7 @@ interface DayData {
   values: number[];
 }
 
-function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, month: number): DayData[] {
+function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, month: number, widget: Widget): DayData[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
@@ -202,9 +240,7 @@ function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, mo
 
     const values: number[] = [];
     dayEntries.forEach((e) => {
-      if (typeof e.data.value === "number") values.push(e.data.value);
-      if (typeof e.data.rating === "number") values.push(e.data.rating);
-      if (typeof e.data.count === "number") values.push(e.data.count);
+      values.push(...extractNumericValues(e, widget));
     });
 
     data.push({ date, count: dayEntries.length, values });
@@ -213,7 +249,7 @@ function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, mo
   return data;
 }
 
-function getLast30DaysData(entries: LogEntry[], widgetIds: string[]): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: LogEntry[], widgetIds: string[], widget: Widget): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
   const today = new Date();
   const idSet = new Set(widgetIds);
@@ -231,8 +267,7 @@ function getLast30DaysData(entries: LogEntry[], widgetIds: string[]): { date: st
 
     const values: number[] = [];
     dayEntries.forEach((e) => {
-      if (typeof e.data.value === "number") values.push(e.data.value);
-      if (typeof e.data.rating === "number") values.push(e.data.rating);
+      values.push(...extractNumericValues(e, widget));
     });
 
     const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
@@ -246,7 +281,7 @@ function getLast30DaysData(entries: LogEntry[], widgetIds: string[]): { date: st
   return data;
 }
 
-function getWeeklyData(entries: LogEntry[], widgetIds: string[]): { week: string; total: number; avg: number }[] {
+function getWeeklyData(entries: LogEntry[], widgetIds: string[], widget: Widget): { week: string; total: number; avg: number }[] {
   const data: { week: string; total: number; avg: number }[] = [];
   const today = new Date();
   const idSet = new Set(widgetIds);
@@ -266,9 +301,7 @@ function getWeeklyData(entries: LogEntry[], widgetIds: string[]): { week: string
 
     const values: number[] = [];
     weekEntries.forEach((e) => {
-      if (typeof e.data.value === "number") values.push(e.data.value);
-      if (typeof e.data.rating === "number") values.push(e.data.rating);
-      if (typeof e.data.count === "number") values.push(1);
+      values.push(...extractNumericValues(e, widget));
     });
 
     const total = weekEntries.length;
@@ -287,6 +320,7 @@ function getWeeklyData(entries: LogEntry[], widgetIds: string[]): { week: string
 function CalendarHeatMap({
   entries,
   widgetIds,
+  widget,
 }: {
   entries: LogEntry[];
   widgetIds: string[];
@@ -296,7 +330,7 @@ function CalendarHeatMap({
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
-  const monthData = useMemo(() => getMonthData(entries, widgetIds, year, month), [entries, widgetIds, year, month]);
+  const monthData = useMemo(() => getMonthData(entries, widgetIds, year, month, widget), [entries, widgetIds, year, month, widget]);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -387,7 +421,7 @@ function TrendChart({
   widgetIds: string[];
   widget: Widget;
 }) {
-  const data = useMemo(() => getLast30DaysData(entries, widgetIds), [entries, widgetIds]);
+  const data = useMemo(() => getLast30DaysData(entries, widgetIds, widget), [entries, widgetIds, widget]);
 
   // Calculate stats
   const values = data.filter((d) => d.value > 0).map((d) => d.value);
@@ -477,7 +511,7 @@ function WeeklyChart({
   widgetIds: string[];
   widget: Widget;
 }) {
-  const data = useMemo(() => getWeeklyData(entries, widgetIds), [entries, widgetIds]);
+  const data = useMemo(() => getWeeklyData(entries, widgetIds, widget), [entries, widgetIds, widget]);
 
   const isCounter = widget.type === "counter" || widget.type === "counter-group";
   const dataKey = isCounter ? "total" : "avg";

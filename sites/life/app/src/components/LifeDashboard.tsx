@@ -31,9 +31,12 @@ import {
   getNotificationPermissionStatus,
 } from "../messaging";
 
-// Helper to get date string for comparison (YYYY-MM-DD)
+// Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {
-  return date.toISOString().split("T")[0];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 // Helper to get start of day
