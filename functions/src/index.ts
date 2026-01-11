@@ -857,19 +857,36 @@ export const sendLifeTrackerSamples = onSchedule(
       }
 
       // Check if any scheduled time has passed and hasn't been sent
+      // Only consider times within the last 15 minutes to avoid catch-up floods
+      const maxAgeMs = 15 * 60 * 1000; // 15 minutes
       const pendingTimes = schedule.times.filter(
-        (t) => t <= now && !schedule!.sentTimes.includes(t)
+        (t) => t <= now && t > (now - maxAgeMs) && !schedule!.sentTimes.includes(t)
+      );
+
+      // Also mark very old times as "sent" to prevent them from ever being sent
+      const oldTimes = schedule.times.filter(
+        (t) => t <= (now - maxAgeMs) && !schedule!.sentTimes.includes(t)
       );
 
       console.log(`Log ${logDoc.id}: schedule times = ${schedule.times.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
       console.log(`Log ${logDoc.id}: sent times = ${schedule.sentTimes.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
-      console.log(`Log ${logDoc.id}: pending = ${pendingTimes.length}`);
+      console.log(`Log ${logDoc.id}: pending = ${pendingTimes.length}, skipping ${oldTimes.length} old times`);
+
+      // Mark old times as sent without actually sending
+      if (oldTimes.length > 0) {
+        await logDoc.ref.update({
+          "sampleSchedule.sentTimes": [...schedule.sentTimes, ...oldTimes],
+        });
+        schedule.sentTimes = [...schedule.sentTimes, ...oldTimes];
+      }
 
       if (pendingTimes.length === 0) {
         continue;
       }
 
-      console.log(`Log ${logDoc.id} has ${pendingTimes.length} pending samples at ${pendingTimes.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
+      // Limit to 1 notification per run to prevent floods
+      const timesToSend = pendingTimes.slice(0, 1);
+      console.log(`Log ${logDoc.id} sending ${timesToSend.length} of ${pendingTimes.length} pending samples`);
 
       // Get FCM tokens for all owners (from fcmTokens array only)
       const ownerTokens: { userId: string; token: string }[] = [];
@@ -894,7 +911,7 @@ export const sendLifeTrackerSamples = onSchedule(
         console.log(`No FCM tokens for log ${logDoc.id} - users may need to enable notifications`);
         // Still mark times as sent to avoid repeated attempts
         await logDoc.ref.update({
-          "sampleSchedule.sentTimes": [...schedule.sentTimes, ...pendingTimes],
+          "sampleSchedule.sentTimes": [...schedule.sentTimes, ...timesToSend],
         });
         continue;
       }
@@ -948,7 +965,7 @@ export const sendLifeTrackerSamples = onSchedule(
 
       // Mark times as sent
       await logDoc.ref.update({
-        "sampleSchedule.sentTimes": [...schedule.sentTimes, ...pendingTimes],
+        "sampleSchedule.sentTimes": [...schedule.sentTimes, ...timesToSend],
       });
 
       // Clean up invalid tokens
