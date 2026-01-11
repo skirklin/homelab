@@ -7,6 +7,39 @@ const Container = styled.div`
   display: inline-block;
 `;
 
+const Popup = styled.div`
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+
+  /* Arrow */
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--color-bg);
+  }
+  &::before {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 7px solid transparent;
+    border-top-color: var(--color-border);
+  }
+`;
+
 const NumberRow = styled.div`
   display: flex;
   gap: 4px;
@@ -106,39 +139,40 @@ export function RatingInput({
   if (disabled) {
     // When disabled, just show the value
     return (
-      <TriggerButton $size={size} $hasValue={value !== null} $selected={value !== null} disabled>
-        {value ?? "—"}
-      </TriggerButton>
-    );
-  }
-
-  if (!expanded) {
-    return (
-      <TriggerButton
-        $size={size}
-        $hasValue={value !== null}
-        $selected={value !== null}
-        onClick={() => setExpanded(true)}
-      >
-        {value ?? "—"}
-      </TriggerButton>
+      <Container>
+        <TriggerButton $size={size} $hasValue={value !== null} $selected={value !== null} disabled>
+          {value ?? "—"}
+        </TriggerButton>
+      </Container>
     );
   }
 
   return (
     <Container ref={containerRef}>
-      <NumberRow>
-        {numbers.map((n) => (
-          <NumberButton
-            key={n}
-            $selected={value !== null && n <= value}
-            $size={size}
-            onClick={() => handleSelect(n)}
-          >
-            {n}
-          </NumberButton>
-        ))}
-      </NumberRow>
+      <TriggerButton
+        $size={size}
+        $hasValue={value !== null}
+        $selected={value !== null}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {value ?? "—"}
+      </TriggerButton>
+      {expanded && (
+        <Popup>
+          <NumberRow>
+            {numbers.map((n) => (
+              <NumberButton
+                key={n}
+                $selected={value !== null && n <= value}
+                $size={size}
+                onClick={() => handleSelect(n)}
+              >
+                {n}
+              </NumberButton>
+            ))}
+          </NumberRow>
+        </Popup>
+      )}
     </Container>
   );
 }
