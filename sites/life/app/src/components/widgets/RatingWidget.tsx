@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import styled, { css } from "styled-components";
 import { message } from "antd";
 
@@ -120,22 +120,26 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
   const [saving, setSaving] = useState(false);
   const [currentRating, setCurrentRating] = useState<number | null>(null);
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
-  const dayEntries = getEntriesForDate(entries, widget.id, timestamp);
 
-  // Initialize from existing entry
+  const dayEntries = useMemo(
+    () => getEntriesForDate(entries, widget.id, timestamp),
+    [entries, widget.id, timestamp]
+  );
+
+  // Get first entry's ID and rating for dependency tracking
+  const firstEntryId = dayEntries[0]?.id;
+  const firstEntryRating = dayEntries[0]?.data?.rating as number | undefined;
+
+  // Sync state from entries
   useEffect(() => {
-    if (dayEntries.length > 0) {
-      const latestEntry = dayEntries[0];
-      const rating = latestEntry.data.rating as number;
-      if (rating !== undefined && rating !== null) {
-        setCurrentRating(rating);
-      }
-      setCurrentEntryId(latestEntry.id);
+    if (dayEntries.length > 0 && firstEntryRating !== undefined) {
+      setCurrentRating(firstEntryRating);
+      setCurrentEntryId(firstEntryId ?? null);
     } else {
       setCurrentRating(null);
       setCurrentEntryId(null);
     }
-  }, [dayEntries.length, widget.id, timestamp?.getTime()]);
+  }, [dayEntries.length, firstEntryId, firstEntryRating]);
 
   const handleRate = async (value: number) => {
     if (!logId || !userId) return;
@@ -143,7 +147,9 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
     setSaving(true);
     try {
       // If clicking the same rating, clear it (delete the entry)
-      if (currentRating === value && currentEntryId) {
+      // Use Number() to handle potential type mismatches from Firestore
+      if (Number(currentRating) === Number(value) && currentEntryId) {
+        console.log("Deleting entry", currentEntryId, "rating was", currentRating);
         await deleteEntry(currentEntryId, logId);
         setCurrentRating(null);
         setCurrentEntryId(null);
