@@ -4,7 +4,7 @@ import { InputNumber, Input, message, Spin } from "antd";
 import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
 import type { ComboWidget as ComboWidgetType, ComboField, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, updateEntry } from "../../firestore";
+import { addEntry, updateEntry, deleteEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
 
@@ -145,12 +145,18 @@ export function ComboWidget({ widget, entries, userId, logId, timestamp, size = 
 
     // Check if at least one field has a value
     const hasValue = Object.values(data).some((v) => v !== null && v !== "" && v !== 0);
-    if (!hasValue) return;
+
+    // No values and no existing entry - nothing to do
+    if (!hasValue && !entryId) return;
 
     setSaving(true);
     setSaved(false);
     try {
-      if (entryId) {
+      if (!hasValue && entryId) {
+        // All fields cleared - delete the entry
+        await deleteEntry(entryId, logId);
+        setCurrentEntryId(null);
+      } else if (entryId) {
         // Update existing entry
         await updateEntry(entryId, { data }, logId);
       } else {
