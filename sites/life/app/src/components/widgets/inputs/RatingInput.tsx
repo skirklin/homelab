@@ -1,10 +1,16 @@
+import { useState, useRef, useEffect } from "react";
 import styled, { css } from "styled-components";
 import { type WidgetSize } from "../../../display-settings";
+
+const Container = styled.div`
+  position: relative;
+  display: inline-block;
+`;
 
 const NumberRow = styled.div`
   display: flex;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 `;
 
 const buttonSizeStyles = {
@@ -48,6 +54,10 @@ const NumberButton = styled.button<{ $selected?: boolean; $size: WidgetSize }>`
   }
 `;
 
+const TriggerButton = styled(NumberButton)<{ $hasValue: boolean }>`
+  min-width: ${props => props.$hasValue ? undefined : '40px'};
+`;
+
 interface RatingInputProps {
   value: number | null;
   onChange: (value: number | null) => void;
@@ -66,29 +76,69 @@ export function RatingInput({
   size = "normal",
   allowClear = true,
 }: RatingInputProps) {
+  const [expanded, setExpanded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const numbers = Array.from({ length: max }, (_, i) => i + 1);
 
-  const handleClick = (n: number) => {
+  // Close on click outside
+  useEffect(() => {
+    if (!expanded) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setExpanded(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [expanded]);
+
+  const handleSelect = (n: number) => {
     if (allowClear && value === n) {
       onChange(null);
     } else {
       onChange(n);
     }
+    setExpanded(false);
   };
 
+  if (disabled) {
+    // When disabled, just show the value
+    return (
+      <TriggerButton $size={size} $hasValue={value !== null} $selected={value !== null} disabled>
+        {value ?? "—"}
+      </TriggerButton>
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <TriggerButton
+        $size={size}
+        $hasValue={value !== null}
+        $selected={value !== null}
+        onClick={() => setExpanded(true)}
+      >
+        {value ?? "—"}
+      </TriggerButton>
+    );
+  }
+
   return (
-    <NumberRow>
-      {numbers.map((n) => (
-        <NumberButton
-          key={n}
-          $selected={value !== null && n <= value}
-          $size={size}
-          disabled={disabled}
-          onClick={() => handleClick(n)}
-        >
-          {n}
-        </NumberButton>
-      ))}
-    </NumberRow>
+    <Container ref={containerRef}>
+      <NumberRow>
+        {numbers.map((n) => (
+          <NumberButton
+            key={n}
+            $selected={value !== null && n <= value}
+            $size={size}
+            onClick={() => handleSelect(n)}
+          >
+            {n}
+          </NumberButton>
+        ))}
+      </NumberRow>
+    </Container>
   );
 }
