@@ -4,7 +4,7 @@ import { message } from "antd";
 
 import type { RatingWidget as RatingWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, updateEntry } from "../../firestore";
+import { addEntry, updateEntry, deleteEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {
@@ -140,13 +140,21 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
   const handleRate = async (value: number) => {
     if (!logId || !userId) return;
 
-    setCurrentRating(value);
     setSaving(true);
     try {
-      if (currentEntryId) {
+      // If clicking the same rating, clear it (delete the entry)
+      if (currentRating === value && currentEntryId) {
+        await deleteEntry(currentEntryId, logId);
+        setCurrentRating(null);
+        setCurrentEntryId(null);
+      } else if (currentEntryId) {
+        // Update existing entry
         await updateEntry(currentEntryId, { data: { rating: value } }, logId);
+        setCurrentRating(value);
       } else {
+        // Create new entry
         await addEntry(widget.id, { rating: value }, userId, { logId, timestamp });
+        setCurrentRating(value);
       }
     } catch (error) {
       console.error("Failed to save:", error);
