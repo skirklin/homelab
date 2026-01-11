@@ -6,6 +6,7 @@ import type { ComboWidget as ComboWidgetType, ComboField, LogEntry } from "../..
 import { getEntriesForDate } from "../../types";
 import { addEntry, updateEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
+import { RatingInput } from "./inputs";
 
 const sizeStyles = {
   compact: css`padding: var(--space-sm);`,
@@ -90,47 +91,6 @@ const FieldInput = styled.div`
 const Unit = styled.span`
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-`;
-
-const NumberRow = styled.div`
-  display: flex;
-  gap: 3px;
-  flex-wrap: wrap;
-`;
-
-const buttonSizeStyles = {
-  compact: css`
-    min-width: 24px;
-    height: 24px;
-    font-size: 11px;
-  `,
-  normal: css`
-    min-width: 28px;
-    height: 28px;
-    font-size: 14px;
-  `,
-  comfortable: css`
-    min-width: 34px;
-    height: 34px;
-    font-size: 16px;
-  `,
-};
-
-const NumberButton = styled.button<{ $selected?: boolean; $size: WidgetSize }>`
-  padding: 0 4px;
-  border: 1px solid ${props => props.$selected ? 'var(--color-primary)' : 'var(--color-border)'};
-  border-radius: 4px;
-  background: ${props => props.$selected ? 'var(--color-primary)' : 'var(--color-bg)'};
-  color: ${props => props.$selected ? 'white' : 'var(--color-text)'};
-  cursor: pointer;
-  font-weight: 500;
-  flex-shrink: 0;
-  ${(props) => buttonSizeStyles[props.$size]}
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
 `;
 
 const ExistingEntries = styled.div<{ $size: WidgetSize }>`
@@ -253,23 +213,15 @@ export function ComboWidget({ widget, entries, userId, logId, timestamp, size = 
         );
 
       case "rating": {
-        const max = field.max || 5;
-        const numbers = Array.from({ length: max }, (_, i) => i + 1);
-        const currentValue = value as number | null;
         return (
-          <NumberRow>
-            {numbers.map((n) => (
-              <NumberButton
-                key={n}
-                $selected={currentValue !== null && n <= currentValue}
-                $size={size}
-                disabled={!logId}
-                onClick={() => updateValue(field.id, n)}
-              >
-                {n}
-              </NumberButton>
-            ))}
-          </NumberRow>
+          <RatingInput
+            value={value as number | null}
+            onChange={(v) => updateValue(field.id, v)}
+            max={field.max || 5}
+            disabled={!logId}
+            size={size}
+            allowClear={true}
+          />
         );
       }
 

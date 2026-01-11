@@ -6,6 +6,7 @@ import type { RatingWidget as RatingWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
 import { addEntry, updateEntry, deleteEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
+import { RatingInput } from "./inputs";
 
 const sizeStyles = {
   compact: css`
@@ -51,54 +52,6 @@ const Label = styled.span<{ $size: WidgetSize }>`
   ${(props) => labelSizeStyles[props.$size]}
 `;
 
-const NumberRow = styled.div`
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  justify-content: center;
-`;
-
-const buttonSizeStyles = {
-  compact: css`
-    width: 28px;
-    height: 28px;
-    font-size: 12px;
-    border-radius: 6px;
-  `,
-  normal: css`
-    width: 34px;
-    height: 34px;
-    font-size: 14px;
-    border-radius: 8px;
-  `,
-  comfortable: css`
-    width: 42px;
-    height: 42px;
-    font-size: 16px;
-    border-radius: 8px;
-  `,
-};
-
-const NumberButton = styled.button<{ $selected?: boolean; $size: WidgetSize }>`
-  border: 2px solid ${props => props.$selected ? 'var(--color-primary)' : 'var(--color-border)'};
-  background: ${props => props.$selected ? 'var(--color-primary)' : 'var(--color-bg)'};
-  color: ${props => props.$selected ? 'white' : 'var(--color-text)'};
-  cursor: pointer;
-  font-weight: 600;
-  ${(props) => buttonSizeStyles[props.$size]}
-
-  &:hover {
-    background: var(--color-primary);
-    color: white;
-    border-color: var(--color-primary);
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
-`;
-
 const ExistingEntries = styled.div<{ $size: WidgetSize }>`
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
@@ -141,26 +94,22 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
     }
   }, [dayEntries.length, firstEntryId, firstEntryRating]);
 
-  const handleRate = async (value: number) => {
+  const handleChange = async (value: number | null) => {
     if (!logId || !userId) return;
-
-    console.log("handleRate called:", { value, currentRating, currentEntryId, dayEntriesLength: dayEntries.length });
 
     setSaving(true);
     try {
-      // If clicking the same rating, clear it (delete the entry)
-      // Use Number() to handle potential type mismatches from Firestore
-      if (Number(currentRating) === Number(value) && currentEntryId) {
-        console.log("Deleting entry", currentEntryId, "rating was", currentRating);
+      if (value === null && currentEntryId) {
+        // Clear/delete
         await deleteEntry(currentEntryId, logId);
         setCurrentRating(null);
         setCurrentEntryId(null);
-      } else if (currentEntryId) {
-        // Update existing entry
+      } else if (value !== null && currentEntryId) {
+        // Update existing
         await updateEntry(currentEntryId, { data: { rating: value } }, logId);
         setCurrentRating(value);
-      } else {
-        // Create new entry
+      } else if (value !== null) {
+        // Create new
         await addEntry(widget.id, { rating: value }, userId, { logId, timestamp });
         setCurrentRating(value);
       }
@@ -171,8 +120,6 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
       setSaving(false);
     }
   };
-
-  const numbers = Array.from({ length: widget.max }, (_, i) => i + 1);
 
   // Format additional entries (after the first)
   const existingRatings = dayEntries.slice(1).map(e => {
@@ -185,19 +132,14 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
       <Header $size={size}>
         <Label $size={size}>{widget.label}</Label>
       </Header>
-      <NumberRow>
-        {numbers.map((n) => (
-          <NumberButton
-            key={n}
-            $selected={currentRating !== null && n <= currentRating}
-            $size={size}
-            disabled={saving || !logId}
-            onClick={() => handleRate(n)}
-          >
-            {n}
-          </NumberButton>
-        ))}
-      </NumberRow>
+      <RatingInput
+        value={currentRating}
+        onChange={handleChange}
+        max={widget.max}
+        disabled={saving || !logId}
+        size={size}
+        allowClear={true}
+      />
       {existingRatings.length > 0 && (
         <ExistingEntries $size={size}>
           +{existingRatings.length} more: {existingRatings.join(", ")}
