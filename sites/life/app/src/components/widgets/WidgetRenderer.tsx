@@ -1,4 +1,4 @@
-import type { Widget, LogEntry } from "../../types";
+import type { Widget, LogEntry, EntryMigration } from "../../types";
 import { useDisplaySettings, type WidgetSize } from "../../display-settings";
 import { CounterWidget } from "./CounterWidget";
 import { CounterGroupWidget } from "./CounterGroupWidget";
@@ -13,16 +13,25 @@ interface WidgetRendererProps {
   userId: string;
   logId: string | undefined;
   timestamp?: Date;
+  migrations?: EntryMigration[];
 }
 
 export type { WidgetSize };
 
-export function WidgetRenderer({ widget, entries, userId, logId, timestamp }: WidgetRendererProps) {
+export function WidgetRenderer({ widget, entries, userId, logId, timestamp, migrations }: WidgetRendererProps) {
   const { widgetSize } = useDisplaySettings();
 
+  // Get IDs of widgets that migrate into this combo widget
+  const migratedFromIds = widget.type === "combo"
+    ? (migrations ?? []).filter(m => m.to === widget.id).map(m => m.from)
+    : [];
+
   // For counter-group, we need entries for all counter IDs in the group
+  // For combo, also include entries from migrated widget IDs
   const widgetEntries = widget.type === "counter-group"
     ? entries.filter(e => widget.counters.some(c => c.id === e.subjectId))
+    : widget.type === "combo"
+    ? entries.filter(e => e.subjectId === widget.id || migratedFromIds.includes(e.subjectId))
     : entries.filter(e => e.subjectId === widget.id);
 
   const commonProps = {
@@ -45,7 +54,7 @@ export function WidgetRenderer({ widget, entries, userId, logId, timestamp }: Wi
     case "text":
       return <TextWidget widget={widget} {...commonProps} />;
     case "combo":
-      return <ComboWidget widget={widget} {...commonProps} />;
+      return <ComboWidget widget={widget} {...commonProps} migrations={migrations} />;
     default:
       return null;
   }

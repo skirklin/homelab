@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import styled, { css } from "styled-components";
 import { InputNumber, Input, message, Spin } from "antd";
 import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
-import type { ComboWidget as ComboWidgetType, ComboField, LogEntry } from "../../types";
-import { getEntriesForDate } from "../../types";
+import type { ComboWidget as ComboWidgetType, ComboField, LogEntry, EntryMigration } from "../../types";
+import { getEntriesForCombo } from "../../types";
 import { addEntry, updateEntry, deleteEntry } from "../../firestore";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
@@ -109,17 +109,18 @@ interface ComboWidgetProps {
   logId: string | undefined;
   timestamp?: Date;
   size?: WidgetSize;
+  migrations?: EntryMigration[];
 }
 
 type FieldValue = number | string | null;
 
-export function ComboWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: ComboWidgetProps) {
+export function ComboWidget({ widget, entries, userId, logId, timestamp, size = "normal", migrations }: ComboWidgetProps) {
   const [values, setValues] = useState<Record<string, FieldValue>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dayEntries = getEntriesForDate(entries, widget.id, timestamp);
+  const dayEntries = getEntriesForCombo(entries, widget.id, migrations, timestamp);
 
   // Initialize values from the latest entry for this date
   useEffect(() => {

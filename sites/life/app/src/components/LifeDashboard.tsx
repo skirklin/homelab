@@ -490,6 +490,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
                   userId={user?.uid ?? ""}
                   logId={state.log?.id}
                   timestamp={getSelectedTimestamp()}
+                  migrations={manifest.migrations}
                 />
               ))}
             </WidgetGrid>

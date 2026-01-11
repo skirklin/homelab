@@ -91,12 +91,29 @@ export interface RandomSamplesConfig {
 }
 
 // ============================================
+// Entry Migrations
+// ============================================
+
+export interface EntryMigration {
+  /** Old standalone widget id */
+  from: string;
+  /** New combo widget id */
+  to: string;
+  /** Field id within the combo widget */
+  field: string;
+  /** Key in old entry's data (defaults to "rating" for ratings, "value" for numbers/text) */
+  dataKey?: string;
+}
+
+// ============================================
 // Manifest
 // ============================================
 
 export interface LifeManifest {
   widgets: Widget[];
   randomSamples: RandomSamplesConfig;
+  /** Migration rules for entries moved from standalone widgets to combo widgets */
+  migrations?: EntryMigration[];
 }
 
 export const DEFAULT_MANIFEST: LifeManifest = {
@@ -236,4 +253,68 @@ export function getCountForDate(
   targetDate?: Date
 ): number {
   return getEntriesForDate(entries, widgetId, targetDate).length;
+}
+
+/**
+ * Get entries for a combo widget, including migrated entries from old standalone widgets.
+ * Migrated entries are transformed to match the combo widget's data structure.
+ */
+export function getEntriesForCombo(
+  entries: LogEntry[],
+  comboWidgetId: string,
+  migrations: EntryMigration[] | undefined,
+  targetDate?: Date
+): LogEntry[] {
+  const date = targetDate ?? new Date();
+  const startOfDay = new Date(date);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(date);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  // Get native combo entries
+  const comboEntries = entries.filter(e =>
+    e.subjectId === comboWidgetId &&
+    e.timestamp >= startOfDay &&
+    e.timestamp <= endOfDay
+  );
+
+  // Find migrations that target this combo widget
+  const relevantMigrations = (migrations ?? []).filter(m => m.to === comboWidgetId);
+
+  if (relevantMigrations.length === 0) {
+    return comboEntries;
+  }
+
+  // Get and transform migrated entries
+  const migratedEntries: LogEntry[] = [];
+  for (const migration of relevantMigrations) {
+    const oldEntries = entries.filter(e =>
+      e.subjectId === migration.from &&
+      e.timestamp >= startOfDay &&
+      e.timestamp <= endOfDay
+    );
+
+    for (const oldEntry of oldEntries) {
+      // Get the value from the old entry
+      const dataKey = migration.dataKey ?? "rating"; // Default for rating widgets
+      const value = oldEntry.data[dataKey];
+
+      if (value !== undefined) {
+        // Transform to combo format
+        migratedEntries.push({
+          ...oldEntry,
+          subjectId: comboWidgetId,
+          data: {
+            ...oldEntry.data,
+            [migration.field]: value,
+          },
+        });
+      }
+    }
+  }
+
+  // Combine and sort by timestamp (most recent first)
+  return [...comboEntries, ...migratedEntries].sort(
+    (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+  );
 }
