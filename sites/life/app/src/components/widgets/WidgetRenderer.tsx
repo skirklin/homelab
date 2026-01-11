@@ -5,6 +5,7 @@ import { CounterGroupWidget } from "./CounterGroupWidget";
 import { NumberWidget } from "./NumberWidget";
 import { RatingWidget } from "./RatingWidget";
 import { TextWidget } from "./TextWidget";
+import { CheckboxWidget } from "./CheckboxWidget";
 import { ComboWidget } from "./ComboWidget";
 
 interface WidgetRendererProps {
@@ -53,6 +54,8 @@ export function WidgetRenderer({ widget, entries, userId, logId, timestamp, migr
       return <RatingWidget widget={widget} {...commonProps} />;
     case "text":
       return <TextWidget widget={widget} {...commonProps} />;
+    case "checkbox":
+      return <CheckboxWidget widget={widget} {...commonProps} />;
     case "combo":
       return <ComboWidget widget={widget} {...commonProps} migrations={migrations} />;
     default:

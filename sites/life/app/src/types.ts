@@ -7,7 +7,7 @@ export { eventFromStore, eventToStore } from "@kirkl/shared";
 // Widget Types
 // ============================================
 
-export type WidgetType = "counter" | "counter-group" | "number" | "rating" | "text" | "combo";
+export type WidgetType = "counter" | "counter-group" | "number" | "rating" | "text" | "combo" | "checkbox";
 
 export interface BaseWidget {
   id: string;
@@ -46,6 +46,10 @@ export interface TextWidget extends BaseWidget {
   multiline?: boolean;
 }
 
+export interface CheckboxWidget extends BaseWidget {
+  type: "checkbox";
+}
+
 export interface ComboField {
   id: string;
   label: string;
@@ -67,6 +71,7 @@ export type Widget =
   | NumberWidget
   | RatingWidget
   | TextWidget
+  | CheckboxWidget
   | ComboWidget;
 
 // ============================================
