@@ -144,6 +144,8 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
   const handleRate = async (value: number) => {
     if (!logId || !userId) return;
 
+    console.log("handleRate called:", { value, currentRating, currentEntryId, dayEntriesLength: dayEntries.length });
+
     setSaving(true);
     try {
       // If clicking the same rating, clear it (delete the entry)
