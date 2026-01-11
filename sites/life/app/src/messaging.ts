@@ -83,7 +83,13 @@ export function onForegroundMessage(callback: (payload: unknown) => void): (() =
   });
 }
 
-export function listenForServiceWorkerMessages(callback: (data: { type: string }) => void): () => void {
+export interface ServiceWorkerMessage {
+  type: string;
+  questionId?: string;
+  value?: number;
+}
+
+export function listenForServiceWorkerMessages(callback: (data: ServiceWorkerMessage) => void): () => void {
   const handler = (event: MessageEvent) => {
     if (event.data && event.data.type) {
       callback(event.data);

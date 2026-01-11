@@ -15,7 +15,7 @@ import {
   Area,
 } from "recharts";
 import { useLife } from "../life-context";
-import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType, ComboWidget as ComboWidgetType } from "../types";
+import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType, ComboWidget as ComboWidgetType, SampleQuestion } from "../types";
 
 // Helper to extract numeric values from an entry based on widget type
 // fieldId is used when extracting a specific field from combo entries
@@ -554,8 +554,8 @@ interface VisualizableItem {
   fieldId?: string;     // For combo fields, the specific field to extract
 }
 
-// Build a flat list of all visualizable items (expands counter-groups and combo widgets)
-function buildVisualizableItems(widgets: Widget[]): VisualizableItem[] {
+// Build a flat list of all visualizable items (expands counter-groups, combo widgets, and sample questions)
+function buildVisualizableItems(widgets: Widget[], sampleQuestions: SampleQuestion[]): VisualizableItem[] {
   const items: VisualizableItem[] = [];
 
   for (const widget of widgets) {
@@ -606,6 +606,24 @@ function buildVisualizableItems(widgets: Widget[]): VisualizableItem[] {
     }
   }
 
+  // Add sample questions as visualizable items
+  for (const question of sampleQuestions) {
+    // Create a virtual widget for this sample question based on question type
+    const virtualWidget: Widget = question.type === "number"
+      ? { id: `sample:${question.id}`, type: "number", label: question.label, min: question.min }
+      : question.type === "rating"
+      ? { id: `sample:${question.id}`, type: "rating", label: question.label, max: question.max || 5 }
+      : { id: `sample:${question.id}`, type: "text", label: question.label };
+
+    items.push({
+      id: `sample:${question.id}`,
+      label: `Sample › ${question.label}`,
+      widget: virtualWidget,
+      entryIds: ["__sample__"], // Sample entries use "__sample__" as subjectId
+      fieldId: question.id,    // Track which field to extract from sample data
+    });
+  }
+
   return items;
 }
 
@@ -615,10 +633,11 @@ export function Visualizations() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const widgets = state.log?.manifest.widgets || [];
+  const sampleQuestions = state.log?.manifest.randomSamples?.questions || [];
   const entries = Array.from(state.entries.values());
 
   // Build flat list of visualizable items
-  const visualizableItems = useMemo(() => buildVisualizableItems(widgets), [widgets]);
+  const visualizableItems = useMemo(() => buildVisualizableItems(widgets, sampleQuestions), [widgets, sampleQuestions]);
 
   // Find selected item (default to first)
   const currentId = selectedId || visualizableItems[0]?.id;

@@ -702,6 +702,7 @@ interface RandomSamplesConfig {
   enabled: boolean;
   timesPerDay: number;
   activeHours: [number, number]; // [startHour, endHour]
+  timezone?: string; // IANA timezone (e.g., "America/Los_Angeles")
   questions: SampleQuestion[];
 }
 
@@ -717,11 +718,47 @@ interface LifeLogData {
   owners: string[];
 }
 
-// Generate random sample times for a day
+// Get the UTC offset for a timezone on a given date (handles DST)
+function getTimezoneOffset(date: Date, timezone: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      timeZoneName: "shortOffset",
+    });
+    const parts = formatter.formatToParts(date);
+    const tzPart = parts.find((p) => p.type === "timeZoneName");
+    // Returns something like "GMT-8" or "GMT+5:30"
+    if (tzPart?.value) {
+      const match = tzPart.value.match(/GMT([+-])(\d+)(?::(\d+))?/);
+      if (match) {
+        const sign = match[1];
+        const hours = match[2].padStart(2, "0");
+        const minutes = match[3] || "00";
+        return `${sign}${hours}:${minutes}`;
+      }
+    }
+  } catch (e) {
+    console.error(`Invalid timezone "${timezone}", falling back to UTC:`, e);
+  }
+  return "+00:00"; // Fallback to UTC
+}
+
+// Get date string in a specific timezone (YYYY-MM-DD)
+function getDateStringInTimezone(date: Date, timezone: string): string {
+  try {
+    return date.toLocaleDateString("en-CA", { timeZone: timezone });
+  } catch (e) {
+    console.error(`Invalid timezone "${timezone}", falling back to UTC:`, e);
+    return date.toISOString().split("T")[0];
+  }
+}
+
+// Generate random sample times for a day in a specific timezone
 function generateSampleTimes(
   timesPerDay: number,
   activeHours: [number, number],
-  date: Date
+  dateString: string, // YYYY-MM-DD in the target timezone
+  timezone: string
 ): number[] {
   const [startHour, endHour] = activeHours;
   const times: number[] = [];
@@ -732,15 +769,23 @@ function generateSampleTimes(
   // Generate evenly distributed times with some randomness
   const interval = totalMinutes / timesPerDay;
 
+  // Get timezone offset for this date (handles DST)
+  const sampleDate = new Date(`${dateString}T12:00:00Z`);
+  const offset = getTimezoneOffset(sampleDate, timezone);
+
   for (let i = 0; i < timesPerDay; i++) {
     // Add randomness within the interval (±25%)
     const baseMinute = startHour * 60 + interval * i + interval / 2;
     const jitter = (Math.random() - 0.5) * interval * 0.5;
     const minute = Math.max(startHour * 60, Math.min(endHour * 60, baseMinute + jitter));
 
-    const sampleTime = new Date(date);
-    sampleTime.setHours(Math.floor(minute / 60), Math.round(minute % 60), 0, 0);
-    times.push(sampleTime.getTime());
+    const hour = Math.floor(minute / 60);
+    const min = Math.round(minute % 60);
+
+    // Create timestamp for this time in the target timezone
+    const timeString = `${dateString}T${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}:00${offset}`;
+    const localDate = new Date(timeString);
+    times.push(localDate.getTime());
   }
 
   return times.sort((a, b) => a - b);
@@ -750,14 +795,14 @@ function generateSampleTimes(
 export const sendLifeTrackerSamples = onSchedule(
   {
     schedule: "*/5 * * * *",
-    timeZone: "America/Los_Angeles",
+    timeZone: "UTC", // Function runs on UTC schedule, but each log uses its own timezone
   },
   async () => {
     console.log("Starting life tracker sample check");
 
     const messaging = getMessaging();
     const now = Date.now();
-    const today = new Date().toISOString().split("T")[0];
+    const nowDate = new Date();
 
     // Get all life logs
     const logsSnapshot = await db.collection("lifeLogs").get();
@@ -779,10 +824,15 @@ export const sendLifeTrackerSamples = onSchedule(
         continue;
       }
 
-      console.log(`Log ${logDoc.id}: sampling enabled, ${config.timesPerDay} times/day, hours ${config.activeHours?.join("-")}`);
+      // Use the configured timezone, default to UTC
+      const timezone = config.timezone || "UTC";
+      // Get today's date in the log's timezone
+      const today = getDateStringInTimezone(nowDate, timezone);
+
+      console.log(`Log ${logDoc.id}: sampling enabled, ${config.timesPerDay} times/day, hours ${config.activeHours?.join("-")}, tz=${timezone}`);
       console.log(`Log ${logDoc.id}: owners = ${logData.owners?.join(", ")}`);
       console.log(`Log ${logDoc.id}: current schedule = ${JSON.stringify(logData.sampleSchedule)}`);
-      console.log(`Log ${logDoc.id}: now = ${now}, today = ${today}`);
+      console.log(`Log ${logDoc.id}: now = ${now}, today (${timezone}) = ${today}`);
 
       // Initialize or update schedule for today
       let schedule = logData.sampleSchedule;
@@ -792,7 +842,8 @@ export const sendLifeTrackerSamples = onSchedule(
         const times = generateSampleTimes(
           config.timesPerDay,
           config.activeHours,
-          new Date()
+          today,
+          timezone
         );
 
         schedule = {
@@ -802,7 +853,7 @@ export const sendLifeTrackerSamples = onSchedule(
         };
 
         await logDoc.ref.update({ sampleSchedule: schedule });
-        console.log(`Generated sample schedule for log ${logDoc.id}: ${times.length} times`);
+        console.log(`Generated sample schedule for log ${logDoc.id}: ${times.length} times for ${today}`);
       }
 
       // Check if any scheduled time has passed and hasn't been sent
@@ -820,22 +871,20 @@ export const sendLifeTrackerSamples = onSchedule(
 
       console.log(`Log ${logDoc.id} has ${pendingTimes.length} pending samples at ${pendingTimes.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
 
-      // Get FCM tokens for all owners
+      // Get FCM tokens for all owners (from fcmTokens array only)
       const ownerTokens: { userId: string; token: string }[] = [];
+      const seenTokens = new Set<string>();
 
       for (const ownerId of logData.owners || []) {
         const userDoc = await db.doc(`users/${ownerId}`).get();
         const userData = userDoc.data();
-        console.log(`Log ${logDoc.id}: checking user ${ownerId}, exists=${userDoc.exists}, hasToken=${!!userData?.fcmToken}, hasTokens=${!!userData?.fcmTokens}`);
+        const userTokens = (userData?.fcmTokens as string[]) || [];
+        console.log(`Log ${logDoc.id}: user ${ownerId} has ${userTokens.length} tokens`);
 
-        // Support both single token (fcmToken) and array (fcmTokens)
-        if (userData?.fcmToken) {
-          console.log(`Log ${logDoc.id}: found fcmToken for ${ownerId}: ${userData.fcmToken.substring(0, 20)}...`);
-          ownerTokens.push({ userId: ownerId, token: userData.fcmToken });
-        }
-        if (userData?.fcmTokens) {
-          console.log(`Log ${logDoc.id}: found ${(userData.fcmTokens as string[]).length} fcmTokens for ${ownerId}`);
-          for (const token of userData.fcmTokens as string[]) {
+        // Add unique tokens only
+        for (const token of userTokens) {
+          if (!seenTokens.has(token)) {
+            seenTokens.add(token);
             ownerTokens.push({ userId: ownerId, token });
           }
         }
@@ -857,6 +906,11 @@ export const sendLifeTrackerSamples = onSchedule(
         ? config.questions[0].label
         : `Answer ${config.questions.length} quick questions`;
 
+      // Find first rating question for quick actions (if only one question and it's a rating)
+      const quickRatingQuestion = config.questions.length === 1 && config.questions[0].type === "rating"
+        ? config.questions[0]
+        : null;
+
       for (const { userId, token } of ownerTokens) {
         try {
           await messaging.send({
@@ -871,6 +925,11 @@ export const sendLifeTrackerSamples = onSchedule(
               title,
               body,
               logId: logDoc.id,
+              // Include quick rating config if applicable (data values must be strings)
+              ...(quickRatingQuestion && {
+                quickRatingId: quickRatingQuestion.id,
+                quickRatingMax: String(quickRatingQuestion.max || 5),
+              }),
             },
           });
           console.log(`Sent sample notification to user ${userId}`);
@@ -892,14 +951,18 @@ export const sendLifeTrackerSamples = onSchedule(
         "sampleSchedule.sentTimes": [...schedule.sentTimes, ...pendingTimes],
       });
 
-      // Clean up invalid tokens (for users with single token)
+      // Clean up invalid tokens
       for (const token of invalidTokens) {
         const ownerInfo = ownerTokens.find((o) => o.token === token);
         if (ownerInfo) {
-          await db.doc(`users/${ownerInfo.userId}`).update({
-            fcmToken: FieldValue.delete(),
-          });
-          console.log(`Removed invalid token for user ${ownerInfo.userId}`);
+          try {
+            await db.doc(`users/${ownerInfo.userId}`).update({
+              fcmTokens: FieldValue.arrayRemove(token),
+            });
+            console.log(`Removed invalid token for user ${ownerInfo.userId}`);
+          } catch (cleanupError) {
+            console.error(`Failed to clean up token for ${ownerInfo.userId}:`, cleanupError);
+          }
         }
       }
     }

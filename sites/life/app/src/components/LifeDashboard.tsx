@@ -30,6 +30,7 @@ import {
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
 } from "../messaging";
+import { addSampleResponse } from "../firestore";
 
 // Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {
@@ -243,6 +244,21 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     setNotificationsEnabled(status === "granted");
   }, []);
 
+  // Handle quick response submission (from notification action buttons)
+  const handleQuickResponse = useCallback(async (questionId: string, value: number) => {
+    if (!user?.uid || !state.log?.id) {
+      console.error("Cannot submit quick response: missing user or log");
+      return;
+    }
+    try {
+      await addSampleResponse({ [questionId]: value }, user.uid, state.log.id);
+      message.success("Response saved");
+    } catch (error) {
+      console.error("Failed to save quick response:", error);
+      message.error("Failed to save response");
+    }
+  }, [user?.uid, state.log?.id]);
+
   // Initialize messaging and listen for foreground messages
   useEffect(() => {
     initializeMessaging();
@@ -254,13 +270,25 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     const unsubscribeSW = listenForServiceWorkerMessages((data) => {
       if (data.type === "SAMPLE_REQUESTED") {
         setShowSampleModal(true);
+      } else if (data.type === "QUICK_RESPONSE" && data.questionId && data.value !== undefined) {
+        // Auto-submit quick response from notification action button
+        handleQuickResponse(data.questionId, data.value);
       }
     });
 
-    // Check URL for sample parameter
+    // Check URL for sample or quick response parameters
     const params = new URLSearchParams(window.location.search);
     if (params.get("sample") === "true") {
       setShowSampleModal(true);
+      // Clean up URL
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (params.get("quickResponse")) {
+      // Handle quick response from URL (format: questionId:value)
+      const quickResponse = params.get("quickResponse");
+      const [questionId, valueStr] = quickResponse?.split(":") || [];
+      if (questionId && valueStr) {
+        handleQuickResponse(questionId, parseInt(valueStr, 10));
+      }
       // Clean up URL
       window.history.replaceState({}, "", window.location.pathname);
     }
@@ -269,7 +297,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       unsubscribeForeground?.();
       unsubscribeSW?.();
     };
-  }, []);
+  }, [handleQuickResponse]);
 
   const handleNotificationToggle = async (enabled: boolean) => {
     if (!user?.uid) return;

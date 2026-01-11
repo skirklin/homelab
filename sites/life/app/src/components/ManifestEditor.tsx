@@ -161,6 +161,7 @@ export function ManifestEditor({
 { "id": "notes", "type": "text", "label": "Notes" }
 { "id": "sleep", "type": "combo", "label": "Sleep", "fields": [...] }`}
           </pre>
+          <strong>Random sampling timezone:</strong> Set <code>"timezone": "America/Los_Angeles"</code> in randomSamples (uses IANA timezone names). Defaults to UTC if not set.
         </HelpText>
       </EditorContainer>
     </Modal>

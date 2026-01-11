@@ -86,6 +86,7 @@ export interface RandomSamplesConfig {
   enabled: boolean;
   timesPerDay: number;
   activeHours: [number, number]; // [startHour, endHour] in 24h format
+  timezone?: string; // IANA timezone (e.g., "America/Los_Angeles", "Europe/London")
   questions: SampleQuestion[];
 }
 
