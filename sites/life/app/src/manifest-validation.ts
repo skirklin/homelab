@@ -11,7 +11,7 @@ export interface ValidationResult {
   manifest?: LifeManifest;
 }
 
-const WIDGET_TYPES = ["counter", "counter-group", "number", "rating", "text", "combo"] as const;
+const WIDGET_TYPES = ["counter", "counter-group", "number", "rating", "text", "checkbox", "combo"] as const;
 const FIELD_TYPES = ["number", "rating", "text"] as const;
 
 function isNonEmptyString(value: unknown): value is string {
