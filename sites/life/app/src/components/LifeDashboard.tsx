@@ -30,7 +30,7 @@ import {
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
 } from "../messaging";
-import { addSampleResponse } from "../firestore";
+import { addSampleResponse, clearSampleSchedule } from "../firestore";
 
 // Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {
@@ -517,6 +517,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       <SettingsModal
         open={showSettings}
         onClose={() => setShowSettings(false)}
+        log={state.log}
+        onResetSchedule={async () => {
+          if (state.log?.id) {
+            await clearSampleSchedule(state.log.id);
+          }
+        }}
       />
     </>
   );

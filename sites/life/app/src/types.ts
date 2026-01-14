@@ -168,11 +168,18 @@ export function getNotes(entry: Event): string | undefined {
 // Life Log Container
 // ============================================
 
+export interface SampleSchedule {
+  date: string; // YYYY-MM-DD
+  times: number[]; // Unix timestamps
+  sentTimes: number[]; // Times that have been sent
+}
+
 export interface LifeLog {
   id: string;
   name: string;
   owners: string[];
   manifest: LifeManifest;
+  sampleSchedule?: SampleSchedule;
   created: Date;
   updated: Date;
 }
@@ -181,6 +188,7 @@ export interface LifeLogStore {
   name: string;
   owners: string[];
   manifest?: LifeManifest;
+  sampleSchedule?: SampleSchedule;
   created: Timestamp;
   updated: Timestamp;
 }
@@ -195,6 +203,7 @@ export function logFromStore(id: string, data: LifeLogStore): LifeLog {
     name: data.name,
     owners: data.owners,
     manifest: data.manifest ?? DEFAULT_MANIFEST,
+    sampleSchedule: data.sampleSchedule,
     created: data.created.toDate(),
     updated: data.updated.toDate(),
   };

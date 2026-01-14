@@ -5,6 +5,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   addDoc,
   Timestamp,
   arrayUnion,
@@ -82,6 +83,13 @@ export async function updateManifest(manifest: LifeManifest, logId?: string): Pr
   await updateDoc(logRef, {
     manifest,
     updated: Timestamp.now(),
+  });
+}
+
+export async function clearSampleSchedule(logId?: string): Promise<void> {
+  const logRef = getLogRef(logId);
+  await updateDoc(logRef, {
+    sampleSchedule: deleteField(),
   });
 }
 
