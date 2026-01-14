@@ -872,10 +872,10 @@ export const sendLifeTrackerSamples = onSchedule(
       console.log(`Log ${logDoc.id}: sent times = ${schedule.sentTimes.map(t => new Date(t).toLocaleTimeString()).join(", ")}`);
       console.log(`Log ${logDoc.id}: pending = ${pendingTimes.length}, skipping ${oldTimes.length} old times`);
 
-      // Mark old times as sent without actually sending
+      // Mark old times as sent without actually sending (use arrayUnion for atomicity)
       if (oldTimes.length > 0) {
         await logDoc.ref.update({
-          "sampleSchedule.sentTimes": [...schedule.sentTimes, ...oldTimes],
+          "sampleSchedule.sentTimes": FieldValue.arrayUnion(...oldTimes),
         });
         schedule.sentTimes = [...schedule.sentTimes, ...oldTimes];
       }
@@ -911,10 +911,47 @@ export const sendLifeTrackerSamples = onSchedule(
         console.log(`No FCM tokens for log ${logDoc.id} - users may need to enable notifications`);
         // Still mark times as sent to avoid repeated attempts
         await logDoc.ref.update({
-          "sampleSchedule.sentTimes": [...schedule.sentTimes, ...timesToSend],
+          "sampleSchedule.sentTimes": FieldValue.arrayUnion(...timesToSend),
         });
         continue;
       }
+
+      // Use a transaction to atomically claim this time slot before sending
+      // This prevents race conditions where multiple instances try to send the same notification
+      const timeToSend = timesToSend[0];
+      let claimed = false;
+      try {
+        await db.runTransaction(async (transaction) => {
+          const freshDoc = await transaction.get(logDoc.ref);
+          const freshData = freshDoc.data() as LifeLogData;
+          const freshSentTimes = freshData?.sampleSchedule?.sentTimes || [];
+
+          if (freshSentTimes.includes(timeToSend)) {
+            // Already claimed by another instance
+            throw new Error("ALREADY_SENT");
+          }
+
+          // Claim this time slot
+          transaction.update(logDoc.ref, {
+            "sampleSchedule.sentTimes": FieldValue.arrayUnion(timeToSend),
+          });
+        });
+        claimed = true;
+      } catch (txError: unknown) {
+        const error = txError as Error;
+        if (error.message === "ALREADY_SENT") {
+          console.log(`Log ${logDoc.id}: time ${timeToSend} already sent by another instance, skipping`);
+          continue;
+        }
+        console.error(`Transaction error for log ${logDoc.id}:`, txError);
+        continue;
+      }
+
+      if (!claimed) {
+        continue;
+      }
+
+      console.log(`Log ${logDoc.id}: claimed time slot ${new Date(timeToSend).toLocaleTimeString()}, sending notifications`);
 
       // Send notification to all owners
       const invalidTokens: string[] = [];
@@ -963,10 +1000,7 @@ export const sendLifeTrackerSamples = onSchedule(
         }
       }
 
-      // Mark times as sent
-      await logDoc.ref.update({
-        "sampleSchedule.sentTimes": [...schedule.sentTimes, ...timesToSend],
-      });
+      // Time was already marked as sent in the transaction above
 
       // Clean up invalid tokens
       for (const token of invalidTokens) {
