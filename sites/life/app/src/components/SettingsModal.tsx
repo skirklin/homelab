@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Modal, Segmented, Button } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useDisplaySettings, type WidgetSize } from "../display-settings";
 import type { LifeLog } from "../types";
+import { getFcmTokens, clearAllFcmTokens } from "../firestore";
 
 const SettingRow = styled.div`
   display: flex;
@@ -78,16 +79,43 @@ interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
   log?: LifeLog | null;
+  userId?: string;
   onResetSchedule?: () => void;
 }
 
-export function SettingsModal({ open, onClose, log, onResetSchedule }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: SettingsModalProps) {
   const { widgetSize, setWidgetSize } = useDisplaySettings();
   const [showDebug, setShowDebug] = useState(false);
+  const [fcmTokenCount, setFcmTokenCount] = useState<number | null>(null);
+  const [loadingTokens, setLoadingTokens] = useState(false);
 
   const schedule = log?.sampleSchedule;
   const config = log?.manifest?.randomSamples;
   const now = Date.now();
+
+  // Load FCM token count when debug is shown
+  useEffect(() => {
+    if (showDebug && userId && fcmTokenCount === null) {
+      setLoadingTokens(true);
+      getFcmTokens(userId)
+        .then(tokens => setFcmTokenCount(tokens.length))
+        .catch(() => setFcmTokenCount(-1))
+        .finally(() => setLoadingTokens(false));
+    }
+  }, [showDebug, userId, fcmTokenCount]);
+
+  const handleClearTokens = async () => {
+    if (!userId) return;
+    setLoadingTokens(true);
+    try {
+      await clearAllFcmTokens(userId);
+      setFcmTokenCount(0);
+    } catch (e) {
+      console.error("Failed to clear tokens:", e);
+    } finally {
+      setLoadingTokens(false);
+    }
+  };
 
   const formatTime = (ts: number) => {
     const date = new Date(ts);
@@ -143,11 +171,37 @@ export function SettingsModal({ open, onClose, log, onResetSchedule }: SettingsM
 
           {showDebug && (
             <DebugContent>
-              <div><strong>Config:</strong></div>
+              <div><strong>Log:</strong></div>
+              <div>Log ID: {log?.id || 'N/A'}</div>
+
+              <div style={{ marginTop: 12 }}><strong>Config:</strong></div>
               <div>Times per day: {config.timesPerDay}</div>
               <div>Active hours: {config.activeHours?.join(' - ')}</div>
               <div>Timezone: {config.timezone || 'UTC (default)'}</div>
               <div>Questions: {config.questions?.length || 0}</div>
+
+              <div style={{ marginTop: 12 }}><strong>FCM Tokens:</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  Registered: {loadingTokens ? '...' : fcmTokenCount === -1 ? 'Error' : fcmTokenCount ?? '...'}
+                  {fcmTokenCount !== null && fcmTokenCount > 1 && (
+                    <span style={{ color: 'var(--color-warning)', marginLeft: 8 }}>
+                      (multiple tokens = multiple notifications!)
+                    </span>
+                  )}
+                </span>
+                {fcmTokenCount !== null && fcmTokenCount > 0 && (
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={loadingTokens}
+                    onClick={handleClearTokens}
+                  >
+                    Clear All
+                  </Button>
+                )}
+              </div>
 
               <div style={{ marginTop: 12 }}><strong>Today's Schedule:</strong></div>
               {schedule ? (

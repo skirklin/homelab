@@ -206,3 +206,14 @@ export async function removeFcmToken(userId: string, token?: string): Promise<vo
     await updateDoc(userRef, { fcmTokens: arrayRemove(token) });
   }
 }
+
+export async function getFcmTokens(userId: string): Promise<string[]> {
+  const userRef = doc(db, "users", userId);
+  const userDoc = await getDoc(userRef);
+  return (userDoc.data()?.fcmTokens as string[]) || [];
+}
+
+export async function clearAllFcmTokens(userId: string): Promise<void> {
+  const userRef = doc(db, "users", userId);
+  await updateDoc(userRef, { fcmTokens: [] });
+}

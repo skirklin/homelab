@@ -518,6 +518,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         open={showSettings}
         onClose={() => setShowSettings(false)}
         log={state.log}
+        userId={user?.uid}
         onResetSchedule={async () => {
           if (state.log?.id) {
             await clearSampleSchedule(state.log.id);
