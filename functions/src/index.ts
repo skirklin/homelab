@@ -620,14 +620,24 @@ export const sendHouseholdTaskNotifications = onSchedule(
 
     console.log(`Found ${userNotifications.size} users with due tasks`);
 
+    // Get today's date string for tracking
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+
     // Send notifications to each user
     for (const [userId, tasks] of userNotifications) {
-      // Get user's FCM tokens
+      // Get user's FCM tokens and notification tracking
       const userDoc = await db.doc(`users/${userId}`).get();
       const userData = userDoc.data();
 
       if (!userData?.fcmTokens || userData.fcmTokens.length === 0) {
         console.log(`No FCM tokens for user ${userId}`);
+        continue;
+      }
+
+      // Check if already notified today
+      const lastTaskNotification = userData.lastTaskNotification as string | undefined;
+      if (lastTaskNotification === today) {
+        console.log(`User ${userId} already notified today, skipping`);
         continue;
       }
 
@@ -676,11 +686,13 @@ export const sendHouseholdTaskNotifications = onSchedule(
         }
       }
 
-      // Clean up invalid tokens
+      // Mark user as notified today
+      await db.doc(`users/${userId}`).update({
+        lastTaskNotification: today,
+        ...(invalidTokens.length > 0 ? { fcmTokens: FieldValue.arrayRemove(...invalidTokens) } : {}),
+      });
+
       if (invalidTokens.length > 0) {
-        await db.doc(`users/${userId}`).update({
-          fcmTokens: FieldValue.arrayRemove(...invalidTokens),
-        });
         console.log(`Removed ${invalidTokens.length} invalid tokens for user ${userId}`);
       }
     }
