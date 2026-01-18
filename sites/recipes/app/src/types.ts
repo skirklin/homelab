@@ -23,10 +23,22 @@ export type BoxStoreType = {
 
 export type StepIngredients = Record<string, string[]>;  // { "0": ["1 cup flour"], "1": ["2 eggs"] }
 
-export type PendingEnrichment = {
-  description: string,
-  suggestedTags: string[],
+// Generic pending changes to a recipe document
+export type PendingChanges = {
+  // Proposed changes to recipe.data fields
+  data?: {
+    name?: string,
+    description?: string,
+    recipeIngredient?: string[],
+    recipeInstructions?: Array<{ text: string, '@type'?: string }>,
+    recipeCategory?: string[],
+  },
+  // Proposed changes to document-level fields
   stepIngredients?: StepIngredients,
+
+  // Metadata
+  source: 'enrichment' | 'modification',
+  prompt?: string,  // User's request (for modifications)
   reasoning: string,
   generatedAt: Timestamp,
   model: string,
@@ -52,7 +64,7 @@ export type RecipeStoreType = {
   updated: Timestamp,
   lastUpdatedBy: string, // user id
   owners: string[], // user ids
-  pendingEnrichment?: PendingEnrichment,
+  pendingChanges?: PendingChanges,
   stepIngredients?: StepIngredients,  // applied from enrichment
   cookingLog?: CookingLogEntryStore[],
   enrichmentStatus?: EnrichmentStatus,

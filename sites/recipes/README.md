@@ -39,7 +39,7 @@ Recipes are automatically enriched with AI-generated descriptions and tags:
 2. A scheduled Cloud Function runs every 10 minutes
 3. It finds recipes with status "needed" that are at least 5 minutes old (delay allows user to finish editing)
 4. Claude generates a description and suggested tags
-5. These are saved as `pendingEnrichment` for user review
+5. These are saved as `pendingChanges` for user review
 6. User can accept (applies changes) or reject (skips)
 7. If user edits a recipe, status resets to "needed" for re-enrichment
 

@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { Recipe, WithContext } from "schema-dts";
+import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import axios from 'axios';
 import * as jsdom from 'jsdom';
 import { initializeApp } from 'firebase-admin/app';
@@ -362,20 +363,153 @@ Guidelines:
       });
     }
 
-    // Save pending enrichment
-    await recipeDoc.ref.update({
-      pendingEnrichment: {
+    // Save pending changes (generic format)
+    const pendingChanges = {
+      data: {
         description: enrichment.description || "",
-        suggestedTags: enrichment.suggestedTags || [],
-        stepIngredients: stepIngredientsObj,
-        reasoning: enrichment.reasoning || "",
-        generatedAt: Timestamp.now(),
-        model: CLAUDE_MODEL,
+        recipeCategory: enrichment.suggestedTags || [],
       },
+      stepIngredients: stepIngredientsObj,
+      source: "enrichment",
+      reasoning: enrichment.reasoning || "",
+      generatedAt: Timestamp.now(),
+      model: CLAUDE_MODEL,
+    };
+
+    await recipeDoc.ref.update({
+      pendingChanges,
       enrichmentStatus: "pending",
     });
 
-    return { success: true, enrichment };
+    return { success: true, modification: pendingChanges };
+  }
+)
+
+// Modify a recipe based on user feedback using AI
+export const modifyRecipe = onCall(
+  {
+    secrets: [anthropicApiKey],
+    cors: ["https://recipes.kirkl.in", "https://home.kirkl.in", "https://kirkl.in", "http://localhost:5000", "http://localhost:5173"],
+    invoker: "public",
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in")
+    }
+
+    const { boxId, recipeId, feedback } = request.data;
+    if (!boxId || !recipeId || !feedback) {
+      throw new HttpsError("invalid-argument", "Must provide boxId, recipeId, and feedback")
+    }
+
+    const apiKey = anthropicApiKey.value();
+    if (!apiKey) {
+      throw new HttpsError("internal", "API key not configured")
+    }
+
+    const recipeDoc = await db.doc(`boxes/${boxId}/recipes/${recipeId}`).get();
+    if (!recipeDoc.exists) {
+      throw new HttpsError("not-found", "Recipe not found")
+    }
+
+    const recipeData = recipeDoc.data()!;
+    const recipe = recipeData.data as Recipe;
+
+    const ingredients = Array.isArray(recipe.recipeIngredient)
+      ? recipe.recipeIngredient as string[]
+      : [];
+    const instructions = Array.isArray(recipe.recipeInstructions)
+      ? (recipe.recipeInstructions as Array<{ text?: string } | string>).map((i) =>
+          typeof i === 'string' ? i : i.text || ''
+        )
+      : [];
+
+    const anthropic = new Anthropic({ apiKey });
+
+    const modificationPrompt = `You are a helpful cooking assistant that modifies recipes based on user feedback.
+
+Current Recipe:
+Name: ${recipe.name || "Unknown"}
+Description: ${recipe.description || "None"}
+
+Ingredients:
+${ingredients.map((ing, i) => `${i + 1}. ${ing}`).join('\n')}
+
+Instructions:
+${instructions.map((inst, i) => `${i + 1}. ${inst}`).join('\n')}
+
+User Feedback: "${feedback}"
+
+Please modify this recipe based on the feedback. Return ONLY valid JSON (no markdown) in this format:
+{
+  "modifiedRecipe": {
+    "name": "Recipe name (include even if unchanged)",
+    "description": "Description (include even if unchanged)",
+    "recipeIngredient": ["full list of ingredients after modification"],
+    "recipeInstructions": [
+      {"@type": "HowToStep", "text": "Step 1 text"},
+      {"@type": "HowToStep", "text": "Step 2 text"}
+    ]
+  },
+  "reasoning": "Brief explanation of changes made and why"
+}
+
+Guidelines:
+- Preserve the recipe's essential character while addressing the feedback
+- For dietary changes (vegetarian, vegan, gluten-free), substitute ingredients thoughtfully
+- For taste adjustments (too salty, too sweet, too bland), adjust quantities or suggest alternatives
+- Keep the same general structure unless the feedback requires structural changes
+- Be specific about quantities in ingredients
+- Explain your changes clearly in the reasoning field`;
+
+    const response = await anthropic.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 4000,
+      messages: [{ role: "user", content: modificationPrompt }],
+    });
+
+    const text = response.content[0].type === "text" ? response.content[0].text : "";
+
+    let modification;
+    try {
+      let jsonStr = text.trim();
+      if (jsonStr.startsWith("```")) {
+        jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+      }
+      modification = JSON.parse(jsonStr);
+    } catch {
+      throw new HttpsError("internal", "Failed to parse modification response")
+    }
+
+    // Build the pending changes object (generic format)
+    const now = Timestamp.now();
+    const pendingChanges = {
+      data: {
+        name: modification.modifiedRecipe?.name,
+        description: modification.modifiedRecipe?.description,
+        recipeIngredient: modification.modifiedRecipe?.recipeIngredient || ingredients,
+        recipeInstructions: modification.modifiedRecipe?.recipeInstructions || instructions.map(text => ({ text })),
+      },
+      source: "modification",
+      prompt: feedback,
+      reasoning: modification.reasoning || "",
+      generatedAt: now,
+      model: CLAUDE_MODEL,
+    };
+
+    // Save pending changes
+    await recipeDoc.ref.update({
+      pendingChanges,
+    });
+
+    // Return a serializable version (Timestamps can't be JSON serialized)
+    return {
+      success: true,
+      modification: {
+        ...pendingChanges,
+        generatedAt: now.toDate().toISOString(),
+      },
+    };
   }
 )
 
@@ -503,12 +637,15 @@ Guidelines:
           });
         }
 
-        // Save pending enrichment
+        // Save pending changes (generic format)
         await recipeDoc.ref.update({
-          pendingEnrichment: {
-            description: enrichment.description || "",
-            suggestedTags: enrichment.suggestedTags || [],
+          pendingChanges: {
+            data: {
+              description: enrichment.description || "",
+              recipeCategory: enrichment.suggestedTags || [],
+            },
             stepIngredients: stepIngredientsObj,
+            source: "enrichment",
             reasoning: enrichment.reasoning || "",
             generatedAt: Timestamp.now(),
             model: CLAUDE_MODEL,
@@ -644,8 +781,8 @@ export const sendHouseholdTaskNotifications = onSchedule(
       // Build notification message
       const taskCount = tasks.length;
       const title = taskCount === 1
-        ? `${tasks[0].taskName} is due today`
-        : `${taskCount} household tasks due today`;
+        ? `${tasks[0].taskName} needs doing`
+        : `${taskCount} household tasks need doing`;
 
       const body = taskCount === 1
         ? "Tap to view details"
@@ -730,39 +867,14 @@ interface LifeLogData {
   owners: string[];
 }
 
-// Get the UTC offset for a timezone on a given date (handles DST)
-function getTimezoneOffset(date: Date, timezone: string): string {
-  try {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      timeZoneName: "shortOffset",
-    });
-    const parts = formatter.formatToParts(date);
-    const tzPart = parts.find((p) => p.type === "timeZoneName");
-    // Returns something like "GMT-8" or "GMT+5:30"
-    if (tzPart?.value) {
-      const match = tzPart.value.match(/GMT([+-])(\d+)(?::(\d+))?/);
-      if (match) {
-        const sign = match[1];
-        const hours = match[2].padStart(2, "0");
-        const minutes = match[3] || "00";
-        return `${sign}${hours}:${minutes}`;
-      }
-    }
-  } catch (e) {
-    console.error(`Invalid timezone "${timezone}", falling back to UTC:`, e);
-  }
-  return "+00:00"; // Fallback to UTC
-}
-
 // Get date string in a specific timezone (YYYY-MM-DD)
 function getDateStringInTimezone(date: Date, timezone: string): string {
-  try {
-    return date.toLocaleDateString("en-CA", { timeZone: timezone });
-  } catch (e) {
-    console.error(`Invalid timezone "${timezone}", falling back to UTC:`, e);
-    return date.toISOString().split("T")[0];
-  }
+  // toZonedTime returns a Date with time shifted to represent the wall-clock time in that timezone
+  const zonedDate = toZonedTime(date, timezone);
+  const year = zonedDate.getFullYear();
+  const month = String(zonedDate.getMonth() + 1).padStart(2, "0");
+  const day = String(zonedDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 // Generate random sample times for a day in a specific timezone
@@ -781,9 +893,8 @@ function generateSampleTimes(
   // Generate evenly distributed times with some randomness
   const interval = totalMinutes / timesPerDay;
 
-  // Get timezone offset for this date (handles DST)
-  const sampleDate = new Date(`${dateString}T12:00:00Z`);
-  const offset = getTimezoneOffset(sampleDate, timezone);
+  // Parse the date string components
+  const [year, month, day] = dateString.split("-").map(Number);
 
   for (let i = 0; i < timesPerDay; i++) {
     // Add randomness within the interval (±25%)
@@ -794,10 +905,11 @@ function generateSampleTimes(
     const hour = Math.floor(minute / 60);
     const min = Math.round(minute % 60);
 
-    // Create timestamp for this time in the target timezone
-    const timeString = `${dateString}T${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}:00${offset}`;
-    const localDate = new Date(timeString);
-    times.push(localDate.getTime());
+    // Create a date representing this wall-clock time, then use fromZonedTime to get the UTC timestamp
+    // fromZonedTime treats the input as if it were in the specified timezone
+    const localDate = new Date(year, month - 1, day, hour, min, 0);
+    const utcDate = fromZonedTime(localDate, timezone);
+    times.push(utcDate.getTime());
   }
 
   return times.sort((a, b) => a - b);

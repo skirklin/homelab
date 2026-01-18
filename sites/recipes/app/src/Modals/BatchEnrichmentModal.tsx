@@ -3,7 +3,7 @@ import { Button, Checkbox, Modal, Tag } from 'antd';
 import { useContext, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
-import { applyEnrichment, rejectEnrichment } from '../firestore';
+import { applyChanges, rejectChanges } from '../firestore';
 import { RecipeEntry } from '../storage';
 import type { BoxId, RecipeId } from '../types';
 import { Section, SectionLabel, SuggestedDescription, TagsContainer, Reasoning } from './EnrichmentStyles';
@@ -78,12 +78,12 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState(false);
 
-  // Find all recipes with pending enrichments
+  // Find all recipes with pending changes
   const pendingRecipes = useMemo(() => {
     const results: PendingRecipe[] = [];
     for (const [boxId, box] of state.boxes) {
       for (const [recipeId, recipe] of box.recipes) {
-        if (recipe.pendingEnrichment) {
+        if (recipe.pendingChanges) {
           results.push({ boxId, recipeId, recipe });
         }
       }
@@ -116,13 +116,13 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     setProcessing(true);
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
-        if (selectedIds.has(getKey(boxId, recipeId)) && recipe.pendingEnrichment) {
+        if (selectedIds.has(getKey(boxId, recipeId)) && recipe.pendingChanges) {
           const recipeData = recipe.getData();
           const currentTags = recipeData.recipeCategory;
           const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
-          await applyEnrichment(boxId, recipeId, recipe.pendingEnrichment, {
+          await applyChanges(boxId, recipeId, recipe.pendingChanges, {
             description: typeof recipeData.description === 'string' ? recipeData.description : undefined,
-            tags,
+            tags: tags as string[],
           });
         }
       }
@@ -135,9 +135,9 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
   const handleRejectSelected = async () => {
     setProcessing(true);
     try {
-      for (const { boxId, recipeId } of pendingRecipes) {
+      for (const { boxId, recipeId, recipe } of pendingRecipes) {
         if (selectedIds.has(getKey(boxId, recipeId))) {
-          await rejectEnrichment(boxId, recipeId);
+          await rejectChanges(boxId, recipeId, recipe.pendingChanges?.source);
         }
       }
       setSelectedIds(new Set());
@@ -150,13 +150,13 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     setProcessing(true);
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
-        if (recipe.pendingEnrichment) {
+        if (recipe.pendingChanges) {
           const recipeData = recipe.getData();
           const currentTags = recipeData.recipeCategory;
           const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
-          await applyEnrichment(boxId, recipeId, recipe.pendingEnrichment, {
+          await applyChanges(boxId, recipeId, recipe.pendingChanges, {
             description: typeof recipeData.description === 'string' ? recipeData.description : undefined,
-            tags,
+            tags: tags as string[],
           });
         }
       }
@@ -168,8 +168,8 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
   const handleRejectAll = async () => {
     setProcessing(true);
     try {
-      for (const { boxId, recipeId } of pendingRecipes) {
-        await rejectEnrichment(boxId, recipeId);
+      for (const { boxId, recipeId, recipe } of pendingRecipes) {
+        await rejectChanges(boxId, recipeId, recipe.pendingChanges?.source);
       }
     } finally {
       setProcessing(false);
@@ -227,9 +227,10 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
           <EnrichmentList>
             {pendingRecipes.map(({ boxId, recipeId, recipe }) => {
               const key = getKey(boxId, recipeId);
-              const enrichment = recipe.pendingEnrichment!;
+              const changes = recipe.pendingChanges!;
               const currentDescription = recipe.getData().description;
-              const hasNewDescription = enrichment.description && enrichment.description !== currentDescription;
+              const hasNewDescription = changes.data?.description && changes.data.description !== currentDescription;
+              const suggestedTags = changes.data?.recipeCategory || [];
 
               return (
                 <EnrichmentItem key={key} $selected={selectedIds.has(key)}>
@@ -244,21 +245,23 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
                   {hasNewDescription && (
                     <IndentedSection>
                       <SectionLabel>Suggested description:</SectionLabel>
-                      <SuggestedDescription>"{enrichment.description}"</SuggestedDescription>
+                      <SuggestedDescription>"{changes.data!.description}"</SuggestedDescription>
+                    </IndentedSection>
+                  )}
+
+                  {suggestedTags.length > 0 && (
+                    <IndentedSection>
+                      <SectionLabel>Suggested tags:</SectionLabel>
+                      <TagsContainer>
+                        {suggestedTags.map((tag, idx) => (
+                          <Tag key={idx} color="purple">{tag}</Tag>
+                        ))}
+                      </TagsContainer>
                     </IndentedSection>
                   )}
 
                   <IndentedSection>
-                    <SectionLabel>Suggested tags:</SectionLabel>
-                    <TagsContainer>
-                      {enrichment.suggestedTags.map((tag, idx) => (
-                        <Tag key={idx} color="purple">{tag}</Tag>
-                      ))}
-                    </TagsContainer>
-                  </IndentedSection>
-
-                  <IndentedSection>
-                    <Reasoning><strong>Why:</strong> {enrichment.reasoning}</Reasoning>
+                    <Reasoning><strong>Why:</strong> {changes.reasoning}</Reasoning>
                   </IndentedSection>
                 </EnrichmentItem>
               );

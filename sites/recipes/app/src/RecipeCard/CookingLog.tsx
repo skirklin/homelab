@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, DeleteOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { useContext, useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Button, Input, Popconfirm, message, Spin } from 'antd';
@@ -225,18 +225,24 @@ function CookingLog(props: RecipeCardProps) {
                 ) : event.data.notes ? (
                   <LogNote
                     $editable={editable}
-                    onDoubleClick={editable ? () => handleStartEdit(event.id) : undefined}
+                    onClick={editable ? () => handleStartEdit(event.id) : undefined}
                   >
                     "{String(event.data.notes)}"
                   </LogNote>
                 ) : editable ? (
-                  <AddNoteHint onDoubleClick={() => handleStartEdit(event.id)}>
-                    Double-click to add a note
+                  <AddNoteHint onClick={() => handleStartEdit(event.id)}>
+                    Click to add a note
                   </AddNoteHint>
                 ) : null}
               </LogContent>
-              {editable && (
+              {editable && !isEditing && (
                 <LogActions>
+                  <ActionButton
+                    type="text"
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={() => handleStartEdit(event.id)}
+                  />
                   <Popconfirm
                     title="Delete this entry?"
                     onConfirm={() => handleDelete(event.id)}

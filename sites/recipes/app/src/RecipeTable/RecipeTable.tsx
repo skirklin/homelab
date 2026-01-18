@@ -120,8 +120,8 @@ export function RecipeTable(props: RecipeTableProps) {
   const { state, dispatch } = useContext(Context)
   const [filteredRows, setFilteredRows] = useState<RowType[]>()
 
-  // Count recipes with pending enrichments
-  const pendingEnrichmentCount = recipes.filter(r => r.recipe.pendingEnrichment).length;
+  // Count recipes with pending changes (enrichments or modifications)
+  const pendingChangesCount = recipes.filter(r => r.recipe.pendingChanges).length;
 
   useEffect(() => {
     const sortedRecipes = _.sortBy(recipes, row => -row.recipe.updated)
@@ -196,7 +196,7 @@ export function RecipeTable(props: RecipeTableProps) {
       render: (_value, record) => (
         <NameCell>
           <RecipeName>{record.recipe.getName()}</RecipeName>
-          {record.recipe.pendingEnrichment && (
+          {record.recipe.pendingChanges && (
             <Tooltip title="AI suggestions available">
               <AIIndicator><RobotOutlined /></AIIndicator>
             </Tooltip>
@@ -246,14 +246,14 @@ export function RecipeTable(props: RecipeTableProps) {
           <UploadButton boxId={boxId} disabled={!writeable} element="button" />
           <ImportButton boxId={boxId} disabled={!writeable} element="button" />
           <GenerateButton boxId={boxId} disabled={!writeable} />
-          {pendingEnrichmentCount > 0 && (
-            <Tooltip title={`Review ${pendingEnrichmentCount} AI suggestion${pendingEnrichmentCount > 1 ? 's' : ''}`}>
+          {pendingChangesCount > 0 && (
+            <Tooltip title={`Review ${pendingChangesCount} AI suggestion${pendingChangesCount > 1 ? 's' : ''}`}>
               <ActionButton
                 onClick={() => setIsBatchModalVisible(true)}
                 icon={<RobotOutlined />}
                 style={{ color: '#9370db', borderColor: '#9370db' }}
               >
-                AI ({pendingEnrichmentCount})
+                AI ({pendingChangesCount})
               </ActionButton>
             </Tooltip>
           )}

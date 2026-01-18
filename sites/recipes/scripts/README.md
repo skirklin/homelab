@@ -49,7 +49,7 @@ npm run enrich -- --box "Family" --limit 2 --dry-run
 # Combine filters
 npm run enrich -- --user you@example.com --box "Favorites" --limit 2
 
-# Run for real (only adds pendingEnrichment field, never modifies existing data)
+# Run for real (only adds pendingChanges field, never modifies existing data)
 npm run enrich
 ```
 
@@ -61,7 +61,7 @@ npm run enrich
 - `--emulator` - Connect to local Firebase emulator instead of production
 
 **Safety features:**
-- Only adds `pendingEnrichment` and `lastEnrichedAt` fields to recipes
+- Only adds `pendingChanges` and `lastEnrichedAt` fields to recipes
 - Never modifies existing recipe data (description, tags, etc.)
 - Skips recipes that already have pending enrichments
 - Skips recipes that haven't changed since last enrichment (safe to run daily)

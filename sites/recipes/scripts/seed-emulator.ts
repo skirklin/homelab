@@ -9,7 +9,7 @@ initializeApp({ projectId: "recipe-box-335721" });
 const db = getFirestore();
 const auth = getAuth();
 
-// Sample recipes - some with pending enrichments, some without
+// Sample recipes - some with pending changes, some without
 const sampleRecipes = [
   {
     data: {
@@ -37,10 +37,13 @@ const sampleRecipes = [
       ],
       recipeCategory: ["dessert"],
     },
-    pendingEnrichment: {
-      description:
-        "Crispy on the edges, chewy in the middle - these classic chocolate chip cookies are the perfect sweet treat for any occasion.",
-      suggestedTags: ["dessert", "baking", "cookies", "chocolate", "kid-friendly"],
+    pendingChanges: {
+      data: {
+        description:
+          "Crispy on the edges, chewy in the middle - these classic chocolate chip cookies are the perfect sweet treat for any occasion.",
+        recipeCategory: ["dessert", "baking", "cookies", "chocolate", "kid-friendly"],
+      },
+      source: "enrichment" as const,
       reasoning:
         "Added specific cookie-related tags and a description highlighting the texture contrast that makes these cookies special.",
       generatedAt: Timestamp.now(),
@@ -68,10 +71,13 @@ const sampleRecipes = [
       ],
       recipeCategory: "dinner",
     },
-    pendingEnrichment: {
-      description:
-        "A simple pasta dish ready in 20 minutes", // Same as existing
-      suggestedTags: ["dinner", "pasta", "italian", "quick", "vegetarian", "weeknight"],
+    pendingChanges: {
+      data: {
+        description:
+          "A simple pasta dish ready in 20 minutes", // Same as existing
+        recipeCategory: ["dinner", "pasta", "italian", "quick", "vegetarian", "weeknight"],
+      },
+      source: "enrichment" as const,
       reasoning:
         "This aglio e olio style pasta is perfect for busy weeknights. Added quick/weeknight tags and vegetarian since it has no meat.",
       generatedAt: Timestamp.now(),
@@ -100,7 +106,7 @@ const sampleRecipes = [
       ],
       recipeCategory: [],
     },
-    // No pending enrichment - needs processing
+    // No pending changes - needs processing
   },
   {
     data: {
@@ -120,7 +126,7 @@ const sampleRecipes = [
       ],
       recipeCategory: ["salad", "healthy"],
     },
-    // No pending enrichment - already has good tags
+    // No pending changes - already has good tags
   },
 ];
 
@@ -207,17 +213,17 @@ async function seed() {
       lastUpdatedBy: userId,
     };
 
-    if (recipe.pendingEnrichment) {
-      recipeDoc.pendingEnrichment = recipe.pendingEnrichment;
+    if (recipe.pendingChanges) {
+      recipeDoc.pendingChanges = recipe.pendingChanges;
     }
 
     const recipeRef = await boxRef.collection("recipes").add(recipeDoc);
-    const hasPending = recipe.pendingEnrichment ? "📋" : "  ";
+    const hasPending = recipe.pendingChanges ? "📋" : "  ";
     console.log(`  ${hasPending} Added recipe: ${recipe.data.name}`);
   }
 
   console.log("\n✅ Seeding complete!");
-  console.log("\n📋 Recipes with pending enrichments ready for review");
+  console.log("\n📋 Recipes with pending changes ready for review");
   console.log("\n🔑 Login credentials:");
   console.log(`   Email: ${TEST_EMAIL}`);
   console.log(`   Password: ${TEST_PASSWORD}`);

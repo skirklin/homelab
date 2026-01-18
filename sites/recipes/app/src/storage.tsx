@@ -2,7 +2,7 @@ import { doc, Timestamp, type DocumentSnapshot, type SnapshotOptions } from "fir
 import _ from "lodash";
 import type { Recipe } from "schema-dts";
 import { db } from "./backend";
-import { type BoxType, type BoxStoreType, type RecipeStoreType, Visibility, type UserStoreType, type BoxId, type UserId, type PendingEnrichment, type CookingLogEntry, EnrichmentStatus, type StepIngredients } from "./types";
+import { type BoxType, type BoxStoreType, type RecipeStoreType, Visibility, type UserStoreType, type BoxId, type UserId, type PendingChanges, type CookingLogEntry, EnrichmentStatus, type StepIngredients } from "./types";
 import { decodeStr } from "./converters";
 
 const DUMMY_FIRST_DATE = new Date(2022, 0, 0)
@@ -18,7 +18,7 @@ export class RecipeEntry {
     created: Date;
     updated: Date;
     lastUpdatedBy: string;
-    pendingEnrichment?: PendingEnrichment;
+    pendingChanges?: PendingChanges;
     stepIngredients?: StepIngredients;
     cookingLog: CookingLogEntry[];
     enrichmentStatus: EnrichmentStatus;
@@ -32,7 +32,7 @@ export class RecipeEntry {
         created: Date,
         updated: Date,
         lastUpdatedBy: string,
-        pendingEnrichment?: PendingEnrichment,
+        pendingChanges?: PendingChanges,
         stepIngredients?: StepIngredients,
         cookingLog?: CookingLogEntry[],
         enrichmentStatus?: EnrichmentStatus
@@ -45,7 +45,7 @@ export class RecipeEntry {
         this.created = created || DUMMY_FIRST_DATE;
         this.updated = updated || DUMMY_FIRST_DATE;
         this.lastUpdatedBy = lastUpdatedBy || this.creator;
-        this.pendingEnrichment = pendingEnrichment;
+        this.pendingChanges = pendingChanges;
         this.stepIngredients = stepIngredients;
         this.cookingLog = cookingLog || [];
         this.enrichmentStatus = enrichmentStatus || EnrichmentStatus.needed;
@@ -63,7 +63,7 @@ export class RecipeEntry {
             this.created,
             this.updated,
             this.lastUpdatedBy,
-            this.pendingEnrichment ? _.cloneDeep(this.pendingEnrichment) : undefined,
+            this.pendingChanges ? _.cloneDeep(this.pendingChanges) : undefined,
             this.stepIngredients ? _.cloneDeep(this.stepIngredients) : undefined,
             _.cloneDeep(this.cookingLog),
             this.enrichmentStatus
@@ -100,8 +100,8 @@ export const recipeConverter = {
             creator: recipe.creator ? recipe.creator : recipe.owners[0],
             enrichmentStatus: recipe.enrichmentStatus,
         };
-        if (recipe.pendingEnrichment) {
-            result.pendingEnrichment = recipe.pendingEnrichment;
+        if (recipe.pendingChanges) {
+            result.pendingChanges = recipe.pendingChanges;
         }
         if (recipe.cookingLog && recipe.cookingLog.length > 0) {
             result.cookingLog = recipe.cookingLog.map(entry => ({
@@ -128,7 +128,7 @@ export const recipeConverter = {
             (rawRecipe.created || DUMMY_FIRST_TIMESTAMP).toDate(),
             (rawRecipe.updated || DUMMY_FIRST_TIMESTAMP).toDate(),
             rawRecipe.lastUpdatedBy,
-            rawRecipe.pendingEnrichment,
+            rawRecipe.pendingChanges,
             rawRecipe.stepIngredients,
             cookingLog,
             rawRecipe.enrichmentStatus,

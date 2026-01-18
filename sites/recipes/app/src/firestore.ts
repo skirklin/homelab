@@ -141,7 +141,7 @@ export async function deleteRecipe(boxes: Map<string, BoxEntry>, boxId: BoxId, r
 export async function saveRecipe(boxId: BoxId, recipeId: RecipeId, recipe: RecipeEntry) {
   // Reset enrichment status so the recipe gets re-enriched after user edits
   recipe.enrichmentStatus = EnrichmentStatus.needed;
-  recipe.pendingEnrichment = undefined;
+  recipe.pendingChanges = undefined;
   const docRef = doc(db, "boxes", boxId, "recipes", recipeId).withConverter(recipeConverter)
   setDoc(docRef, recipe)
   return docRef
@@ -168,50 +168,80 @@ export async function setLastSeenUpdateVersion(userId: UserId, version: number) 
   updateDoc(doc(db, "users", userId), { lastSeenUpdateVersion: version })
 }
 
-export async function applyEnrichment(
+// ============================================
+// Pending Changes (generic apply/reject)
+// ============================================
+
+import type { PendingChanges } from './types';
+
+export async function applyChanges(
   boxId: BoxId,
   recipeId: RecipeId,
-  enrichment: { description: string; suggestedTags: string[]; stepIngredients?: Record<string, string[]> },
+  changes: PendingChanges,
   currentRecipe?: { description?: string; tags?: string[] }
 ) {
   const recipeRef = doc(db, "boxes", boxId, "recipes", recipeId);
 
-  // Use passed-in recipe data to avoid network read
-  const currentDescription = currentRecipe?.description;
-  const currentTags = currentRecipe?.tags || [];
-
-  // Merge suggested tags with existing tags (avoid duplicates, all lowercase)
-  const existingTags = Array.isArray(currentTags) ? currentTags : [currentTags].filter(Boolean);
-  const mergedTags = [...new Set([...existingTags, ...enrichment.suggestedTags].map(t => t.toLowerCase()))];
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updates: Record<string, any> = {
-    pendingEnrichment: deleteField(),
-    enrichmentStatus: EnrichmentStatus.done,
+    pendingChanges: deleteField(),
+    updated: Timestamp.now(),
   };
 
-  // Only update description if there wasn't one
-  if (!currentDescription?.trim()) {
-    updates["data.description"] = enrichment.description;
+  // Apply recipe data changes
+  if (changes.data) {
+    if (changes.data.name) {
+      updates["data.name"] = changes.data.name;
+    }
+    // For description: only apply if current is empty (enrichment) or always apply (modification)
+    if (changes.data.description) {
+      const currentDescription = currentRecipe?.description;
+      if (changes.source === 'modification' || !currentDescription?.trim()) {
+        updates["data.description"] = changes.data.description;
+      }
+    }
+    if (changes.data.recipeIngredient) {
+      updates["data.recipeIngredient"] = changes.data.recipeIngredient;
+    }
+    if (changes.data.recipeInstructions) {
+      updates["data.recipeInstructions"] = changes.data.recipeInstructions;
+    }
+    if (changes.data.recipeCategory) {
+      // Merge with existing tags
+      const currentTags = currentRecipe?.tags || [];
+      const existingTags = Array.isArray(currentTags) ? currentTags : [currentTags].filter(Boolean);
+      const mergedTags = [...new Set([...existingTags, ...changes.data.recipeCategory].map(t => t.toLowerCase()))];
+      updates["data.recipeCategory"] = mergedTags;
+    }
   }
 
-  // Update tags with merged list
-  updates["data.recipeCategory"] = mergedTags;
+  // Apply document-level changes
+  if (changes.stepIngredients && Object.keys(changes.stepIngredients).length > 0) {
+    updates["stepIngredients"] = changes.stepIngredients;
+  }
 
-  // Save step ingredients if provided
-  if (enrichment.stepIngredients && Object.keys(enrichment.stepIngredients).length > 0) {
-    updates["stepIngredients"] = enrichment.stepIngredients;
+  // Set enrichment status based on source
+  if (changes.source === 'enrichment') {
+    updates["enrichmentStatus"] = EnrichmentStatus.done;
+  } else {
+    // Re-enrich after modification
+    updates["enrichmentStatus"] = EnrichmentStatus.needed;
   }
 
   await updateDoc(recipeRef, updates);
 }
 
-export async function rejectEnrichment(boxId: BoxId, recipeId: RecipeId) {
+export async function rejectChanges(boxId: BoxId, recipeId: RecipeId, source?: string) {
   const recipeRef = doc(db, "boxes", boxId, "recipes", recipeId);
-  await updateDoc(recipeRef, {
-    pendingEnrichment: deleteField(),
-    enrichmentStatus: EnrichmentStatus.skipped,
-  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updates: Record<string, any> = {
+    pendingChanges: deleteField(),
+  };
+  // Only mark as skipped for enrichment rejections
+  if (source === 'enrichment') {
+    updates["enrichmentStatus"] = EnrichmentStatus.skipped;
+  }
+  await updateDoc(recipeRef, updates);
 }
 
 // ============================================

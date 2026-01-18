@@ -31,6 +31,12 @@ function getPartMap(params: Readonly<Params<string>>, state: AppState) {
   return partMap
 }
 
+// Check if we're embedded in the home app (path starts with /recipes)
+function isEmbedded(pathname: string): boolean {
+  const parts = pathname.split('/').filter(i => i);
+  return parts[0] === 'recipes';
+}
+
 // Filter out the app's base path segment (e.g., "recipes" when embedded at /recipes)
 function getContentParts(pathname: string): string[] {
   const parts = pathname.split('/').filter(i => i);
@@ -41,22 +47,33 @@ function getContentParts(pathname: string): string[] {
   return parts;
 }
 
+// Build URL with correct prefix based on embedded status
+function buildUrl(contentParts: string[], index: number, embedded: boolean): string {
+  const path = `/${contentParts.slice(0, index + 1).join('/')}`;
+  return embedded ? `/recipes${path}` : path;
+}
+
+function getHomeUrl(embedded: boolean): string {
+  return embedded ? '/recipes' : '/';
+}
+
 function FullBreadcrumbs() {
   const location = useLocation();
   const params = useParams();
   const { state } = useContext(Context);
   const partMap = getPartMap(params, state)
 
+  const embedded = isEmbedded(location.pathname);
   const contentParts = getContentParts(location.pathname);
 
   const items: ItemType[] = [
     {
       key: 'home',
       className: 'recipes-breadcrumb',
-      title: <Link to="/">Recipes</Link>,
+      title: <Link to={getHomeUrl(embedded)}>Recipes</Link>,
     },
     ...contentParts.map((part, index) => {
-      const url = `/${contentParts.slice(0, index + 1).join('/')}`;
+      const url = buildUrl(contentParts, index, embedded);
       return {
         key: url,
         className: 'recipes-breadcrumb',
@@ -73,10 +90,11 @@ function CollapsedBreadcrumbs() {
   const params = useParams();
   const { state } = useContext(Context);
   const partMap = getPartMap(params, state)
+  const embedded = isEmbedded(location.pathname);
   const contentParts = getContentParts(location.pathname);
 
   const menuItems = contentParts.map((part, index) => {
-    const url = `/${contentParts.slice(0, index + 1).join('/')}`;
+    const url = buildUrl(contentParts, index, embedded);
     return {
       key: url,
       label: <Link to={url}>{partMap.get(part) || part} /</Link>,
@@ -87,7 +105,7 @@ function CollapsedBreadcrumbs() {
     {
       key: 'home',
       className: 'recipes-breadcrumb',
-      title: <Link to="/">Recipes</Link>,
+      title: <Link to={getHomeUrl(embedded)}>Recipes</Link>,
     },
     {
       key: 'ellipsis',

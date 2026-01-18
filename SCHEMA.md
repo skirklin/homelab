@@ -60,8 +60,8 @@ Individual recipes using [schema.org Recipe](https://schema.org/Recipe) format.
 | `data` | Recipe | Schema.org Recipe object |
 | `owners` | string[] | User IDs with access |
 | `visibility` | string | Recipe-level visibility override |
-| `enrichmentStatus` | string? | `"needed"`, `"pending"`, `"skipped"` |
-| `pendingEnrichment` | object? | AI-generated suggestions awaiting review |
+| `enrichmentStatus` | string? | `"needed"`, `"pending"`, `"done"`, `"skipped"` |
+| `pendingChanges` | object? | AI-generated suggestions awaiting review (enrichment or modification) |
 | `created` | Timestamp | Creation time |
 | `updated` | Timestamp | Last update time |
 

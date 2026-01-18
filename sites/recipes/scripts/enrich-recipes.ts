@@ -57,7 +57,7 @@ interface RecipeDoc {
   data: Recipe;
   owners: string[];
   visibility: string;
-  pendingEnrichment?: PendingEnrichment;
+  pendingChanges?: PendingChanges;
   lastEnrichedAt?: Timestamp;
   updated?: Timestamp;
 }
@@ -68,9 +68,17 @@ export interface EnrichmentResult {
   reasoning: string;
 }
 
-interface PendingEnrichment {
-  description: string;
-  suggestedTags: string[];
+interface PendingChanges {
+  data?: {
+    name?: string;
+    description?: string;
+    recipeIngredient?: string[];
+    recipeInstructions?: Array<{ text: string }>;
+    recipeCategory?: string[];
+  };
+  stepIngredients?: Record<string, string[]>;
+  source: 'enrichment' | 'modification';
+  prompt?: string;
   reasoning: string;
   generatedAt: Timestamp;
   model: string;
@@ -243,7 +251,7 @@ async function resolveUserFilter(userFilter: string): Promise<string> {
 async function main() {
   console.log("Recipe Enrichment Script");
   console.log("========================");
-  console.log("This script ONLY adds a 'pendingEnrichment' field.");
+  console.log("This script ONLY adds a 'pendingChanges' field.");
   console.log("It never modifies existing recipe data.\n");
 
   const db = initFirebase();
@@ -304,9 +312,9 @@ async function main() {
 
       console.log(`\n  📝 ${recipeName}`);
 
-      // Skip if already has pending enrichment
-      if (recipeData.pendingEnrichment) {
-        console.log("     ⏭️  Already has pending enrichment, skipping");
+      // Skip if already has pending changes
+      if (recipeData.pendingChanges) {
+        console.log("     ⏭️  Already has pending changes, skipping");
         skippedCount++;
         continue;
       }
@@ -340,26 +348,29 @@ async function main() {
         console.log(`     🏷️  Tags: ${enrichment.suggestedTags.join(", ")}`);
         console.log(`     💭 Reasoning: ${enrichment.reasoning}`);
 
-        // Create pending enrichment object
-        const pendingEnrichment: PendingEnrichment = {
-          description: enrichment.description,
-          suggestedTags: enrichment.suggestedTags.map(t => t.toLowerCase()),
+        // Create pending changes object
+        const pendingChanges: PendingChanges = {
+          data: {
+            description: enrichment.description,
+            recipeCategory: enrichment.suggestedTags.map(t => t.toLowerCase()),
+          },
+          source: 'enrichment',
           reasoning: enrichment.reasoning,
           generatedAt: Timestamp.now(),
           model: CLAUDE_MODEL,
         };
 
         if (DRY_RUN) {
-          console.log("     🔒 Would write pendingEnrichment (dry run)");
+          console.log("     🔒 Would write pendingChanges (dry run)");
         } else {
-          // Set pendingEnrichment and lastEnrichedAt - never touch other fields
+          // Set pendingChanges and lastEnrichedAt - never touch other fields
           await db
             .collection("boxes")
             .doc(boxDoc.id)
             .collection("recipes")
             .doc(recipeDoc.id)
-            .set({ pendingEnrichment, lastEnrichedAt: Timestamp.now() }, { merge: true });
-          console.log("     ✅ Added pendingEnrichment");
+            .set({ pendingChanges, lastEnrichedAt: Timestamp.now() }, { merge: true });
+          console.log("     ✅ Added pendingChanges");
         }
         enrichedCount++;
         processedCount++;
