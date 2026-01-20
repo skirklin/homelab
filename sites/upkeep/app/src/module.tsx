@@ -41,3 +41,4 @@ export function UpkeepModule() {
 }
 
 export { UpkeepProvider, useUpkeepContext } from "./upkeep-context";
+export { isNotificationSupported, requestNotificationPermission, getFcmToken } from "./messaging";

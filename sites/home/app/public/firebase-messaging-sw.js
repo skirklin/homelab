@@ -1,4 +1,4 @@
-// Firebase Cloud Messaging Service Worker for Life Tracker
+// Firebase Cloud Messaging Service Worker for Home App (Life Tracker + Upkeep)
 importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js');
 
@@ -16,12 +16,26 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Background message received:', payload);
 
+  // Check if this is an upkeep notification (data-only message)
+  if (payload.data?.type === 'household_task_due') {
+    const notificationTitle = payload.data.title || 'Household Tasks';
+    const notificationOptions = {
+      body: payload.data.body || 'You have tasks that need attention',
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      data: { ...payload.data, notificationType: 'upkeep' },
+      tag: 'upkeep-tasks',
+    };
+    return self.registration.showNotification(notificationTitle, notificationOptions);
+  }
+
+  // Default: Life tracker notification
   const notificationTitle = payload.notification?.title || 'Life Tracker';
   const notificationOptions = {
     body: payload.notification?.body || 'Time for a quick check-in!',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
-    data: payload.data,
+    data: { ...payload.data, notificationType: 'life' },
     requireInteraction: true,
     actions: [
       { action: 'respond', title: 'Respond' },
@@ -41,15 +55,25 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  // Open the life app with sample parameter
-  const urlToOpen = new URL('/life?sample=true', self.location.origin).href;
+  // Determine URL based on notification type
+  const notificationType = event.notification.data?.notificationType;
+  let urlToOpen;
+
+  if (notificationType === 'upkeep') {
+    urlToOpen = new URL('/upkeep', self.location.origin).href;
+  } else {
+    // Default to life tracker
+    urlToOpen = new URL('/life?sample=true', self.location.origin).href;
+  }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // If app is already open, focus it
       for (const client of clientList) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.postMessage({ type: 'SAMPLE_REQUESTED' });
+          if (notificationType === 'life') {
+            client.postMessage({ type: 'SAMPLE_REQUESTED' });
+          }
           return client.focus();
         }
       }

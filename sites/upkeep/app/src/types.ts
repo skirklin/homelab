@@ -88,16 +88,21 @@ export interface TaskListStore {
   updated: Timestamp;
 }
 
+// Notification mode: "all" = all tasks, "subscribed" = individual subscriptions, "off" = muted
+export type NotificationMode = "all" | "subscribed" | "off";
+
 // User profile for tracking accessible lists via slugs
 // Uses 'householdSlugs' to avoid conflict with groceries app's 'slugs' field
 export interface UserProfile {
   householdSlugs: Record<string, string>;
   fcmTokens?: string[]; // FCM tokens for push notifications
+  upkeepNotificationMode?: NotificationMode; // Notification preference
 }
 
 export interface UserProfileStore {
   householdSlugs: Record<string, string>;
   fcmTokens?: string[];
+  upkeepNotificationMode?: NotificationMode;
 }
 
 // Urgency levels for Kanban columns

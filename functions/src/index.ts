@@ -691,19 +691,18 @@ function calculateDueDate(lastCompleted: Date, frequency: TaskFrequency): Date {
   return due;
 }
 
-function isDateToday(date: Date): boolean {
+function isDueTodayOrEarlier(date: Date): boolean {
   const today = new Date();
-  return (
-    date.getFullYear() === today.getFullYear() &&
-    date.getMonth() === today.getMonth() &&
-    date.getDate() === today.getDate()
-  );
+  // Set both to start of day for comparison
+  const dueDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return dueDay <= todayDay;
 }
 
-// Run every 5 minutes for testing (change back to "0 8 * * *" for production)
+// Run once daily at 8 AM Pacific to notify users of tasks due today
 export const sendHouseholdTaskNotifications = onSchedule(
   {
-    schedule: "*/5 * * * *", // Every 5 minutes for testing
+    schedule: "0 8 * * *", // Daily at 8 AM
     timeZone: "America/Los_Angeles",
   },
   async () => {
@@ -719,50 +718,78 @@ export const sendHouseholdTaskNotifications = onSchedule(
       return;
     }
 
-    // Group notifications by user
-    const userNotifications: Map<string, { taskName: string; listId: string }[]> = new Map();
+    // Collect all due tasks grouped by list, with individual subscriptions
+    const dueTasksByList: Map<string, { taskName: string; notifyUsers: string[] }[]> = new Map();
 
     for (const taskDoc of tasksSnapshot.docs) {
       const task = taskDoc.data() as TaskData;
 
-      // Skip if no one wants notifications for this task
-      if (!task.notifyUsers || task.notifyUsers.length === 0) {
-        continue;
-      }
-
-      // Calculate if task is due today
-      let isDueToday = false;
+      // Calculate if task is due (today or overdue)
+      let isDue = false;
 
       if (!task.lastCompleted) {
-        // Never completed = overdue, should have been notified already
-        // But notify if someone just subscribed
-        isDueToday = true;
+        isDue = true; // Never completed = overdue
       } else {
         const dueDate = calculateDueDate(task.lastCompleted.toDate(), task.frequency);
-        isDueToday = isDateToday(dueDate);
+        isDue = isDueTodayOrEarlier(dueDate);
       }
 
-      if (isDueToday) {
-        // Extract list ID from path: taskLists/{listId}/tasks/{taskId}
+      if (isDue) {
         const listId = taskDoc.ref.parent.parent?.id || "unknown";
+        if (!dueTasksByList.has(listId)) {
+          dueTasksByList.set(listId, []);
+        }
+        dueTasksByList.get(listId)!.push({
+          taskName: task.name,
+          notifyUsers: task.notifyUsers || [],
+        });
+      }
+    }
 
+    console.log(`Found ${dueTasksByList.size} lists with due tasks`);
+
+    // Get list ownership for notifyAll users
+    const listOwners: Map<string, string[]> = new Map();
+    for (const listId of dueTasksByList.keys()) {
+      const listDoc = await db.doc(`taskLists/${listId}`).get();
+      if (listDoc.exists) {
+        listOwners.set(listId, listDoc.data()?.owners || []);
+      }
+    }
+
+    // Build individual subscription map (user -> tasks they explicitly subscribed to)
+    const individualSubscriptions: Map<string, { taskName: string; listId: string }[]> = new Map();
+
+    for (const [listId, tasks] of dueTasksByList) {
+      for (const task of tasks) {
         for (const userId of task.notifyUsers) {
-          if (!userNotifications.has(userId)) {
-            userNotifications.set(userId, []);
+          if (!individualSubscriptions.has(userId)) {
+            individualSubscriptions.set(userId, []);
           }
-          userNotifications.get(userId)!.push({ taskName: task.name, listId });
+          individualSubscriptions.get(userId)!.push({ taskName: task.taskName, listId });
         }
       }
     }
 
-    console.log(`Found ${userNotifications.size} users with due tasks`);
+    // Collect all potential users to check (subscribers + list owners)
+    const potentialUsers = new Set<string>();
+    for (const userId of individualSubscriptions.keys()) {
+      potentialUsers.add(userId);
+    }
+    for (const owners of listOwners.values()) {
+      for (const ownerId of owners) {
+        potentialUsers.add(ownerId);
+      }
+    }
+
+    console.log(`Found ${potentialUsers.size} potential users to check`);
 
     // Get today's date string for tracking
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 
-    // Send notifications to each user
-    for (const [userId, tasks] of userNotifications) {
-      // Get user's FCM tokens and notification tracking
+    // Send notifications to each potential user
+    for (const userId of potentialUsers) {
+      // Get user's FCM tokens and notification preferences
       const userDoc = await db.doc(`users/${userId}`).get();
       const userData = userDoc.data();
 
@@ -771,10 +798,40 @@ export const sendHouseholdTaskNotifications = onSchedule(
         continue;
       }
 
+      // Check notification mode: "all", "subscribed" (default), or "off"
+      const notificationMode = userData.upkeepNotificationMode || "subscribed";
+
+      if (notificationMode === "off") {
+        console.log(`User ${userId} has notifications off, skipping`);
+        continue;
+      }
+
       // Check if already notified today
       const lastTaskNotification = userData.lastTaskNotification as string | undefined;
       if (lastTaskNotification === today) {
         console.log(`User ${userId} already notified today, skipping`);
+        continue;
+      }
+
+      // Determine which tasks to notify about based on mode
+      let tasks: { taskName: string; listId: string }[] = [];
+
+      if (notificationMode === "all") {
+        // Notify for all tasks in lists the user owns
+        for (const [listId, listTasks] of dueTasksByList) {
+          const owners = listOwners.get(listId) || [];
+          if (owners.includes(userId)) {
+            for (const task of listTasks) {
+              tasks.push({ taskName: task.taskName, listId });
+            }
+          }
+        }
+      } else {
+        // "subscribed" mode: only notify for individually subscribed tasks
+        tasks = individualSubscriptions.get(userId) || [];
+      }
+
+      if (tasks.length === 0) {
         continue;
       }
 

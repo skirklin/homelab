@@ -1,13 +1,26 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "antd";
-import { ShareAltOutlined, LogoutOutlined, PlusOutlined } from "@ant-design/icons";
+import { Button, Popover, Segmented, message } from "antd";
+import { ShareAltOutlined, LogoutOutlined, PlusOutlined, BellOutlined, BellFilled } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
-import { AppHeader, ShareModal } from "@kirkl/shared";
+import { AppHeader, ShareModal, useAuth } from "@kirkl/shared";
 import { auth } from "../backend";
 import { useUpkeepContext } from "../upkeep-context";
-import { getCurrentListId } from "../firestore";
+import { getCurrentListId, getNotificationMode, setNotificationMode } from "../firestore";
 import { appStorage, StorageKeys } from "../storage";
+import { isNotificationSupported, requestNotificationPermission, getFcmToken } from "../messaging";
+import styled from "styled-components";
+import type { NotificationMode } from "../types";
+
+const NotificationPopover = styled.div`
+  padding: var(--space-xs);
+`;
+
+const PopoverTitle = styled.div`
+  font-weight: 500;
+  margin-bottom: var(--space-sm);
+  color: var(--color-text);
+`;
 
 interface HeaderProps {
   onAddTask: () => void;
@@ -17,16 +30,57 @@ interface HeaderProps {
 
 export function Header({ onAddTask, embedded = false }: HeaderProps) {
   const { state } = useUpkeepContext();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [notificationMode, setNotificationModeState] = useState<NotificationMode>("subscribed");
+  const [loadingSettings, setLoadingSettings] = useState(true);
 
   const listId = getCurrentListId();
   const shareUrl = `${window.location.origin}/join/${listId}`;
   const listName = state.list?.name || "Tasks";
 
+  // Load notification settings
+  useEffect(() => {
+    if (user) {
+      getNotificationMode(user.uid).then((mode) => {
+        setNotificationModeState(mode);
+        setLoadingSettings(false);
+      });
+    }
+  }, [user]);
+
   const handleSignOut = async () => {
     await signOut(auth);
     navigate("..");
+  };
+
+  const handleModeChange = async (mode: NotificationMode) => {
+    if (!user) return;
+
+    // If enabling notifications, ensure we have permission and token
+    if (mode !== "off") {
+      if (!isNotificationSupported()) {
+        message.warning("Notifications are not supported in this browser");
+        return;
+      }
+      const permission = await requestNotificationPermission();
+      if (permission !== "granted") {
+        message.warning("Please allow notifications to receive reminders");
+        return;
+      }
+      await getFcmToken(user.uid);
+    }
+
+    setNotificationModeState(mode);
+    await setNotificationMode(user.uid, mode);
+
+    const messages: Record<NotificationMode, string> = {
+      all: "You'll be notified for all tasks",
+      subscribed: "You'll be notified for subscribed tasks only",
+      off: "Notifications paused",
+    };
+    message.success(messages[mode]);
   };
 
   // When embedded, no dropdown menu - use inline buttons for actions
@@ -47,14 +101,44 @@ export function Header({ onAddTask, embedded = false }: HeaderProps) {
     },
   ];
 
-  // Share button as inline action
-  const desktopActions = (
-    <Button icon={<ShareAltOutlined />} onClick={() => setShareModalOpen(true)} />
+  // Notification settings popover content
+  const notificationContent = (
+    <NotificationPopover>
+      <PopoverTitle>Notifications</PopoverTitle>
+      <Segmented
+        value={notificationMode}
+        onChange={(value) => handleModeChange(value as NotificationMode)}
+        options={[
+          { label: "All", value: "all" },
+          { label: "Subscribed", value: "subscribed" },
+          { label: "Off", value: "off" },
+        ]}
+        disabled={loadingSettings}
+      />
+    </NotificationPopover>
   );
 
-  // On mobile when embedded, show share button since there's no dropdown
+  // Bell icon varies based on mode
+  const bellIcon = notificationMode === "off" ? <BellOutlined /> : <BellFilled />;
+
+  // Share and notifications buttons as inline actions
+  const desktopActions = (
+    <>
+      <Popover content={notificationContent} trigger="click" placement="bottomRight">
+        <Button icon={bellIcon} />
+      </Popover>
+      <Button icon={<ShareAltOutlined />} onClick={() => setShareModalOpen(true)} />
+    </>
+  );
+
+  // On mobile when embedded, show share and notification buttons
   const mobileActions = embedded ? (
-    <Button type="text" size="small" icon={<ShareAltOutlined />} onClick={() => setShareModalOpen(true)} />
+    <>
+      <Popover content={notificationContent} trigger="click" placement="bottomRight">
+        <Button type="text" size="small" icon={bellIcon} />
+      </Popover>
+      <Button type="text" size="small" icon={<ShareAltOutlined />} onClick={() => setShareModalOpen(true)} />
+    </>
   ) : undefined;
 
   return (

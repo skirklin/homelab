@@ -268,3 +268,20 @@ export async function removeFcmToken(userId: string, token: string) {
   const userRef = getUserRef(userId);
   await updateDoc(userRef, { fcmTokens: arrayRemove(token) });
 }
+
+import type { NotificationMode } from "./types";
+
+export async function getNotificationMode(userId: string): Promise<NotificationMode> {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+  if (userSnap.exists()) {
+    const data = userSnap.data();
+    return data.upkeepNotificationMode || "subscribed";
+  }
+  return "subscribed";
+}
+
+export async function setNotificationMode(userId: string, mode: NotificationMode) {
+  const userRef = getUserRef(userId);
+  await updateDoc(userRef, { upkeepNotificationMode: mode });
+}

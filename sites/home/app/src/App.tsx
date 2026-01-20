@@ -1,10 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
+import { useEffect } from "react";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
 import { GroceriesProvider, GroceriesRoutes } from "@kirkl/groceries";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
-import { UpkeepProvider, UpkeepRoutes } from "@kirkl/upkeep";
+import { UpkeepProvider, UpkeepRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
@@ -48,6 +49,17 @@ function AuthenticatedRoutes() {
 
 function ProtectedRoute() {
   const { user, loading } = useAuth();
+
+  // Initialize upkeep notifications when user is authenticated
+  useEffect(() => {
+    if (user && isNotificationSupported()) {
+      requestNotificationPermission().then((permission) => {
+        if (permission === "granted") {
+          getFcmToken(user.uid);
+        }
+      });
+    }
+  }, [user]);
 
   if (loading) {
     return null;
