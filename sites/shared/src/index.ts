@@ -4,8 +4,28 @@ export { initializeBackend, getBackend, app, auth, db } from "./backend";
 // Auth
 export { AuthProvider, useAuth, AuthContext } from "./auth";
 
+// Storage
+export { createAppStorage, migrateStorageKey } from "./appStorage";
+export type { AppStorage } from "./appStorage";
+
+// List Management
+export { ListPicker, JoinList } from "./ListManagement";
+export type {
+  ListPickerConfig,
+  ListPickerProps,
+  ListOperations,
+  JoinListConfig,
+  JoinListProps,
+} from "./ListManagement";
+
 // Shared types
-export type { Event, EventStore } from "./types";
+export type {
+  Event,
+  EventStore,
+  UserProfile,
+  UserProfileStore,
+  NotificationMode,
+} from "./types";
 export { eventFromStore, eventToStore } from "./types";
 
 // UI Components

@@ -1,319 +1,36 @@
-import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Input, List, Modal, Spin } from "antd";
-import { PlusOutlined, LinkOutlined, RightOutlined } from "@ant-design/icons";
-import styled from "styled-components";
+/**
+ * List picker for upkeep app - uses shared ListPicker component.
+ */
+
+import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { useAuth } from "@kirkl/shared";
 import { createList, setUserSlug, getListById } from "../firestore";
 import { appStorage, StorageKeys } from "../storage";
 
-const Container = styled.div`
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-`;
-
-const Header = styled.header`
-  padding: var(--space-md);
-  background: var(--color-primary);
-  color: white;
-`;
-
-const Title = styled.h1`
-  margin: 0;
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-`;
-
-const Content = styled.main`
-  flex: 1;
-  padding: var(--space-md);
-  max-width: 600px;
-  margin: 0 auto;
-  width: 100%;
-`;
-
-const Actions = styled.div`
-  display: flex;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-lg);
-`;
-
-const ListItemRow = styled(List.Item)`
-  cursor: pointer;
-  padding: var(--space-md) !important;
-
-  &:hover {
-    background: var(--color-bg-muted);
-  }
-`;
-
-const ListItemContent = styled.div`
-  display: flex;
-  align-items: center;
-  width: 100%;
-`;
-
-const ListName = styled.span`
-  font-weight: 500;
-  flex: 1;
-`;
-
-const GoIcon = styled(RightOutlined)`
-  color: var(--color-text-muted);
-`;
-
-const EmptyState = styled.div`
-  text-align: center;
-  padding: var(--space-2xl);
-  color: var(--color-text-secondary);
-`;
-
-const ModalForm = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-`;
-
-const FormField = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-`;
-
-const Label = styled.label`
-  font-weight: 500;
-  color: var(--color-text-secondary);
-`;
-
-interface ListInfo {
-  slug: string;
-  listId: string;
-  name: string | null;  // null while loading
-}
+const config: ListPickerConfig = {
+  title: "Upkeep",
+  newListLabel: "New Task List",
+  newListPlaceholder: "Home Maintenance",
+  createModalTitle: "Create New Task List",
+  emptyMessage: ["No task lists yet.", "Create a new list to start tracking your tasks!"],
+  lastListKey: StorageKeys.LAST_LIST,
+};
 
 export function ListPicker() {
   const { state } = useUpkeepContext();
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [lists, setLists] = useState<ListInfo[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  // Modal state
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [sharedListId, setSharedListId] = useState("");
-  const [sharedListSlug, setSharedListSlug] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  // Auto-navigate to last-used list only if one is saved
-  // Skip if ?pick=true is in URL (user explicitly wants to see the list picker)
-  useEffect(() => {
-    const wantsPicker = searchParams.get("pick") === "true";
-    if (wantsPicker) return;
-
-    const slugs = Object.keys(state.userSlugs);
-    const lastUsed = appStorage.get<string | null>(StorageKeys.LAST_LIST, null);
-
-    // Only auto-navigate if we have a saved last-used list that still exists
-    if (lastUsed && slugs.includes(lastUsed)) {
-      navigate(lastUsed, { replace: true });
-    }
-  }, [state.userSlugs, navigate, searchParams]);
-
-  // Load list names for each slug
-  useEffect(() => {
-    async function loadListNames() {
-      const slugEntries = Object.entries(state.userSlugs);
-      const listInfos: ListInfo[] = slugEntries.map(([slug, listId]) => ({
-        slug,
-        listId,
-        name: null,
-      }));
-      setLists(listInfos);
-      setLoading(false);
-
-      // Load names in parallel
-      const namesPromises = slugEntries.map(async ([slug, listId]) => {
-        const listData = await getListById(listId);
-        return { slug, name: listData?.name || "(deleted)" };
-      });
-
-      const names = await Promise.all(namesPromises);
-      setLists(prev => prev.map(item => {
-        const found = names.find(n => n.slug === item.slug);
-        return found ? { ...item, name: found.name } : item;
-      }));
-    }
-
-    loadListNames();
-  }, [state.userSlugs]);
-
-  const handleCreateList = async () => {
-    if (!newName.trim() || !user) return;
-
-    const name = newName.trim();
-    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-
-    // Check if slug already exists
-    if (state.userSlugs[slug]) {
-      alert(`You already have a list called "${slug}"`);
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await createList(name, slug, user.uid);
-      setCreateModalOpen(false);
-      setNewName("");
-      navigate(slug);
-    } catch (error) {
-      console.error("Failed to create list:", error);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleAddSharedList = async () => {
-    if (!sharedListSlug.trim() || !sharedListId.trim() || !user) return;
-
-    const slug = sharedListSlug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-
-    // Check if slug already exists
-    if (state.userSlugs[slug]) {
-      alert(`You already have a list called "${slug}"`);
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      // Verify the list exists
-      const listData = await getListById(sharedListId.trim());
-      if (!listData) {
-        alert("List not found. Check the ID and try again.");
-        setSubmitting(false);
-        return;
-      }
-
-      await setUserSlug(user.uid, slug, sharedListId.trim());
-      setAddModalOpen(false);
-      setSharedListSlug("");
-      setSharedListId("");
-      navigate(slug);
-    } catch (error) {
-      console.error("Failed to add shared list:", error);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleSelectList = (slug: string) => {
-    navigate(slug);
+  const operations: ListOperations = {
+    getUserSlugs: () => state.userSlugs,
+    createList,
+    setUserSlug,
+    getListById,
   };
 
   return (
-    <Container>
-      <Header>
-        <Title>Upkeep</Title>
-      </Header>
-      <Content>
-        <Actions>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setCreateModalOpen(true)}
-          >
-            New Task List
-          </Button>
-          <Button
-            icon={<LinkOutlined />}
-            onClick={() => setAddModalOpen(true)}
-          >
-            Add Shared List
-          </Button>
-        </Actions>
-
-        {loading ? (
-          <EmptyState><Spin /></EmptyState>
-        ) : lists.length === 0 ? (
-          <EmptyState>
-            <p>No task lists yet.</p>
-            <p>Create a new list to start tracking your up tasks!</p>
-          </EmptyState>
-        ) : (
-          <List
-            bordered
-            dataSource={lists}
-            renderItem={(item) => (
-              <ListItemRow onClick={() => handleSelectList(item.slug)}>
-                <ListItemContent>
-                  <ListName>{item.name ?? "..."}</ListName>
-                  <GoIcon />
-                </ListItemContent>
-              </ListItemRow>
-            )}
-          />
-        )}
-      </Content>
-
-      {/* Create New List Modal */}
-      <Modal
-        title="Create New Task List"
-        open={createModalOpen}
-        onOk={handleCreateList}
-        onCancel={() => {
-          setCreateModalOpen(false);
-          setNewName("");
-        }}
-        confirmLoading={submitting}
-        okText="Create"
-        okButtonProps={{ disabled: !newName.trim() }}
-      >
-        <Input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="Home Maintenance"
-          onPressEnter={handleCreateList}
-          autoFocus
-        />
-      </Modal>
-
-      {/* Add Shared List Modal */}
-      <Modal
-        title="Add Shared List"
-        open={addModalOpen}
-        onOk={handleAddSharedList}
-        onCancel={() => {
-          setAddModalOpen(false);
-          setSharedListSlug("");
-          setSharedListId("");
-        }}
-        confirmLoading={submitting}
-        okText="Add"
-        okButtonProps={{ disabled: !sharedListSlug.trim() || !sharedListId.trim() }}
-      >
-        <ModalForm>
-          <FormField>
-            <Label>List ID (from the person sharing)</Label>
-            <Input
-              value={sharedListId}
-              onChange={(e) => setSharedListId(e.target.value)}
-              placeholder="abc123xyz"
-            />
-          </FormField>
-          <FormField>
-            <Label>Name for this list</Label>
-            <Input
-              value={sharedListSlug}
-              onChange={(e) => setSharedListSlug(e.target.value)}
-              placeholder="home"
-            />
-          </FormField>
-        </ModalForm>
-      </Modal>
-    </Container>
+    <SharedListPicker
+      config={config}
+      operations={operations}
+      storage={appStorage}
+    />
   );
 }

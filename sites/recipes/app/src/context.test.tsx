@@ -47,9 +47,9 @@ describe('recipeBoxReducer', () => {
       const state = initState();
       expect(state.boxes.size).toBe(0);
       expect(state.users.size).toBe(0);
-      expect(state.authUser).toBeNull();
       expect(state.writeable).toBe(true);
       expect(state.loading).toBe(0);
+      expect(state.subscriptionsReady).toBe(false);
     });
   });
 
@@ -70,34 +70,28 @@ describe('recipeBoxReducer', () => {
     });
   });
 
-  describe('SET_AUTH_USER', () => {
-    it('sets auth user and resets state', () => {
+  describe('RESET_STATE', () => {
+    it('resets state to initial values', () => {
       const state = createStateWithBox();
-      const authUser = { uid: "user2" } as any;
 
-      const newState = recipeBoxReducer(state, { type: "SET_AUTH_USER", authUser });
+      const newState = recipeBoxReducer(state, { type: "RESET_STATE" });
 
-      expect(newState.authUser).toBe(authUser);
-      expect(newState.boxes.size).toBe(0); // reset
-    });
-
-    it('returns same state if authUser unchanged', () => {
-      const authUser = { uid: "user1" } as any;
-      const state = { ...initState(), authUser };
-
-      const newState = recipeBoxReducer(state, { type: "SET_AUTH_USER", authUser });
-
-      expect(newState).toBe(state);
-    });
-
-    it('handles null authUser (logout)', () => {
-      const state = createStateWithBox();
-      state.authUser = { uid: "user1" } as any;
-
-      const newState = recipeBoxReducer(state, { type: "SET_AUTH_USER", authUser: null });
-
-      expect(newState.authUser).toBeNull();
       expect(newState.boxes.size).toBe(0);
+      expect(newState.users.size).toBe(0);
+      expect(newState.writeable).toBe(true);
+      expect(newState.loading).toBe(0);
+      expect(newState.subscriptionsReady).toBe(false);
+    });
+
+    it('clears all boxes and users on reset', () => {
+      const state = createStateWithBox();
+      expect(state.boxes.size).toBe(1);
+      expect(state.users.size).toBe(1);
+
+      const newState = recipeBoxReducer(state, { type: "RESET_STATE" });
+
+      expect(newState.boxes.size).toBe(0);
+      expect(newState.users.size).toBe(0);
     });
   });
 

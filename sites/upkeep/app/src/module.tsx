@@ -8,10 +8,8 @@ import { UpkeepProvider } from "./upkeep-context";
 import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
-import { appStorage } from "./storage";
-
-// Migrate legacy localStorage keys on startup
-appStorage.migrateFromLegacy();
+// Storage is imported to trigger legacy key migration on startup
+import "./storage";
 
 interface UpkeepRoutesProps {
   /** When true, hides sign-out and other account actions (handled by parent shell) */

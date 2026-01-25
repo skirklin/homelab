@@ -116,11 +116,6 @@ export interface ShoppingTripStore {
   items: ShoppingTripItem[];
 }
 
-// User profile for tracking accessible lists via slugs
-export interface UserProfile {
-  slugs: Record<string, string>;  // { "groceries": "listId123", "rei": "listId456" }
-}
-
-export interface UserProfileStore {
-  slugs: Record<string, string>;
-}
+// User profile - re-exported from shared
+// Groceries uses the 'slugs' field for list mapping
+export type { UserProfile, UserProfileStore } from "@kirkl/shared";

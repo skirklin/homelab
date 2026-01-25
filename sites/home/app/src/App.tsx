@@ -9,6 +9,7 @@ import { UpkeepProvider, UpkeepRoutes, isNotificationSupported, requestNotificat
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
+import { Settings } from "./shared/Settings";
 
 // Initialize shared backend
 initializeBackend("home.kirkl.in");
@@ -37,6 +38,7 @@ function AuthenticatedRoutes() {
       <Route element={<Shell />}>
         <Route path="/" element={<RedirectToLastApp />} />
         <Route path="/timeline" element={<Timeline />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/life/*" element={<LifeRoutes embedded />} />
         <Route path="/groceries/*" element={<GroceriesRoutes embedded />} />
         <Route path="/recipes/*" element={<RecipesRoutes embedded />} />

@@ -347,7 +347,7 @@ describe('state accessor functions', () => {
   describe('getAppUserFromState', () => {
     it('returns current auth user from state', () => {
       const state = createTestState();
-      const user = getAppUserFromState(state);
+      const user = getAppUserFromState(state, state.authUser?.uid);
       expect(user).toBeDefined();
       expect(user?.id).toBe("user1");
     });
@@ -355,7 +355,7 @@ describe('state accessor functions', () => {
     it('returns undefined when not authenticated', () => {
       const state = createTestState();
       state.authUser = null;
-      expect(getAppUserFromState(state)).toBeUndefined();
+      expect(getAppUserFromState(state, state.authUser?.uid)).toBeUndefined();
     });
   });
 });

@@ -1,4 +1,5 @@
-// Firebase Cloud Messaging Service Worker for Home App (Life Tracker + Upkeep)
+// Firebase Cloud Messaging Service Worker for Home App
+// Handles notifications for all embedded apps: Life Tracker, Upkeep, etc.
 importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js');
 
@@ -12,67 +13,111 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+const DEBUG = false;
+
 // Handle background messages
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Background message received:', payload);
+  if (DEBUG) console.log('[firebase-messaging-sw.js] Background message received:', payload);
 
-  // Check if this is an upkeep notification (data-only message)
-  if (payload.data?.type === 'household_task_due') {
-    const notificationTitle = payload.data.title || 'Household Tasks';
+  const data = payload.data || {};
+
+  // Upkeep notifications
+  if (data.type === 'household_task_due') {
     const notificationOptions = {
-      body: payload.data.body || 'You have tasks that need attention',
+      body: data.body || 'You have tasks that need attention',
       icon: '/favicon.svg',
       badge: '/favicon.svg',
-      data: { ...payload.data, notificationType: 'upkeep' },
+      data: { ...data, notificationType: 'upkeep' },
       tag: 'upkeep-tasks',
     };
-    return self.registration.showNotification(notificationTitle, notificationOptions);
+    return self.registration.showNotification(
+      data.title || 'Household Tasks',
+      notificationOptions
+    );
   }
 
-  // Default: Life tracker notification
-  const notificationTitle = payload.notification?.title || 'Life Tracker';
+  // Life tracker notifications
+  if (data.type === 'life_tracker_sample') {
+    // Build actions - use quick rating buttons if available
+    let actions;
+    if (data.quickRatingId && data.quickRatingMax) {
+      const max = parseInt(data.quickRatingMax, 10);
+      actions = [];
+      for (let i = 1; i <= Math.min(max, 5); i++) {
+        actions.push({ action: `rating:${data.quickRatingId}:${i}`, title: String(i) });
+      }
+    } else {
+      actions = [
+        { action: 'respond', title: 'Respond' },
+        { action: 'dismiss', title: 'Later' },
+      ];
+    }
+
+    const notificationOptions = {
+      body: data.body || 'Time for a quick check-in!',
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      data: { ...data, notificationType: 'life' },
+      requireInteraction: true,
+      actions,
+    };
+    return self.registration.showNotification(
+      data.title || 'Life Tracker',
+      notificationOptions
+    );
+  }
+
+  // Default notification (legacy format)
+  const notificationTitle = payload.notification?.title || 'Notification';
   const notificationOptions = {
-    body: payload.notification?.body || 'Time for a quick check-in!',
+    body: payload.notification?.body || '',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
-    data: { ...payload.data, notificationType: 'life' },
-    requireInteraction: true,
-    actions: [
-      { action: 'respond', title: 'Respond' },
-      { action: 'dismiss', title: 'Later' },
-    ],
+    data: { ...data, notificationType: 'unknown' },
   };
-
   return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
 // Handle notification click
 self.addEventListener('notificationclick', (event) => {
-  console.log('[firebase-messaging-sw.js] Notification clicked:', event);
+  if (DEBUG) console.log('[firebase-messaging-sw.js] Notification clicked:', event);
   event.notification.close();
 
   if (event.action === 'dismiss') {
     return;
   }
 
-  // Determine URL based on notification type
   const notificationType = event.notification.data?.notificationType;
   let urlToOpen;
+  let messageData = null;
 
-  if (notificationType === 'upkeep') {
+  // Handle quick rating action from life tracker (format: "rating:questionId:value")
+  if (event.action && event.action.startsWith('rating:')) {
+    const [, questionId, value] = event.action.split(':');
+    urlToOpen = new URL(`/life?quickResponse=${questionId}:${value}`, self.location.origin).href;
+    messageData = { type: 'QUICK_RESPONSE', questionId, value: parseInt(value, 10) };
+  }
+  // Upkeep notification
+  else if (notificationType === 'upkeep') {
     urlToOpen = new URL('/upkeep', self.location.origin).href;
-  } else {
-    // Default to life tracker
+  }
+  // Life tracker notification (default respond action)
+  else if (notificationType === 'life') {
     urlToOpen = new URL('/life?sample=true', self.location.origin).href;
+    messageData = { type: 'SAMPLE_REQUESTED' };
+  }
+  // Default
+  else {
+    urlToOpen = new URL('/', self.location.origin).href;
   }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If app is already open, focus it
+      // If app is already open, focus it and optionally send message
       for (const client of clientList) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
-          if (notificationType === 'life') {
-            client.postMessage({ type: 'SAMPLE_REQUESTED' });
+          if (messageData) {
+            client.postMessage(messageData);
           }
           return client.focus();
         }

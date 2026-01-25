@@ -10,13 +10,11 @@ import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "./messaging";
-import { appStorage } from "./storage";
+// Storage is imported to trigger legacy key migration on startup
+import "./storage";
 
 // Initialize backend for standalone mode
 initializeBackend("upkeep.kirkl.in");
-
-// Migrate legacy localStorage keys on startup
-appStorage.migrateFromLegacy();
 
 const theme = {
   token: {

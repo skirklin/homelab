@@ -1,6 +1,7 @@
-// Firebase Messaging Service Worker
-importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js');
+// Firebase Cloud Messaging Service Worker for Upkeep (standalone)
+// Note: When embedded in home app, the home app's service worker handles notifications.
+importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: "AIzaSyDnTpynPmWemzfi-AHzPEgu2TqZ0e-8UUA",
@@ -12,35 +13,37 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+const DEBUG = false;
 
 // Handle background messages (data-only messages from Cloud Function)
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Received background message:', payload);
+  if (DEBUG) console.log('[firebase-messaging-sw.js] Background message received:', payload);
 
-  // Read from data payload (not notification payload to avoid duplicates)
-  const notificationTitle = payload.data?.title || 'Upkeep Task Due';
+  const data = payload.data || {};
   const notificationOptions = {
-    body: payload.data?.body || 'A task needs your attention',
+    body: data.body || 'A task needs your attention',
     icon: '/favicon.svg',
     badge: '/favicon.svg',
-    tag: 'upkeep-daily-reminder', // Use consistent tag to prevent duplicate notifications
-    data: payload.data,
+    tag: 'upkeep-daily-reminder',
+    data: { ...data, notificationType: 'upkeep' },
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+  return self.registration.showNotification(
+    data.title || 'Upkeep Task Due',
+    notificationOptions
+  );
 });
 
 // Handle notification click
 self.addEventListener('notificationclick', (event) => {
-  console.log('[firebase-messaging-sw.js] Notification clicked:', event);
+  if (DEBUG) console.log('[firebase-messaging-sw.js] Notification clicked:', event);
   event.notification.close();
 
-  // Open the app when notification is clicked
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // If a window is already open, focus it
       for (const client of clientList) {
-        if (client.url.includes('upkeep') && 'focus' in client) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
           return client.focus();
         }
       }

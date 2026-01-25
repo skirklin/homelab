@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { AuthContext } from '@kirkl/shared';
 import { JoinList } from './JoinList';
+import { UpkeepProvider } from '../upkeep-context';
 import * as firestore from '../firestore';
-import * as context from '../context';
+import * as subscription from '../subscription';
 
 // Mock the firestore module
 vi.mock('../firestore', () => ({
@@ -12,9 +14,13 @@ vi.mock('../firestore', () => ({
   setUserSlug: vi.fn(),
 }));
 
-// Mock the context
-vi.mock('../context', () => ({
-  useAppContext: vi.fn(),
+// Mock the subscription module (used by UpkeepProvider)
+vi.mock('../subscription', () => ({
+  subscribeToUserSlugs: vi.fn(() => () => {}),
+  subscribeToList: vi.fn(() => Promise.resolve([])),
+  getTasksFromState: vi.fn(() => []),
+  getTasksByUrgency: vi.fn(() => ({ today: [], thisWeek: [], later: [] })),
+  getTasksByRoom: vi.fn(() => new Map()),
 }));
 
 // Mock antd message
@@ -38,30 +44,34 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-function renderJoinList(listId: string) {
+// Test wrapper that provides auth context and upkeep context
+function TestWrapper({ children, user = { uid: 'user123' } as any }: { children: React.ReactNode; user?: any }) {
+  return (
+    <AuthContext.Provider value={{ user, loading: false }}>
+      <UpkeepProvider>
+        {children}
+      </UpkeepProvider>
+    </AuthContext.Provider>
+  );
+}
+
+function renderJoinList(listId: string, user: any = { uid: 'user123' }) {
   return render(
-    <MemoryRouter initialEntries={[`/join/${listId}`]}>
-      <Routes>
-        <Route path="/join/:listId" element={<JoinList />} />
-      </Routes>
-    </MemoryRouter>
+    <TestWrapper user={user}>
+      <MemoryRouter initialEntries={[`/join/${listId}`]}>
+        <Routes>
+          <Route path="/join/:listId" element={<JoinList />} />
+        </Routes>
+      </MemoryRouter>
+    </TestWrapper>
   );
 }
 
 describe('JoinList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(context.useAppContext).mockReturnValue({
-      state: {
-        authUser: { uid: 'user123' } as any,
-        userSlugs: {},
-        list: null,
-        tasks: new Map(),
-        completions: [],
-        loading: false,
-      },
-      dispatch: vi.fn(),
-    });
+    // Reset to default mock that returns empty slugs
+    vi.mocked(subscription.subscribeToUserSlugs).mockImplementation(() => () => {});
   });
 
   it('shows loading spinner while fetching list', () => {
@@ -139,24 +149,22 @@ describe('JoinList', () => {
     await waitFor(() => {
       expect(firestore.setUserSlug).toHaveBeenCalledWith('user123', 'home', 'list123');
     });
-    expect(mockNavigate).toHaveBeenCalledWith('/home');
+    expect(mockNavigate).toHaveBeenCalledWith('home');
   });
 
   it('shows error when slug already exists', async () => {
     const user = userEvent.setup();
     const { message } = await import('antd');
 
-    vi.mocked(context.useAppContext).mockReturnValue({
-      state: {
-        authUser: { uid: 'user123' } as any,
-        userSlugs: { home: 'existing-list' },
-        list: null,
-        tasks: new Map(),
-        completions: [],
-        loading: false,
-      },
-      dispatch: vi.fn(),
+    // Mock the subscription to return existing slugs
+    vi.mocked(subscription.subscribeToUserSlugs).mockImplementation((_uid, dispatch) => {
+      // Simulate the subscription immediately dispatching existing slugs
+      setTimeout(() => {
+        dispatch({ type: 'SET_USER_SLUGS', slugs: { home: 'existing-list' } });
+      }, 0);
+      return () => {};
     });
+
     vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
 
     renderJoinList('list123');
@@ -168,7 +176,9 @@ describe('JoinList', () => {
     const joinButton = screen.getByRole('button', { name: 'Add to My Lists' });
     await user.click(joinButton);
 
-    expect(message.error).toHaveBeenCalledWith('You already have a list at "/home"');
+    await waitFor(() => {
+      expect(message.error).toHaveBeenCalledWith('You already have a list at "/home"');
+    });
     expect(firestore.setUserSlug).not.toHaveBeenCalled();
   });
 
@@ -195,7 +205,7 @@ describe('JoinList', () => {
     });
   });
 
-  it('navigates to home on cancel', async () => {
+  it('navigates to parent route on cancel', async () => {
     const user = userEvent.setup();
     vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
 
@@ -208,6 +218,135 @@ describe('JoinList', () => {
     const cancelButton = screen.getByRole('button', { name: 'Cancel' });
     await user.click(cancelButton);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/');
+    // Uses relative navigation to go back to parent route
+    expect(mockNavigate).toHaveBeenCalledWith('..');
+  });
+
+  // === New tests for fixes ===
+
+  describe('auth check fix', () => {
+    it('shows error when user is not authenticated (null user)', async () => {
+      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
+
+      renderJoinList('list123', null); // Pass null user (not authenticated)
+
+      await waitFor(() => {
+        expect(screen.getByText('Cannot Join List')).toBeInTheDocument();
+      });
+      expect(screen.getByText('You must be signed in to join a list')).toBeInTheDocument();
+    });
+
+    it('waits while auth is loading (undefined user)', () => {
+      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
+
+      // Render with undefined user (auth still loading)
+      render(
+        <AuthContext.Provider value={{ user: undefined as any, loading: true }}>
+          <UpkeepProvider>
+            <MemoryRouter initialEntries={['/join/list123']}>
+              <Routes>
+                <Route path="/join/:listId" element={<JoinList />} />
+              </Routes>
+            </MemoryRouter>
+          </UpkeepProvider>
+        </AuthContext.Provider>
+      );
+
+      // Should show loading state while auth is determining
+      expect(screen.getByText('Join Task List')).toBeInTheDocument();
+      expect(document.querySelector('.ant-spin')).toBeInTheDocument();
+    });
+  });
+
+  describe('slug validation fix', () => {
+    it('rejects slugs with only special characters', async () => {
+      const user = userEvent.setup();
+      const { message } = await import('antd');
+      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
+
+      renderJoinList('list123');
+
+      await waitFor(() => {
+        expect(screen.getByText('Test List')).toBeInTheDocument();
+      });
+
+      const input = screen.getByRole('textbox');
+      await user.clear(input);
+      await user.type(input, '---');
+
+      const joinButton = screen.getByRole('button', { name: 'Add to My Lists' });
+      await user.click(joinButton);
+
+      expect(message.error).toHaveBeenCalledWith('Slug must contain at least one letter or number');
+      expect(firestore.setUserSlug).not.toHaveBeenCalled();
+    });
+
+    it('rejects empty slugs', async () => {
+      const user = userEvent.setup();
+      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
+
+      renderJoinList('list123');
+
+      await waitFor(() => {
+        expect(screen.getByText('Test List')).toBeInTheDocument();
+      });
+
+      const input = screen.getByRole('textbox');
+      await user.clear(input);
+
+      const joinButton = screen.getByRole('button', { name: 'Add to My Lists' });
+      // Button should be disabled or input validation prevents submission
+      await user.click(joinButton);
+
+      // Should not call setUserSlug with empty slug
+      expect(firestore.setUserSlug).not.toHaveBeenCalled();
+    });
+
+    it('accepts valid slugs with alphanumeric characters', async () => {
+      const user = userEvent.setup();
+      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
+      vi.mocked(firestore.setUserSlug).mockResolvedValue(undefined);
+
+      renderJoinList('list123');
+
+      await waitFor(() => {
+        expect(screen.getByText('Test List')).toBeInTheDocument();
+      });
+
+      const input = screen.getByRole('textbox');
+      await user.clear(input);
+      await user.type(input, 'my-list-123');
+
+      const joinButton = screen.getByRole('button', { name: 'Add to My Lists' });
+      await user.click(joinButton);
+
+      await waitFor(() => {
+        expect(firestore.setUserSlug).toHaveBeenCalledWith('user123', 'my-list-123', 'list123');
+      });
+    });
+
+    it('strips leading and trailing dashes from slugs', async () => {
+      const user = userEvent.setup();
+      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
+      vi.mocked(firestore.setUserSlug).mockResolvedValue(undefined);
+
+      renderJoinList('list123');
+
+      await waitFor(() => {
+        expect(screen.getByText('Test List')).toBeInTheDocument();
+      });
+
+      const input = screen.getByRole('textbox');
+      await user.clear(input);
+      await user.type(input, '--my-list--');
+
+      const joinButton = screen.getByRole('button', { name: 'Add to My Lists' });
+      await user.click(joinButton);
+
+      await waitFor(() => {
+        // Should strip leading/trailing dashes
+        expect(firestore.setUserSlug).toHaveBeenCalledWith('user123', 'my-list', 'list123');
+      });
+    });
   });
 });

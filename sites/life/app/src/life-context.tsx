@@ -75,10 +75,16 @@ export function LifeProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useLife() {
-  return useContext(LifeContext);
-}
-
+/**
+ * Hook to access life tracker context.
+ * Follows the pattern used by other apps: use[App]Context()
+ */
 export function useLifeContext() {
   return useContext(LifeContext);
 }
+
+/**
+ * @deprecated Use useLifeContext() instead for consistency with other apps.
+ * This alias will be removed in a future version.
+ */
+export const useLife = useLifeContext;

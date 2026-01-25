@@ -1,4 +1,5 @@
-// Firebase Cloud Messaging Service Worker for Life Tracker
+// Firebase Cloud Messaging Service Worker for Life Tracker (standalone)
+// Note: When embedded in home app, the home app's service worker handles notifications.
 importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js');
 
@@ -11,20 +12,18 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+const DEBUG = false;
 
 // Handle background messages
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Background message received:', payload);
+  if (DEBUG) console.log('[firebase-messaging-sw.js] Background message received:', payload);
 
   const data = payload.data || {};
-  const notificationTitle = data.title || payload.notification?.title || 'Life Tracker';
-  const notificationBody = data.body || payload.notification?.body || 'Time for a quick check-in!';
 
-  // Build actions - use quick rating buttons if available, otherwise default actions
+  // Build actions - use quick rating buttons if available
   let actions;
   if (data.quickRatingId && data.quickRatingMax) {
     const max = parseInt(data.quickRatingMax, 10);
-    // Generate rating buttons (1 through max, up to 5)
     actions = [];
     for (let i = 1; i <= Math.min(max, 5); i++) {
       actions.push({ action: `rating:${data.quickRatingId}:${i}`, title: String(i) });
@@ -37,33 +36,35 @@ messaging.onBackgroundMessage((payload) => {
   }
 
   const notificationOptions = {
-    body: notificationBody,
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
-    data: data,
+    body: data.body || payload.notification?.body || 'Time for a quick check-in!',
+    icon: '/favicon.svg',
+    badge: '/favicon.svg',
+    data: { ...data, notificationType: 'life' },
     requireInteraction: true,
     actions,
   };
 
-  return self.registration.showNotification(notificationTitle, notificationOptions);
+  return self.registration.showNotification(
+    data.title || payload.notification?.title || 'Life Tracker',
+    notificationOptions
+  );
 });
 
 // Handle notification click
 self.addEventListener('notificationclick', (event) => {
-  console.log('[firebase-messaging-sw.js] Notification clicked:', event);
+  if (DEBUG) console.log('[firebase-messaging-sw.js] Notification clicked:', event);
   event.notification.close();
 
   if (event.action === 'dismiss') {
     return;
   }
 
-  // Check if this is a quick rating action (format: "rating:questionId:value")
   let urlToOpen;
   let messageData = { type: 'SAMPLE_REQUESTED' };
 
+  // Handle quick rating action (format: "rating:questionId:value")
   if (event.action && event.action.startsWith('rating:')) {
     const [, questionId, value] = event.action.split(':');
-    // Pass quick response data to auto-submit
     urlToOpen = new URL(`/?quickResponse=${questionId}:${value}`, self.location.origin).href;
     messageData = { type: 'QUICK_RESPONSE', questionId, value: parseInt(value, 10) };
   } else {

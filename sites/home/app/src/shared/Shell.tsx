@@ -9,6 +9,7 @@ import {
   LogoutOutlined,
   BookOutlined,
   HistoryOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { signOut } from "firebase/auth";
 import { getBackend } from "@kirkl/shared";
@@ -88,7 +89,12 @@ const NavIcon = styled.span<{ $active?: boolean }>`
   }
 `;
 
-const SignOutButton = styled.button`
+const HeaderActions = styled.div`
+  display: flex;
+  gap: 4px;
+`;
+
+const IconButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
@@ -172,11 +178,18 @@ export function Shell() {
             <span className="nav-label">Timeline</span>
           </NavButton>
         </Nav>
-        <Tooltip title="Sign out">
-          <SignOutButton onClick={handleSignOut}>
-            <LogoutOutlined />
-          </SignOutButton>
-        </Tooltip>
+        <HeaderActions>
+          <Tooltip title="Settings">
+            <IconButton onClick={() => navigate("/settings")}>
+              <SettingOutlined />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Sign out">
+            <IconButton onClick={handleSignOut}>
+              <LogoutOutlined />
+            </IconButton>
+          </Tooltip>
+        </HeaderActions>
       </Header>
       <Content>
         <Outlet />
