@@ -26,6 +26,7 @@ export interface Task {
   roomId: RoomId;
   frequency: Frequency;
   lastCompleted: Date | null;
+  snoozedUntil: Date | null; // When set, task is hidden until this time
   notifyUsers: string[]; // User IDs who want notifications when task becomes due
   createdBy: string;
   createdAt: Date;
@@ -39,6 +40,7 @@ export interface TaskStore {
   roomId: RoomId;
   frequency: Frequency;
   lastCompleted: Timestamp | null;
+  snoozedUntil?: Timestamp | null;
   notifyUsers: string[];
   createdBy: string;
   createdAt: Timestamp;
@@ -104,6 +106,7 @@ export function taskFromStore(id: string, data: TaskStore): Task {
     roomId: data.roomId || "general",
     frequency: data.frequency,
     lastCompleted: data.lastCompleted?.toDate() ?? null,
+    snoozedUntil: data.snoozedUntil?.toDate() ?? null,
     notifyUsers: data.notifyUsers || [],
     createdBy: data.createdBy,
     createdAt: data.createdAt.toDate(),
@@ -118,6 +121,7 @@ export function taskToStore(task: Omit<Task, "id">): TaskStore {
     roomId: task.roomId,
     frequency: task.frequency,
     lastCompleted: task.lastCompleted ? Timestamp.fromDate(task.lastCompleted) : null,
+    snoozedUntil: task.snoozedUntil ? Timestamp.fromDate(task.snoozedUntil) : null,
     notifyUsers: task.notifyUsers || [],
     createdBy: task.createdBy,
     createdAt: Timestamp.fromDate(task.createdAt),
@@ -192,6 +196,32 @@ export function formatFrequency(frequency: Frequency): string {
     return `Every ${unit.slice(0, -1)}`;
   }
   return `Every ${value} ${unit}`;
+}
+
+// Utility: check if task is currently snoozed
+export function isTaskSnoozed(task: Task): boolean {
+  if (!task.snoozedUntil) return false;
+  return task.snoozedUntil.getTime() > Date.now();
+}
+
+// Utility: format snooze remaining time
+export function formatSnoozeRemaining(task: Task): string {
+  if (!task.snoozedUntil) return "";
+  const now = new Date();
+  const diffMs = task.snoozedUntil.getTime() - now.getTime();
+  if (diffMs <= 0) return "";
+
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) {
+    return diffDays === 1 ? "1 day" : `${diffDays} days`;
+  }
+  if (diffHours > 0) {
+    return diffHours === 1 ? "1 hour" : `${diffHours} hours`;
+  }
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  return diffMinutes <= 1 ? "< 1 min" : `${diffMinutes} min`;
 }
 
 // Utility: format due date for display

@@ -2,7 +2,7 @@ import { onSnapshot, query, orderBy, limit, type Unsubscribe } from "firebase/fi
 import { getListRef, getTasksRef, getEventsRef, ensureListExists, setCurrentListId, getUserRef } from "./firestore";
 import { eventFromStore, type EventStore } from "@kirkl/shared";
 import type { TaskStore, TaskListStore, UserProfileStore, Completion } from "./types";
-import { taskFromStore, listFromStore, getUrgencyLevel } from "./types";
+import { taskFromStore, listFromStore, getUrgencyLevel, isTaskSnoozed } from "./types";
 import type { UpkeepState, UpkeepAction } from "./upkeep-context";
 
 type Dispatch = React.Dispatch<UpkeepAction>;
@@ -113,9 +113,15 @@ export function getTasksByUrgency(state: UpkeepState) {
     today: [] as typeof tasks,
     thisWeek: [] as typeof tasks,
     later: [] as typeof tasks,
+    snoozed: [] as typeof tasks,
   };
 
   for (const task of tasks) {
+    // Check if task is snoozed first
+    if (isTaskSnoozed(task)) {
+      grouped.snoozed.push(task);
+      continue;
+    }
     const urgency = getUrgencyLevel(task);
     grouped[urgency].push(task);
   }
@@ -127,9 +133,17 @@ export function getTasksByUrgency(state: UpkeepState) {
     return aDate - bDate; // Earlier last completed = more overdue
   };
 
+  // Sort snoozed by when they'll unsnooze
+  const sortBySnoozeEnd = (a: typeof tasks[0], b: typeof tasks[0]) => {
+    const aDate = a.snoozedUntil?.getTime() ?? 0;
+    const bDate = b.snoozedUntil?.getTime() ?? 0;
+    return aDate - bDate; // Soonest to unsnooze first
+  };
+
   grouped.today.sort(sortByDue);
   grouped.thisWeek.sort(sortByDue);
   grouped.later.sort(sortByDue);
+  grouped.snoozed.sort(sortBySnoozeEnd);
 
   return grouped;
 }

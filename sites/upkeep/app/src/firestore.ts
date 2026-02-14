@@ -81,6 +81,22 @@ export async function updateTask(taskId: string, updates: Partial<TaskStore>) {
   await updateDoc(taskRef, { ...updates, updatedAt: Timestamp.now() });
 }
 
+export async function snoozeTask(taskId: string, until: Date): Promise<void> {
+  const taskRef = getTaskRef(taskId);
+  await updateDoc(taskRef, {
+    snoozedUntil: Timestamp.fromDate(until),
+    updatedAt: Timestamp.now(),
+  });
+}
+
+export async function unsnoozeTask(taskId: string): Promise<void> {
+  const taskRef = getTaskRef(taskId);
+  await updateDoc(taskRef, {
+    snoozedUntil: null,
+    updatedAt: Timestamp.now(),
+  });
+}
+
 export async function deleteTask(taskId: string) {
   const taskRef = getTaskRef(taskId);
   await deleteDoc(taskRef);

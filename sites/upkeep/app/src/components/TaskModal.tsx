@@ -97,6 +97,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
           roomId: "general",
           frequency,
           lastCompleted: null,
+          snoozedUntil: null,
           notifyUsers: [],
           createdBy: user.uid,
           createdAt: now,

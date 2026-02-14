@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Spin } from "antd";
+import { ClockCircleOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepContext } from "../upkeep-context";
 import { useAuth } from "@kirkl/shared";
@@ -9,6 +10,7 @@ import { Header } from "./Header";
 import { KanbanColumn } from "./KanbanColumn";
 import { TaskModal } from "./TaskModal";
 import { CompleteTaskModal } from "./CompleteTaskModal";
+import { TaskCard } from "./TaskCard";
 import { appStorage, StorageKeys } from "../storage";
 import type { Task } from "../types";
 
@@ -53,6 +55,44 @@ const NotFoundContainer = styled.div`
   color: var(--color-text-secondary);
 `;
 
+const SnoozedSection = styled.div`
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+`;
+
+const SnoozedHeader = styled.button`
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+
+  &:hover {
+    background: var(--color-border);
+  }
+`;
+
+const SnoozedCount = styled.span`
+  background: var(--color-warning, #faad14);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+`;
+
+const SnoozedList = styled.div`
+  padding: var(--space-sm);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-sm);
+`;
+
 interface TaskBoardProps {
   embedded?: boolean;
 }
@@ -69,6 +109,7 @@ export function TaskBoard({ embedded = false }: TaskBoardProps) {
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
   const [completingTask, setCompletingTask] = useState<Task | null>(null);
   const [completeModalTab, setCompleteModalTab] = useState<"complete" | "history">("complete");
+  const [showSnoozed, setShowSnoozed] = useState(false);
 
   // Get list ID from slug
   const listId = slug ? state.userSlugs[slug] : null;
@@ -169,6 +210,32 @@ export function TaskBoard({ embedded = false }: TaskBoardProps) {
           onViewHistory={handleViewHistory}
         />
       </BoardContainer>
+
+      {tasksByUrgency.snoozed.length > 0 && (
+        <SnoozedSection>
+          <SnoozedHeader onClick={() => setShowSnoozed(!showSnoozed)}>
+            <ClockCircleOutlined />
+            <span>Snoozed</span>
+            <SnoozedCount>{tasksByUrgency.snoozed.length}</SnoozedCount>
+            <span style={{ marginLeft: "auto" }}>
+              {showSnoozed ? <UpOutlined /> : <DownOutlined />}
+            </span>
+          </SnoozedHeader>
+          {showSnoozed && (
+            <SnoozedList>
+              {tasksByUrgency.snoozed.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onEdit={() => handleEditTask(task)}
+                  onComplete={() => handleCompleteTask(task)}
+                  onViewHistory={() => handleViewHistory(task)}
+                />
+              ))}
+            </SnoozedList>
+          )}
+        </SnoozedSection>
+      )}
 
       <TaskModal
         open={taskModalOpen}

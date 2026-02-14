@@ -1,21 +1,24 @@
 import { useState } from "react";
-import { Button, Tooltip, message } from "antd";
-import { CheckOutlined, EditOutlined, BellOutlined, BellFilled, InfoCircleOutlined, DownOutlined, UpOutlined, HistoryOutlined } from "@ant-design/icons";
+import { Button, Tooltip, message, Dropdown } from "antd";
+import type { MenuProps } from "antd";
+import { CheckOutlined, EditOutlined, BellOutlined, BellFilled, InfoCircleOutlined, DownOutlined, UpOutlined, HistoryOutlined, ClockCircleOutlined, UndoOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import type { Task } from "../types";
-import { formatDueDate } from "../types";
+import { formatDueDate, isTaskSnoozed, formatSnoozeRemaining } from "../types";
 import { useAuth } from "@kirkl/shared";
-import { toggleTaskNotification } from "../firestore";
+import { toggleTaskNotification, snoozeTask, unsnoozeTask } from "../firestore";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "../messaging";
 
-const CardWrapper = styled.div`
-  background: var(--color-bg);
+const CardWrapper = styled.div<{ $snoozed?: boolean }>`
+  background: ${props => props.$snoozed ? 'var(--color-bg-subtle)' : 'var(--color-bg)'};
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   overflow: hidden;
+  opacity: ${props => props.$snoozed ? 0.7 : 1};
 
   &:hover {
     border-color: var(--color-primary);
+    opacity: 1;
   }
 `;
 
@@ -59,6 +62,15 @@ const DueInfo = styled.span`
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
+`;
+
+const SnoozeInfo = styled.span`
+  font-size: var(--font-size-xs);
+  color: var(--color-warning, #faad14);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 `;
 
 const Actions = styled.div`
@@ -118,6 +130,37 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
   const userId = user?.uid;
   const isNotified = userId ? task.notifyUsers.includes(userId) : false;
   const hasNotes = !!task.description?.trim();
+  const snoozed = isTaskSnoozed(task);
+
+  const handleSnooze = async (hours: number) => {
+    try {
+      const until = new Date(Date.now() + hours * 60 * 60 * 1000);
+      await snoozeTask(task.id, until);
+      const label = hours >= 24 ? `${Math.floor(hours / 24)} day${hours >= 48 ? 's' : ''}` : `${hours} hour${hours > 1 ? 's' : ''}`;
+      message.success(`Snoozed for ${label}`);
+    } catch (error) {
+      console.error("Failed to snooze task:", error);
+      message.error("Failed to snooze task");
+    }
+  };
+
+  const handleUnsnooze = async () => {
+    try {
+      await unsnoozeTask(task.id);
+      message.success("Task unsnoozed");
+    } catch (error) {
+      console.error("Failed to unsnooze task:", error);
+      message.error("Failed to unsnooze task");
+    }
+  };
+
+  const snoozeMenuItems: MenuProps["items"] = [
+    { key: "1h", label: "1 hour", onClick: () => handleSnooze(1) },
+    { key: "4h", label: "4 hours", onClick: () => handleSnooze(4) },
+    { key: "1d", label: "1 day", onClick: () => handleSnooze(24) },
+    { key: "3d", label: "3 days", onClick: () => handleSnooze(72) },
+    { key: "1w", label: "1 week", onClick: () => handleSnooze(168) },
+  ];
 
   const handleToggleNotification = async () => {
     if (!userId) return;
@@ -149,22 +192,41 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
   };
 
   return (
-    <CardWrapper>
+    <CardWrapper $snoozed={snoozed}>
       <CardHeader>
         <TaskInfo>
           <TaskNameRow>
             <TaskName title={task.name}>{task.name}</TaskName>
             {hasNotes && <HasNotesIcon title="Has notes" />}
           </TaskNameRow>
-          <DueInfo>{formatDueDate(task)}</DueInfo>
+          {snoozed ? (
+            <SnoozeInfo>
+              <ClockCircleOutlined /> Snoozed for {formatSnoozeRemaining(task)}
+            </SnoozeInfo>
+          ) : (
+            <DueInfo>{formatDueDate(task)}</DueInfo>
+          )}
         </TaskInfo>
         <Actions>
-          <Tooltip title="Mark done">
-            <IconBtn type="text" icon={<CheckOutlined />} onClick={onComplete} />
-          </Tooltip>
-          <Tooltip title="History">
-            <IconBtn type="text" icon={<HistoryOutlined />} onClick={onViewHistory} />
-          </Tooltip>
+          {snoozed ? (
+            <Tooltip title="Unsnooze">
+              <IconBtn type="text" icon={<UndoOutlined />} onClick={handleUnsnooze} />
+            </Tooltip>
+          ) : (
+            <>
+              <Tooltip title="Mark done">
+                <IconBtn type="text" icon={<CheckOutlined />} onClick={onComplete} />
+              </Tooltip>
+              <Tooltip title="History">
+                <IconBtn type="text" icon={<HistoryOutlined />} onClick={onViewHistory} />
+              </Tooltip>
+              <Dropdown menu={{ items: snoozeMenuItems }} trigger={["click"]}>
+                <Tooltip title="Snooze">
+                  <IconBtn type="text" icon={<ClockCircleOutlined />} />
+                </Tooltip>
+              </Dropdown>
+            </>
+          )}
           <Tooltip title="Edit">
             <IconBtn type="text" icon={<EditOutlined />} onClick={onEdit} />
           </Tooltip>

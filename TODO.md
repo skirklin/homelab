@@ -79,9 +79,9 @@ Only primary/accent colors differ per app (intentional branding).
 - [ ] Revisit recipes→groceries integration after more usage (is adding one item at a time enough, or need "add all ingredients"?)
 
 ## Upkeep App
-- [ ] Add snooze/defer feature for tasks
-  - "Remind me in X days" or "Remind me on [date]"
-  - Use case: traveling and can't do household tasks this week
+- [x] Add snooze/defer feature for tasks
+  - Snooze button on task cards with preset durations (1h, 4h, 1d, 3d, 1w)
+  - Snoozed tasks appear in collapsible section at bottom of board
 
 ## Life Tracker App (High Priority)
 - [x] **Data limit bug**: Only showing last 2 weeks of data - analysis mode needs ALL historical data
@@ -94,7 +94,5 @@ Only primary/accent colors differ per app (intentional branding).
   - Native home screen widget (complex but ideal)
 
 ## Home App Shell
-- [ ] Consider pinning app switcher at top of screen
-  - Pro: No scrolling to switch apps
-  - Con: Uses screen real estate
-  - Compromise: Collapsible bar, or only pin on larger screens
+- [x] Pin app switcher at top of screen
+  - Implemented with position: sticky for smooth scroll behavior
