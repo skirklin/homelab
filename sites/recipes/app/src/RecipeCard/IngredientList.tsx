@@ -13,7 +13,6 @@ import { useGroceriesIntegration } from '../GroceriesIntegrationContext';
 import { AddToGroceriesModal } from '../Modals/AddToGroceriesModal';
 
 const IngredientsSection = styled.div`
-  position: relative;
   background-color: var(--color-bg-subtle);
   border-radius: var(--radius-md);
   padding: var(--space-md);
@@ -50,24 +49,30 @@ const Placeholder = styled.span`
 `
 
 const AddToGroceriesButton = styled.button`
-  position: absolute;
-  bottom: var(--space-sm);
-  right: var(--space-sm);
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
   background: var(--color-primary);
   border: none;
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  width: 48px;
+  height: 48px;
   cursor: pointer;
   color: white;
-  opacity: 0.7;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  transition: transform 0.2s, box-shadow 0.2s;
 
   &:hover {
-    opacity: 1;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  svg {
+    font-size: 20px;
   }
 `
 
@@ -141,18 +146,15 @@ function IngredientList(props: RecipeCardProps) {
         <IngredientsSection onDoubleClick={() => setEditable(true)}>
           <SectionTitle>Ingredients</SectionTitle>
           {formatIngredientList(ingredients)}
-          {hasGroceriesIntegration && (
-            <AddToGroceriesButton
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddToGroceries();
-              }}
-              title="Add to grocery list"
-            >
-              <PlusOutlined />
-            </AddToGroceriesButton>
-          )}
         </IngredientsSection>
+        {hasGroceriesIntegration && (
+          <AddToGroceriesButton
+            onClick={handleAddToGroceries}
+            title="Add to grocery list"
+          >
+            <PlusOutlined />
+          </AddToGroceriesButton>
+        )}
         {groceriesIntegration && (
           <AddToGroceriesModal
             isVisible={showAddModal}
