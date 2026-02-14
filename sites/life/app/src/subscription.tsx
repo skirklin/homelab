@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { collection, query, onSnapshot, orderBy, limit } from "firebase/firestore";
+import { collection, query, onSnapshot, orderBy } from "firebase/firestore";
 import { getBackend, eventFromStore, type EventStore } from "@kirkl/shared";
 import { useLife } from "./life-context";
 import { setCurrentLogId, getCurrentLogId } from "./firestore";
@@ -18,7 +18,7 @@ export function useEntriesSubscription(logId: string | null) {
 
     const { db } = getBackend();
     const eventsRef = collection(db, "lifeLogs", logId, "events");
-    const q = query(eventsRef, orderBy("timestamp", "desc"), limit(100));
+    const q = query(eventsRef, orderBy("timestamp", "desc"));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const entries: LogEntry[] = [];
