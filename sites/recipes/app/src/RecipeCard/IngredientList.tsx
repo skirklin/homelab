@@ -1,6 +1,6 @@
 import { useState, useContext } from 'react';
 import styled from 'styled-components';
-import { PlusOutlined } from '@ant-design/icons';
+import { ShoppingCartOutlined } from '@ant-design/icons';
 import type { Recipe } from 'schema-dts';
 import { ingredientsToStr, strToIngredients, decodeStr } from '../converters';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
@@ -149,7 +149,7 @@ function IngredientList(props: RecipeCardProps) {
             onClick={handleAddToGroceries}
             title="Add to grocery list"
           >
-            <PlusOutlined />
+            <ShoppingCartOutlined />
           </AddToGroceriesButton>
         )}
         {groceriesIntegration && (
