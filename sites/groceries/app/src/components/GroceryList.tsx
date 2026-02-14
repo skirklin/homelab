@@ -53,11 +53,17 @@ const StickyTop = styled.div`
   position: sticky;
   top: 0;
   z-index: 100;
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
 `;
 
 const Content = styled.main`
   flex: 1;
   padding-bottom: var(--space-xl);
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
 `;
 
 const LoadingContainer = styled.div`
