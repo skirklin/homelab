@@ -2,7 +2,7 @@
  * Bridges the recipes app's GroceriesIntegrationContext to the groceries app.
  * This allows recipes to add items to grocery lists when embedded in the home app.
  */
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useGroceriesContext, addGroceryItem, setCurrentListId } from "@kirkl/groceries";
 import { GroceriesIntegrationContext } from "@kirkl/recipes";
 import { useAuth } from "@kirkl/shared";

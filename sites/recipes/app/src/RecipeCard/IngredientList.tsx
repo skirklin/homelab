@@ -91,7 +91,7 @@ function IngredientList(props: RecipeCardProps) {
   const handleAddToGroceries = () => {
     // Pre-fill with first ingredient if available
     const ingredientArray = Array.isArray(ingredients) ? ingredients : [];
-    const firstIngredient = ingredientArray.length > 0 ? decodeStr(String(ingredientArray[0])) : "";
+    const firstIngredient = ingredientArray.length > 0 ? decodeStr(String(ingredientArray[0])) ?? "" : "";
     setSelectedIngredient(firstIngredient);
     setShowAddModal(true);
   };
