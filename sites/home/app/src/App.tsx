@@ -10,6 +10,7 @@ import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
 import { Settings } from "./shared/Settings";
+import { GroceriesIntegrationProvider } from "./shared/GroceriesIntegrationProvider";
 
 // Initialize shared backend
 initializeBackend("home.kirkl.in");
@@ -95,9 +96,11 @@ export function App() {
             <LifeProvider>
               <RecipesProvider>
                 <CookingModeProvider>
-                  <UpkeepProvider>
-                    <AppRoutes />
-                  </UpkeepProvider>
+                  <GroceriesIntegrationProvider>
+                    <UpkeepProvider>
+                      <AppRoutes />
+                    </UpkeepProvider>
+                  </GroceriesIntegrationProvider>
                 </CookingModeProvider>
               </RecipesProvider>
             </LifeProvider>

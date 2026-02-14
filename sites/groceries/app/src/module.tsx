@@ -45,3 +45,4 @@ export function GroceriesModule() {
 
 // Re-export provider for standalone use
 export { GroceriesProvider, useGroceriesContext } from "./groceries-context";
+export { addItem as addGroceryItem, setCurrentListId } from "./firestore";

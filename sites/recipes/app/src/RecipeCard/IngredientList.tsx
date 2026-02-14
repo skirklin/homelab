@@ -1,5 +1,6 @@
 import { useState, useContext } from 'react';
 import styled from 'styled-components';
+import { PlusOutlined } from '@ant-design/icons';
 import type { Recipe } from 'schema-dts';
 import { ingredientsToStr, strToIngredients, decodeStr } from '../converters';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
@@ -8,8 +9,11 @@ import { Context } from '../context';
 import type { RecipeCardProps } from './RecipeCard';
 import { StyledTextArea } from '../StyledComponents';
 import { useAuth } from '@kirkl/shared';
+import { useGroceriesIntegration } from '../GroceriesIntegrationContext';
+import { AddToGroceriesModal } from '../Modals/AddToGroceriesModal';
 
 const IngredientsSection = styled.div`
+  position: relative;
   background-color: var(--color-bg-subtle);
   border-radius: var(--radius-md);
   padding: var(--space-md);
@@ -45,18 +49,52 @@ const Placeholder = styled.span`
   font-style: italic;
 `
 
+const AddToGroceriesButton = styled.button`
+  position: absolute;
+  bottom: var(--space-sm);
+  right: var(--space-sm);
+  background: var(--color-primary);
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  color: white;
+  opacity: 0.7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+
+  &:hover {
+    opacity: 1;
+  }
+`
 
 function IngredientList(props: RecipeCardProps) {
   const [editable, setEditablePrimitive] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedIngredient, setSelectedIngredient] = useState("");
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
   const { user: authUser } = useAuth();
+  const groceriesIntegration = useGroceriesIntegration();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
 
   if (recipe === undefined || box === undefined) {
     return null
   }
+
+  const hasGroceriesIntegration = groceriesIntegration && Object.keys(groceriesIntegration.userSlugs).length > 0;
+
+  const handleAddToGroceries = () => {
+    // Pre-fill with first ingredient if available
+    const ingredientArray = Array.isArray(ingredients) ? ingredients : [];
+    const firstIngredient = ingredientArray.length > 0 ? decodeStr(String(ingredientArray[0])) : "";
+    setSelectedIngredient(firstIngredient);
+    setShowAddModal(true);
+  };
 
   const setEditable = (value: boolean) => {
     const user = getAppUserFromState(state, authUser?.uid)
@@ -99,10 +137,31 @@ function IngredientList(props: RecipeCardProps) {
     )
   } else {
     return (
-      <IngredientsSection onDoubleClick={() => setEditable(true)}>
-        <SectionTitle>Ingredients</SectionTitle>
-        {formatIngredientList(ingredients)}
-      </IngredientsSection>
+      <>
+        <IngredientsSection onDoubleClick={() => setEditable(true)}>
+          <SectionTitle>Ingredients</SectionTitle>
+          {formatIngredientList(ingredients)}
+          {hasGroceriesIntegration && (
+            <AddToGroceriesButton
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddToGroceries();
+              }}
+              title="Add to grocery list"
+            >
+              <PlusOutlined />
+            </AddToGroceriesButton>
+          )}
+        </IngredientsSection>
+        {groceriesIntegration && (
+          <AddToGroceriesModal
+            isVisible={showAddModal}
+            setIsVisible={setShowAddModal}
+            ingredient={selectedIngredient}
+            integration={groceriesIntegration}
+          />
+        )}
+      </>
     )
   }
 }

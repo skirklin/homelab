@@ -21,3 +21,4 @@ export { RecipesProvider, useRecipesContext } from "./context";
 export { CookingModeProvider } from "./CookingModeContext";
 export { RecipesRoutes } from "./RecipesRoutes";
 export { PublicRecipe } from "./routes/PublicRecipe";
+export { GroceriesIntegrationContext, useGroceriesIntegration } from "./GroceriesIntegrationContext";

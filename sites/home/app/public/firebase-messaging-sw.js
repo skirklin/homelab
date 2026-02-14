@@ -113,9 +113,18 @@ self.addEventListener('notificationclick', (event) => {
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If app is already open, focus it and optionally send message
+      // If app is already open, navigate to correct page, then focus
       for (const client of clientList) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
+          // Navigate to the target URL so the right app page loads
+          if ('navigate' in client) {
+            return client.navigate(urlToOpen).then((c) => {
+              if (messageData && c) {
+                c.postMessage(messageData);
+              }
+              return c ? c.focus() : undefined;
+            });
+          }
           if (messageData) {
             client.postMessage(messageData);
           }
