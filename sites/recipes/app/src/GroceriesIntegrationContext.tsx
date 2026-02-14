@@ -11,7 +11,7 @@ export interface GroceriesIntegration {
   /** Currently viewed list ID (if any) */
   currentListId: string | null;
   /** Add an item to a grocery list */
-  addItem: (listId: string, name: string) => Promise<void>;
+  addItem: (listId: string, ingredient: string, note?: string) => Promise<void>;
 }
 
 export const GroceriesIntegrationContext = createContext<GroceriesIntegration | null>(null);

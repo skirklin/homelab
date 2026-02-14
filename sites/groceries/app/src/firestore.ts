@@ -48,8 +48,8 @@ export function getUserRef(userId: string) {
   return doc(db, "users", userId);
 }
 
-function normalizeItemName(name: string): string {
-  return name.toLowerCase().trim();
+function normalizeIngredient(ingredient: string): string {
+  return ingredient.toLowerCase().trim();
 }
 
 export async function ensureListExists(userId: string) {
@@ -69,14 +69,14 @@ export async function ensureListExists(userId: string) {
 }
 
 export async function addItem(
-  name: string,
+  ingredient: string,
   userId: string,
-  options?: { itemId?: string; categoryId?: string }
+  options?: { itemId?: string; categoryId?: string; note?: string }
 ) {
-  // Use provided categoryId or look up from history
+  // Use provided categoryId or look up from history (keyed by ingredient)
   let categoryId: string = options?.categoryId || "uncategorized";
   if (!options?.categoryId) {
-    const historyRef = doc(getHistoryRef(), normalizeItemName(name));
+    const historyRef = doc(getHistoryRef(), normalizeIngredient(ingredient));
     const historySnap = await getDoc(historyRef);
     const historyData = historySnap.exists() ? historySnap.data() : null;
     categoryId = historyData?.categoryId || "uncategorized";
@@ -87,7 +87,8 @@ export async function addItem(
     ? doc(getItemsRef(), options.itemId)
     : doc(getItemsRef());
   const itemData: GroceryItemStore = {
-    name,
+    ingredient,
+    note: options?.note,
     categoryId,
     checked: false,
     addedBy: userId,
@@ -95,9 +96,9 @@ export async function addItem(
   };
   await setDoc(itemRef, itemData);
 
-  // Save to history for autocomplete (preserves the name with correct casing)
-  const historyRef = doc(getHistoryRef(), normalizeItemName(name));
-  const newHistoryData: ItemHistoryStore = { name, categoryId, lastAdded: Timestamp.now() };
+  // Save to history for autocomplete (keyed by normalized ingredient)
+  const historyRef = doc(getHistoryRef(), normalizeIngredient(ingredient));
+  const newHistoryData: ItemHistoryStore = { ingredient, categoryId, lastAdded: Timestamp.now() };
   await setDoc(historyRef, newHistoryData);
 }
 
@@ -129,9 +130,9 @@ export async function updateItemCategory(item: GroceryItem, newCategoryId: Categ
   const itemRef = getItemRef(item.id);
   await updateDoc(itemRef, { categoryId: newCategoryId });
 
-  // Update history too
-  const historyRef = doc(getHistoryRef(), normalizeItemName(item.name));
-  await setDoc(historyRef, { name: item.name, categoryId: newCategoryId, lastAdded: Timestamp.now() });
+  // Update history too (keyed by ingredient)
+  const historyRef = doc(getHistoryRef(), normalizeIngredient(item.ingredient));
+  await setDoc(historyRef, { ingredient: item.ingredient, categoryId: newCategoryId, lastAdded: Timestamp.now() });
 }
 
 export async function clearCheckedItems(items: GroceryItem[]) {
@@ -142,7 +143,8 @@ export async function clearCheckedItems(items: GroceryItem[]) {
   const tripData: ShoppingTripStore = {
     completedAt: Timestamp.now(),
     items: checkedItems.map((item) => ({
-      name: item.name,
+      ingredient: item.ingredient,
+      note: item.note,
       categoryId: item.categoryId,
     })),
   };

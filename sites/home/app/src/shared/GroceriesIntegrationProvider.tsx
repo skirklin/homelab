@@ -15,13 +15,13 @@ export function GroceriesIntegrationProvider({ children }: GroceriesIntegrationP
   const { state } = useGroceriesContext();
   const { user } = useAuth();
 
-  const addItem = async (listId: string, name: string) => {
+  const addItem = async (listId: string, ingredient: string, note?: string) => {
     if (!user) {
       throw new Error("User must be authenticated to add items");
     }
     // Set the current list ID for the firestore functions
     setCurrentListId(listId);
-    await addGroceryItem(name, user.uid);
+    await addGroceryItem(ingredient, user.uid, { note });
   };
 
   const integration = {

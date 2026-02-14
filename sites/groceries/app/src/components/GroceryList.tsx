@@ -272,7 +272,10 @@ export function GroceryList({ embedded = false }: GroceryListProps) {
             {createPortal(
               <DragOverlay modifiers={[snapVerticalToCursor]}>
                 {draggedItem ? (
-                  <DragItem data-testid="drag-overlay">{draggedItem.name}</DragItem>
+                  <DragItem data-testid="drag-overlay">
+                    {draggedItem.ingredient}
+                    {draggedItem.note && ` (${draggedItem.note})`}
+                  </DragItem>
                 ) : null}
               </DragOverlay>,
               document.body

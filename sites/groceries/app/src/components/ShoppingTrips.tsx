@@ -77,6 +77,12 @@ const ItemName = styled.span`
   flex: 1;
 `;
 
+const ItemNote = styled.span`
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  margin-left: var(--space-xs);
+`;
+
 const ItemCategory = styled.span`
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
@@ -132,8 +138,8 @@ export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onBack]);
 
-  const handleAddItem = (name: string) => {
-    addItem(name, userId).catch((error) => {
+  const handleAddItem = (ingredient: string, note?: string) => {
+    addItem(ingredient, userId, { note }).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };
@@ -165,13 +171,16 @@ export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
               <TripItems>
                 {trip.items.map((item, index) => (
                   <TripItem key={index}>
-                    <ItemName>{item.name}</ItemName>
+                    <ItemName>
+                      {item.ingredient}
+                      {item.note && <ItemNote>({item.note})</ItemNote>}
+                    </ItemName>
                     <ItemCategory>{formatCategoryId(item.categoryId, categories)}</ItemCategory>
                     <AddButton
                       type="text"
                       size="small"
                       icon={<PlusOutlined />}
-                      onClick={() => handleAddItem(item.name)}
+                      onClick={() => handleAddItem(item.ingredient, item.note)}
                     />
                   </TripItem>
                 ))}

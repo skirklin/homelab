@@ -1,6 +1,6 @@
 import { onSnapshot, query, orderBy, limit, type Unsubscribe } from "firebase/firestore";
 import { getListRef, getItemsRef, getHistoryRef, getTripsRef, ensureListExists, setCurrentListId, getUserSlugs, getUserRef } from "./firestore";
-import type { GroceryItemStore, GroceryListStore, ItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
+import type { GroceryItemStore, GroceryListStore, ItemHistoryStore, LegacyItemHistoryStore, ShoppingTripStore, UserProfileStore } from "./types";
 import { itemFromStore, listFromStore } from "./types";
 import type { GroceriesState, GroceriesAction } from "./groceries-context";
 
@@ -104,9 +104,10 @@ export async function subscribeToList(
     getHistoryRef(),
     (snapshot) => {
       const history = snapshot.docs.map((doc) => {
-        const data = doc.data() as ItemHistoryStore;
+        const data = doc.data() as ItemHistoryStore & LegacyItemHistoryStore;
         return {
-          name: data.name,
+          // Handle legacy history entries that use 'name' instead of 'ingredient'
+          ingredient: data.ingredient || data.name || "",
           categoryId: data.categoryId || "uncategorized",
           lastAdded: data.lastAdded.toDate(),
         };
@@ -131,7 +132,15 @@ export async function subscribeToList(
         return {
           id: doc.id,
           completedAt: data.completedAt.toDate(),
-          items: data.items,
+          // Handle legacy trip items that use 'name' instead of 'ingredient'
+          items: data.items.map((item) => {
+            const legacyItem = item as { name?: string; ingredient?: string; note?: string; categoryId: string };
+            return {
+              ingredient: legacyItem.ingredient || legacyItem.name || "",
+              note: legacyItem.note,
+              categoryId: legacyItem.categoryId || "uncategorized",
+            };
+          }),
         };
       });
       dispatch({ type: "SET_TRIPS", trips });

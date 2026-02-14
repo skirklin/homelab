@@ -39,6 +39,12 @@ const ItemName = styled.span<{ $checked: boolean }>`
   margin-left: var(--space-xs);
 `;
 
+const ItemNote = styled.span`
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-left: var(--space-xs);
+`;
+
 const DeleteButton = styled(Button)`
   opacity: 0.5;
 
@@ -82,7 +88,10 @@ export function GroceryItemRow({ item }: Props) {
         checked={item.checked}
         onChange={handleToggle}
       />
-      <ItemName $checked={item.checked}>{item.name}</ItemName>
+      <ItemName $checked={item.checked}>
+        {item.ingredient}
+        {item.note && <ItemNote>({item.note})</ItemNote>}
+      </ItemName>
       <DeleteButton
         type="text"
         size="small"

@@ -11,7 +11,8 @@ export type CategoryId = string;
 
 export interface GroceryItem {
   id: string;
-  name: string;
+  ingredient: string;
+  note?: string;
   categoryId: CategoryId;
   checked: boolean;
   addedBy: string;
@@ -21,7 +22,8 @@ export interface GroceryItem {
 }
 
 export interface GroceryItemStore {
-  name: string;
+  ingredient: string;
+  note?: string;
   categoryId: CategoryId;
   checked: boolean;
   addedBy: string;
@@ -47,13 +49,21 @@ export interface GroceryListStore {
   updated: Timestamp;
 }
 
+// Legacy store format for backward compatibility
+interface LegacyGroceryItemStore {
+  name?: string;
+}
+
 export function itemFromStore(
   id: string,
   data: GroceryItemStore
 ): GroceryItem {
+  // Handle legacy items that only have 'name' field
+  const legacy = data as GroceryItemStore & LegacyGroceryItemStore;
   return {
     id,
-    name: data.name,
+    ingredient: data.ingredient || legacy.name || "",
+    note: data.note,
     categoryId: data.categoryId || "uncategorized",
     checked: data.checked,
     addedBy: data.addedBy,
@@ -65,7 +75,8 @@ export function itemFromStore(
 
 export function itemToStore(item: Omit<GroceryItem, "id">): GroceryItemStore {
   return {
-    name: item.name,
+    ingredient: item.ingredient,
+    note: item.note,
     categoryId: item.categoryId,
     checked: item.checked,
     addedBy: item.addedBy,
@@ -86,22 +97,28 @@ export function listFromStore(id: string, data: GroceryListStore): GroceryList {
   };
 }
 
-// Item history for autocomplete
+// Item history for autocomplete (keyed by normalized ingredient)
 export interface ItemHistory {
-  name: string;
+  ingredient: string;
   categoryId: CategoryId;
   lastAdded: Date;
 }
 
 export interface ItemHistoryStore {
-  name: string;
+  ingredient: string;
   categoryId: CategoryId;
   lastAdded: Timestamp;
 }
 
+// Legacy history format for backward compatibility
+export interface LegacyItemHistoryStore {
+  name?: string;
+}
+
 // Shopping trip record
 export interface ShoppingTripItem {
-  name: string;
+  ingredient: string;
+  note?: string;
   categoryId: CategoryId;
 }
 

@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import { AutoComplete, Button } from "antd";
+import { AutoComplete, Button, Input } from "antd";
 import type { BaseSelectRef } from "rc-select";
 import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -19,36 +19,41 @@ const Form = styled.form`
   gap: var(--space-sm);
 `;
 
-const InputWrapper = styled.div`
+const IngredientWrapper = styled.div`
+  flex: 2;
+`;
+
+const NoteWrapper = styled.div`
   flex: 1;
 `;
 
 export function AddItem() {
   const { user } = useAuth();
   const { state } = useGroceriesContext();
-  const [name, setName] = useState("");
+  const [ingredient, setIngredient] = useState("");
+  const [note, setNote] = useState("");
   const inputRef = useRef<BaseSelectRef>(null);
 
-  // Filter history for autocomplete options
+  // Filter history for autocomplete options (based on ingredient)
   const autocompleteOptions = useMemo(() => {
-    if (!name.trim()) return [];
+    if (!ingredient.trim()) return [];
 
-    const searchTerm = name.toLowerCase();
+    const searchTerm = ingredient.toLowerCase();
     const existingItems = getItemsFromState(state);
-    const existingNames = new Set(existingItems.map((i) => i.name.toLowerCase()));
+    const existingIngredients = new Set(existingItems.map((i) => i.ingredient.toLowerCase()));
 
     return state.history
       .filter(
         (h) =>
-          h.name.toLowerCase().includes(searchTerm) &&
-          !existingNames.has(h.name.toLowerCase())
+          h.ingredient.toLowerCase().includes(searchTerm) &&
+          !existingIngredients.has(h.ingredient.toLowerCase())
       )
       .slice(0, 8)
       .map((h) => ({
-        value: h.name,
-        label: h.name,
+        value: h.ingredient,
+        label: h.ingredient,
       }));
-  }, [name, state.history, state.items]);
+  }, [ingredient, state.history, state.items]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,35 +61,37 @@ export function AddItem() {
   };
 
   const submitItem = () => {
-    const trimmedName = name.trim();
-    if (!trimmedName || !user) return;
+    const trimmedIngredient = ingredient.trim();
+    if (!trimmedIngredient || !user) return;
 
-    // Check for duplicates (case-insensitive)
+    // Check for duplicates (case-insensitive, based on ingredient only)
     const existingItems = getItemsFromState(state);
     const duplicate = existingItems.find(
-      (item) => item.name.toLowerCase() === trimmedName.toLowerCase()
+      (item) => item.ingredient.toLowerCase() === trimmedIngredient.toLowerCase()
     );
 
     if (duplicate) {
-      alert(`"${duplicate.name}" is already on the list`);
+      alert(`"${duplicate.ingredient}" is already on the list`);
       return;
     }
 
     // Clear immediately for fast typing
-    setName("");
+    setIngredient("");
+    setNote("");
 
     // Return focus to input for rapid entry
     inputRef.current?.focus();
 
     // Look up category from local history (already loaded via subscription)
-    const normalizedName = trimmedName.toLowerCase();
+    const normalizedIngredient = trimmedIngredient.toLowerCase();
     const historyEntry = state.history.find(
-      (h) => h.name.toLowerCase() === normalizedName
+      (h) => h.ingredient.toLowerCase() === normalizedIngredient
     );
     const categoryId = historyEntry?.categoryId || "uncategorized";
 
     // Fire and forget - pass category to skip network lookup
-    addItem(trimmedName, user.uid, { categoryId }).catch((error) => {
+    const trimmedNote = note.trim() || undefined;
+    addItem(trimmedIngredient, user.uid, { categoryId, note: trimmedNote }).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };
@@ -92,25 +99,33 @@ export function AddItem() {
   return (
     <Container>
       <Form onSubmit={handleSubmit}>
-        <InputWrapper>
+        <IngredientWrapper>
           <AutoComplete
             ref={inputRef}
-            value={name}
-            onChange={setName}
-            onSelect={(value) => setName(value)}
+            value={ingredient}
+            onChange={setIngredient}
+            onSelect={(value) => setIngredient(value)}
             options={autocompleteOptions}
-            placeholder="Add item..."
+            placeholder="Item..."
             size="large"
             style={{ width: "100%" }}
             autoFocus
           />
-        </InputWrapper>
+        </IngredientWrapper>
+        <NoteWrapper>
+          <Input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note"
+            size="large"
+          />
+        </NoteWrapper>
         <Button
           type="primary"
           htmlType="submit"
           size="large"
           icon={<PlusOutlined />}
-          disabled={!name.trim()}
+          disabled={!ingredient.trim()}
         >
           Add
         </Button>

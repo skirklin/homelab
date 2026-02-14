@@ -15,6 +15,19 @@ const Label = styled.label`
   margin-bottom: var(--space-xs);
 `;
 
+const InputRow = styled.div`
+  display: flex;
+  gap: var(--space-sm);
+`;
+
+const IngredientInput = styled(Input)`
+  flex: 2;
+`;
+
+const NoteInput = styled(Input)`
+  flex: 1;
+`;
+
 interface AddToGroceriesModalProps {
   isVisible: boolean;
   setIsVisible: (visible: boolean) => void;
@@ -28,14 +41,16 @@ export function AddToGroceriesModal({
   ingredient,
   integration,
 }: AddToGroceriesModalProps) {
-  const [itemName, setItemName] = useState(ingredient);
+  const [itemIngredient, setItemIngredient] = useState(ingredient);
+  const [itemNote, setItemNote] = useState("");
   const [selectedListId, setSelectedListId] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
   // Reset state when modal opens
   useEffect(() => {
     if (isVisible) {
-      setItemName(ingredient);
+      setItemIngredient(ingredient);
+      setItemNote("");
       // Default to current list, or first list if only one exists
       if (integration.currentListId) {
         setSelectedListId(integration.currentListId);
@@ -56,12 +71,14 @@ export function AddToGroceriesModal({
   );
 
   const handleAdd = async () => {
-    if (!itemName.trim() || !selectedListId) return;
+    if (!itemIngredient.trim() || !selectedListId) return;
 
     setLoading(true);
     try {
-      await integration.addItem(selectedListId, itemName.trim());
-      message.success(`Added "${itemName.trim()}" to grocery list`);
+      const trimmedIngredient = itemIngredient.trim();
+      const trimmedNote = itemNote.trim() || undefined;
+      await integration.addItem(selectedListId, trimmedIngredient, trimmedNote);
+      message.success(`Added "${trimmedIngredient}" to grocery list`);
       setIsVisible(false);
     } catch {
       message.error("Failed to add item to grocery list");
@@ -72,7 +89,8 @@ export function AddToGroceriesModal({
 
   const handleClose = () => {
     setIsVisible(false);
-    setItemName("");
+    setItemIngredient("");
+    setItemNote("");
     setSelectedListId("");
   };
 
@@ -84,19 +102,27 @@ export function AddToGroceriesModal({
       onCancel={handleClose}
       okText="Add to List"
       okButtonProps={{
-        disabled: !itemName.trim() || !selectedListId,
+        disabled: !itemIngredient.trim() || !selectedListId,
         loading,
       }}
       destroyOnClose
     >
       <FormGroup>
-        <Label>Item name</Label>
-        <Input
-          value={itemName}
-          onChange={(e) => setItemName(e.target.value)}
-          placeholder="Enter item name"
-          onPressEnter={handleAdd}
-        />
+        <Label>Item</Label>
+        <InputRow>
+          <IngredientInput
+            value={itemIngredient}
+            onChange={(e) => setItemIngredient(e.target.value)}
+            placeholder="Ingredient"
+            onPressEnter={handleAdd}
+          />
+          <NoteInput
+            value={itemNote}
+            onChange={(e) => setItemNote(e.target.value)}
+            placeholder="Note (optional)"
+            onPressEnter={handleAdd}
+          />
+        </InputRow>
       </FormGroup>
       <FormGroup>
         <Label>Grocery list</Label>
