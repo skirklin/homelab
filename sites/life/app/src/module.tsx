@@ -2,17 +2,19 @@
  * Life tracker module for embedding in the home app.
  * Provides routes that can be mounted at /life/*
  */
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { LifeProvider, useLife } from "./life-context";
 import { DisplaySettingsProvider } from "./display-settings";
-import { getOrCreateUserLog, setCurrentLogId } from "./firestore";
+import { getOrCreateUserLog, setCurrentLogId, getCachedLogId } from "./firestore";
 import { logFromStore } from "./types";
 import { LifeDashboard } from "./components/LifeDashboard";
-import { Visualizations } from "./components/Visualizations";
+
+// Lazy load heavy visualization component
+const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
 
 const LoadingContainer = styled.div`
   display: flex;
@@ -33,6 +35,13 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   useEffect(() => {
     if (!user) return;
 
+    // Try to use cached log ID for immediate subscription start
+    const cachedLogId = getCachedLogId();
+    if (cachedLogId && !state.log) {
+      // Optimistically set the log ID so subscription can start
+      setCurrentLogId(cachedLogId);
+    }
+
     const loadLog = async () => {
       const { id, data } = await getOrCreateUserLog(user.uid);
       setCurrentLogId(id);
@@ -40,7 +49,7 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     };
 
     loadLog();
-  }, [user, dispatch]);
+  }, [user, dispatch, state.log]);
 
   if (!state.log) {
     return (
@@ -54,7 +63,11 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     <DisplaySettingsProvider>
       <Routes>
         <Route path="/" element={<LifeDashboard embedded={embedded} />} />
-        <Route path="/insights" element={<Visualizations />} />
+        <Route path="/insights" element={
+          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+            <Visualizations />
+          </Suspense>
+        } />
         <Route path="*" element={<LifeDashboard embedded={embedded} />} />
       </Routes>
     </DisplaySettingsProvider>

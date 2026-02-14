@@ -17,14 +17,25 @@ import { DEFAULT_MANIFEST } from "./types";
 
 const { db } = getBackend();
 
+const LOG_ID_CACHE_KEY = "life-log-id";
+
 let currentLogId: string | null = null;
 
 export function setCurrentLogId(logId: string | null) {
   currentLogId = logId;
+  // Cache for faster startup next time
+  if (logId) {
+    localStorage.setItem(LOG_ID_CACHE_KEY, logId);
+  }
 }
 
 export function getCurrentLogId(): string | null {
   return currentLogId;
+}
+
+/** Get cached log ID for optimistic loading */
+export function getCachedLogId(): string | null {
+  return localStorage.getItem(LOG_ID_CACHE_KEY);
 }
 
 function getEventsRef(logId?: string) {

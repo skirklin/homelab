@@ -30,7 +30,7 @@ import {
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
 } from "../messaging";
-import { addSampleResponse, clearSampleSchedule } from "../firestore";
+import { addSampleResponse, clearSampleSchedule, getCachedLogId } from "../firestore";
 
 // Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {
@@ -232,8 +232,9 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     return dayjs(selectedDate).format("ddd, MMM D");
   };
 
-  // Subscribe to entries
-  useEntriesSubscription(state.log?.id ?? null);
+  // Subscribe to entries - use cached log ID for faster startup
+  const logId = state.log?.id ?? getCachedLogId();
+  useEntriesSubscription(logId);
 
   const manifest = state.log?.manifest ?? DEFAULT_MANIFEST;
   const allEntries = Array.from(state.entries.values());

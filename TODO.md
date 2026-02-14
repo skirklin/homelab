@@ -84,11 +84,10 @@ Only primary/accent colors differ per app (intentional branding).
   - Use case: traveling and can't do household tasks this week
 
 ## Life Tracker App (High Priority)
-- [ ] **Data limit bug**: Only showing last 2 weeks of data - analysis mode needs ALL historical data
-  - May need to paginate or lazy-load, but analysis view must have full dataset
-- [ ] **Slow initial load**: ~5 seconds to open logging view adds friction
-  - Investigate: Firestore persistence, bundle size, unnecessary data loading
-  - Goal: Near-instant load for quick logging
+- [x] **Data limit bug**: Only showing last 2 weeks of data - analysis mode needs ALL historical data
+  - Fixed: Removed limit(100) from Firestore query in subscription.tsx
+- [x] **Slow initial load**: ~5 seconds to open logging view adds friction
+  - Fixed: Log ID caching, lazy-loaded Visualizations component, optimistic subscription start
 - [ ] **Quick entry widget**: Way to log without opening the full app
   - PWA improvements for faster launch
   - Deep-link shortcut to minimal logging view
