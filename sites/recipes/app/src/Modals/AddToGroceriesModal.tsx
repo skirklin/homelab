@@ -32,17 +32,21 @@ export function AddToGroceriesModal({
   const [selectedListId, setSelectedListId] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
-  // Reset state when modal opens with a new ingredient
+  // Reset state when modal opens
   useEffect(() => {
     if (isVisible) {
       setItemName(ingredient);
-      // Auto-select first list if only one exists
-      const listIds = Object.values(integration.userSlugs);
-      if (listIds.length === 1) {
-        setSelectedListId(listIds[0]);
+      // Default to current list, or first list if only one exists
+      if (integration.currentListId) {
+        setSelectedListId(integration.currentListId);
+      } else {
+        const listIds = Object.values(integration.userSlugs);
+        if (listIds.length === 1) {
+          setSelectedListId(listIds[0]);
+        }
       }
     }
-  }, [isVisible, ingredient, integration.userSlugs]);
+  }, [isVisible, ingredient, integration.currentListId, integration.userSlugs]);
 
   const listOptions = Object.entries(integration.userSlugs).map(
     ([slug, listId]) => ({

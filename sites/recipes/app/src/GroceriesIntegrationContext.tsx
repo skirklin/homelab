@@ -8,6 +8,8 @@ import { createContext, useContext } from "react";
 export interface GroceriesIntegration {
   /** User's grocery list slugs: { slug → listId } */
   userSlugs: Record<string, string>;
+  /** Currently viewed list ID (if any) */
+  currentListId: string | null;
   /** Add an item to a grocery list */
   addItem: (listId: string, name: string) => Promise<void>;
 }

@@ -26,6 +26,7 @@ export function GroceriesIntegrationProvider({ children }: GroceriesIntegrationP
 
   const integration = {
     userSlugs: state.userSlugs,
+    currentListId: state.list?.id ?? null,
     addItem,
   };
 
