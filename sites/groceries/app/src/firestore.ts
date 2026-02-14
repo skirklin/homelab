@@ -126,6 +126,24 @@ export async function deleteItem(itemId: string) {
   await deleteDoc(itemRef);
 }
 
+export async function updateItem(
+  itemId: string,
+  updates: { ingredient?: string; note?: string }
+) {
+  const itemRef = getItemRef(itemId);
+  const updateData: Record<string, string | null> = {};
+
+  if (updates.ingredient !== undefined) {
+    updateData.ingredient = updates.ingredient;
+  }
+  if (updates.note !== undefined) {
+    // Store null instead of empty string to remove the field
+    updateData.note = updates.note || null;
+  }
+
+  await updateDoc(itemRef, updateData);
+}
+
 export async function updateItemCategory(item: GroceryItem, newCategoryId: CategoryId) {
   const itemRef = getItemRef(item.id);
   await updateDoc(itemRef, { categoryId: newCategoryId });
