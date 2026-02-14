@@ -71,3 +71,31 @@ Only primary/accent colors differ per app (intentional branding).
 - Deploy home app to home.kirkl.in
 - Update Firebase hosting configuration for home app
 - Consider deprecating standalone apps once home app is stable
+
+## Groceries App
+- [ ] Fix drag-and-drop category reassignment on mobile (currently broken)
+  - Option A: Fix touch handling in dnd-kit
+  - Option B: Add "Move to..." dropdown/modal on long-press as mobile alternative
+- [ ] Revisit recipes→groceries integration after more usage (is adding one item at a time enough, or need "add all ingredients"?)
+
+## Upkeep App
+- [ ] Add snooze/defer feature for tasks
+  - "Remind me in X days" or "Remind me on [date]"
+  - Use case: traveling and can't do household tasks this week
+
+## Life Tracker App (High Priority)
+- [ ] **Data limit bug**: Only showing last 2 weeks of data - analysis mode needs ALL historical data
+  - May need to paginate or lazy-load, but analysis view must have full dataset
+- [ ] **Slow initial load**: ~5 seconds to open logging view adds friction
+  - Investigate: Firestore persistence, bundle size, unnecessary data loading
+  - Goal: Near-instant load for quick logging
+- [ ] **Quick entry widget**: Way to log without opening the full app
+  - PWA improvements for faster launch
+  - Deep-link shortcut to minimal logging view
+  - Native home screen widget (complex but ideal)
+
+## Home App Shell
+- [ ] Consider pinning app switcher at top of screen
+  - Pro: No scrolling to switch apps
+  - Con: Uses screen real estate
+  - Compromise: Collapsible bar, or only pin on larger screens
