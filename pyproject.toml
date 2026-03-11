@@ -1,0 +1,46 @@
+[project]
+name = "money"
+version = "0.1.0"
+description = "Personal finance data collection and analysis"
+readme = "README.md"
+authors = [
+    { name = "Scott Kirklin", email = "scott.kirklin@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click",
+    "playwright",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "pyright",
+]
+gcs = [
+    "google-cloud-storage",
+]
+
+[project.scripts]
+money = "money.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
