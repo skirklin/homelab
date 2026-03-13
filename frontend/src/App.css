@@ -1,0 +1,319 @@
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+header h1 {
+  font-size: 1.6em;
+  margin: 0;
+  font-weight: 600;
+}
+
+.net-worth-header {
+  font-size: 1.6em;
+  font-weight: 300;
+  color: #4ade80;
+}
+
+.loading,
+.error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 50vh;
+  font-size: 1.2em;
+}
+.error {
+  color: #f87171;
+}
+
+/* Sections */
+.chart-section {
+  margin-bottom: 2.5rem;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chart-section h2 {
+  font-size: 1.1em;
+  font-weight: 500;
+  margin: 0 0 0.5rem 0;
+  opacity: 0.8;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* Metrics */
+.metric-row {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.big-number {
+  font-size: 1.4em;
+  font-weight: 300;
+}
+
+.change {
+  font-size: 0.9em;
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+.change.positive {
+  color: #4ade80;
+}
+.change.negative {
+  color: #f87171;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.metric-label {
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+}
+.metric-value {
+  font-size: 1em;
+  font-weight: 400;
+}
+.metric.positive .metric-value {
+  color: #4ade80;
+}
+.metric.negative .metric-value {
+  color: #f87171;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.time-range-selector {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.range-btn {
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.75em;
+  font-weight: 500;
+}
+.range-btn.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.range-btn:hover:not(.active) {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.toggle-btn {
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 0.75em;
+}
+.toggle-btn.active {
+  background: rgba(129, 140, 248, 0.15);
+  border-color: #818cf8;
+  color: #818cf8;
+}
+
+/* Account summary */
+.account-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.account-group {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.inst-name {
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.inst-total {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.account-card {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.account-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.account-name {
+  font-size: 0.9em;
+}
+
+.account-type {
+  font-size: 0.7em;
+  text-transform: uppercase;
+  opacity: 0.4;
+  letter-spacing: 0.05em;
+}
+
+.account-balance {
+  font-size: 1.05em;
+  margin-top: 0.15rem;
+}
+
+.account-gain {
+  font-size: 0.8em;
+  margin-top: 0.1rem;
+}
+.account-gain.positive {
+  color: #4ade80;
+}
+.account-gain.negative {
+  color: #f87171;
+}
+.gain-pct {
+  opacity: 0.7;
+}
+
+/* Spending */
+.spending-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 900px) {
+  .spending-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Transaction table */
+.search-input {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.85em;
+  width: 250px;
+}
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.table-container {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.txn-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+
+.txn-table th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 500;
+  opacity: 0.6;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  position: sticky;
+  top: 0;
+  background: #1a1a2e;
+}
+
+.txn-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.txn-table .date {
+  white-space: nowrap;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+.txn-table .desc {
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.txn-table .acct {
+  opacity: 0.5;
+  font-size: 0.9em;
+}
+.txn-table .amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.txn-table .right {
+  text-align: right;
+}
+.positive {
+  color: #4ade80;
+}
+.negative {
+  color: #f87171;
+}
+
+.txn-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}

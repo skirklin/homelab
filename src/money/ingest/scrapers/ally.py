@@ -36,7 +36,7 @@ class ScrapedAccount:
     balance: float | None = None
 
 
-def _login(page: Page, profile: str | None = None) -> None:
+def _login(page: Page, profile: str) -> None:
     creds = load_credentials("ally", profile)
     log.info("Navigating to Ally login page")
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
@@ -426,7 +426,7 @@ def _download_csv(page: Page, account: ScrapedAccount, download_dir: Path) -> Pa
         return None
 
 
-def scrape_ally(profile: str | None = None) -> list[tuple[ScrapedAccount, Path]]:
+def scrape_ally(profile: str) -> list[tuple[ScrapedAccount, Path]]:
     """Log in to Ally Bank, discover accounts, and download CSVs.
 
     Returns list of (account_info, csv_path) tuples.

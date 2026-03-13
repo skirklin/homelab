@@ -18,9 +18,9 @@ SCHEMA_VERSION = 1
 
 
 class Database:
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(self, path: str | Path = ":memory:", check_same_thread: bool = True) -> None:
         self.path = str(path)
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.path, check_same_thread=check_same_thread)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.row_factory = sqlite3.Row
@@ -118,7 +118,8 @@ class Database:
 
     def insert_balance(self, balance: Balance) -> None:
         self.conn.execute(
-            """INSERT INTO balances (account_id, as_of, balance, source, raw_file_ref, recorded_at)
+            """INSERT OR IGNORE INTO balances
+               (account_id, as_of, balance, source, raw_file_ref, recorded_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (
                 balance.account_id,
@@ -238,6 +239,36 @@ class Database:
         self.conn.commit()
         assert cursor.lastrowid is not None
         return cursor.lastrowid
+
+    # -- Performance History --
+
+    def insert_performance(
+        self,
+        account_id: str,
+        as_of: date,
+        balance: float,
+        invested: float | None = None,
+        earned: float | None = None,
+    ) -> None:
+        self.conn.execute(
+            """INSERT OR IGNORE INTO performance_history
+               (account_id, date, balance, invested, earned)
+               VALUES (?, ?, ?, ?, ?)""",
+            (account_id, as_of.isoformat(), balance, invested, earned),
+        )
+        self.conn.commit()
+
+    def insert_performance_batch(
+        self,
+        rows: list[tuple[str, str, float, float | None, float | None]],
+    ) -> None:
+        self.conn.executemany(
+            """INSERT OR IGNORE INTO performance_history
+               (account_id, date, balance, invested, earned)
+               VALUES (?, ?, ?, ?, ?)""",
+            rows,
+        )
+        self.conn.commit()
 
     # -- Net Worth --
 

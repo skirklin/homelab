@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "Money Data Collector",
+  "version": "0.1.0",
+  "description": "Collects financial data from supported institution websites",
+  "permissions": ["activeTab", "storage", "cookies", "scripting"],
+  "host_permissions": [
+    "http://localhost:5555/*",
+    "https://secure.ally.com/*",
+    "https://wwws.ally.com/*",
+    "https://www.wealthfront.com/*",
+    "https://wwws.betterment.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://secure.ally.com/*",
+        "https://wwws.ally.com/*"
+      ],
+      "js": ["content/network_recorder.js", "content/ally.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.wealthfront.com/*"
+      ],
+      "js": ["content/network_recorder.js", "content/wealthfront.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://wwws.betterment.com/*"
+      ],
+      "js": ["content/network_recorder.js", "content/betterment.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content/page_interceptor.js"],
+      "matches": [
+        "https://secure.ally.com/*",
+        "https://wwws.ally.com/*",
+        "https://www.wealthfront.com/*",
+        "https://wwws.betterment.com/*"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

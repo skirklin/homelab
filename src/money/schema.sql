@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id);
 
+CREATE TABLE IF NOT EXISTS performance_history (
+    account_id    TEXT NOT NULL REFERENCES accounts(id),
+    date          TEXT NOT NULL,
+    balance       REAL NOT NULL,
+    invested      REAL,
+    earned        REAL,
+    PRIMARY KEY (account_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_perf_date ON performance_history(date);
+
 CREATE TABLE IF NOT EXISTS option_grants (
     id                TEXT PRIMARY KEY,
     account_id        TEXT NOT NULL REFERENCES accounts(id),

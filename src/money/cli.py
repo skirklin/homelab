@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import click
 
@@ -104,25 +105,137 @@ def balances(ctx: click.Context) -> None:
     db.close()
 
 
+@main.command()
+@click.option("-p", "--port", default=5555, help="Port to listen on.")
+@click.option("--host", default="127.0.0.1", help="Host to bind to.")
+@click.pass_context
+def serve(ctx: click.Context, port: int, host: str) -> None:
+    """Start local server to receive data from the Chrome extension."""
+    from money.config import RAW_STORE_DIR
+    from money.server import run_server
+    from money.storage import LocalStore
+
+    db_path = ctx.obj["db_path"]
+    db = Database(db_path)
+    db.initialize()
+
+    store = LocalStore(RAW_STORE_DIR)
+
+    click.echo(f"Starting server on http://{host}:{port}")
+    try:
+        run_server(db=db, store=store, port=port, host=host)
+    finally:
+        db.close()
+
+
 @main.group()
 def sync() -> None:
     """Sync data from financial institutions."""
 
 
 @sync.command()
-@click.option("--profile", default=None, help="Credential profile (e.g. 'partner').")
+@click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
+@click.option("--cookies", is_flag=True, help="Use relayed auth token from Chrome extension.")
 @click.pass_context
-def ally(ctx: click.Context, profile: str | None) -> None:
+def ally(ctx: click.Context, profile: str, cookies: bool) -> None:
     """Sync Ally Bank accounts."""
+    from money.config import RAW_STORE_DIR, load_config
+    from money.storage import DualStore, GCSStore, LocalStore
+
+    config = load_config()
+    local = LocalStore(RAW_STORE_DIR)
+    store: LocalStore | DualStore
+    if config.gcs_bucket:
+        store = DualStore(
+            local, GCSStore(config.gcs_bucket, project=config.gcs_project, prefix="raw")
+        )
+    else:
+        store = local
+
+    db_path = ctx.obj["db_path"]
+    db = Database(db_path)
+    db.initialize()
+
+    try:
+        if cookies:
+            from money.ingest.ally_api import sync_ally_api
+
+            sync_ally_api(db, store, profile=profile)
+        else:
+            from money.ingest.ally import sync_ally
+
+            sync_ally(db, store, profile=profile)
+    finally:
+        db.close()
+
+    # Back up the DB to GCS after sync
+    if config.gcs_bucket:
+        gcs = GCSStore(config.gcs_bucket, project=config.gcs_project)
+        gcs.put("money.db", Path(db_path).read_bytes())
+        click.echo(f"Backed up database to gs://{config.gcs_bucket}/money.db")
+
+
+@sync.command()
+@click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
+@click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
+@click.option("--cookies", is_flag=True, help="Use relayed cookies from Chrome extension.")
+@click.pass_context
+def betterment(ctx: click.Context, profile: str, explore: bool, cookies: bool) -> None:
+    """Sync Betterment accounts."""
+    if explore:
+        from money.ingest.scrapers.betterment import explore_betterment
+
+        explore_betterment(profile)
+        return
+
+    if cookies:
+        from money.config import RAW_STORE_DIR
+        from money.ingest.betterment import sync_betterment
+        from money.storage import LocalStore
+
+        db_path = ctx.obj["db_path"]
+        db = Database(db_path)
+        db.initialize()
+        store = LocalStore(RAW_STORE_DIR)
+
+        try:
+            sync_betterment(db, store, profile=profile)
+        finally:
+            db.close()
+        return
+
+
+@sync.command()
+@click.option("--profile", required=True, help="Credential profile (e.g. 'scott').")
+@click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
+@click.option("--camoufox", is_flag=True, help="Use camoufox anti-detect browser.")
+@click.option("--cookies", is_flag=True, help="Use relayed cookies from Chrome extension.")
+@click.pass_context
+def wealthfront(
+    ctx: click.Context, profile: str, explore: bool, camoufox: bool, cookies: bool,
+) -> None:
+    """Sync Wealthfront accounts."""
+    if explore:
+        if cookies:
+            from money.ingest.scrapers.wealthfront import explore_wealthfront_cookies
+
+            explore_wealthfront_cookies(profile)
+            return
+        from money.ingest.scrapers.wealthfront import explore_wealthfront
+
+        explore_wealthfront(profile, use_camoufox=camoufox)
+        return
+
     from money.config import RAW_STORE_DIR
-    from money.ingest.ally import sync_ally
+    from money.ingest.wealthfront import sync_wealthfront
     from money.storage import LocalStore
 
-    db = Database(ctx.obj["db_path"])
+    db_path = ctx.obj["db_path"]
+    db = Database(db_path)
     db.initialize()
     store = LocalStore(RAW_STORE_DIR)
 
     try:
-        sync_ally(db, store, profile=profile)
+        sync_wealthfront(db, store, profile=profile)
     finally:
         db.close()
