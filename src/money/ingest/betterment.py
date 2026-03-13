@@ -266,23 +266,28 @@ def sync_betterment(db: Database, store: RawStore, profile: str) -> None:
         # 2. For each envelope, get balance via PurposeHeader
         for envelope in envelopes:
             envelope_id = envelope["id"]
-            purpose_name = envelope.get("purpose", {}).get("name", "Unknown")
+            purpose_raw = envelope.get("purpose")
+            purpose_name = purpose_raw.get("name", "Unknown") if purpose_raw else "Unknown"
             accounts = envelope.get("accounts", [])
 
-            purpose_data = _graphql(
-                cookies, csrf_token, "PurposeHeader", PURPOSE_HEADER_QUERY,
-                variables={"id": envelope_id},
-            )
-            store.put(
-                f"betterment/{timestamp}_{envelope_id}_purpose.json",
-                json.dumps(purpose_data, indent=2).encode(),
-            )
+            # Only query PurposeHeader if the envelope has a purpose
+            envelope_balance: float | None = None
+            if purpose_raw is not None:
+                purpose_data = _graphql(
+                    cookies, csrf_token, "PurposeHeader", PURPOSE_HEADER_QUERY,
+                    variables={"id": envelope_id},
+                )
+                store.put(
+                    f"betterment/{timestamp}_{envelope_id}_purpose.json",
+                    json.dumps(purpose_data, indent=2).encode(),
+                )
 
-            envelope_balance_cents = (
-                purpose_data.get("data", {}).get("purpose", {})
-                .get("envelope", {}).get("balance")
-            )
-            envelope_balance = _cents_to_dollars(envelope_balance_cents)
+                purpose_obj = purpose_data.get("data", {}).get("purpose")
+                if purpose_obj:
+                    envelope_balance_cents = (
+                        purpose_obj.get("envelope", {}).get("balance")
+                    )
+                    envelope_balance = _cents_to_dollars(envelope_balance_cents)
             log.info(
                 "Envelope '%s': %d account(s), balance=$%s",
                 purpose_name,

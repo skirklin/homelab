@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
+import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import type { Account } from './api'
 import { fetchAccounts } from './api'
-import { NetWorthChart } from './components/NetWorthChart'
-import { AccountSummary } from './components/AccountSummary'
-import { PerformanceChart } from './components/PerformanceChart'
-import { SpendingByMonth, SpendingByCategory } from './components/SpendingCharts'
-import { TransactionTable } from './components/TransactionTable'
+import { Overview } from './pages/Overview'
+import { Investments } from './pages/Investments'
+import { Spending } from './pages/Spending'
 import './App.css'
+
+const fmtDollar = (v: number) =>
+  `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 function App() {
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -31,28 +33,26 @@ function App() {
   const totalBalance = accounts.reduce((sum, a) => sum + (a.latest_balance ?? 0), 0)
 
   return (
-    <div className="app">
-      <header>
-        <h1>Money</h1>
-        <div className="net-worth-header">
-          $
-          {totalBalance.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </div>
-      </header>
-      <main>
-        <NetWorthChart />
-        <AccountSummary accounts={accounts} />
-        <PerformanceChart />
-        <div className="spending-grid">
-          <SpendingByMonth />
-          <SpendingByCategory />
-        </div>
-        <TransactionTable />
-      </main>
-    </div>
+    <BrowserRouter>
+      <div className="app">
+        <header>
+          <h1>Money</h1>
+          <div className="net-worth-header">{fmtDollar(totalBalance)}</div>
+          <nav className="nav">
+            <NavLink to="/" end>Overview</NavLink>
+            <NavLink to="/investments">Investments</NavLink>
+            <NavLink to="/spending">Spending</NavLink>
+          </nav>
+        </header>
+        <main>
+          <Routes>
+            <Route path="/" element={<Overview accounts={accounts} />} />
+            <Route path="/investments" element={<Investments />} />
+            <Route path="/spending" element={<Spending />} />
+          </Routes>
+        </main>
+      </div>
+    </BrowserRouter>
   )
 }
 

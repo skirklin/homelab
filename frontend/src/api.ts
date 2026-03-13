@@ -95,12 +95,14 @@ export const fetchPerformance = (opts?: { accountId?: string; institution?: stri
 
 export const fetchTransactions = (opts?: {
   search?: string
+  accountId?: string
   start?: string
   end?: string
   limit?: number
 }) => {
   const params = new URLSearchParams()
   if (opts?.search) params.set('search', opts.search)
+  if (opts?.accountId) params.set('account_id', opts.accountId)
   if (opts?.start) params.set('start', opts.start)
   if (opts?.end) params.set('end', opts.end)
   if (opts?.limit) params.set('limit', String(opts.limit))

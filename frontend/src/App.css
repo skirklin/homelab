@@ -11,6 +11,35 @@ header {
   margin-bottom: 2rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.nav {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 2px;
+  margin-left: auto;
+}
+
+.nav a {
+  padding: 6px 16px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.5);
+  text-decoration: none;
+  font-size: 0.85em;
+  font-weight: 500;
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav a:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.nav a.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 header h1 {
@@ -227,6 +256,118 @@ header h1 {
 }
 .gain-pct {
   opacity: 0.7;
+}
+
+/* Portfolio composition */
+.allocation-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+  gap: 2px;
+}
+
+.allocation-segment {
+  border-radius: 4px;
+  min-width: 4px;
+  transition: opacity 0.15s;
+}
+.allocation-segment:hover {
+  opacity: 0.8;
+}
+
+.portfolio-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.portfolio-group {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.portfolio-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.portfolio-group-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.portfolio-pct {
+  font-size: 0.8em;
+  opacity: 0.5;
+}
+
+.portfolio-group-totals {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+}
+
+.portfolio-return {
+  font-size: 0.85em;
+}
+
+.portfolio-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+
+.portfolio-table th {
+  text-align: left;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-weight: 500;
+  opacity: 0.5;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.portfolio-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.portfolio-table .right {
+  text-align: right;
+}
+
+.portfolio-table .amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.portfolio-table .acct {
+  opacity: 0.5;
+  font-size: 0.9em;
+  text-transform: capitalize;
+}
+
+.portfolio-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Account filter */
+.account-filter {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.85em;
 }
 
 /* Spending */

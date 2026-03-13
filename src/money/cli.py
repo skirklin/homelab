@@ -18,11 +18,14 @@ from money.db import Database
 @click.pass_context
 def main(ctx: click.Context, db_path: str, verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    root = logging.getLogger()
+    root.setLevel(level)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
-    )
+    ))
+    root.addHandler(handler)
     ctx.ensure_object(dict)
     ctx.obj["db_path"] = db_path
 
@@ -200,6 +203,10 @@ def betterment(ctx: click.Context, profile: str, explore: bool, cookies: bool) -
 
         try:
             sync_betterment(db, store, profile=profile)
+            click.echo("Betterment sync complete.")
+        except Exception as e:
+            click.echo(f"Betterment sync failed: {e}", err=True)
+            raise
         finally:
             db.close()
         return
@@ -237,5 +244,64 @@ def wealthfront(
 
     try:
         sync_wealthfront(db, store, profile=profile)
+    finally:
+        db.close()
+
+
+@sync.command()
+@click.option("--profile", required=True, help="Credential profile (e.g. 'scott').")
+@click.pass_context
+def capital_one(ctx: click.Context, profile: str) -> None:
+    """Sync Capital One credit card accounts."""
+    from money.config import RAW_STORE_DIR
+    from money.ingest.capital_one import sync_capital_one
+    from money.storage import LocalStore
+
+    db_path = ctx.obj["db_path"]
+    db = Database(db_path)
+    db.initialize()
+    store = LocalStore(RAW_STORE_DIR)
+
+    try:
+        sync_capital_one(db, store, profile=profile)
+    finally:
+        db.close()
+
+
+@sync.command()
+@click.pass_context
+def chase(ctx: click.Context) -> None:
+    """Sync Chase accounts from captured network log."""
+    from money.config import RAW_STORE_DIR
+    from money.ingest.chase import sync_chase
+    from money.storage import LocalStore
+
+    db_path = ctx.obj["db_path"]
+    db = Database(db_path)
+    db.initialize()
+    store = LocalStore(RAW_STORE_DIR)
+
+    try:
+        sync_chase(db, store)
+    finally:
+        db.close()
+
+
+@sync.command()
+@click.option("--profile", required=True, help="Credential profile (e.g. 'scott').")
+@click.pass_context
+def morgan_stanley(ctx: click.Context, profile: str) -> None:
+    """Sync Morgan Stanley Shareworks stock options/RSUs."""
+    from money.config import RAW_STORE_DIR
+    from money.ingest.morgan_stanley import sync_morgan_stanley
+    from money.storage import LocalStore
+
+    db_path = ctx.obj["db_path"]
+    db = Database(db_path)
+    db.initialize()
+    store = LocalStore(RAW_STORE_DIR)
+
+    try:
+        sync_morgan_stanley(db, store, profile=profile)
     finally:
         db.close()
