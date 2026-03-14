@@ -266,6 +266,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         search = params.get("search", [None])[0]
         start = params.get("start", [None])[0]
         end = params.get("end", [None])[0]
+        hide_transfers = params.get("hide_transfers", ["0"])[0] == "1"
         limit = int(params.get("limit", ["200"])[0])
 
         query = """
@@ -288,6 +289,17 @@ class IngestHandler(BaseHTTPRequestHandler):
         if end:
             conditions.append("t.date <= ?")
             query_params.append(end)
+        if hide_transfers:
+            # Exclude transactions that have a matching opposite-amount entry
+            # on the same date in a different account (inter-account transfers)
+            conditions.append("""
+                t.id NOT IN (
+                    SELECT t1.id FROM transactions t1
+                    JOIN transactions t2 ON t1.date = t2.date
+                        AND t1.account_id != t2.account_id
+                        AND ABS(t1.amount + t2.amount) < 0.01
+                )
+            """)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY t.date DESC, t.id DESC LIMIT ?"
@@ -314,14 +326,48 @@ class IngestHandler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
         group_by = params.get("group_by", ["month"])[0]
 
-        if group_by == "category":
-            rows = self.db.conn.execute("""
-                SELECT COALESCE(t.category, t.description) as category,
-                       SUM(t.amount) as total,
-                       COUNT(*) as count
+        # Categories that aren't consumption spending — these are movements
+        # between accounts, not real income or expenses
+        non_spending = (
+            "cc_payment", "transfer", "investment", "wire_transfer",
+            "deposit", "fee_rebate",
+        )
+        non_spending_clause = (
+            "AND d.category NOT IN ("
+            + ",".join(f"'{c}'" for c in non_spending)
+            + ")"
+        )
+
+        # Deduplicate: Ally API returns the same transactions for all checking
+        # accounts. Pick one row per (institution, date, amount, description).
+        # Then exclude inter-account transfers (opposite amounts on same date).
+        deduped_cte = """
+            WITH deduped AS (
+                SELECT MIN(t.id) as id, a.institution, t.date, t.amount,
+                       t.description, t.category
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.id
-                WHERE a.account_type = 'checking' AND t.amount < 0
+                WHERE a.account_type IN ('checking', 'credit_card')
+                GROUP BY a.institution, t.date, t.amount, t.description
+            ),
+            transfer_ids AS (
+                SELECT d1.id FROM deduped d1
+                JOIN deduped d2 ON d1.date = d2.date
+                    AND d1.id != d2.id
+                    AND ABS(d1.amount + d2.amount) < 0.01
+            )
+        """
+
+        if group_by == "category":
+            rows = self.db.conn.execute(f"""
+                {deduped_cte}
+                SELECT COALESCE(d.category, d.description) as category,
+                       SUM(d.amount) as total,
+                       COUNT(*) as count
+                FROM deduped d
+                WHERE d.amount < 0
+                  AND d.id NOT IN (SELECT id FROM transfer_ids)
+                  {non_spending_clause}
                 GROUP BY category
                 ORDER BY total ASC
             """).fetchall()
@@ -334,13 +380,14 @@ class IngestHandler(BaseHTTPRequestHandler):
                 })
             self._json_response(200, {"categories": categories})
         else:
-            rows = self.db.conn.execute("""
-                SELECT strftime('%Y-%m', t.date) as month,
-                       SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END) as income,
-                       SUM(CASE WHEN t.amount < 0 THEN t.amount ELSE 0 END) as spending
-                FROM transactions t
-                JOIN accounts a ON t.account_id = a.id
-                WHERE a.account_type = 'checking'
+            rows = self.db.conn.execute(f"""
+                {deduped_cte}
+                SELECT strftime('%Y-%m', d.date) as month,
+                       SUM(CASE WHEN d.amount > 0 THEN d.amount ELSE 0 END) as income,
+                       SUM(CASE WHEN d.amount < 0 THEN d.amount ELSE 0 END) as spending
+                FROM deduped d
+                WHERE d.id NOT IN (SELECT id FROM transfer_ids)
+                  {non_spending_clause}
                 GROUP BY month
                 ORDER BY month ASC
             """).fetchall()

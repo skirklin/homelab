@@ -10,7 +10,7 @@ from typing import Any
 
 from money.config import cookie_relay_path
 from money.db import Database
-from money.models import AccountType, Balance, IngestionRecord, IngestionStatus
+from money.models import AccountType, Balance, Holding, IngestionRecord, IngestionStatus
 from money.storage import RawStore
 
 log = logging.getLogger(__name__)
@@ -138,6 +138,47 @@ fragment PerformanceHistoryItem on PerformanceHistoryItem {
   invested
   earned
   __typename
+}"""
+
+
+HOLDINGS_QUERY = """\
+query EnvelopeAccountHoldings($id: ID!) \
+@operationServiceConfig(feature: "envelope_holdings") {
+  account: envelopeAccount(id: $id) {
+    id
+    ... on ManagedAccount {
+      securityGroupPositions {
+        amount
+        currentWeight
+        securityGroup {
+          name
+          targetWeight
+          __typename
+        }
+        securityPositions {
+          amount
+          shares
+          security {
+            symbol
+            ... on SecurityFund {
+              name
+              __typename
+            }
+            __typename
+          }
+          financialSecurity {
+            name
+            symbol
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
 }"""
 
 
@@ -386,6 +427,62 @@ def sync_betterment(db: Database, store: RawStore, profile: str) -> None:
                         time_series[0]["date"],
                         time_series[-1]["date"],
                     )
+
+                # Fetch holdings for managed (investment) accounts
+                if acct_typename == "ManagedAccount":
+                    try:
+                        holdings_data = _graphql(
+                            cookies, csrf_token,
+                            "EnvelopeAccountHoldings",
+                            HOLDINGS_QUERY,
+                            variables={"id": acct_graphql_id},
+                        )
+                        holdings_key = (
+                            f"betterment/{timestamp}_{acct_external_id}_holdings.json"
+                        )
+                        store.put(
+                            holdings_key,
+                            json.dumps(holdings_data, indent=2).encode(),
+                        )
+
+                        acct_holdings = holdings_data.get("data", {}).get("account", {})
+                        groups = acct_holdings.get("securityGroupPositions", [])
+                        holding_rows: list[Holding] = []
+                        for group in groups:
+                            group_name = group.get("securityGroup", {}).get("name", "")
+                            for pos in group.get("securityPositions", []):
+                                amount_cents = pos.get("amount")
+                                security = pos.get("security", {})
+                                fin_sec = pos.get("financialSecurity", {})
+                                symbol = (
+                                    security.get("symbol")
+                                    or fin_sec.get("symbol")
+                                )
+                                name = (
+                                    security.get("name")
+                                    or fin_sec.get("name")
+                                    or symbol
+                                    or ""
+                                )
+                                holding_rows.append(Holding(
+                                    account_id=account.id,
+                                    as_of=date.today(),
+                                    symbol=symbol,
+                                    name=name,
+                                    asset_class=group_name,
+                                    shares=float(pos.get("shares", 0)),
+                                    value=amount_cents / 100.0 if amount_cents else 0.0,
+                                    source="betterment_graphql",
+                                    raw_file_ref=holdings_key,
+                                ))
+                        if holding_rows:
+                            db.insert_holdings_batch(holding_rows)
+                            log.info(
+                                "  Holdings: %d positions across %d asset classes",
+                                len(holding_rows), len(groups),
+                            )
+                    except Exception as e:
+                        log.warning("  Could not fetch holdings for %s: %s", display_name, e)
 
         db.insert_ingestion_record(
             IngestionRecord(

@@ -98,6 +98,7 @@ export const fetchTransactions = (opts?: {
   accountId?: string
   start?: string
   end?: string
+  hideTransfers?: boolean
   limit?: number
 }) => {
   const params = new URLSearchParams()
@@ -105,6 +106,7 @@ export const fetchTransactions = (opts?: {
   if (opts?.accountId) params.set('account_id', opts.accountId)
   if (opts?.start) params.set('start', opts.start)
   if (opts?.end) params.set('end', opts.end)
+  if (opts?.hideTransfers) params.set('hide_transfers', '1')
   if (opts?.limit) params.set('limit', String(opts.limit))
   const qs = params.toString()
   return get<{ transactions: Transaction[] }>(`/api/transactions${qs ? `?${qs}` : ''}`).then(

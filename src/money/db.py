@@ -7,6 +7,7 @@ from money.models import (
     Account,
     AccountType,
     Balance,
+    Holding,
     IngestionRecord,
     OptionGrant,
     PrivateValuation,
@@ -45,6 +46,33 @@ class Database:
                 "ON accounts(institution, external_id)"
             )
             self.conn.commit()
+
+        # Ensure holdings table exists (added after initial schema)
+        tables = {
+            row[0] for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if "holdings" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS holdings (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id    TEXT NOT NULL REFERENCES accounts(id),
+                    as_of         TEXT NOT NULL,
+                    symbol        TEXT,
+                    name          TEXT NOT NULL,
+                    asset_class   TEXT,
+                    shares        REAL NOT NULL,
+                    value         REAL NOT NULL,
+                    source        TEXT NOT NULL,
+                    raw_file_ref  TEXT,
+                    recorded_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(account_id, as_of, symbol, source)
+                );
+                CREATE INDEX IF NOT EXISTS idx_holdings_account_date
+                    ON holdings(account_id, as_of);
+                CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
+            """)
 
     # -- Accounts --
 
@@ -148,7 +176,7 @@ class Database:
 
     def insert_transaction(self, txn: Transaction) -> None:
         self.conn.execute(
-            """INSERT INTO transactions (account_id, date, amount, description, category,
+            """INSERT OR IGNORE INTO transactions (account_id, date, amount, description, category,
                raw_file_ref, recorded_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -195,7 +223,7 @@ class Database:
 
     def insert_private_valuation(self, valuation: PrivateValuation) -> None:
         self.conn.execute(
-            """INSERT INTO private_valuations
+            """INSERT OR IGNORE INTO private_valuations
                (account_id, as_of, fmv_per_share, source, recorded_at)
                VALUES (?, ?, ?, ?, ?)""",
             (
@@ -219,6 +247,32 @@ class Database:
         if row is None:
             return None
         return _row_to_private_valuation(row)
+
+    # -- Holdings --
+
+    def insert_holdings_batch(self, holdings: list[Holding]) -> None:
+        self.conn.executemany(
+            """INSERT OR REPLACE INTO holdings
+               (account_id, as_of, symbol, name, asset_class, shares, value,
+                source, raw_file_ref, recorded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    h.account_id,
+                    h.as_of.isoformat(),
+                    h.symbol,
+                    h.name,
+                    h.asset_class,
+                    h.shares,
+                    h.value,
+                    h.source,
+                    h.raw_file_ref,
+                    h.recorded_at.isoformat(),
+                )
+                for h in holdings
+            ],
+        )
+        self.conn.commit()
 
     # -- Ingestion Log --
 

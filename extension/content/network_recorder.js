@@ -17,17 +17,25 @@ function stopRecording() {
   recording = false;
 }
 
+function safeSendMessage(msg) {
+  try {
+    if (!chrome.runtime?.id) return; // Extension context invalidated
+    chrome.runtime.sendMessage(msg);
+  } catch (e) {
+    // Extension was reloaded or uninstalled — ignore
+  }
+}
+
 // Relay intercepted requests from page context to background
 window.addEventListener("message", (event) => {
   if (event.data && event.data.source === "__money_network") {
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: "NETWORK_REQUEST",
       entry: event.data.entry,
     });
   }
-  // Relay captured auth tokens
   if (event.data && event.data.source === "__money_auth_token") {
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: "AUTH_TOKEN",
       token: event.data.token,
       tokenType: event.data.tokenType,
@@ -51,8 +59,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // On load, check if background says we should be recording (survives page refresh)
-chrome.runtime.sendMessage({ type: "CHECK_RECORDING_FOR_TAB" }, (response) => {
-  if (response && response.shouldRecord) {
-    startRecording();
-  }
-});
+try {
+  chrome.runtime.sendMessage({ type: "CHECK_RECORDING_FOR_TAB" }, (response) => {
+    if (chrome.runtime.lastError) return; // Stale context
+    if (response && response.shouldRecord) {
+      startRecording();
+    }
+  });
+} catch (e) {
+  // Extension context invalidated — ignore
+}

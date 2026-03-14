@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     description   TEXT,
     category      TEXT,
     raw_file_ref  TEXT,
-    recorded_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    recorded_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(account_id, date, amount, description)
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
@@ -79,6 +80,24 @@ CREATE TABLE IF NOT EXISTS private_valuations (
     recorded_at   TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(account_id, as_of)
 );
+
+CREATE TABLE IF NOT EXISTS holdings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    TEXT NOT NULL REFERENCES accounts(id),
+    as_of         TEXT NOT NULL,
+    symbol        TEXT,
+    name          TEXT NOT NULL,
+    asset_class   TEXT,
+    shares        REAL NOT NULL,
+    value         REAL NOT NULL,
+    source        TEXT NOT NULL,
+    raw_file_ref  TEXT,
+    recorded_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(account_id, as_of, symbol, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_holdings_account_date ON holdings(account_id, as_of);
+CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
 
 CREATE TABLE IF NOT EXISTS ingestion_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

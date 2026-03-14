@@ -25,15 +25,15 @@
       }
     } catch(e) {}
 
-    // Capture Authorization header
-    let authHeader = null;
+    // Capture all request headers
+    let requestHeaders = {};
     try {
       if (args[1] && args[1].headers) {
         const h = args[1].headers;
         if (h instanceof Headers) {
-          authHeader = h.get('Authorization') || h.get('authorization');
+          h.forEach((value, key) => { requestHeaders[key] = value; });
         } else if (typeof h === 'object') {
-          authHeader = h['Authorization'] || h['authorization'];
+          requestHeaders = Object.assign({}, h);
         }
       }
     } catch(e) {}
@@ -67,7 +67,7 @@
         status: response.status,
         contentType: contentType,
         requestBody: reqBody ? reqBody.substring(0, 2000) : null,
-        requestAuth: authHeader,
+        requestHeaders: requestHeaders,
         responseBody: responseBody,
         responseSize: responseBody ? JSON.stringify(responseBody).length : null,
         duration: Date.now() - startTime,
@@ -120,8 +120,7 @@
     }
 
     const method = this.__moneyMethod || 'GET';
-    const authHeader = (this.__moneyHeaders || {})['Authorization'] ||
-                       (this.__moneyHeaders || {})['authorization'] || null;
+    const allHeaders = this.__moneyHeaders || {};
     const startTime = Date.now();
 
     this.addEventListener('load', function() {
@@ -149,7 +148,7 @@
         status: this.status,
         contentType: contentType,
         requestBody: (body && typeof body === 'string') ? body.substring(0, 2000) : null,
-        requestAuth: authHeader,
+        requestHeaders: allHeaders,
         responseBody: responseBody,
         responseSize: responseBody ? JSON.stringify(responseBody).length : null,
         duration: Date.now() - startTime,

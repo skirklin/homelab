@@ -109,6 +109,60 @@ def balances(ctx: click.Context) -> None:
 
 
 @main.command()
+@click.option("--account", "account_name", default=None, help="Filter by account name.")
+@click.argument("as_of", required=False)
+@click.pass_context
+def holdings(ctx: click.Context, account_name: str | None, as_of: str | None) -> None:
+    """Show portfolio holdings as of a date (default: latest)."""
+    db = Database(ctx.obj["db_path"])
+    query = """
+        SELECT a.name AS account, h.as_of, h.symbol, h.name, h.asset_class,
+               h.shares, h.value
+        FROM holdings h
+        JOIN accounts a ON h.account_id = a.id
+        WHERE h.as_of = (
+            SELECT MAX(h2.as_of) FROM holdings h2
+            WHERE h2.account_id = h.account_id
+        )
+    """
+    params: list[object] = []
+    if as_of:
+        query = query.replace(
+            "SELECT MAX(h2.as_of) FROM holdings h2\n"
+            "            WHERE h2.account_id = h.account_id",
+            "SELECT MAX(h2.as_of) FROM holdings h2\n"
+            "            WHERE h2.account_id = h.account_id AND h2.as_of <= ?",
+        )
+        params.append(as_of)
+    if account_name:
+        query += " AND a.name LIKE ?"
+        params.append(f"%{account_name}%")
+    query += " ORDER BY a.name, h.value DESC"
+    rows = db.conn.execute(query, params).fetchall()
+    if not rows:
+        click.echo("No holdings found.")
+        db.close()
+        return
+
+    current_account = ""
+    account_total = 0.0
+    for row in rows:
+        if row[0] != current_account:
+            if current_account:
+                click.echo(f"  {'':40s} {'Total':>10s} ${account_total:>12,.2f}")
+                click.echo()
+            current_account = row[0]
+            account_total = 0.0
+            click.echo(f"{current_account} (as of {row[1]}):")
+        symbol = row[2] or "—"
+        account_total += row[6]
+        click.echo(f"  {symbol:<8s} {row[3]:<32s} {row[5]:>10.2f} sh  ${row[6]:>12,.2f}")
+    if current_account:
+        click.echo(f"  {'':40s} {'Total':>10s} ${account_total:>12,.2f}")
+    db.close()
+
+
+@main.command()
 @click.option("-p", "--port", default=5555, help="Port to listen on.")
 @click.option("--host", default="127.0.0.1", help="Host to bind to.")
 @click.pass_context
@@ -181,9 +235,8 @@ def ally(ctx: click.Context, profile: str, cookies: bool) -> None:
 @sync.command()
 @click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
 @click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
-@click.option("--cookies", is_flag=True, help="Use relayed cookies from Chrome extension.")
 @click.pass_context
-def betterment(ctx: click.Context, profile: str, explore: bool, cookies: bool) -> None:
+def betterment(ctx: click.Context, profile: str, explore: bool) -> None:
     """Sync Betterment accounts."""
     if explore:
         from money.ingest.scrapers.betterment import explore_betterment
@@ -191,46 +244,35 @@ def betterment(ctx: click.Context, profile: str, explore: bool, cookies: bool) -
         explore_betterment(profile)
         return
 
-    if cookies:
-        from money.config import RAW_STORE_DIR
-        from money.ingest.betterment import sync_betterment
-        from money.storage import LocalStore
+    from money.config import RAW_STORE_DIR
+    from money.ingest.betterment import sync_betterment
+    from money.storage import LocalStore
 
-        db_path = ctx.obj["db_path"]
-        db = Database(db_path)
-        db.initialize()
-        store = LocalStore(RAW_STORE_DIR)
+    db_path = ctx.obj["db_path"]
+    db = Database(db_path)
+    db.initialize()
+    store = LocalStore(RAW_STORE_DIR)
 
-        try:
-            sync_betterment(db, store, profile=profile)
-            click.echo("Betterment sync complete.")
-        except Exception as e:
-            click.echo(f"Betterment sync failed: {e}", err=True)
-            raise
-        finally:
-            db.close()
-        return
+    try:
+        sync_betterment(db, store, profile=profile)
+        click.echo("Betterment sync complete.")
+    except Exception as e:
+        click.echo(f"Betterment sync failed: {e}", err=True)
+        raise
+    finally:
+        db.close()
 
 
 @sync.command()
 @click.option("--profile", required=True, help="Credential profile (e.g. 'scott').")
 @click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
-@click.option("--camoufox", is_flag=True, help="Use camoufox anti-detect browser.")
-@click.option("--cookies", is_flag=True, help="Use relayed cookies from Chrome extension.")
 @click.pass_context
-def wealthfront(
-    ctx: click.Context, profile: str, explore: bool, camoufox: bool, cookies: bool,
-) -> None:
+def wealthfront(ctx: click.Context, profile: str, explore: bool) -> None:
     """Sync Wealthfront accounts."""
     if explore:
-        if cookies:
-            from money.ingest.scrapers.wealthfront import explore_wealthfront_cookies
-
-            explore_wealthfront_cookies(profile)
-            return
         from money.ingest.scrapers.wealthfront import explore_wealthfront
 
-        explore_wealthfront(profile, use_camoufox=camoufox)
+        explore_wealthfront(profile)
         return
 
     from money.config import RAW_STORE_DIR

@@ -8,6 +8,10 @@ const COOKIE_DOMAINS = {
   ally: [".ally.com", "secure.ally.com", "wwws.ally.com"],
   wealthfront: [".wealthfront.com", "www.wealthfront.com"],
   betterment: [".betterment.com", "wwws.betterment.com"],
+  morgan_stanley: [".morganstanley.com", "stockplanconnect.morganstanley.com", "www.morganstanley.com", ".solium.com", "shareworks.solium.com"],
+  capital_one: [".capitalone.com", "myaccounts.capitalone.com", "www.capitalone.com"],
+  bofa: [".bankofamerica.com", "secure.bankofamerica.com", "www.bankofamerica.com"],
+  chase: [".chase.com", "secure.chase.com", "secure03b.chase.com", "www.chase.com"],
 };
 
 async function getServerUrl() {
@@ -105,33 +109,8 @@ function getInstitutionForUrl(url) {
 
 // Listen for messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "SYNC_DATA") {
-    sendToServer("/ingest", message.payload).then(sendResponse);
-    return true; // Keep channel open for async response
-  }
-
   if (message.type === "CHECK_HEALTH") {
     checkServerHealth().then((healthy) => sendResponse({ healthy }));
-    return true;
-  }
-
-  if (message.type === "SCRAPED_DATA") {
-    // Store scraped data from content script for popup to retrieve
-    chrome.storage.local.set({
-      [`scraped_${message.institution}`]: {
-        data: message.payload,
-        timestamp: Date.now(),
-        tabId: sender.tab?.id,
-      },
-    });
-    sendResponse({ received: true });
-    return true;
-  }
-
-  if (message.type === "GET_SCRAPED") {
-    chrome.storage.local.get(`scraped_${message.institution}`).then((result) => {
-      sendResponse(result[`scraped_${message.institution}`] || null);
-    });
     return true;
   }
 

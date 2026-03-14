@@ -15,6 +15,7 @@ export function TransactionTable({ accounts, accountId, onAccountChange }: Props
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [hideTransfers, setHideTransfers] = useState(true)
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300)
@@ -25,15 +26,22 @@ export function TransactionTable({ accounts, accountId, onAccountChange }: Props
     fetchTransactions({
       search: debouncedSearch || undefined,
       accountId: accountId,
+      hideTransfers,
       limit: 200,
     }).then(setTransactions)
-  }, [debouncedSearch, accountId])
+  }, [debouncedSearch, accountId, hideTransfers])
 
   return (
     <section className="chart-section">
       <div className="section-header">
         <h2>Transactions</h2>
         <div className="controls">
+          <button
+            className={`toggle-btn ${hideTransfers ? 'active' : ''}`}
+            onClick={() => setHideTransfers(!hideTransfers)}
+          >
+            Hide Transfers
+          </button>
           {accounts && accounts.length > 0 && onAccountChange && (
             <select
               className="account-filter"

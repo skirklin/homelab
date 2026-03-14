@@ -10,7 +10,14 @@ from urllib.parse import unquote
 
 from money.config import cookie_relay_path
 from money.db import Database
-from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
+from money.models import (
+    AccountType,
+    Balance,
+    Holding,
+    IngestionRecord,
+    IngestionStatus,
+    Transaction,
+)
 from money.storage import RawStore
 
 log = logging.getLogger(__name__)
@@ -129,6 +136,18 @@ def _download_supplementary(
         log.info("  Stored %d years of tax savings data", years)
     except Exception as e:
         log.warning("  Could not fetch tax savings: %s", e)
+
+    # Open lots (current holdings with cost basis)
+    try:
+        open_lots_data = _api_get(
+            cookies,
+            f"/capitan/v1/accounts/{acct_id}/taxable-open-lots",
+        )
+        store.put(f"{prefix}_open_lots.json", json.dumps(open_lots_data, indent=2).encode())
+        lot_count = len(open_lots_data.get("openLotForDisplayList", []))
+        log.info("  Stored %d open lots (current holdings)", lot_count)
+    except Exception as e:
+        log.warning("  Could not fetch open lots: %s", e)
 
     # Combined dashboard data and transfers (need numeric ID)
     numeric_id = numeric_ids.get(acct_id)
@@ -325,6 +344,42 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str) -> None:
                     db, account.id, transfers_data, transfers_key
                 )
                 log.info("  Ingested %d transactions from transfers", txn_count)
+
+            # Ingest holdings from open lots (aggregate by symbol)
+            open_lots_key = f"wealthfront/{timestamp}_{acct_id}_open_lots.json"
+            if store.exists(open_lots_key):
+                lots_raw: Any = json.loads(store.get(open_lots_key))
+                lots_list: list[dict[str, Any]] = lots_raw.get(
+                    "openLotForDisplayList", []
+                )
+                # Aggregate multiple lots per symbol
+                by_symbol: dict[str, dict[str, float]] = {}
+                for lot in lots_list:
+                    sym = lot.get("symbol", "")
+                    if not sym:
+                        continue
+                    if sym not in by_symbol:
+                        by_symbol[sym] = {"shares": 0.0, "value": 0.0, "cost_basis": 0.0}
+                    by_symbol[sym]["shares"] += float(lot.get("quantity", 0))
+                    by_symbol[sym]["value"] += float(lot.get("currentValue", 0))
+                    by_symbol[sym]["cost_basis"] += float(lot.get("costBasis", 0))
+
+                holding_rows: list[Holding] = []
+                for sym, agg in by_symbol.items():
+                    if agg["shares"] > 0:
+                        holding_rows.append(Holding(
+                            account_id=account.id,
+                            as_of=date.today(),
+                            symbol=sym,
+                            name=sym,
+                            shares=agg["shares"],
+                            value=agg["value"],
+                            source="wealthfront_api",
+                            raw_file_ref=open_lots_key,
+                        ))
+                if holding_rows:
+                    db.insert_holdings_batch(holding_rows)
+                    log.info("  Holdings: %d positions", len(holding_rows))
 
         db.insert_ingestion_record(
             IngestionRecord(

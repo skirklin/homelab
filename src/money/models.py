@@ -108,6 +108,21 @@ class PrivateValuation:
 
 
 @dataclass
+class Holding:
+    account_id: str
+    as_of: date
+    name: str
+    shares: float
+    value: float
+    source: str
+    id: int | None = None
+    symbol: str | None = None
+    asset_class: str | None = None
+    raw_file_ref: str | None = None
+    recorded_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class IngestionRecord:
     source: str
     status: IngestionStatus
