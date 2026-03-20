@@ -798,7 +798,13 @@ class IngestHandler(BaseHTTPRequestHandler):
             count = accept_suggestion(self.db, rule_id)
             self._json_response(200, {"accepted": True, "categorized": count})
         elif action == "reject":
-            reject_suggestion(self.db, rule_id)
+            content_length = int(self.headers.get("Content-Length", 0))
+            feedback = None
+            if content_length > 0:
+                body = json.loads(self.rfile.read(content_length))
+                if isinstance(body, dict):
+                    feedback = body.get("feedback")
+            reject_suggestion(self.db, rule_id, feedback)
             self._json_response(200, {"rejected": True})
         else:
             self._json_response(400, {"error": f"unknown action: {action}"})

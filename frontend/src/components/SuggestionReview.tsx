@@ -10,6 +10,8 @@ export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => vo
   const [expanded, setExpanded] = useState<number | null>(null)
   const [loading, setLoading] = useState<Record<number, boolean>>({})
   const [generating, setGenerating] = useState(false)
+  const [rejectingId, setRejectingId] = useState<number | null>(null)
+  const [feedbackText, setFeedbackText] = useState('')
 
   const refresh = useCallback(() => {
     fetchSuggestions().then(setSuggestions)
@@ -28,21 +30,28 @@ export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => vo
     }
   }, [refresh, onRulesChanged])
 
-  const handleReject = useCallback(async (id: number) => {
-    setLoading((prev) => ({ ...prev, [id]: true }))
+  const handleRejectStart = useCallback((id: number) => {
+    setRejectingId(id)
+    setFeedbackText('')
+  }, [])
+
+  const handleRejectConfirm = useCallback(async () => {
+    if (rejectingId == null) return
+    setLoading((prev) => ({ ...prev, [rejectingId]: true }))
     try {
-      await rejectSuggestion(id)
+      await rejectSuggestion(rejectingId, feedbackText || undefined)
+      setRejectingId(null)
+      setFeedbackText('')
       refresh()
     } finally {
-      setLoading((prev) => ({ ...prev, [id]: false }))
+      setLoading((prev) => ({ ...prev, [rejectingId!]: false }))
     }
-  }, [refresh])
+  }, [rejectingId, feedbackText, refresh])
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true)
     try {
       await generateSuggestions()
-      // Poll for results since generation is async
       setTimeout(refresh, 5000)
       setTimeout(refresh, 15000)
       setTimeout(refresh, 30000)
@@ -56,14 +65,14 @@ export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => vo
   return (
     <section className="chart-section suggestions-section">
       <div className="section-header">
-        <h2>Category Suggestions <span className="suggestion-badge">{suggestions.length}</span></h2>
+        <h2>category suggestions <span className="suggestion-badge">{suggestions.length}</span></h2>
         <div className="controls">
           <button
             className="toggle-btn"
             onClick={handleGenerate}
             disabled={generating}
           >
-            {generating ? 'Generating...' : 'Generate More'}
+            {generating ? 'generating...' : 'generate more'}
           </button>
         </div>
       </div>
@@ -71,12 +80,13 @@ export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => vo
         {suggestions.map((s) => {
           const isExpanded = expanded === s.id
           const isLoading = loading[s.id]
+          const isRejecting = rejectingId === s.id
           return (
             <div key={s.id} className="suggestion-card">
               <div className="suggestion-header" onClick={() => setExpanded(isExpanded ? null : s.id)}>
                 <div className="suggestion-info">
                   <code className="suggestion-pattern">{s.pattern}</code>
-                  <span className="suggestion-arrow">→</span>
+                  <span className="suggestion-arrow">&rarr;</span>
                   <span className="suggestion-path">{s.category_path}</span>
                   <span className="suggestion-count">{s.matches.length} transaction{s.matches.length !== 1 ? 's' : ''}</span>
                   {s.confidence != null && (
@@ -91,19 +101,38 @@ export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => vo
                     onClick={(e) => { e.stopPropagation(); handleAccept(s.id) }}
                     disabled={isLoading}
                   >
-                    Accept
+                    accept
                   </button>
                   <button
                     className="suggestion-reject"
-                    onClick={(e) => { e.stopPropagation(); handleReject(s.id) }}
+                    onClick={(e) => { e.stopPropagation(); handleRejectStart(s.id) }}
                     disabled={isLoading}
                   >
-                    Reject
+                    reject
                   </button>
                 </div>
               </div>
-              {s.reasoning && (
+              {s.reasoning && !isRejecting && (
                 <div className="suggestion-reasoning">{s.reasoning}</div>
+              )}
+              {isRejecting && (
+                <div className="reject-feedback" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="text"
+                    className="reject-feedback-input"
+                    placeholder="what's wrong? (e.g. 'kobo is a bookstore, not a subscription')"
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleRejectConfirm() }}
+                    autoFocus
+                  />
+                  <button className="suggestion-reject" onClick={handleRejectConfirm} disabled={isLoading}>
+                    confirm
+                  </button>
+                  <button className="suggestion-reject" onClick={() => setRejectingId(null)}>
+                    cancel
+                  </button>
+                </div>
               )}
               {isExpanded && (
                 <div className="suggestion-matches">
@@ -121,7 +150,7 @@ export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => vo
                         <tr key={m.id}>
                           <td className="date">{m.date}</td>
                           <td className="desc">{m.description}</td>
-                          <td className="acct">{m.current_category_path ?? 'Uncategorized'}</td>
+                          <td className="acct">{m.current_category_path ?? 'uncategorized'}</td>
                           <td className={`amount right ${m.amount >= 0 ? 'positive' : 'negative'}`}>
                             {fmtDollar(m.amount)}
                           </td>

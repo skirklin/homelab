@@ -124,6 +124,15 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_suggested_rules_status
                     ON suggested_rules(status);
             """)
+        else:
+            # Add feedback column if missing
+            sr_columns = {
+                row["name"]
+                for row in self.conn.execute("PRAGMA table_info(suggested_rules)").fetchall()
+            }
+            if "feedback" not in sr_columns:
+                self.conn.execute("ALTER TABLE suggested_rules ADD COLUMN feedback TEXT")
+                self.conn.commit()
 
     # -- Accounts --
 

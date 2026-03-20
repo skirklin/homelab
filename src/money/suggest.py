@@ -67,9 +67,29 @@ def _get_uncategorized_transactions(
     ]
 
 
+def _get_rejected_feedback(db: Database) -> str:
+    """Get feedback from rejected suggestions to include in the prompt."""
+    rows = db.conn.execute("""
+        SELECT pattern, category_path, feedback
+        FROM suggested_rules
+        WHERE status = 'rejected' AND feedback IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT 20
+    """).fetchall()
+    if not rows:
+        return ""
+    lines = ["Previously rejected suggestions (learn from these):"]
+    for row in rows:
+        lines.append(
+            f"  {row['pattern']} → {row['category_path']} — REJECTED: {row['feedback']}"
+        )
+    return "\n".join(lines)
+
+
 def _build_prompt(
     transactions: list[dict[str, Any]],
     category_tree: str,
+    rejected_feedback: str,
 ) -> str:
     """Build the prompt for Claude Code subprocess."""
     txn_lines: list[str] = []
@@ -81,10 +101,13 @@ def _build_prompt(
         )
     txn_block = "\n".join(txn_lines)
 
+    rejected_section = f"\n\n{rejected_feedback}" if rejected_feedback else ""
+
     return f"""You are helping categorize personal finance transactions.
 
 Here is the current category hierarchy (materialized paths):
 {category_tree}
+{rejected_section}
 
 Here are uncategorized transactions that need rules:
 {txn_block}
@@ -139,7 +162,8 @@ def generate_suggestions(
     log.info("Generating suggestions for %d uncategorized transactions...", len(transactions))
 
     category_tree = _get_category_tree()
-    prompt = _build_prompt(transactions, category_tree)
+    rejected_feedback = _get_rejected_feedback(db)
+    prompt = _build_prompt(transactions, category_tree, rejected_feedback)
 
     try:
         result = subprocess.run(
@@ -287,11 +311,11 @@ def accept_suggestion(db: Database, rule_id: int) -> int:
     return count
 
 
-def reject_suggestion(db: Database, rule_id: int) -> None:
+def reject_suggestion(db: Database, rule_id: int, feedback: str | None = None) -> None:
     """Reject a suggestion so it won't be re-suggested."""
     db.conn.execute(
-        "UPDATE suggested_rules SET status = 'rejected' WHERE id = ?",
-        (rule_id,),
+        "UPDATE suggested_rules SET status = 'rejected', feedback = ? WHERE id = ?",
+        (feedback, rule_id),
     )
     db.conn.commit()
 

@@ -221,8 +221,8 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
 export const acceptSuggestion = (id: number) =>
   post<{ accepted: boolean; categorized: number }>(`/api/suggestions/${id}/accept`)
 
-export const rejectSuggestion = (id: number) =>
-  post<{ rejected: boolean }>(`/api/suggestions/${id}/reject`)
+export const rejectSuggestion = (id: number, feedback?: string) =>
+  post<{ rejected: boolean }>(`/api/suggestions/${id}/reject`, feedback ? { feedback } : undefined)
 
 export const generateSuggestions = () =>
   post<{ status: string }>('/api/suggestions/generate')

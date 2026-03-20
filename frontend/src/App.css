@@ -858,6 +858,27 @@ header h1 {
   overflow-y: auto;
 }
 
+.reject-feedback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px 10px;
+}
+
+.reject-feedback-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.8);
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.reject-feedback-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
 .suggestion-matches .txn-table {
   font-size: 12px;
 }
