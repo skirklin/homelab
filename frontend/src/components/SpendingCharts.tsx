@@ -20,8 +20,56 @@ function buildColorMap(categories: string[]): Record<string, string> {
   return map
 }
 
+interface CatStats {
+  category: string
+  total: number
+  count: number
+  avg: number
+  min: number
+  max: number
+  stddev: number
+  pctOfTotal: number
+}
+
+function computeStats(
+  categories: CategorySummary[],
+  monthData: MonthCategoryData | null,
+): CatStats[] {
+  const totalSpend = categories.reduce((s, c) => s + Math.abs(c.total), 0)
+  if (!monthData) {
+    return categories.map((c) => ({
+      category: c.category,
+      total: c.total,
+      count: c.count,
+      avg: 0, min: 0, max: 0, stddev: 0,
+      pctOfTotal: totalSpend > 0 ? (Math.abs(c.total) / totalSpend) * 100 : 0,
+    }))
+  }
+
+  return categories.map((c) => {
+    const monthly = monthData.months.map((m) => (m[c.category] as number) || 0)
+    const n = monthly.length
+    const avg = n > 0 ? monthly.reduce((s, v) => s + v, 0) / n : 0
+    const min = n > 0 ? Math.min(...monthly) : 0
+    const max = n > 0 ? Math.max(...monthly) : 0
+    const variance = n > 0
+      ? monthly.reduce((s, v) => s + (v - avg) ** 2, 0) / n
+      : 0
+
+    return {
+      category: c.category,
+      total: c.total,
+      count: c.count,
+      avg,
+      min,
+      max,
+      stddev: Math.sqrt(variance),
+      pctOfTotal: totalSpend > 0 ? (Math.abs(c.total) / totalSpend) * 100 : 0,
+    }
+  })
+}
+
 interface SpendingChartsProps {
-  /** Current category path prefix, e.g. null, "Housing", "Housing/Utilities" */
   prefix: string | null
   onPrefixChange: (prefix: string | null) => void
   onBarClick?: (month: string, category: string) => void
@@ -52,9 +100,14 @@ export function SpendingCharts({
     return buildColorMap(sorted)
   }, [monthCatData, categories])
 
-  const topCategories = useMemo(
-    () => [...categories].sort((a, b) => a.total - b.total).slice(0, 12),
+  const sortedCategories = useMemo(
+    () => [...categories].sort((a, b) => a.total - b.total).slice(0, 15),
     [categories],
+  )
+
+  const stats = useMemo(
+    () => computeStats(sortedCategories, monthCatData),
+    [sortedCategories, monthCatData],
   )
 
   if (!monthCatData || monthCatData.months.length === 0) return null
@@ -70,7 +123,6 @@ export function SpendingCharts({
     hovertemplate: `%{x}<br>${cat}: $%{y:,.0f}<extra></extra>`,
   }))
 
-  // Build breadcrumb segments from the prefix
   const segments = prefix ? prefix.split('/') : []
 
   return (
@@ -82,7 +134,7 @@ export function SpendingCharts({
               className={prefix ? 'breadcrumb-link' : ''}
               onClick={prefix ? () => onPrefixChange(null) : undefined}
             >
-              Spending
+              spending
             </span>
             {segments.map((seg, i) => {
               const path = segments.slice(0, i + 1).join('/')
@@ -137,33 +189,49 @@ export function SpendingCharts({
         />
       </section>
 
-      {topCategories.length > 1 && (
-        <div className="category-buttons">
-          {(() => {
-            const totalSpend = topCategories.reduce((s, c) => s + Math.abs(c.total), 0)
-            return topCategories.map((cat) => {
-              const color = colorMap[cat.category] || '#94a3b8'
-              const pct = totalSpend > 0 ? (Math.abs(cat.total) / totalSpend) * 100 : 0
-              const childPrefix = prefix ? `${prefix}/${cat.category}` : cat.category
-              return (
-                <button
-                  key={cat.category}
-                  className="category-btn"
-                  style={{
-                    borderColor: 'rgba(255,255,255,0.1)',
-                  }}
-                  onClick={() => onPrefixChange(childPrefix)}
-                >
-                  <span className="category-btn-dot" style={{ backgroundColor: color }} />
-                  <span className="category-btn-name">{cat.category}</span>
-                  <span className="category-btn-amount">
-                    {fmtDollar(cat.total)} &middot; {pct.toFixed(0)}%
-                  </span>
-                </button>
-              )
-            })
-          })()}
-        </div>
+      {stats.length > 1 && (
+        <section className="chart-section">
+          <table className="cat-stats-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>category</th>
+                <th className="right">total</th>
+                <th className="right">%</th>
+                <th className="right">avg/mo</th>
+                <th className="right">min/mo</th>
+                <th className="right">max/mo</th>
+                <th className="right">stddev</th>
+                <th className="right">txns</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.map((s) => {
+                const color = colorMap[s.category] || '#94a3b8'
+                const childPrefix = prefix ? `${prefix}/${s.category}` : s.category
+                return (
+                  <tr
+                    key={s.category}
+                    className="cat-stats-row"
+                    onClick={() => onPrefixChange(childPrefix)}
+                  >
+                    <td>
+                      <span className="cat-dot" style={{ backgroundColor: color }} />
+                    </td>
+                    <td className="cat-name">{s.category}</td>
+                    <td className="right num">{fmtDollar(s.total)}</td>
+                    <td className="right num dim">{s.pctOfTotal.toFixed(1)}%</td>
+                    <td className="right num">{fmtDollar(s.avg)}</td>
+                    <td className="right num dim">{fmtDollar(s.min)}</td>
+                    <td className="right num dim">{fmtDollar(s.max)}</td>
+                    <td className="right num dim">{fmtDollar(s.stddev)}</td>
+                    <td className="right num dim">{s.count}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </section>
       )}
     </>
   )

@@ -688,6 +688,63 @@ header h1 {
   font-size: 11px;
 }
 
+/* ── Category stats table ────────────────────────────────────── */
+
+.cat-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8em;
+}
+
+.cat-stats-table th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 500;
+  opacity: 0.4;
+  font-size: 0.85em;
+  text-transform: lowercase;
+  letter-spacing: 0.03em;
+}
+
+.cat-stats-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.cat-stats-row {
+  cursor: pointer;
+}
+
+.cat-stats-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cat-stats-table .cat-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.cat-stats-table .cat-name {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.cat-stats-table .right {
+  text-align: right;
+}
+
+.cat-stats-table .num {
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.cat-stats-table .dim {
+  color: rgba(255, 255, 255, 0.35);
+}
+
 .breadcrumb-link {
   cursor: pointer;
   color: rgba(255, 255, 255, 0.5);
