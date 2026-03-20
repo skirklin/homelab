@@ -125,14 +125,21 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
         display_desc = max(desc_counts, key=lambda d: desc_counts[d])
         last_seen = dates[-1].isoformat()
 
-        # Skip if already confirmed with same category_path and similar amount
+        # If already confirmed with same category_path and similar amount,
+        # update its stats but don't create a duplicate
         existing = db.conn.execute(
             """SELECT id FROM recurring_patterns
                WHERE category_path = ? AND status = 'confirmed'
-               AND ABS(avg_amount - ?) / avg_amount < 0.2""",
+               AND ABS(avg_amount - ?) / CASE WHEN avg_amount = 0 THEN 1 ELSE avg_amount END < 0.2""",
             (category_path, avg_amount),
         ).fetchone()
         if existing:
+            db.conn.execute(
+                """UPDATE recurring_patterns
+                   SET avg_amount = ?, match_count = ?, last_seen = ?, description = ?
+                   WHERE id = ?""",
+                (avg_amount, len(txns), last_seen, display_desc, existing["id"]),
+            )
             continue
 
         db.conn.execute(
