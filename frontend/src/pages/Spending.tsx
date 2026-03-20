@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { Account, MonthSummary, Transaction } from '../api'
 import { fetchAccounts, fetchSpendingByMonth } from '../api'
 import { SpendingCharts } from '../components/SpendingCharts'
@@ -72,8 +73,19 @@ export function Spending() {
   const [selectedAccount, setSelectedAccount] = useState<string | undefined>()
   const [months, setMonths] = useState<MonthSummary[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
-  const [prefix, setPrefix] = useState<string | null>(null)
-  const [monthFilter, setMonthFilter] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const prefix = searchParams.get('category') || null
+  const monthFilter = searchParams.get('month') || null
+
+  const setPrefix = useCallback((newPrefix: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (newPrefix) next.set('category', newPrefix)
+      else next.delete('category')
+      next.delete('month')
+      return next
+    })
+  }, [setSearchParams])
 
   useEffect(() => {
     fetchAccounts().then(setAccounts)
@@ -82,20 +94,21 @@ export function Spending() {
 
   const handlePrefixChange = useCallback((newPrefix: string | null) => {
     setPrefix(newPrefix)
-    setMonthFilter(null)
-  }, [])
+  }, [setPrefix])
 
   const handleBarClick = useCallback((month: string, category: string) => {
-    // Clicking a bar drills into that category and optionally filters by month
     const childPrefix = prefix ? `${prefix}/${category}` : category
-    setPrefix(childPrefix)
-    setMonthFilter(month)
-  }, [prefix])
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('category', childPrefix)
+      next.set('month', month)
+      return next
+    })
+  }, [prefix, setSearchParams])
 
   const clearFilter = useCallback(() => {
-    setPrefix(null)
-    setMonthFilter(null)
-  }, [])
+    setSearchParams({})
+  }, [setSearchParams])
 
   const handleRulesChanged = useCallback(() => {
     setRefreshKey((k) => k + 1)
