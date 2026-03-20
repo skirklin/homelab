@@ -98,6 +98,46 @@ def categorize(ctx: click.Context) -> None:
 
 
 @main.command()
+@click.option("-n", "--limit", default=50, help="Max uncategorized transactions to process.")
+@click.pass_context
+def suggest(ctx: click.Context, limit: int) -> None:
+    """Generate AI-powered categorization suggestions for uncategorized transactions."""
+    from money.suggest import generate_suggestions
+
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    try:
+        count = generate_suggestions(db, limit)
+        click.echo(f"Created {count} suggestions. Review in the web UI.")
+    finally:
+        db.close()
+
+
+@main.command()
+@click.pass_context
+def pending_suggestions(ctx: click.Context) -> None:
+    """List pending categorization suggestions."""
+    from money.suggest import get_pending_suggestions
+
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    try:
+        suggestions = get_pending_suggestions(db)
+        if not suggestions:
+            click.echo("No pending suggestions.")
+            return
+        for s in suggestions:
+            n = len(s["matches"])
+            click.echo(
+                f"  [{s['id']}] {s['pattern']:30s} → {s['category_path']}"
+                f"  ({n} matches, confidence {s['confidence']:.1f})"
+            )
+            click.echo(f"       {s['reasoning']}")
+    finally:
+        db.close()
+
+
+@main.command()
 @click.pass_context
 def accounts(ctx: click.Context) -> None:
     """List all accounts."""

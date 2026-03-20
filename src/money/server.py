@@ -55,6 +55,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/travel/trips"):
             self._handle_travel_trips()
             return
+        if self.path.startswith("/api/suggestions"):
+            self._handle_get_suggestions()
+            return
         self._json_response(404, {"error": "not found"})
 
     def _handle_get_accounts(self) -> None:
@@ -697,6 +700,53 @@ class IngestHandler(BaseHTTPRequestHandler):
                 )
             self._json_response(200, {"months": months})
 
+    def _handle_get_suggestions(self) -> None:
+        from money.suggest import get_pending_suggestions
+
+        suggestions = get_pending_suggestions(self.db)
+        self._json_response(200, {"suggestions": suggestions})
+
+    def _handle_suggestion_action(self) -> None:
+        """Handle POST /api/suggestions/{id}/accept or /reject."""
+        from money.suggest import accept_suggestion, reject_suggestion
+
+        parts = self.path.rstrip("/").split("/")
+        if len(parts) < 4:
+            self._json_response(400, {"error": "invalid path"})
+            return
+
+        action = parts[-1]
+        try:
+            rule_id = int(parts[-2])
+        except ValueError:
+            self._json_response(400, {"error": "invalid rule id"})
+            return
+
+        if action == "accept":
+            count = accept_suggestion(self.db, rule_id)
+            self._json_response(200, {"accepted": True, "categorized": count})
+        elif action == "reject":
+            reject_suggestion(self.db, rule_id)
+            self._json_response(200, {"rejected": True})
+        else:
+            self._json_response(400, {"error": f"unknown action: {action}"})
+
+    def _handle_generate_suggestions(self) -> None:
+        """Trigger AI suggestion generation (async-friendly)."""
+        import threading
+
+        from money.suggest import generate_suggestions
+
+        def _run() -> None:
+            try:
+                generate_suggestions(self.db)
+            except Exception:
+                log.exception("Suggestion generation failed")
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        self._json_response(202, {"status": "generating"})
+
     def do_POST(self) -> None:
         if self.path == "/ingest":
             self._handle_ingest()
@@ -709,6 +759,12 @@ class IngestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/auth-token":
             self._handle_auth_token()
+            return
+        if self.path.startswith("/api/suggestions/"):
+            self._handle_suggestion_action()
+            return
+        if self.path == "/api/suggestions/generate":
+            self._handle_generate_suggestions()
             return
         self._json_response(404, {"error": "not found"})
 

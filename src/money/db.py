@@ -104,6 +104,27 @@ class Database:
             )
             self.conn.commit()
 
+        # Suggested rules tables (AI-generated, pending human review)
+        if "suggested_rules" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS suggested_rules (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern       TEXT NOT NULL,
+                    category_path TEXT NOT NULL,
+                    confidence    REAL,
+                    reasoning     TEXT,
+                    status        TEXT NOT NULL DEFAULT 'pending',
+                    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS suggested_rule_matches (
+                    rule_id        INTEGER NOT NULL REFERENCES suggested_rules(id),
+                    transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+                    PRIMARY KEY (rule_id, transaction_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_suggested_rules_status
+                    ON suggested_rules(status);
+            """)
+
     # -- Accounts --
 
     def insert_account(self, account: Account) -> None:
