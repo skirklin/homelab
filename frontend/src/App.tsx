@@ -5,6 +5,7 @@ import { fetchAccounts, fetchNetWorthSummary } from './api'
 import { Overview } from './pages/Overview'
 import { Investments } from './pages/Investments'
 import { Spending } from './pages/Spending'
+import { Transactions } from './pages/Transactions'
 import { Travel } from './pages/Travel'
 import './App.css'
 
@@ -64,6 +65,7 @@ function App() {
             <NavLink to="/" end>Overview</NavLink>
             <NavLink to="/investments">Investments</NavLink>
             <NavLink to="/spending">Spending</NavLink>
+            <NavLink to="/transactions">Transactions</NavLink>
             <NavLink to="/travel">Travel</NavLink>
           </nav>
         </header>
@@ -72,6 +74,7 @@ function App() {
             <Route path="/" element={<Overview accounts={accounts} />} />
             <Route path="/investments" element={<Investments />} />
             <Route path="/spending" element={<Spending />} />
+            <Route path="/transactions" element={<Transactions />} />
             <Route path="/travel" element={<Travel />} />
           </Routes>
         </main>
