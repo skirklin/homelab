@@ -20,11 +20,6 @@ function getPrevMonth(month: string): string {
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
 }
 
-interface FilterState {
-  month?: string
-  category?: string
-}
-
 function SummaryCards({ months }: { months: MonthSummary[] }) {
   if (months.length === 0) return null
 
@@ -76,57 +71,84 @@ export function Spending() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [selectedAccount, setSelectedAccount] = useState<string | undefined>()
   const [months, setMonths] = useState<MonthSummary[]>([])
-  const [filter, setFilter] = useState<FilterState>({})
   const [refreshKey, setRefreshKey] = useState(0)
+
+  // drillCategory: which top-level category the chart is drilled into (null = top level)
+  // txnFilter: what the transaction table filters by (month, category path prefix)
+  const [drillCategory, setDrillCategory] = useState<string | null>(null)
+  const [txnFilter, setTxnFilter] = useState<{ month?: string; categoryPrefix?: string }>({})
 
   useEffect(() => {
     fetchAccounts().then(setAccounts)
     fetchSpendingByMonth().then(setMonths)
   }, [refreshKey])
 
-  const handleBarClick = useCallback((month: string, category: string) => {
-    setFilter((prev) =>
-      prev.month === month && prev.category === category ? {} : { month, category },
-    )
-  }, [])
-
   const handleCategoryChange = useCallback((category: string | null) => {
-    setFilter(category ? { category } : {})
+    setDrillCategory(category)
+    // When drilling into a category, also filter transactions to it
+    setTxnFilter(category ? { categoryPrefix: category } : {})
   }, [])
 
-  const clearFilter = useCallback(() => setFilter({}), [])
+  const handleSubcategoryClick = useCallback((subcategory: string) => {
+    // Filter transactions to a specific subcategory within the drilled-in group
+    // e.g. drillCategory="Housing", subcategory="Rent" → filter to "Housing/Rent"
+    setTxnFilter((prev) => {
+      const fullPath = drillCategory ? `${drillCategory}/${subcategory}` : subcategory
+      // Toggle off if already selected
+      if (prev.categoryPrefix === fullPath) {
+        return drillCategory ? { categoryPrefix: drillCategory } : {}
+      }
+      return { ...prev, categoryPrefix: fullPath }
+    })
+  }, [drillCategory])
+
+  const handleBarClick = useCallback((month: string, category: string) => {
+    setTxnFilter((prev) => {
+      const prefix = drillCategory ? `${drillCategory}/${category}` : category
+      if (prev.month === month && prev.categoryPrefix === prefix) return {}
+      return { month, categoryPrefix: prefix }
+    })
+  }, [drillCategory])
+
+  const clearFilter = useCallback(() => {
+    setTxnFilter({})
+    setDrillCategory(null)
+  }, [])
 
   const handleRulesChanged = useCallback(() => {
     setRefreshKey((k) => k + 1)
   }, [])
 
   const filterFn = useMemo(() => {
-    if (!filter.month && !filter.category) return undefined
+    if (!txnFilter.month && !txnFilter.categoryPrefix) return undefined
     return (t: Transaction) => {
-      if (filter.month && !t.date.startsWith(filter.month)) return false
-      if (filter.category) {
-        if (filter.category === 'Uncategorized') {
+      if (txnFilter.month && !t.date.startsWith(txnFilter.month)) return false
+      if (txnFilter.categoryPrefix) {
+        if (txnFilter.categoryPrefix === 'Uncategorized') {
           if (t.category_path) return false
         } else {
           const path = t.category_path ?? ''
-          const topLevel = path.split('/')[0]
-          if (topLevel !== filter.category && path !== filter.category) return false
+          // Match if the path starts with the prefix (or equals it)
+          if (path !== txnFilter.categoryPrefix
+            && !path.startsWith(txnFilter.categoryPrefix + '/')) return false
         }
       }
       return true
     }
-  }, [filter])
+  }, [txnFilter])
 
-  const filterLabel = [filter.month, filter.category].filter(Boolean).join(' / ') || undefined
+  const filterLabel = [txnFilter.month, txnFilter.categoryPrefix].filter(Boolean).join(' / ') || undefined
 
   return (
     <>
       <SummaryCards months={months} />
       <SpendingCharts
         key={refreshKey}
-        selectedCategory={filter.category ?? null}
+        selectedCategory={drillCategory}
         onCategoryChange={handleCategoryChange}
+        onSubcategoryClick={handleSubcategoryClick}
         onBarClick={handleBarClick}
+        activeSubcategory={txnFilter.categoryPrefix}
       />
       <SuggestionReview onRulesChanged={handleRulesChanged} />
       <TransactionTable

@@ -27,13 +27,17 @@ function buildColorMap(categories: string[]): Record<string, string> {
 interface SpendingChartsProps {
   selectedCategory: string | null
   onCategoryChange: (category: string | null) => void
+  onSubcategoryClick?: (subcategory: string) => void
   onBarClick?: (month: string, category: string) => void
+  activeSubcategory?: string
 }
 
 export function SpendingCharts({
   selectedCategory,
   onCategoryChange,
+  onSubcategoryClick,
   onBarClick,
+  activeSubcategory,
 }: SpendingChartsProps) {
   const [monthCatData, setMonthCatData] = useState<MonthCategoryData | null>(null)
   const [categories, setCategories] = useState<CategorySummary[]>([])
@@ -176,7 +180,10 @@ export function SpendingCharts({
           const totalSpend = displayedButtons.reduce((s, c) => s + Math.abs(c.total), 0)
           return displayedButtons.map((cat) => {
             const color = buttonColorMap[cat.category] || '#94a3b8'
-            const isActive = !selectedCategory && cat.category === selectedCategory
+            const fullPath = isDrilledIn
+              ? `${selectedCategory}/${cat.category}`
+              : cat.category
+            const isActive = activeSubcategory === fullPath
             const pct = totalSpend > 0 ? (Math.abs(cat.total) / totalSpend) * 100 : 0
             return (
               <button
@@ -187,8 +194,8 @@ export function SpendingCharts({
                   backgroundColor: isActive ? color + '22' : 'transparent',
                 }}
                 onClick={() => {
-                  if (selectedCategory) {
-                    onCategoryChange(null)
+                  if (isDrilledIn) {
+                    onSubcategoryClick?.(cat.category)
                   } else {
                     onCategoryChange(cat.category)
                   }
