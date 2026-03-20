@@ -91,9 +91,13 @@ def _pattern_specificity(pattern: str) -> int:
     """Score a pattern by specificity for longest-match-wins resolution.
 
     Strips SQL LIKE wildcards (%) and counts remaining characters.
+    category: patterns are penalized so description-based rules take
+    priority — bank-assigned categories are less reliable than merchant
+    name matching.
     """
-    stripped = pattern.removeprefix("category:")
-    return len(stripped.replace("%", ""))
+    if pattern.startswith("category:"):
+        return 0
+    return len(pattern.replace("%", ""))
 
 
 def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
