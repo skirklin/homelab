@@ -182,11 +182,9 @@ query EnvelopeAccountHoldings($id: ID!) \
 }"""
 
 
-def _load_cookies(profile: str | None = None) -> dict[str, str]:
+def _load_cookies() -> dict[str, str]:
     """Load relayed cookies from the Chrome extension."""
-    path = cookie_relay_path("betterment", profile)
-    if not path.exists():
-        path = cookie_relay_path("betterment")
+    path = cookie_relay_path("betterment")
     if not path.exists():
         raise FileNotFoundError(
             "No cookies found for betterment. Log into Betterment in Chrome and "
@@ -284,13 +282,13 @@ def cents_to_dollars(cents: int | None) -> float | None:
     return cents / 100.0
 
 
-def sync_betterment(db: Database, store: RawStore, profile: str) -> None:
+def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -> None:
     """Sync Betterment accounts and balances via GraphQL API."""
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
     try:
-        cookies = _load_cookies(profile)
+        cookies = _load_cookies()
         log.info("Loaded %d cookies for Betterment", len(cookies))
 
         csrf_token = _fetch_csrf_token(cookies)

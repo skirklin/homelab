@@ -26,11 +26,9 @@ USER_AGENT = (
 )
 
 
-def _load_cookies(profile: str | None = None) -> dict[str, str]:
+def _load_cookies() -> dict[str, str]:
     """Load relayed cookies from the Chrome extension."""
-    path = cookie_relay_path("capital_one", profile)
-    if not path.exists():
-        path = cookie_relay_path("capital_one")
+    path = cookie_relay_path("capital_one")
     if not path.exists():
         raise FileNotFoundError(
             "No cookies found for capital_one. Log into Capital One in Chrome and "
@@ -92,7 +90,7 @@ def sync_capital_one(
     raw_key = f"capital_one/{timestamp}_accounts.json"
 
     try:
-        cookies = _load_cookies(profile)
+        cookies = _load_cookies()
         log.info("Loaded %d cookies for capital_one", len(cookies))
 
         # 1. Fetch accounts

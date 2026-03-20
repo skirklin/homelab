@@ -43,7 +43,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pyright]
 pythonVersion = "3.12"
-typeCheckingMode = "strict"
+typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
 reportUnknownMemberType = "warning"

@@ -4,10 +4,10 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Any, cast
 
-from google.auth.transport.requests import Request  # type: ignore[import-untyped]
-from google.oauth2.credentials import Credentials  # type: ignore[import-untyped]
-from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
-from googleapiclient.discovery import build  # type: ignore[import-untyped]
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 
 from money.config import CONFIG_DIR
 

@@ -45,12 +45,9 @@ ACCOUNT_TYPE_MAP: dict[str, AccountType] = {
 }
 
 
-def _load_cookies(profile: str | None = None) -> dict[str, str]:
+def _load_cookies() -> dict[str, str]:
     """Load relayed cookies from the Chrome extension."""
-    path = cookie_relay_path("wealthfront", profile)
-    if not path.exists():
-        # Fall back to non-profiled cookies
-        path = cookie_relay_path("wealthfront")
+    path = cookie_relay_path("wealthfront")
     if not path.exists():
         raise FileNotFoundError(
             "No cookies found for wealthfront. Log into Wealthfront in Chrome and "
@@ -215,13 +212,13 @@ def ingest_transfers(
     return count
 
 
-def sync_wealthfront(db: Database, store: RawStore, profile: str) -> None:
+def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) -> None:
     """Sync Wealthfront accounts and balances via internal API."""
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
     try:
-        cookies = _load_cookies(profile)
+        cookies = _load_cookies()
         log.info("Loaded %d cookies for Wealthfront", len(cookies))
 
         data = _api_get(cookies, OVERVIEWS_URL)
@@ -280,7 +277,6 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str) -> None:
             # Store per-account manifest
             manifest = {
                 "institution": "wealthfront",
-                "profile": profile,
                 "account_name": display_name,
                 "account_type": account_type.value,
                 "external_id": acct_id,
