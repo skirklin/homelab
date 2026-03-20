@@ -124,21 +124,33 @@ def _replay_ally(db: Database, raw_dir: Path) -> None:
         if not accounts_data:
             continue
 
-        accounts: list[dict[str, Any]] = accounts_data.get("data", [])
+        # Support both old ("data" key) and current ("accounts" key) formats
+        accounts: list[dict[str, Any]] = (
+            accounts_data.get("accounts") or accounts_data.get("data") or []
+        )
         raw_key = f"ally/{ts}_accounts.json"
 
         for acct in accounts:
-            acct_number = acct.get("accountNumber", "")
-            acct_name = acct.get("nickName") or acct.get("name", f"Account {acct_number}")
-            acct_type_str = acct.get("type", "DDA")
-            status = acct.get("status", "")
-            balance_data = acct.get("balance", {})
-            current_balance = balance_data.get("current")
+            acct_number = (
+                acct.get("accountNumberPvtEncrypt")
+                or acct.get("accountNumber", "")
+            )
+            acct_name = (
+                acct.get("nickName")
+                or acct.get("name")
+                or f"Account {str(acct_number)[-4:]}"
+            )
+            acct_type_str = acct.get("accountType") or acct.get("type", "DDA")
+            status = acct.get("accountStatus") or acct.get("status", "")
+            current_balance = (
+                acct.get("currentBalance")
+                or acct.get("balance", {}).get("current")
+            )
 
-            if status != "ACTIVE":
+            if status.upper() != "ACTIVE":
                 continue
 
-            external_id = acct_number[-4:] if acct_number else ""
+            external_id = str(acct_number)[-4:] if acct_number else ""
             account_type = ALLY_TYPE_MAP.get(acct_type_str, AccountType.CHECKING)
 
             account = db.get_or_create_account(
@@ -582,19 +594,23 @@ def _replay_capital_one(db: Database, raw_dir: Path) -> None:
                 )
 
             # Transactions
-            txn_file = inst_dir / f"{ts}_{last_four}_transactions.json"
-            txn_data = _read_json(txn_file)
-            if not txn_data:
+            # Transaction files may be a single file or chunked (_0, _1, etc.)
+            txn_files = sorted(inst_dir.glob(f"{ts}_{last_four}_transactions*.json"))
+            if not txn_files:
                 continue
 
-            txn_key = f"capital_one/{ts}_{last_four}_transactions.json"
-            raw_entries: list[dict[str, Any]]
-            if isinstance(txn_data, dict):
-                raw_entries = list(txn_data.get("entries", txn_data.get("transactions", [])))
-            elif isinstance(txn_data, list):
-                raw_entries = list(txn_data)
-            else:
-                raw_entries = []
+            raw_entries: list[dict[str, Any]] = []
+            txn_key = f"capital_one/{txn_files[0].name}"
+            for txn_file in txn_files:
+                txn_data = _read_json(txn_file)
+                if not txn_data:
+                    continue
+                if isinstance(txn_data, dict):
+                    raw_entries.extend(
+                        txn_data.get("entries", txn_data.get("transactions", []))
+                    )
+                elif isinstance(txn_data, list):
+                    raw_entries.extend(txn_data)
 
             txn_count = 0
             for entry in raw_entries:
