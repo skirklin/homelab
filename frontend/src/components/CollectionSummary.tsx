@@ -1,134 +1,101 @@
-import { useEffect, useState } from 'react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import type { CollectionInfo, CollectionMonthSummary, CategorySummary } from '../api'
-import { fetchCollections, fetchCollectionByMonth, fetchCollectionByCategory } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import * as echarts from 'echarts'
+import type { CollectionInfo, CollectionMonthSummary } from '../api'
+import { fetchCollections, fetchCollectionByMonth } from '../api'
 
-const fmt = (v: number) => {
-  const abs = Math.abs(v)
-  if (abs >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(0)}`
-}
+const fmtDollar = (v: number) =>
+  `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 
-const fmtFull = (v: number) =>
-  `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max) + '...' : s
+const THEME = {
+  cardBg: '#1e1e3f',
+  border: 'rgba(255,255,255,0.1)',
+  textMuted: 'rgba(255,255,255,0.4)',
+  text: 'rgba(255,255,255,0.7)',
+  grid: 'rgba(255,255,255,0.06)',
 }
 
 function CollectionDetail({ collection }: { collection: CollectionInfo }) {
   const [months, setMonths] = useState<CollectionMonthSummary[]>([])
-  const [categories, setCategories] = useState<CategorySummary[]>([])
+  const chartRef = useRef<HTMLDivElement | null>(null)
+  const echartsRef = useRef<echarts.ECharts | null>(null)
 
   useEffect(() => {
     fetchCollectionByMonth(collection.id).then(setMonths)
-    fetchCollectionByCategory(collection.id).then(setCategories)
   }, [collection.id])
 
+  useEffect(() => {
+    if (!chartRef.current) return
+    echartsRef.current = echarts.init(chartRef.current)
+    const handleResize = () => echartsRef.current?.resize()
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      echartsRef.current?.dispose()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!echartsRef.current || months.length === 0) return
+
+    echartsRef.current.setOption({
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: THEME.cardBg,
+        borderColor: THEME.border,
+        textStyle: { color: THEME.text, fontSize: 12 },
+        formatter: (params: echarts.DefaultLabelFormatterCallbackParams[]) => {
+          if (!Array.isArray(params) || params.length === 0) return ''
+          const p = params[0]
+          return `<b>${p.axisValueLabel}</b><br/>${fmtDollar(p.value as number)}`
+        },
+      },
+      grid: { left: 60, right: 20, top: 10, bottom: 30 },
+      xAxis: {
+        type: 'category',
+        data: months.map((m) => m.month),
+        axisLine: { lineStyle: { color: THEME.grid } },
+        axisLabel: { color: THEME.textMuted, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: {
+          color: THEME.textMuted,
+          fontSize: 11,
+          formatter: (v: number) => fmtDollar(v),
+        },
+        splitLine: { lineStyle: { color: THEME.grid } },
+      },
+      series: [{
+        type: 'bar',
+        data: months.map((m) => Math.abs(m.total)),
+        itemStyle: { color: '#818cf8', borderRadius: [4, 4, 0, 0] },
+        barMaxWidth: 40,
+      }],
+      animationDuration: 400,
+    }, true)
+  }, [months])
+
   const totalSpent = months.reduce((s, m) => s + m.total, 0)
-  const totalTxns = months.reduce((s, m) => s + m.count, 0)
-  const chartMonths = months.map((m) => ({ ...m, absTotal: Math.abs(m.total) }))
-  const chartCats = categories
-    .sort((a, b) => a.total - b.total)
-    .slice(0, 10)
-    .map((c) => ({
-      ...c,
-      category: truncate(c.category ?? 'Unknown', 35),
-      absTotal: Math.abs(c.total),
-    }))
 
   return (
     <section className="chart-section">
       <div className="section-header">
         <div>
           <h2>{collection.label}</h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', margin: '4px 0 8px' }}>
+          <p style={{ color: THEME.textMuted, margin: '4px 0 8px', fontSize: 13 }}>
             {collection.description}
           </p>
           <div className="metric-row">
             <span className="metric negative">
-              <span className="metric-label">Total Spent</span>
-              <span className="metric-value">{fmtFull(totalSpent)}</span>
-            </span>
-            <span className="metric">
-              <span className="metric-label">Transactions</span>
-              <span className="metric-value">{totalTxns}</span>
+              <span className="metric-label">Total</span>
+              <span className="metric-value">{fmtDollar(totalSpent)}</span>
             </span>
           </div>
         </div>
       </div>
-
-      {chartMonths.length > 0 && (
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={chartMonths} margin={{ top: 10, right: 30, left: 20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="month" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
-            <YAxis
-              tickFormatter={fmt}
-              stroke="rgba(255,255,255,0.3)"
-              tick={{ fontSize: 11 }}
-              width={60}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#1e1e3f',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 8,
-              }}
-              formatter={(value: number) => [fmtFull(value), 'Spent']}
-              labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
-            />
-            <Bar dataKey="absTotal" name="Spent" fill="#818cf8" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      )}
-
-      {chartCats.length > 0 && (
-        <ResponsiveContainer width="100%" height={Math.max(150, chartCats.length * 28)}>
-          <BarChart
-            data={chartCats}
-            layout="vertical"
-            margin={{ top: 10, right: 30, left: 160, bottom: 0 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis
-              type="number"
-              tickFormatter={fmt}
-              stroke="rgba(255,255,255,0.3)"
-              tick={{ fontSize: 11 }}
-            />
-            <YAxis
-              type="category"
-              dataKey="category"
-              stroke="rgba(255,255,255,0.3)"
-              tick={{ fontSize: 11 }}
-              width={150}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#1e1e3f',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 8,
-              }}
-              formatter={(value: number) => [fmtFull(value), 'Total']}
-              labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
-            />
-            <Bar dataKey="absTotal" name="Amount" radius={[0, 4, 4, 0]}>
-              {chartCats.map((_, i) => (
-                <Cell key={i} fill={`hsl(${250 + i * 12}, 70%, 65%)`} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+      {months.length > 0 && (
+        <div ref={chartRef} style={{ width: '100%', height: 200 }} />
       )}
     </section>
   )
