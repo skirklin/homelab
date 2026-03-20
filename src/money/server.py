@@ -862,27 +862,9 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(200, {"months": months})
 
     def _handle_get_recurring(self) -> None:
-        from money.recurring import detect_recurring, generate_display_names, get_recurring_patterns
+        from money.recurring import get_recurring_patterns
 
-        detect_recurring(self.db)
         patterns = get_recurring_patterns(self.db)
-
-        # Generate friendly names for any that don't have them yet
-        unnamed = [p for p in patterns if p["display_name"] == p["description"]]
-        if unnamed:
-            import threading
-
-            db_path = self.db.path
-
-            def _gen() -> None:
-                thread_db = Database(db_path)
-                thread_db.initialize()
-                try:
-                    generate_display_names(thread_db)
-                finally:
-                    thread_db.close()
-
-            threading.Thread(target=_gen, daemon=True).start()
 
         self._json_response(200, {"patterns": patterns})
 
