@@ -51,27 +51,7 @@ export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => vo
     }
   }, [refresh])
 
-  if (suggestions.length === 0) {
-    return (
-      <section className="chart-section suggestions-section">
-        <div className="section-header">
-          <h2>Category Suggestions</h2>
-          <div className="controls">
-            <button
-              className="toggle-btn"
-              onClick={handleGenerate}
-              disabled={generating}
-            >
-              {generating ? 'Generating...' : 'Generate Suggestions'}
-            </button>
-          </div>
-        </div>
-        <p style={{ color: 'rgba(255,255,255,0.4)', padding: '1rem 0', textAlign: 'center' }}>
-          No pending suggestions. Click Generate to analyze uncategorized transactions.
-        </p>
-      </section>
-    )
-  }
+  if (suggestions.length === 0) return null
 
   return (
     <section className="chart-section suggestions-section">
