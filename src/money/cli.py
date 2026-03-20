@@ -133,6 +133,44 @@ def category_stats(ctx: click.Context) -> None:
 
 
 @main.command()
+@click.option("-n", "--top", default=50, help="Number of groups to show.")
+@click.pass_context
+def uncategorized(ctx: click.Context, top: int) -> None:
+    """Show uncategorized transactions grouped by description similarity."""
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    rows = db.conn.execute("""
+        SELECT t.description, t.category, COUNT(*) as cnt,
+               SUM(t.amount) as total, MIN(t.date) as first, MAX(t.date) as last
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE t.category_path IS NULL
+          AND a.account_type IN ('checking', 'credit_card')
+        GROUP BY t.description
+        ORDER BY cnt DESC
+        LIMIT ?
+    """, (top,)).fetchall()
+    total_uncategorized = db.conn.execute("""
+        SELECT COUNT(*)
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE t.category_path IS NULL
+          AND a.account_type IN ('checking', 'credit_card')
+    """).fetchone()
+    assert total_uncategorized is not None
+    click.echo(f"Uncategorized: {total_uncategorized[0]} transactions\n")
+    for row in rows:
+        desc = row["description"] or "(no description)"
+        cat = f"  [{row['category']}]" if row["category"] else ""
+        click.echo(
+            f"  {row['cnt']:>4d}x  ${abs(row['total']):>10,.2f}"
+            f"  {row['first']}..{row['last']}"
+            f"  {desc}{cat}"
+        )
+    db.close()
+
+
+@main.command()
 @click.argument("as_of", required=False)
 @click.pass_context
 def net_worth(ctx: click.Context, as_of: str | None) -> None:
