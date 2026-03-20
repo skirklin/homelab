@@ -1,13 +1,15 @@
 """Recurring transaction detection.
 
-Analyzes transaction history to identify recurring charges — same merchant,
-similar amount, regular intervals. Stores detected patterns for review.
+Analyzes transaction history to identify recurring charges by grouping
+transactions that match the same categorization rule pattern, then checking
+for regular intervals and consistent amounts.
 """
 
 import logging
 from datetime import date
 from typing import Any
 
+from money.categorize import load_rules
 from money.db import Database
 
 log = logging.getLogger(__name__)
@@ -16,37 +18,71 @@ log = logging.getLogger(__name__)
 def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
     """Detect recurring transaction patterns.
 
-    Groups transactions by description similarity, checks for regular intervals,
-    and stores detected patterns. Returns number of patterns found.
+    Groups transactions by which categorization rule pattern they match,
+    checks for regular intervals, and stores detected patterns.
+    Returns number of patterns found.
     """
-    # Get all spending transactions grouped by description
+    rules = load_rules()
+    if not rules:
+        return 0
+
+    # Get all spending transactions
     rows = db.conn.execute("""
-        SELECT t.description, t.category_path, t.amount, t.date
+        SELECT t.id, t.description, t.category, t.category_path, t.amount, t.date
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE a.account_type IN ('checking', 'credit_card')
           AND t.amount < 0
           AND (t.category_path IS NULL OR t.category_path NOT LIKE 'capital%')
-        ORDER BY t.description, t.date
+        ORDER BY t.date
     """).fetchall()
 
-    # Group by description
-    groups: dict[str, list[dict[str, Any]]] = {}
+    # Import the LIKE matcher
+    from money.categorize import _like_match, _pattern_specificity
+
+    # For each transaction, find its best matching rule pattern
+    # (same logic as apply_rules but we track the pattern)
+    desc_rules = [r for r in rules if not r.pattern.startswith("category:")]
+    cat_rules = [r for r in rules if r.pattern.startswith("category:")]
+
+    pattern_groups: dict[str, list[dict[str, Any]]] = {}
+
     for row in rows:
-        desc = row["description"] or ""
-        if not desc:
-            continue
-        groups.setdefault(desc, []).append({
-            "amount": row["amount"],
-            "date": row["date"],
-            "category_path": row["category_path"],
-        })
+        description = (row["description"] or "").upper()
+        category = row["category"] or ""
+
+        best_pattern: str | None = None
+        best_specificity = -1
+
+        for rule in desc_rules:
+            pat = rule.pattern.upper()
+            if _like_match(description, pat):
+                spec = _pattern_specificity(rule.pattern)
+                if spec > best_specificity:
+                    best_specificity = spec
+                    best_pattern = rule.pattern
+
+        for rule in cat_rules:
+            cat_value = rule.pattern.removeprefix("category:")
+            if category == cat_value:
+                spec = _pattern_specificity(rule.pattern)
+                if spec > best_specificity:
+                    best_specificity = spec
+                    best_pattern = rule.pattern
+
+        if best_pattern:
+            pattern_groups.setdefault(best_pattern, []).append({
+                "amount": row["amount"],
+                "date": row["date"],
+                "category_path": row["category_path"],
+                "description": row["description"],
+            })
 
     # Clear old detected patterns (keep confirmed/dismissed)
     db.conn.execute("DELETE FROM recurring_patterns WHERE status = 'detected'")
 
     count = 0
-    for desc, txns in groups.items():
+    for pattern, txns in pattern_groups.items():
         if len(txns) < min_occurrences:
             continue
 
@@ -81,12 +117,20 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
 
         avg_amount = sum(abs(t["amount"]) for t in txns) / len(txns)
         category_path = txns[-1]["category_path"]
+        # Use the most common description as the display name
+        desc_counts: dict[str, int] = {}
+        for t in txns:
+            d = t["description"] or pattern
+            desc_counts[d] = desc_counts.get(d, 0) + 1
+        display_desc = max(desc_counts, key=lambda d: desc_counts[d])
         last_seen = dates[-1].isoformat()
 
-        # Skip if already confirmed/dismissed with same description
+        # Skip if already confirmed with same category_path and similar amount
         existing = db.conn.execute(
-            "SELECT id FROM recurring_patterns WHERE description = ? AND status != 'detected'",
-            (desc,),
+            """SELECT id FROM recurring_patterns
+               WHERE category_path = ? AND status = 'confirmed'
+               AND ABS(avg_amount - ?) / avg_amount < 0.2""",
+            (category_path, avg_amount),
         ).fetchone()
         if existing:
             continue
@@ -95,12 +139,12 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
             """INSERT INTO recurring_patterns
                (description, category_path, avg_amount, frequency, match_count, last_seen)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (desc, category_path, avg_amount, frequency, len(txns), last_seen),
+            (display_desc, category_path, avg_amount, frequency, len(txns), last_seen),
         )
         count += 1
 
     db.conn.commit()
-    log.info("Detected %d recurring patterns from %d description groups", count, len(groups))
+    log.info("Detected %d recurring patterns from %d rule groups", count, len(pattern_groups))
     return count
 
 
@@ -146,7 +190,6 @@ def get_recurring_patterns(db: Database) -> list[dict[str, Any]]:
 
 
 def _annualize(amount: float, frequency: str) -> float:
-    """Convert a per-period amount to annual."""
     multipliers = {
         "weekly": 52,
         "monthly": 12,
