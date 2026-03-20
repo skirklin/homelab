@@ -74,6 +74,18 @@ export const fetchBalances = (accountId?: string) =>
     accountId ? `/api/balances?account_id=${accountId}` : '/api/balances',
   ).then((d) => d.balances)
 
+export interface NetWorthSummary {
+  liquid: number
+  liquid_plus_vested: number
+  liquid_plus_all_equity: number
+  vested_equity: number
+  total_equity: number
+  fmv_per_share: number
+}
+
+export const fetchNetWorthSummary = () =>
+  get<NetWorthSummary>('/api/net-worth/summary')
+
 export const fetchNetWorthHistory = (start?: string, end?: string) => {
   const params = new URLSearchParams()
   if (start) params.set('start', start)
@@ -249,6 +261,7 @@ export const reclassifyTransaction = (transactionId: number, feedback: string) =
 export interface RecurringPattern {
   id: number
   description: string
+  display_name: string
   category_path: string | null
   avg_amount: number
   frequency: string

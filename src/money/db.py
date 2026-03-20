@@ -153,6 +153,16 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_recurring_status
                     ON recurring_patterns(status);
             """)
+        else:
+            rp_columns = {
+                row["name"]
+                for row in self.conn.execute("PRAGMA table_info(recurring_patterns)").fetchall()
+            }
+            if "display_name" not in rp_columns:
+                self.conn.execute(
+                    "ALTER TABLE recurring_patterns ADD COLUMN display_name TEXT"
+                )
+                self.conn.commit()
 
     # -- Accounts --
 

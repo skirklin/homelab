@@ -52,6 +52,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/holdings"):
             self._handle_get_holdings()
             return
+        if self.path.startswith("/api/net-worth/summary"):
+            self._handle_net_worth_summary()
+            return
         if self.path.startswith("/api/travel/trips"):
             self._handle_travel_trips()
             return
@@ -350,6 +353,89 @@ class IngestHandler(BaseHTTPRequestHandler):
                 }
             )
         self._json_response(200, {"transactions": transactions})
+
+    def _handle_net_worth_summary(self) -> None:
+        """Return net worth broken into liquid, +vested equity, +all equity."""
+        from datetime import date as date_type
+
+        today = date_type.today()
+
+        # Liquid net worth: all accounts except stock_options
+        liquid_row = self.db.conn.execute("""
+            SELECT COALESCE(SUM(b.balance), 0)
+            FROM balances b
+            JOIN accounts a ON b.account_id = a.id
+            WHERE a.account_type != 'stock_options'
+              AND b.as_of = (SELECT MAX(b2.as_of) FROM balances b2
+                             WHERE b2.account_id = b.account_id)
+        """).fetchone()
+        liquid = float(liquid_row[0]) if liquid_row else 0.0
+
+        # Get FMV
+        fmv_row = self.db.conn.execute(
+            "SELECT fmv_per_share FROM private_valuations ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+        fmv = float(fmv_row[0]) if fmv_row else 0.0
+
+        # Calculate vested and total equity from grants
+        grants = self.db.conn.execute("""
+            SELECT total_shares, strike_price, vesting_start,
+                   vesting_months, cliff_months, vesting_schedule
+            FROM option_grants
+        """).fetchall()
+
+        vested_value = 0.0
+        total_equity_value = 0.0
+
+        for g in grants:
+            total_shares = int(g["total_shares"])
+            strike = float(g["strike_price"])
+            vesting_start = date_type.fromisoformat(g["vesting_start"])
+            vest_months = int(g["vesting_months"])
+            cliff_months = int(g["cliff_months"])
+            schedule = g["vesting_schedule"]
+
+            per_share = max(0.0, fmv - strike)
+            total_equity_value += total_shares * per_share
+
+            # Calculate vested shares
+            cliff_month = vesting_start.month - 1 + cliff_months
+            cliff_date = date_type(
+                vesting_start.year + cliff_month // 12,
+                cliff_month % 12 + 1,
+                min(vesting_start.day, 28),
+            )
+
+            if today < cliff_date:
+                continue
+
+            months_elapsed = min(
+                (today.year - vesting_start.year) * 12
+                + (today.month - vesting_start.month),
+                vest_months,
+            )
+
+            if schedule == "monthly":
+                vested = int(total_shares * months_elapsed / vest_months)
+            else:
+                quarters = months_elapsed // 3
+                total_quarters = vest_months // 3
+                vested = (
+                    int(total_shares * quarters / total_quarters)
+                    if total_quarters > 0
+                    else 0
+                )
+
+            vested_value += min(vested, total_shares) * per_share
+
+        self._json_response(200, {
+            "liquid": liquid,
+            "liquid_plus_vested": liquid + vested_value,
+            "liquid_plus_all_equity": liquid + total_equity_value,
+            "vested_equity": vested_value,
+            "total_equity": total_equity_value,
+            "fmv_per_share": fmv,
+        })
 
     def _handle_get_holdings(self) -> None:
         from urllib.parse import parse_qs, urlparse
@@ -777,10 +863,28 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(200, {"months": months})
 
     def _handle_get_recurring(self) -> None:
-        from money.recurring import detect_recurring, get_recurring_patterns
-        # Re-detect on each GET (fast enough, keeps data fresh)
+        from money.recurring import detect_recurring, generate_display_names, get_recurring_patterns
+
         detect_recurring(self.db)
         patterns = get_recurring_patterns(self.db)
+
+        # Generate friendly names for any that don't have them yet
+        unnamed = [p for p in patterns if p["display_name"] == p["description"]]
+        if unnamed:
+            import threading
+
+            db_path = self.db.path
+
+            def _gen() -> None:
+                thread_db = Database(db_path)
+                thread_db.initialize()
+                try:
+                    generate_display_names(thread_db)
+                finally:
+                    thread_db.close()
+
+            threading.Thread(target=_gen, daemon=True).start()
+
         self._json_response(200, {"patterns": patterns})
 
     def _handle_recurring_action(self) -> None:

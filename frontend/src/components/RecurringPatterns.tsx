@@ -9,6 +9,7 @@ export function RecurringPatterns() {
   const [patterns, setPatterns] = useState<RecurringPattern[]>([])
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [expandedTxns, setExpandedTxns] = useState<Transaction[]>([])
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(() => {
     fetchRecurring().then(setPatterns)
@@ -36,12 +37,21 @@ export function RecurringPatterns() {
     }
   }, [expandedId])
 
+  const toggleGroup = useCallback((group: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }, [])
+
   if (patterns.length === 0) return null
 
   const confirmed = patterns.filter((p) => p.status === 'confirmed')
   const needsReview = patterns.filter((p) => p.status === 'detected')
-
   const all = [...confirmed, ...needsReview]
+
   const totalMonthly = confirmed.reduce((s, p) => s + p.annual_cost / 12, 0)
   const totalAnnual = confirmed.reduce((s, p) => s + p.annual_cost, 0)
 
@@ -52,7 +62,6 @@ export function RecurringPatterns() {
     if (!grouped.has(topLevel)) grouped.set(topLevel, [])
     grouped.get(topLevel)!.push(p)
   }
-  // Sort groups by total annual cost
   const sortedGroups = [...grouped.entries()].sort((a, b) => {
     const aTotal = a[1].reduce((s, p) => s + p.annual_cost, 0)
     const bTotal = b[1].reduce((s, p) => s + p.annual_cost, 0)
@@ -68,7 +77,7 @@ export function RecurringPatterns() {
 
   return (
     <>
-      <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.85em', marginBottom: 8 }}>
+      <div className="tree-summary">
         {confirmed.length} commitments &middot; {fmtDollar(totalMonthly)}/mo &middot; {fmtDollar(totalAnnual)}/yr
       </div>
 
@@ -77,7 +86,7 @@ export function RecurringPatterns() {
           <div className="recurring-review-label">possibly stopped:</div>
           {stale.map((p) => (
             <div key={p.id} className="recurring-review-item">
-              <span className="recurring-desc">{p.description}</span>
+              <span className="recurring-desc">{p.display_name}</span>
               <span className="recurring-meta">
                 {fmtDollar(p.avg_amount)}/{p.frequency} &middot; last seen {p.last_seen}
               </span>
@@ -87,50 +96,52 @@ export function RecurringPatterns() {
         </div>
       )}
 
-      {sortedGroups.map(([group, items]) => {
-        const groupAnnual = items.reduce((s, p) => s + p.annual_cost, 0)
-        return (
-          <div key={group} className="recurring-group">
-            <div className="recurring-group-header">
-              <span>{group}</span>
-              <span className="dim">{fmtDollar(groupAnnual)}/yr</span>
-            </div>
-            <table className="cat-stats-table">
-              <tbody>
-                {items.map((p) => (
-                  <tr key={p.id} className="cat-stats-row" onClick={() => toggleExpand(p)}>
-                    <td className="cat-name">{p.description}</td>
-                    <td className="dim">{p.category_path?.split('/').slice(1).join('/') || ''}</td>
-                    <td className="right num">{fmtDollar(p.avg_amount)}</td>
-                    <td className="dim">{p.frequency}</td>
-                    <td className="right num">{fmtDollar(p.annual_cost)}</td>
-                    <td className="cat-actions">
-                      {p.status === 'detected' && (
-                        <>
-                          <button className="suggestion-accept" onClick={(e) => { e.stopPropagation(); handleConfirm(p.id) }}>confirm</button>
-                          <button className="suggestion-reject" onClick={(e) => { e.stopPropagation(); handleDismiss(p.id) }}>dismiss</button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {items.some((p) => p.id === expandedId) && expandedTxns.length > 0 && (
-              <div className="recurring-txns">
-                {expandedTxns.map((t) => (
-                  <div key={t.id} className="recurring-txn-row">
-                    <span className="dim">{t.date}</span>
-                    <span>{t.description}</span>
-                    <span className="num">{fmtDollar(t.amount)}</span>
-                    <span className="dim">{t.account_name}</span>
-                  </div>
-                ))}
+      <div className="tree">
+        {sortedGroups.map(([group, items]) => {
+          const groupAnnual = items.reduce((s, p) => s + p.annual_cost, 0)
+          const isCollapsed = collapsedGroups.has(group)
+          return (
+            <div key={group} className="tree-group">
+              <div className="tree-group-row" onClick={() => toggleGroup(group)}>
+                <span className="tree-toggle">{isCollapsed ? '\u25B6' : '\u25BC'}</span>
+                <span className="tree-group-name">{group}</span>
+                <span className="tree-group-stats">
+                  {fmtDollar(groupAnnual / 12)}/mo &middot; {fmtDollar(groupAnnual)}/yr
+                </span>
               </div>
-            )}
-          </div>
-        )
-      })}
+              {!isCollapsed && items.map((p) => (
+                <div key={p.id} className="tree-item-container">
+                  <div className="tree-item" onClick={() => toggleExpand(p)}>
+                    <span className="tree-indent" />
+                    <span className="tree-item-name">{p.display_name}</span>
+                    <span className="tree-item-stats">
+                      {fmtDollar(p.avg_amount)}/{p.frequency}
+                      <span className="dim"> &middot; {fmtDollar(p.annual_cost)}/yr</span>
+                    </span>
+                    {p.status === 'detected' && (
+                      <span className="tree-item-actions">
+                        <button className="suggestion-accept" onClick={(e) => { e.stopPropagation(); handleConfirm(p.id) }}>confirm</button>
+                        <button className="suggestion-reject" onClick={(e) => { e.stopPropagation(); handleDismiss(p.id) }}>dismiss</button>
+                      </span>
+                    )}
+                  </div>
+                  {expandedId === p.id && expandedTxns.length > 0 && (
+                    <div className="tree-txns">
+                      {expandedTxns.map((t) => (
+                        <div key={t.id} className="tree-txn-row">
+                          <span className="dim">{t.date}</span>
+                          <span>{t.description}</span>
+                          <span className="num">{fmtDollar(t.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        })}
+      </div>
     </>
   )
 }

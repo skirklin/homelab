@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Plot from 'react-plotly.js'
-import type { MonthCategoryData, CategorySummary, TimeRange } from '../api'
-import { fetchSpendingByMonthCategory, fetchSpendingByCategory } from '../api'
+import type { MonthCategoryData, CategorySummary, TimeRange, Transaction } from '../api'
+import {
+  fetchSpendingByMonthCategory,
+  fetchSpendingByCategory,
+  fetchTransactions,
+  reclassifyTransaction,
+} from '../api'
 
 const fmtDollar = (v: number) =>
   `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
@@ -95,6 +100,28 @@ export function SpendingCharts({
 }: SpendingChartsProps) {
   const [monthCatData, setMonthCatData] = useState<MonthCategoryData | null>(null)
   const [categories, setCategories] = useState<CategorySummary[]>([])
+  const [expandedCat, setExpandedCat] = useState<string | null>(null)
+  const [expandedTxns, setExpandedTxns] = useState<Transaction[]>([])
+  const [reclassifyingId, setReclassifyingId] = useState<number | null>(null)
+  const [reclassifyFeedback, setReclassifyFeedback] = useState('')
+
+  const toggleExpand = useCallback((catPrefix: string) => {
+    if (expandedCat === catPrefix) {
+      setExpandedCat(null)
+      setExpandedTxns([])
+    } else {
+      setExpandedCat(catPrefix)
+      // Fetch transactions matching this category prefix
+      fetchTransactions({ limit: 200 }).then((txns) => {
+        setExpandedTxns(
+          txns.filter((t) => {
+            const path = t.category_path ?? ''
+            return path === catPrefix || path.startsWith(catPrefix + '/')
+          })
+        )
+      })
+    }
+  }, [expandedCat])
 
   useEffect(() => {
     fetchSpendingByMonthCategory(15, prefix ?? undefined, timeRange).then(setMonthCatData)
@@ -275,16 +302,26 @@ export function SpendingCharts({
             {stats.map((s) => {
               const color = colorMap[s.category] || '#94a3b8'
               const childPrefix = prefix ? `${prefix}/${s.category}` : s.category
+              const isExpanded = expandedCat === childPrefix
               return (
                 <tr
                   key={s.category}
-                  className="cat-stats-row"
-                  onClick={() => onPrefixChange(childPrefix)}
+                  className={`cat-stats-row ${isExpanded ? 'expanded' : ''}`}
+                  onClick={() => toggleExpand(childPrefix)}
+                  onDoubleClick={() => onPrefixChange(childPrefix)}
                 >
                   <td>
                     <span className="cat-dot" style={{ backgroundColor: color }} />
                   </td>
-                  <td className="cat-name">{s.category}</td>
+                  <td className="cat-name">
+                    {s.category}
+                    <span
+                      className="drill-link"
+                      onClick={(e) => { e.stopPropagation(); onPrefixChange(childPrefix) }}
+                    >
+                      &rarr;
+                    </span>
+                  </td>
                   <td className="right num">{fmtDollar(s.total)}</td>
                   <td className="right num dim">{s.pctOfTotal.toFixed(1)}%</td>
                   <td className="right num">{fmtDollar(s.avg)}</td>
@@ -295,6 +332,55 @@ export function SpendingCharts({
                 </tr>
               )
             })}
+            {expandedCat && expandedTxns.length > 0 && (
+              <tr>
+                <td colSpan={9} className="expanded-txns-cell">
+                  <div className="tree-txns">
+                    {expandedTxns.map((t) => {
+                      const isReclassifying = reclassifyingId === t.id
+                      return (
+                        <div key={t.id} className="tree-txn-row">
+                          <span className="dim">{t.date}</span>
+                          <span className="tree-txn-desc">{t.description}</span>
+                          <span className="dim">{t.category_path}</span>
+                          <span className="num">{fmtDollar(t.amount)}</span>
+                          {isReclassifying ? (
+                            <input
+                              type="text"
+                              className="reclassify-input"
+                              placeholder="what's wrong?"
+                              value={reclassifyFeedback}
+                              onChange={(e) => setReclassifyFeedback(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && reclassifyFeedback) {
+                                  reclassifyTransaction(t.id, reclassifyFeedback)
+                                  setReclassifyingId(null)
+                                  setReclassifyFeedback('')
+                                }
+                                if (e.key === 'Escape') {
+                                  setReclassifyingId(null)
+                                }
+                              }}
+                              autoFocus
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <button
+                              className="reclassify-btn"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setReclassifyingId(t.id)
+                                setReclassifyFeedback('')
+                              }}
+                            >?</button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </section>

@@ -130,7 +130,9 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
         existing = db.conn.execute(
             """SELECT id FROM recurring_patterns
                WHERE category_path = ? AND status = 'confirmed'
-               AND ABS(avg_amount - ?) / CASE WHEN avg_amount = 0 THEN 1 ELSE avg_amount END < 0.2""",
+               AND ABS(avg_amount - ?)
+                   / CASE WHEN avg_amount = 0 THEN 1 ELSE avg_amount END
+                   < 0.2""",
             (category_path, avg_amount),
         ).fetchone()
         if existing:
@@ -173,7 +175,7 @@ def _classify_frequency(avg_interval_days: float) -> str | None:
 def get_recurring_patterns(db: Database) -> list[dict[str, Any]]:
     """Get all recurring patterns (detected + confirmed)."""
     rows = db.conn.execute("""
-        SELECT id, description, category_path, avg_amount, frequency,
+        SELECT id, description, display_name, category_path, avg_amount, frequency,
                match_count, last_seen, status, created_at
         FROM recurring_patterns
         WHERE status IN ('detected', 'confirmed')
@@ -184,6 +186,7 @@ def get_recurring_patterns(db: Database) -> list[dict[str, Any]]:
         {
             "id": row["id"],
             "description": row["description"],
+            "display_name": row["display_name"] or row["description"],
             "category_path": row["category_path"],
             "avg_amount": row["avg_amount"],
             "frequency": row["frequency"],
@@ -205,6 +208,89 @@ def _annualize(amount: float, frequency: str) -> float:
         "annual": 1,
     }
     return amount * multipliers.get(frequency, 12)
+
+
+def generate_display_names(db: Database) -> int:
+    """Use Claude to generate friendly display names for recurring patterns."""
+    import json
+    import shutil
+    import subprocess
+
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        log.error("Claude CLI not found")
+        return 0
+
+    rows = db.conn.execute("""
+        SELECT id, description, category_path, avg_amount, frequency
+        FROM recurring_patterns
+        WHERE status IN ('detected', 'confirmed')
+          AND (display_name IS NULL OR display_name = description)
+    """).fetchall()
+
+    if not rows:
+        return 0
+
+    lines = []
+    for r in rows:
+        lines.append(
+            f"  id={r['id']}  \"{r['description']}\""
+            f"  category={r['category_path']}  ${r['avg_amount']:.2f}/{r['frequency']}"
+        )
+
+    prompt = f"""Give each of these recurring transactions a short, clean display name.
+The descriptions come from bank statements and are often cryptic.
+Keep names short (2-4 words), lowercase, human-readable.
+Good examples: "netflix", "new york times", "gym membership", "home insurance"
+Bad examples: "REINSUREPRO NREIG~ Future Amount: 185.46 ~ Tran: ACHDW"
+
+Transactions:
+{chr(10).join(lines)}
+
+Respond with ONLY a JSON object mapping id to display name, no markdown:
+{{"1": "clean name", "2": "another name"}}"""
+
+    try:
+        result = subprocess.run(
+            [claude_path, "--print", "--output-format", "json", "--model", "haiku", "-p", prompt],
+            capture_output=True, text=True, timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        log.error("Claude timed out generating display names")
+        return 0
+
+    if result.returncode != 0:
+        return 0
+
+    try:
+        output = json.loads(result.stdout)
+        text: str = output.get("result", output.get("text", result.stdout))
+    except json.JSONDecodeError:
+        text = result.stdout
+
+    # Parse JSON from response
+    try:
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        names: dict[str, str] = json.loads(text[start:end])
+    except (ValueError, json.JSONDecodeError):
+        log.warning("Could not parse display names from Claude response")
+        return 0
+
+    count = 0
+    for id_str, name in names.items():
+        try:
+            db.conn.execute(
+                "UPDATE recurring_patterns SET display_name = ? WHERE id = ?",
+                (name, int(id_str)),
+            )
+            count += 1
+        except (ValueError, Exception):
+            continue
+
+    db.conn.commit()
+    log.info("Generated %d display names", count)
+    return count
 
 
 def confirm_pattern(db: Database, pattern_id: int) -> None:

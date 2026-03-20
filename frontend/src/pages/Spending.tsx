@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import type { Account, Transaction, TimeRange } from '../api'
+import type { Account, TimeRange } from '../api'
 import { fetchAccounts } from '../api'
 import { SpendingCharts } from '../components/SpendingCharts'
-import { TransactionTable } from '../components/TransactionTable'
 import { SuggestionReview } from '../components/SuggestionReview'
 import { RecurringPatterns } from '../components/RecurringPatterns'
 
@@ -21,18 +20,16 @@ const TIME_PRESETS: { label: string; key: string; range: TimeRange }[] = [
   { label: 'all', key: 'all', range: {} },
 ]
 
-type Tab = 'categories' | 'transactions' | 'recurring'
+type Tab = 'spending' | 'recurring'
 
 export function Spending() {
-  const [accounts, setAccounts] = useState<Account[]>([])
-  const [selectedAccount, setSelectedAccount] = useState<string | undefined>()
   const [refreshKey, setRefreshKey] = useState(0)
   const [suggestionsKey, setSuggestionsKey] = useState(0)
   const [searchParams, setSearchParams] = useSearchParams()
 
   const prefix = searchParams.get('category') || null
   const timeKey = searchParams.get('time') || '1y'
-  const activeTab = (searchParams.get('tab') as Tab) || 'categories'
+  const activeTab = (searchParams.get('tab') as Tab) || 'spending'
   const timeRange = useMemo(
     () => TIME_PRESETS.find((p) => p.key === timeKey)?.range ?? {},
     [timeKey],
@@ -56,30 +53,13 @@ export function Spending() {
   }, [setParam])
 
   const setTab = useCallback((tab: Tab) => {
-    setParam('tab', tab === 'categories' ? null : tab)
+    setParam('tab', tab === 'spending' ? null : tab)
   }, [setParam])
-
-  useEffect(() => {
-    fetchAccounts().then(setAccounts)
-  }, [refreshKey])
-
-  const handlePrefixChange = useCallback((newPrefix: string | null) => {
-    setPrefix(newPrefix)
-  }, [setPrefix])
 
   const handleBarClick = useCallback((_month: string, category: string) => {
     const childPrefix = prefix ? `${prefix}/${category}` : category
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set('category', childPrefix)
-      next.set('tab', 'transactions')
-      return next
-    })
-  }, [prefix, setSearchParams])
-
-  const clearFilter = useCallback(() => {
-    setParam('category', null)
-  }, [setParam])
+    setPrefix(childPrefix)
+  }, [prefix, setPrefix])
 
   const handleRulesChanged = useCallback(() => {
     setRefreshKey((k) => k + 1)
@@ -90,35 +70,14 @@ export function Spending() {
     polls.forEach((ms) => setTimeout(() => setSuggestionsKey((k) => k + 1), ms))
   }, [])
 
-  const filterFn = useMemo(() => {
-    if (!prefix) return undefined
-    return (t: Transaction) => {
-      if (prefix === 'uncategorized') {
-        if (t.category_path) return false
-      } else {
-        const path = t.category_path ?? ''
-        if (path !== prefix && !path.startsWith(prefix + '/')) return false
-      }
-      return true
-    }
-  }, [prefix])
-
-  const filterLabel = prefix || undefined
-
   return (
     <>
       <div className="spending-tabs">
         <button
-          className={`spending-tab ${activeTab === 'categories' ? 'active' : ''}`}
-          onClick={() => setTab('categories')}
+          className={`spending-tab ${activeTab === 'spending' ? 'active' : ''}`}
+          onClick={() => setTab('spending')}
         >
-          categories
-        </button>
-        <button
-          className={`spending-tab ${activeTab === 'transactions' ? 'active' : ''}`}
-          onClick={() => setTab('transactions')}
-        >
-          transactions
+          spending
         </button>
         <button
           className={`spending-tab ${activeTab === 'recurring' ? 'active' : ''}`}
@@ -128,12 +87,12 @@ export function Spending() {
         </button>
       </div>
 
-      {activeTab === 'categories' && (
+      {activeTab === 'spending' && (
         <>
           <SpendingCharts
             key={refreshKey}
             prefix={prefix}
-            onPrefixChange={handlePrefixChange}
+            onPrefixChange={setPrefix}
             onBarClick={handleBarClick}
             timeRange={timeRange}
             timeKey={timeKey}
@@ -141,19 +100,6 @@ export function Spending() {
           />
           <SuggestionReview key={`sug-${suggestionsKey}`} onRulesChanged={handleRulesChanged} />
         </>
-      )}
-
-      {activeTab === 'transactions' && (
-        <TransactionTable
-          key={`txn-${refreshKey}`}
-          accounts={accounts}
-          accountId={selectedAccount}
-          onAccountChange={setSelectedAccount}
-          filterFn={filterFn}
-          filterLabel={filterLabel}
-          onClearFilter={clearFilter}
-          onReclassifyRequested={handleReclassifyRequested}
-        />
       )}
 
       {activeTab === 'recurring' && (
