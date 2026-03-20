@@ -83,7 +83,7 @@ class Database:
             self.conn.execute("ALTER TABLE transactions ADD COLUMN display_category TEXT")
             self.conn.commit()
 
-        # Ensure transaction_tags table exists
+        # Ensure transaction_tags table exists (legacy, kept for compatibility)
         if "transaction_tags" not in tables:
             self.conn.executescript("""
                 CREATE TABLE IF NOT EXISTS transaction_tags (
@@ -94,6 +94,15 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_txn_tags_tag ON transaction_tags(tag);
             """)
+
+        # Add category_path column (materialized path, e.g. "Travel/Lodging")
+        if "category_path" not in txn_columns:
+            self.conn.execute("ALTER TABLE transactions ADD COLUMN category_path TEXT")
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_transactions_category_path"
+                " ON transactions(category_path)"
+            )
+            self.conn.commit()
 
     # -- Accounts --
 
@@ -212,29 +221,8 @@ class Database:
         )
         self.conn.commit()
 
-    def tag_transaction(self, transaction_id: int, tag: str, source: str = "rule") -> None:
-        self.conn.execute(
-            "INSERT OR IGNORE INTO transaction_tags (transaction_id, tag, source) VALUES (?, ?, ?)",
-            (transaction_id, tag, source),
-        )
-        self.conn.commit()
-
-    def set_display_category(self, transaction_id: int, category: str) -> None:
-        self.conn.execute(
-            "UPDATE transactions SET display_category = ? WHERE id = ?",
-            (category, transaction_id),
-        )
-        self.conn.commit()
-
-    def clear_tags(self, source: str | None = None) -> None:
-        if source is not None:
-            self.conn.execute("DELETE FROM transaction_tags WHERE source = ?", (source,))
-        else:
-            self.conn.execute("DELETE FROM transaction_tags")
-        self.conn.commit()
-
-    def clear_display_categories(self) -> None:
-        self.conn.execute("UPDATE transactions SET display_category = NULL")
+    def clear_category_paths(self) -> None:
+        self.conn.execute("UPDATE transactions SET category_path = NULL")
         self.conn.commit()
 
     # -- Option Grants --

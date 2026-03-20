@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -12,6 +13,10 @@ from money.models import AccountType, Balance, IngestionRecord, IngestionStatus
 from money.storage import RawStore
 
 log = logging.getLogger(__name__)
+
+# Track in-flight syncs to avoid duplicates
+_active_syncs: set[str] = set()
+_sync_lock = threading.Lock()
 
 VALID_ACCOUNT_TYPES = {t.value for t in AccountType}
 
@@ -289,7 +294,7 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         query = """
             SELECT t.id, t.date, t.amount, t.description, t.category,
-                   a.name as account_name, a.institution
+                   t.category_path, a.name as account_name, a.institution
             FROM transactions t
             JOIN accounts a ON t.account_id = a.id
         """
@@ -333,6 +338,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                     "amount": row["amount"],
                     "description": row["description"],
                     "category": row["category"],
+                    "category_path": row["category_path"],
                     "account_name": row["account_name"],
                     "institution": row["institution"],
                 }
@@ -389,61 +395,54 @@ class IngestHandler(BaseHTTPRequestHandler):
     def _handle_spending_summary(self) -> None:
         from urllib.parse import parse_qs, urlparse
 
-        from money.categorize import collection_meta
-
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
         group_by = params.get("group_by", ["month"])[0]
-        collection = params.get("collection", [None])[0]
+        start = params.get("start", [None])[0]
+        end = params.get("end", [None])[0]
 
-        if collection and collection != "_list":
-            self._handle_collection_summary(collection, group_by)
-            return
+        # Use category_path for grouping; exclude Capital top-level group.
+        # The "top_category" is the first segment of category_path.
+        date_filter = "AND t.date >= date('now', '-1 year')"
+        date_params: list[str] = []
+        if start and end:
+            date_filter = "AND t.date >= ? AND t.date <= ?"
+            date_params = [start, end]
+        elif start:
+            date_filter = "AND t.date >= ?"
+            date_params = [start]
+        elif end:
+            date_filter = "AND t.date <= ?"
+            date_params = [end]
 
-        if collection == "_list":
-            tag_rows = self.db.conn.execute(
-                "SELECT DISTINCT tag FROM transaction_tags"
-                " WHERE tag NOT IN ('capital', 'consumption')"
-            ).fetchall()
-            dynamic_tags = {row["tag"] for row in tag_rows}
-            meta = collection_meta()
-            collections = [
-                {
-                    "id": tag,
-                    "label": meta.get(tag, {}).get("label", tag.title()),
-                    "description": meta.get(tag, {}).get("description", ""),
-                }
-                for tag in dynamic_tags
-                if tag in meta
-            ]
-            self._json_response(200, {"collections": collections})
-            return
-
-        base_cte = """
+        base_cte = f"""
             WITH base AS (
                 SELECT t.id, t.date, t.amount, t.description, t.category,
-                       t.display_category
+                       t.category_path
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.id
                 WHERE a.account_type IN ('checking', 'credit_card')
-                  AND t.date >= date('now', '-1 year')
-                  AND t.id NOT IN (
-                      SELECT transaction_id FROM transaction_tags WHERE tag = 'capital'
-                  )
+                  {date_filter}
+                  AND (t.category_path IS NULL
+                       OR t.category_path NOT LIKE 'Capital%')
             )
         """
 
         if group_by == "category":
+            # Group by top-level category (first path segment)
             rows = self.db.conn.execute(f"""
                 {base_cte}
-                SELECT COALESCE(b.display_category, b.category, b.description) as cat,
+                SELECT CASE INSTR(b.category_path, '/')
+                         WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
+                         ELSE SUBSTR(b.category_path, 1, INSTR(b.category_path, '/') - 1)
+                       END as cat,
                        SUM(b.amount) as total,
                        COUNT(*) as count
                 FROM base b
                 WHERE b.amount < 0
                 GROUP BY cat
                 ORDER BY total ASC
-            """).fetchall()
+            """, date_params).fetchall()
             categories: list[dict[str, Any]] = []
             for row in rows:
                 categories.append(
@@ -454,7 +453,109 @@ class IngestHandler(BaseHTTPRequestHandler):
                     }
                 )
             self._json_response(200, {"categories": categories})
+
+        elif group_by == "subcategory":
+            # Group by full category_path (for drill-down into a top-level group)
+            parent = params.get("parent", [None])[0]
+            parent_filter = ""
+            extra_params: list[str] = []
+            if parent == "Uncategorized":
+                parent_filter = "AND b.category_path IS NULL"
+            elif parent:
+                parent_filter = (
+                    "AND (b.category_path = ? OR b.category_path LIKE ?)"
+                )
+                extra_params = [parent, f"{parent}/%"]
+
+            rows = self.db.conn.execute(f"""
+                {base_cte}
+                SELECT COALESCE(b.category_path, b.description, 'Unknown') as cat,
+                       SUM(b.amount) as total,
+                       COUNT(*) as count
+                FROM base b
+                WHERE b.amount < 0
+                  {parent_filter}
+                GROUP BY cat
+                ORDER BY total ASC
+            """, [*date_params, *extra_params]).fetchall()
+            categories = []
+            for row in rows:
+                categories.append(
+                    {
+                        "category": row["cat"],
+                        "total": row["total"],
+                        "count": row["count"],
+                    }
+                )
+            self._json_response(200, {"categories": categories})
+
+        elif group_by == "month_category":
+            # Spending by month × top-level category for stacked charts
+            top_n = int(params.get("top", ["10"])[0])
+
+            top_rows = self.db.conn.execute(f"""
+                {base_cte}
+                SELECT CASE INSTR(b.category_path, '/')
+                         WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
+                         ELSE SUBSTR(b.category_path, 1, INSTR(b.category_path, '/') - 1)
+                       END as cat,
+                       SUM(b.amount) as total
+                FROM base b
+                WHERE b.amount < 0
+                GROUP BY cat
+                ORDER BY total ASC
+                LIMIT ?
+            """, [*date_params, top_n]).fetchall()
+            top_cats = [row["cat"] for row in top_rows]
+
+            cat_placeholders = ",".join("?" for _ in top_cats)
+            rows = self.db.conn.execute(f"""
+                {base_cte}
+                SELECT strftime('%Y-%m', b.date) as month,
+                       CASE
+                         WHEN CASE INSTR(b.category_path, '/')
+                                WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
+                                ELSE SUBSTR(b.category_path, 1,
+                                            INSTR(b.category_path, '/') - 1)
+                              END IN ({cat_placeholders})
+                         THEN CASE INSTR(b.category_path, '/')
+                                WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
+                                ELSE SUBSTR(b.category_path, 1,
+                                            INSTR(b.category_path, '/') - 1)
+                              END
+                         ELSE 'Other'
+                       END as cat,
+                       SUM(b.amount) as total
+                FROM base b
+                WHERE b.amount < 0
+                GROUP BY month, cat
+                ORDER BY month ASC
+            """, [*date_params, *top_cats]).fetchall()
+
+            months_map: dict[str, dict[str, float]] = {}
+            all_cats: set[str] = set()
+            for row in rows:
+                month: str = row["month"]
+                cat: str = row["cat"]
+                all_cats.add(cat)
+                if month not in months_map:
+                    months_map[month] = {"month": month}  # type: ignore[dict-item]
+                months_map[month][cat] = abs(row["total"])
+
+            result: list[dict[str, Any]] = []
+            for m in sorted(months_map):
+                entry = months_map[m]
+                for cat in all_cats:
+                    entry.setdefault(cat, 0.0)
+                result.append(entry)
+
+            self._json_response(200, {
+                "months": result,
+                "categories": sorted(all_cats, key=lambda c: c != "Other"),
+            })
+
         else:
+            # Default: monthly income/spending totals
             rows = self.db.conn.execute(f"""
                 {base_cte}
                 SELECT strftime('%Y-%m', b.date) as month,
@@ -463,10 +564,10 @@ class IngestHandler(BaseHTTPRequestHandler):
                 FROM base b
                 GROUP BY month
                 ORDER BY month ASC
-            """).fetchall()
-            months: list[dict[str, Any]] = []
+            """, date_params).fetchall()
+            months_list: list[dict[str, Any]] = []
             for row in rows:
-                months.append(
+                months_list.append(
                     {
                         "month": row["month"],
                         "income": row["income"],
@@ -474,7 +575,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                         "net": row["income"] + row["spending"],
                     }
                 )
-            self._json_response(200, {"months": months})
+            self._json_response(200, {"months": months_list})
 
     def _handle_travel_trips(self) -> None:
         """Return travel spending grouped by trip, using calendar data."""
@@ -486,7 +587,7 @@ class IngestHandler(BaseHTTPRequestHandler):
             SELECT t.date, t.amount, t.description, t.category, a.name as account_name
             FROM transactions t
             JOIN accounts a ON t.account_id = a.id
-            WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag = 'travel')
+            WHERE (t.category_path = 'Travel' OR t.category_path LIKE 'Travel/%')
               AND t.date >= date('now', '-1 year')
             ORDER BY t.date
         """).fetchall()
@@ -545,21 +646,22 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._json_response(200, {"trips": trip_summaries})
 
     def _handle_collection_summary(self, collection: str, group_by: str) -> None:
-        """Return spending summary filtered to a named collection (by tag)."""
+        """Return spending summary filtered to a top-level category group."""
+        path_filter = "(t.category_path = ? OR t.category_path LIKE ?)"
+        path_params = [collection, f"{collection}/%"]
+
         if group_by == "category":
             rows = self.db.conn.execute(
-                """
-                SELECT COALESCE(t.display_category, t.category, t.description) as cat,
+                f"""
+                SELECT COALESCE(t.category_path, t.description) as cat,
                        SUM(t.amount) as total,
                        COUNT(*) as count
                 FROM transactions t
-                WHERE t.id IN (
-                    SELECT transaction_id FROM transaction_tags WHERE tag = ?
-                )
+                WHERE {path_filter}
                 GROUP BY cat
                 ORDER BY total ASC
             """,
-                (collection,),
+                path_params,
             ).fetchall()
             categories: list[dict[str, Any]] = []
             for row in rows:
@@ -573,18 +675,16 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(200, {"categories": categories})
         else:
             rows = self.db.conn.execute(
-                """
+                f"""
                 SELECT strftime('%Y-%m', t.date) as month,
                        SUM(t.amount) as total,
                        COUNT(*) as count
                 FROM transactions t
-                WHERE t.id IN (
-                    SELECT transaction_id FROM transaction_tags WHERE tag = ?
-                )
+                WHERE {path_filter}
                 GROUP BY month
                 ORDER BY month ASC
             """,
-                (collection,),
+                path_params,
             ).fetchall()
             months: list[dict[str, Any]] = []
             for row in rows:
@@ -618,6 +718,15 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._set_cors_headers()
         self.end_headers()
 
+    def _trigger_auto_sync(self, institution: str) -> None:
+        """Kick off a background sync for an institution."""
+        thread = threading.Thread(
+            target=_run_auto_sync,
+            args=(self.db.path, self.store, institution),
+            daemon=True,
+        )
+        thread.start()
+
     def _handle_cookies(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
@@ -640,11 +749,13 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "'cookies' must be a list"})
             return
 
-        profile = data.get("profile")
-        path = cookie_relay_path(institution, profile)
+        path = cookie_relay_path(institution)
         path.write_text(json.dumps(data, indent=2))
-        label = f"{institution}/{profile}" if profile else institution
-        log.info("Stored %d cookies for %s at %s", len(cookies_raw), label, path)
+        log.info("Stored %d cookies for %s at %s", len(cookies_raw), institution, path)
+
+        # Ally uses Playwright login, not cookie relay — skip auto-sync
+        if institution != "ally":
+            self._trigger_auto_sync(institution)
 
         self._json_response(
             200,
@@ -700,6 +811,8 @@ class IngestHandler(BaseHTTPRequestHandler):
             log.info("API routes discovered for %s:", institution)
             for route in sorted(routes):
                 log.info("  %s", route)
+
+        self._trigger_auto_sync(institution)
 
         self._json_response(
             200,
@@ -908,6 +1021,54 @@ def _process_ingest(
         "balances_recorded": balances_recorded,
         "raw_file_ref": raw_key,
     }
+
+
+def _run_auto_sync(db_path: str, store: RawStore, institution: str) -> None:
+    """Run a sync for an institution in the background after receiving fresh auth data."""
+    sync_key = institution
+
+    with _sync_lock:
+        if sync_key in _active_syncs:
+            log.info("Sync already in progress for %s, skipping", sync_key)
+            return
+        _active_syncs.add(sync_key)
+
+    db = Database(db_path, check_same_thread=False)
+    try:
+        db.initialize()
+        log.info("Auto-sync starting for %s", sync_key)
+
+        if institution == "betterment":
+            from money.ingest.betterment import sync_betterment
+            sync_betterment(db, store)
+        elif institution == "wealthfront":
+            from money.ingest.wealthfront import sync_wealthfront
+            sync_wealthfront(db, store)
+        elif institution == "capital_one":
+            from money.ingest.capital_one import sync_capital_one
+            sync_capital_one(db, store)
+        elif institution == "chase":
+            from money.ingest.chase import sync_chase
+            sync_chase(db, store)
+        elif institution == "morgan_stanley":
+            from money.ingest.morgan_stanley import sync_morgan_stanley
+            sync_morgan_stanley(db, store)
+        else:
+            log.info("No auto-sync configured for %s", institution)
+            return
+
+        # Recategorize after sync
+        from money.categorize import apply_rules
+        apply_rules(db)
+
+        log.info("Auto-sync complete for %s", sync_key)
+
+    except Exception:
+        log.exception("Auto-sync failed for %s", sync_key)
+    finally:
+        with _sync_lock:
+            _active_syncs.discard(sync_key)
+        db.close()
 
 
 def run_server(

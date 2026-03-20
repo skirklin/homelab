@@ -110,6 +110,29 @@ def accounts(ctx: click.Context) -> None:
 
 
 @main.command()
+@click.pass_context
+def category_stats(ctx: click.Context) -> None:
+    """Show category_path distribution across transactions."""
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    rows = db.conn.execute("""
+        SELECT category_path, COUNT(*) as cnt
+        FROM transactions
+        WHERE category_path IS NOT NULL
+        GROUP BY category_path
+        ORDER BY cnt DESC
+    """).fetchall()
+    total = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()
+    categorized = sum(r["cnt"] for r in rows)
+    assert total is not None
+    click.echo(f"Categorized: {categorized} / {total[0]}")
+    click.echo()
+    for row in rows:
+        click.echo(f"  {row['cnt']:>5d}  {row['category_path']}")
+    db.close()
+
+
+@main.command()
 @click.argument("as_of", required=False)
 @click.pass_context
 def net_worth(ctx: click.Context, as_of: str | None) -> None:

@@ -124,10 +124,15 @@ class Holding:
 
 @dataclass
 class CategoryRule:
+    """A categorization rule mapping a LIKE pattern to a category path.
+
+    category_path is a slash-delimited materialized path, e.g. "Travel/Lodging".
+    pattern is a SQL LIKE pattern matched against description, or "category:VALUE"
+    to match against the raw category field.
+    """
+
     pattern: str
-    tag: str
-    priority: int = 0
-    display_category: str | None = None
+    category_path: str
     id: int | None = None
 
 

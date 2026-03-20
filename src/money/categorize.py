@@ -1,9 +1,30 @@
 """Category rule engine for transactions.
 
 Rules are loaded from ~/.config/money/categories.yaml and applied to transactions
-to populate transaction_tags and display_category in the database.
+to populate category_path in the database.
 
 The YAML file is the source of truth for rules — it survives database rebuilds.
+
+YAML format is a nested dict where keys are path segments and leaf lists contain
+SQL LIKE patterns (or "category:VALUE" to match the raw category field).
+Longest matching pattern wins when multiple rules match a transaction.
+
+Example:
+    rules:
+      Travel:
+        Lodging:
+          - "%AIRBNB%"
+          - "%HOTEL%"
+        Airfare:
+          - "%UNITED%AIR%"
+      Pets:
+        - "%MIDTOWN MUTTS%"
+
+This produces rules:
+    "%AIRBNB%"      → "Travel/Lodging"
+    "%HOTEL%"       → "Travel/Lodging"
+    "%UNITED%AIR%"  → "Travel/Airfare"
+    "%MIDTOWN MUTTS%" → "Pets"
 """
 
 import logging
@@ -19,12 +40,6 @@ log = logging.getLogger(__name__)
 
 RULES_FILE = CONFIG_DIR / "categories.yaml"
 
-# Categories whose raw values are too generic — fall through to description
-_DEFAULT_GENERIC_CATEGORIES = frozenset({
-    "ACH", "Bill Pay", "POS", "Unknown", "Other",
-    "Other Services", "Other Travel", "Fee",
-})
-
 
 def load_config() -> dict[str, Any]:
     """Load the categories config from YAML."""
@@ -37,57 +52,65 @@ def load_config() -> dict[str, Any]:
     return data
 
 
-def load_rules() -> list[CategoryRule]:
-    """Load category rules from the YAML config file."""
-    config = load_config()
+def _parse_rules_recursive(
+    node: dict[str, Any] | list[str],
+    path: list[str],
+) -> list[CategoryRule]:
+    """Recursively walk the YAML tree and produce flat CategoryRule list.
+
+    Dict keys become path segments. Lists at any level contain patterns
+    assigned to the current path.
+    """
+    if isinstance(node, list):
+        category_path = "/".join(path)
+        return [CategoryRule(pattern=p, category_path=category_path) for p in node]
+
     rules: list[CategoryRule] = []
-    for entry in config.get("rules", []):
-        rules.append(CategoryRule(
-            pattern=entry["pattern"],
-            tag=entry["tag"],
-            priority=entry.get("priority", 0),
-            display_category=entry.get("display_category"),
-        ))
+    for key, child in node.items():
+        if isinstance(child, dict):
+            rules.extend(_parse_rules_recursive(child, path + [key]))
+        elif isinstance(child, list):
+            category_path = "/".join(path + [key])
+            rules.extend(
+                CategoryRule(pattern=str(p), category_path=category_path) for p in child
+            )
+        # Ignore other types (e.g. scalar metadata keys)
     return rules
 
 
-def generic_categories() -> frozenset[str]:
-    """Return the set of generic category names that should fall through to description."""
-    try:
-        config = load_config()
-        return frozenset(config.get("generic_categories", _DEFAULT_GENERIC_CATEGORIES))
-    except FileNotFoundError:
-        return _DEFAULT_GENERIC_CATEGORIES
+def load_rules() -> list[CategoryRule]:
+    """Load category rules from the YAML config file."""
+    config = load_config()
+    rules_tree: dict[str, Any] | list[str] = config.get("rules", {})
+    if not isinstance(rules_tree, dict):
+        return []
+    return _parse_rules_recursive(rules_tree, [])
 
 
-def collection_meta() -> dict[str, dict[str, str]]:
-    """Return collection metadata (label, description) from config."""
-    try:
-        config = load_config()
-        return dict(config.get("collections", {}))
-    except FileNotFoundError:
-        return {}
+def _pattern_specificity(pattern: str) -> int:
+    """Score a pattern by specificity for longest-match-wins resolution.
+
+    Strips SQL LIKE wildcards (%) and counts remaining characters.
+    """
+    stripped = pattern.removeprefix("category:")
+    return len(stripped.replace("%", ""))
 
 
 def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
-    """Apply category rules from the YAML config to transactions.
+    """Apply category rules to transactions, populating category_path.
 
-    Clears existing rule-based tags, then reapplies all rules.
-    Sets display_category from the highest-priority matching rule.
-    Falls back to description when the raw category is generic.
+    For each transaction, all matching rules are found. The rule with the
+    longest (most specific) pattern wins. Ties are broken by the rule's
+    position in the config (first wins).
 
-    Returns count of transactions tagged.
+    Returns count of transactions categorized.
     """
     rules = load_rules()
     if not rules:
         log.warning("No rules loaded from %s", RULES_FILE)
         return 0
 
-    # Sort by priority DESC so highest-priority display_category wins
-    rules.sort(key=lambda r: r.priority, reverse=True)
-
-    db.clear_tags(source="rule")
-    db.clear_display_categories()
+    db.clear_category_paths()
 
     # Separate description-pattern rules from category-prefix rules
     desc_rules = [r for r in rules if not r.pattern.startswith("category:")]
@@ -100,74 +123,135 @@ def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
         txn_filter = f" AND t.id IN ({placeholders})"
         txn_params = list(transaction_ids)
 
-    # Apply tags
-    for rule in desc_rules:
-        db.conn.execute(
-            f"""INSERT OR IGNORE INTO transaction_tags (transaction_id, tag, source)
-                SELECT t.id, ?, 'rule'
-                FROM transactions t
-                JOIN accounts a ON t.account_id = a.id
-                WHERE a.account_type IN ('checking', 'credit_card')
-                  AND UPPER(t.description) LIKE UPPER(?){txn_filter}""",
-            [rule.tag, rule.pattern, *txn_params],
-        )
+    # Fetch all candidate transactions
+    rows = db.conn.execute(
+        f"""SELECT t.id, t.description, t.category
+            FROM transactions t
+            JOIN accounts a ON t.account_id = a.id
+            WHERE a.account_type IN ('checking', 'credit_card')
+            {txn_filter}""",
+        txn_params,
+    ).fetchall()
 
-    for rule in cat_rules:
-        cat_value = rule.pattern.removeprefix("category:")
-        db.conn.execute(
-            f"""INSERT OR IGNORE INTO transaction_tags (transaction_id, tag, source)
-                SELECT t.id, ?, 'rule'
-                FROM transactions t
-                JOIN accounts a ON t.account_id = a.id
-                WHERE a.account_type IN ('checking', 'credit_card')
-                  AND t.category = ?{txn_filter}""",
-            [rule.tag, cat_value, *txn_params],
-        )
+    # Build per-transaction best match
+    count = 0
+    updates: list[tuple[str, int]] = []
 
-    db.conn.commit()
+    for row in rows:
+        txn_id: int = row["id"]
+        description: str = (row["description"] or "").upper()
+        category: str = row["category"] or ""
 
-    # Set display_category (highest priority first, only if not yet set)
-    for rule in desc_rules:
-        if rule.display_category is None:
-            continue
-        db.conn.execute(
-            f"""UPDATE transactions
-                SET display_category = ?
-                WHERE display_category IS NULL
-                  AND UPPER(description) LIKE UPPER(?){txn_filter.replace('t.id', 'id')}""",
-            [rule.display_category, rule.pattern, *txn_params],
-        )
+        best_rule: CategoryRule | None = None
+        best_specificity = -1
 
-    for rule in cat_rules:
-        if rule.display_category is None:
-            continue
-        cat_value = rule.pattern.removeprefix("category:")
-        db.conn.execute(
-            f"""UPDATE transactions
-                SET display_category = ?
-                WHERE display_category IS NULL
-                  AND category = ?{txn_filter.replace('t.id', 'id')}""",
-            [rule.display_category, cat_value, *txn_params],
-        )
+        for rule in desc_rules:
+            # Convert SQL LIKE pattern to a simple match
+            pat = rule.pattern.upper()
+            if _like_match(description, pat):
+                spec = _pattern_specificity(rule.pattern)
+                if spec > best_specificity:
+                    best_specificity = spec
+                    best_rule = rule
 
-    # Fallback: use description when category is generic
-    generics = generic_categories()
-    generic_ph = ",".join("?" for _ in generics)
-    db.conn.execute(
-        f"""UPDATE transactions
-            SET display_category = description
-            WHERE display_category IS NULL
-              AND (category IS NULL OR category IN ({generic_ph}))
-              {txn_filter.replace('AND t.id', 'AND id')}""",
-        [*generics, *txn_params],
+        for rule in cat_rules:
+            cat_value = rule.pattern.removeprefix("category:")
+            if category == cat_value:
+                spec = _pattern_specificity(rule.pattern)
+                if spec > best_specificity:
+                    best_specificity = spec
+                    best_rule = rule
+
+        if best_rule is not None:
+            updates.append((best_rule.category_path, txn_id))
+            count += 1
+
+    # Batch update
+    db.conn.executemany(
+        "UPDATE transactions SET category_path = ? WHERE id = ?",
+        updates,
     )
-
     db.conn.commit()
 
-    tagged_row = db.conn.execute(
-        "SELECT COUNT(DISTINCT transaction_id) FROM transaction_tags WHERE source = 'rule'"
-    ).fetchone()
-    assert tagged_row is not None
-    count = int(tagged_row[0])
-    log.info("Tagged %d transactions from %d rules", count, len(rules))
+    log.info("Categorized %d / %d transactions from %d rules", count, len(rows), len(rules))
     return count
+
+
+def _like_match(text: str, pattern: str) -> bool:
+    """Match a SQL LIKE pattern (with % wildcards) against text.
+
+    Both text and pattern should already be uppercased.
+    """
+    # Simple recursive LIKE matcher
+    return _like_match_impl(text, 0, pattern, 0)
+
+
+def _like_match_impl(text: str, ti: int, pattern: str, pi: int) -> bool:
+    while pi < len(pattern):
+        if pattern[pi] == "%":
+            # Skip consecutive %
+            while pi < len(pattern) and pattern[pi] == "%":
+                pi += 1
+            if pi == len(pattern):
+                return True
+            # Try matching the rest from every position
+            return any(
+                _like_match_impl(text, ti2, pattern, pi)
+                for ti2 in range(ti, len(text) + 1)
+            )
+        else:
+            if ti >= len(text) or text[ti] != pattern[pi]:
+                return False
+            ti += 1
+            pi += 1
+    return ti == len(text)
+
+
+def dry_run_pattern(
+    db: Database,
+    pattern: str,
+    category_path: str,
+) -> list[dict[str, Any]]:
+    """Preview what a new rule would do without applying it.
+
+    Returns list of affected transactions with their current and proposed
+    category_path values.
+    """
+    is_cat_rule = pattern.startswith("category:")
+
+    if is_cat_rule:
+        cat_value = pattern.removeprefix("category:")
+        rows = db.conn.execute(
+            """SELECT t.id, t.date, t.amount, t.description, t.category,
+                      t.category_path
+               FROM transactions t
+               JOIN accounts a ON t.account_id = a.id
+               WHERE a.account_type IN ('checking', 'credit_card')
+                 AND t.category = ?
+               ORDER BY t.date DESC""",
+            (cat_value,),
+        ).fetchall()
+    else:
+        rows = db.conn.execute(
+            """SELECT t.id, t.date, t.amount, t.description, t.category,
+                      t.category_path
+               FROM transactions t
+               JOIN accounts a ON t.account_id = a.id
+               WHERE a.account_type IN ('checking', 'credit_card')
+                 AND UPPER(t.description) LIKE UPPER(?)
+               ORDER BY t.date DESC""",
+            (pattern,),
+        ).fetchall()
+
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        results.append({
+            "id": row["id"],
+            "date": row["date"],
+            "amount": row["amount"],
+            "description": row["description"],
+            "current_category_path": row["category_path"],
+            "proposed_category_path": category_path,
+            "would_change": row["category_path"] != category_path,
+        })
+    return results

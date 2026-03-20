@@ -42,6 +42,7 @@ export interface Transaction {
   amount: number
   description: string | null
   category: string | null
+  category_path: string | null
   account_name: string
   institution: string
 }
@@ -121,6 +122,14 @@ export const fetchSpendingByCategory = () =>
   get<{ categories: CategorySummary[] }>('/api/spending/summary?group_by=category').then(
     (d) => d.categories,
   )
+
+export interface MonthCategoryData {
+  months: Record<string, number | string>[]
+  categories: string[]
+}
+
+export const fetchSpendingByMonthCategory = (top: number = 10) =>
+  get<MonthCategoryData>(`/api/spending/summary?group_by=month_category&top=${top}`)
 
 export interface CollectionInfo {
   id: string
