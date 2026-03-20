@@ -113,13 +113,26 @@ const NETWORK_LOG_INSTITUTIONS = new Set(["chase", "morgan_stanley"]);
 const lastAutoCapture = {};
 const AUTO_CAPTURE_COOLDOWN_MS = 30_000;
 
-// Auto-capture cookies when navigating to a supported site
+// URL patterns that indicate an authenticated session (past login)
+const AUTHENTICATED_URL_PATTERNS = {
+  capital_one: /myaccounts\.capitalone\.com\/(accountSummary|accountDetail)/,
+  betterment: /app\.betterment\.com\/(investing|summary|goals)/,
+  wealthfront: /www\.wealthfront\.com\/(dashboard|portfolio|transfers)/,
+};
+
+// Auto-capture cookies when navigating to an authenticated page
 chrome.webNavigation.onCompleted.addListener(async (details) => {
   // Only main frame, not iframes
   if (details.frameId !== 0) return;
 
   const institution = getInstitutionForUrl(details.url);
   if (!institution) return;
+
+  // Only auto-capture if the URL looks like an authenticated page
+  const authPattern = AUTHENTICATED_URL_PATTERNS[institution];
+  if (authPattern && !authPattern.test(details.url)) {
+    return;
+  }
 
   // Cooldown check
   const now = Date.now();

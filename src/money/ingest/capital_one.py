@@ -39,8 +39,8 @@ def _load_cookies() -> dict[str, str]:
     cookies: dict[str, str] = {}
     for c in data.get("cookies", []):
         domain: str = c.get("domain", "")
-        # Only use cookies from myaccounts subdomain
-        if "myaccounts" not in domain and domain != ".myaccounts.capitalone.com":
+        # Include cookies from myaccounts and the broader .capitalone.com domain
+        if "capitalone" not in domain:
             continue
         cookies[c["name"]] = c["value"]
 
