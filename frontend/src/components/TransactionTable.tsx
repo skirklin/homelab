@@ -5,15 +5,15 @@ import { fetchTransactions } from '../api'
 const fmtDollar = (v: number) =>
   `${v < 0 ? '-' : '+'}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
+type SortKey = 'date' | 'amount' | 'description' | 'category' | 'account'
+type SortDir = 'asc' | 'desc'
+
 interface Props {
   accounts?: Account[]
   accountId?: string
   onAccountChange?: (id: string | undefined) => void
-  /** Client-side filter function applied on top of the fetched data */
   filterFn?: (t: Transaction) => boolean
-  /** Label describing the active filter */
   filterLabel?: string
-  /** Called when user clears the filter */
   onClearFilter?: () => void
 }
 
@@ -29,6 +29,8 @@ export function TransactionTable({
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [hideTransfers, setHideTransfers] = useState(true)
+  const [sortKey, setSortKey] = useState<SortKey>('date')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300)
@@ -43,10 +45,19 @@ export function TransactionTable({
     }).then(setAllTransactions)
   }, [accountId, hideTransfers])
 
-  const filtered = useMemo(() => {
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      // Default sort direction: amount → desc (biggest first), others → asc
+      setSortDir(key === 'amount' ? 'desc' : 'asc')
+    }
+  }
+
+  const sorted = useMemo(() => {
     let result = allTransactions
 
-    // Client-side text search
     if (debouncedSearch) {
       const q = debouncedSearch.toLowerCase()
       result = result.filter(
@@ -58,13 +69,39 @@ export function TransactionTable({
       )
     }
 
-    // External filter (from chart clicks)
     if (filterFn) {
       result = result.filter(filterFn)
     }
 
-    return result
-  }, [allTransactions, debouncedSearch, filterFn])
+    const sorted = [...result].sort((a, b) => {
+      let cmp = 0
+      switch (sortKey) {
+        case 'date':
+          cmp = a.date.localeCompare(b.date)
+          break
+        case 'amount':
+          cmp = Math.abs(a.amount) - Math.abs(b.amount)
+          break
+        case 'description':
+          cmp = (a.description ?? '').localeCompare(b.description ?? '')
+          break
+        case 'category':
+          cmp = (a.category_path ?? '').localeCompare(b.category_path ?? '')
+          break
+        case 'account':
+          cmp = a.account_name.localeCompare(b.account_name)
+          break
+      }
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+
+    return sorted
+  }, [allTransactions, debouncedSearch, filterFn, sortKey, sortDir])
+
+  const sortIndicator = (key: SortKey) => {
+    if (sortKey !== key) return null
+    return <span className="sort-indicator">{sortDir === 'asc' ? ' \u25B2' : ' \u25BC'}</span>
+  }
 
   return (
     <section className="chart-section">
@@ -110,15 +147,25 @@ export function TransactionTable({
         <table className="txn-table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th>Category</th>
-              <th>Account</th>
-              <th className="right">Amount</th>
+              <th className="sortable" onClick={() => handleSort('date')}>
+                Date{sortIndicator('date')}
+              </th>
+              <th className="sortable" onClick={() => handleSort('description')}>
+                Description{sortIndicator('description')}
+              </th>
+              <th className="sortable" onClick={() => handleSort('category')}>
+                Category{sortIndicator('category')}
+              </th>
+              <th className="sortable" onClick={() => handleSort('account')}>
+                Account{sortIndicator('account')}
+              </th>
+              <th className="sortable right" onClick={() => handleSort('amount')}>
+                Amount{sortIndicator('amount')}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((t) => (
+            {sorted.map((t) => (
               <tr key={t.id}>
                 <td className="date">{t.date}</td>
                 <td className="desc">{t.description}</td>
@@ -131,7 +178,7 @@ export function TransactionTable({
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {sorted.length === 0 && (
               <tr>
                 <td colSpan={5} style={{ textAlign: 'center', opacity: 0.5, padding: '2rem' }}>
                   No transactions found
