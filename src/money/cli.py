@@ -99,6 +99,25 @@ def categorize(ctx: click.Context) -> None:
 
 @main.command()
 @click.pass_context
+def enrich(ctx: click.Context) -> None:
+    """Enrich holdings with asset class data and fetch benchmark history."""
+    from money.benchmarks import BENCHMARKS, enrich_holdings_asset_classes, fetch_yahoo_history
+
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    try:
+        count = enrich_holdings_asset_classes(db)
+        click.echo(f"Enriched {count} holdings with asset class data.")
+    finally:
+        db.close()
+
+    for symbol, name in BENCHMARKS.items():
+        data = fetch_yahoo_history(symbol)
+        click.echo(f"Fetched {len(data)} data points for {name} ({symbol}).")
+
+
+@main.command()
+@click.pass_context
 def detect_recurring(ctx: click.Context) -> None:
     """Detect recurring transaction patterns."""
     from money.recurring import detect_recurring as _detect

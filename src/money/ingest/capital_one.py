@@ -67,7 +67,14 @@ def _api_get(cookies: dict[str, str], path: str) -> Any:
         body = e.read().decode("utf-8", errors="replace")[:500]
         log.error("HTTP %d on %s: %s", e.code, path, body)
         raise
-    return json.loads(resp.read())
+    body = resp.read()
+    if not body:
+        raise ValueError(f"Empty response from {path} (status {resp.status})")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        preview = body.decode("utf-8", errors="replace")[:200]
+        raise ValueError(f"Non-JSON response from {path}: {preview}")
 
 
 def _encode_ref(ref_id: str) -> str:

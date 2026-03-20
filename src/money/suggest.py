@@ -352,13 +352,16 @@ def accept_suggestion(db: Database, rule_id: int) -> int:
     if row is None:
         return 0
 
+    pattern: str = row["pattern"]
+    category_path: str = row["category_path"]
     yaml_patch: str | None = row["yaml_patch"]
 
-    # Apply the YAML patch if provided
-    if yaml_patch and RULES_FILE.exists():
-        _apply_yaml_patch(yaml_patch)
+    if RULES_FILE.exists():
+        applied = _apply_rule_change(pattern, category_path, yaml_patch)
+        if not applied:
+            log.error("Failed to apply rule change for suggestion %d", rule_id)
+            return 0
 
-    # Re-apply all rules from the updated YAML
     count = apply_rules(db)
 
     db.conn.execute(
@@ -370,13 +373,84 @@ def accept_suggestion(db: Database, rule_id: int) -> int:
     return count
 
 
-def _apply_yaml_patch(patch: str) -> None:
-    """Apply a unified diff patch to categories.yaml."""
-    import tempfile
+def _apply_rule_change(pattern: str, category_path: str, yaml_patch: str | None) -> bool:
+    """Apply a rule change to categories.yaml. Returns True on success.
+
+    Strategy:
+    1. Try the AI-generated unified diff patch
+    2. Validate the result parses as YAML and loads rules
+    3. If invalid, roll back and fall back to programmatic insert
+    4. Validate again after programmatic insert
+    """
+    import yaml as yaml_mod  # type: ignore[import-untyped]
 
     original = RULES_FILE.read_text()
 
-    # Write original and patch to temp files, then use `patch` command
+    # Try AI patch first
+    if yaml_patch:
+        patched = _try_unified_patch(original, yaml_patch)
+        if patched and _validate_yaml(patched):
+            RULES_FILE.write_text(patched)
+            log.info("Applied AI patch for %s → %s", pattern, category_path)
+            return True
+        log.warning("AI patch failed or produced invalid YAML, trying programmatic insert")
+
+    # Programmatic fallback: parse YAML, remove pattern from old location,
+    # insert at new location
+    try:
+        config: dict[str, Any] = yaml_mod.safe_load(original)
+        rules_tree: dict[str, Any] = config.get("rules", {})
+
+        # Remove pattern from anywhere it currently exists
+        _remove_pattern_from_tree(rules_tree, pattern)
+
+        # Insert at the target path
+        segments = category_path.split("/")
+        node = rules_tree
+        for seg in segments[:-1]:
+            if seg not in node:
+                node[seg] = {}
+            child = node[seg]
+            if isinstance(child, list):
+                node[seg] = {"_direct": child}
+                child = node[seg]
+            node = child
+
+        leaf_key = segments[-1]
+        if leaf_key not in node:
+            node[leaf_key] = []
+        leaf = node[leaf_key]
+        if isinstance(leaf, list):
+            if pattern not in leaf:
+                leaf.append(pattern)
+        elif isinstance(leaf, dict):
+            # Has subcategories — add to a direct list
+            direct: list[str] = leaf.setdefault("_direct", [])
+            if pattern not in direct:
+                direct.append(pattern)
+
+        config["rules"] = rules_tree
+        result = yaml_mod.dump(config, default_flow_style=False, sort_keys=False)
+
+        if _validate_yaml(result):
+            RULES_FILE.write_text(result)
+            log.info("Programmatic insert for %s → %s", pattern, category_path)
+            return True
+        else:
+            log.error("Programmatic insert produced invalid YAML, rolling back")
+            RULES_FILE.write_text(original)
+            return False
+
+    except Exception:
+        log.exception("Failed to programmatically insert rule")
+        RULES_FILE.write_text(original)
+        return False
+
+
+def _try_unified_patch(original: str, patch: str) -> str | None:
+    """Try to apply a unified diff patch. Returns patched content or None."""
+    import tempfile
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as orig_f:
         orig_f.write(original)
         orig_path = orig_f.name
@@ -392,33 +466,38 @@ def _apply_yaml_patch(patch: str) -> None:
             text=True,
             timeout=10,
         )
-        if result.returncode == 0:
-            RULES_FILE.write_text(result.stdout)
-            log.info("Applied YAML patch successfully")
-        else:
-            log.warning(
-                "Patch failed (rc=%d), falling back to direct append: %s",
-                result.returncode, result.stderr[:200],
-            )
-            # Fallback: if patch fails, just append the new lines
-            _fallback_append(patch, original)
+        return result.stdout if result.returncode == 0 else None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
     finally:
         import os
         os.unlink(orig_path)
         os.unlink(patch_path)
 
 
-def _fallback_append(patch: str, original: str) -> None:
-    """If the unified diff fails to apply, extract added lines and append them."""
-    added_lines = []
-    for line in patch.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
-            added_lines.append(line[1:])
+def _validate_yaml(content: str) -> bool:
+    """Check that content parses as valid YAML and produces loadable rules."""
+    import yaml as yaml_mod  # type: ignore[import-untyped]
 
-    if added_lines:
-        content = original.rstrip("\n") + "\n" + "\n".join(added_lines) + "\n"
-        RULES_FILE.write_text(content)
-        log.info("Fallback: appended %d lines to YAML", len(added_lines))
+    try:
+        config = yaml_mod.safe_load(content)
+        if not isinstance(config, dict) or "rules" not in config:
+            return False
+        # Quick sanity: rules should be a dict
+        return isinstance(config["rules"], dict)
+    except Exception:
+        return False
+
+
+def _remove_pattern_from_tree(node: dict[str, Any] | list[str], pattern: str) -> None:
+    """Recursively remove a pattern from the YAML rules tree."""
+    if isinstance(node, list):
+        while pattern in node:
+            node.remove(pattern)
+        return
+    for child in node.values():
+        if isinstance(child, (list, dict)):
+            _remove_pattern_from_tree(child, pattern)
 
 
 def reject_suggestion(db: Database, rule_id: int, feedback: str | None = None) -> None:

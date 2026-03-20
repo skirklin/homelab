@@ -52,6 +52,12 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/holdings"):
             self._handle_get_holdings()
             return
+        if self.path.startswith("/api/allocation"):
+            self._handle_allocation()
+            return
+        if self.path.startswith("/api/benchmarks"):
+            self._handle_benchmarks()
+            return
         if self.path.startswith("/api/net-worth/summary"):
             self._handle_net_worth_summary()
             return
@@ -353,6 +359,72 @@ class IngestHandler(BaseHTTPRequestHandler):
                 }
             )
         self._json_response(200, {"transactions": transactions})
+
+    def _handle_allocation(self) -> None:
+        """Return asset allocation breakdown across all investment accounts."""
+        rows = self.db.conn.execute("""
+            SELECT COALESCE(h.asset_class, 'Unclassified') as asset_class,
+                   SUM(h.value) as total_value,
+                   COUNT(*) as position_count,
+                   a.institution
+            FROM holdings h
+            JOIN accounts a ON h.account_id = a.id
+            WHERE h.as_of = (SELECT MAX(h2.as_of) FROM holdings h2
+                             WHERE h2.account_id = h.account_id)
+            GROUP BY asset_class, a.institution
+            ORDER BY total_value DESC
+        """).fetchall()
+
+        allocation: list[dict[str, Any]] = []
+        for row in rows:
+            allocation.append({
+                "asset_class": row["asset_class"],
+                "value": row["total_value"],
+                "positions": row["position_count"],
+                "institution": row["institution"],
+            })
+
+        # Also aggregate by asset class (across institutions)
+        by_class: dict[str, float] = {}
+        for item in allocation:
+            cls = item["asset_class"]
+            by_class[cls] = by_class.get(cls, 0.0) + item["value"]
+
+        summary = [
+            {"asset_class": k, "value": v}
+            for k, v in sorted(by_class.items(), key=lambda x: -x[1])
+        ]
+
+        self._json_response(200, {
+            "by_institution": allocation,
+            "by_asset_class": summary,
+        })
+
+    def _handle_benchmarks(self) -> None:
+        """Return benchmark price history for comparison charts."""
+        from urllib.parse import parse_qs, urlparse
+
+        from money.benchmarks import BENCHMARKS, fetch_yahoo_history
+
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        symbols = params.get("symbols", list(BENCHMARKS.keys()))
+        start_str = params.get("start", [None])[0]
+        end_str = params.get("end", [None])[0]
+
+        start = date.fromisoformat(start_str) if start_str else None
+        end = date.fromisoformat(end_str) if end_str else None
+
+        result: dict[str, Any] = {}
+        for symbol in symbols:
+            if isinstance(symbol, str):
+                data = fetch_yahoo_history(symbol.upper(), start, end)
+                result[symbol.upper()] = {
+                    "name": BENCHMARKS.get(symbol.upper(), symbol.upper()),
+                    "data": data,
+                }
+
+        self._json_response(200, {"benchmarks": result})
 
     def _handle_net_worth_summary(self) -> None:
         """Return net worth broken into liquid, +vested equity, +all equity."""
