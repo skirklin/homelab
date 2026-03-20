@@ -432,20 +432,55 @@ class IngestHandler(BaseHTTPRequestHandler):
         """
 
         if group_by == "category":
-            # Group by top-level category (first path segment)
-            rows = self.db.conn.execute(f"""
-                {base_cte}
-                SELECT CASE INSTR(b.category_path, '/')
-                         WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
-                         ELSE SUBSTR(b.category_path, 1, INSTR(b.category_path, '/') - 1)
-                       END as cat,
-                       SUM(b.amount) as total,
-                       COUNT(*) as count
-                FROM base b
-                WHERE b.amount < 0
-                GROUP BY cat
-                ORDER BY total ASC
-            """, date_params).fetchall()
+            # Group by next path segment under parent (or top-level if no parent)
+            parent = params.get("parent", [None])[0]
+
+            if parent:
+                parent_prefix = f"{parent}/"
+                parent_len = len(parent_prefix)
+                rows = self.db.conn.execute(f"""
+                    {base_cte}
+                    SELECT CASE
+                             WHEN b.category_path = ? THEN ?
+                             WHEN b.category_path LIKE ? THEN
+                               CASE INSTR(SUBSTR(b.category_path, ?), '/')
+                                 WHEN 0 THEN SUBSTR(b.category_path, ?)
+                                 ELSE SUBSTR(b.category_path, ?,
+                                             INSTR(SUBSTR(b.category_path, ?), '/') - 1)
+                               END
+                             ELSE 'Other'
+                           END as cat,
+                           SUM(b.amount) as total,
+                           COUNT(*) as count
+                    FROM base b
+                    WHERE b.amount < 0
+                      AND (b.category_path = ? OR b.category_path LIKE ?)
+                    GROUP BY cat
+                    ORDER BY total ASC
+                """, [
+                    *date_params,
+                    parent, parent,
+                    parent_prefix + "%",
+                    parent_len + 1, parent_len + 1,
+                    parent_len + 1, parent_len + 1,
+                    parent, parent_prefix + "%",
+                ]).fetchall()
+            else:
+                rows = self.db.conn.execute(f"""
+                    {base_cte}
+                    SELECT CASE INSTR(b.category_path, '/')
+                             WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
+                             ELSE SUBSTR(b.category_path, 1,
+                                         INSTR(b.category_path, '/') - 1)
+                           END as cat,
+                           SUM(b.amount) as total,
+                           COUNT(*) as count
+                    FROM base b
+                    WHERE b.amount < 0
+                    GROUP BY cat
+                    ORDER BY total ASC
+                """, date_params).fetchall()
+
             categories: list[dict[str, Any]] = []
             for row in rows:
                 categories.append(

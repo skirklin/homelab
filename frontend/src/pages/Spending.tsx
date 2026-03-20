@@ -72,47 +72,29 @@ export function Spending() {
   const [selectedAccount, setSelectedAccount] = useState<string | undefined>()
   const [months, setMonths] = useState<MonthSummary[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
-
-  // drillCategory: which top-level category the chart is drilled into (null = top level)
-  // txnFilter: what the transaction table filters by (month, category path prefix)
-  const [drillCategory, setDrillCategory] = useState<string | null>(null)
-  const [txnFilter, setTxnFilter] = useState<{ month?: string; categoryPrefix?: string }>({})
+  const [prefix, setPrefix] = useState<string | null>(null)
+  const [monthFilter, setMonthFilter] = useState<string | null>(null)
 
   useEffect(() => {
     fetchAccounts().then(setAccounts)
     fetchSpendingByMonth().then(setMonths)
   }, [refreshKey])
 
-  const handleCategoryChange = useCallback((category: string | null) => {
-    setDrillCategory(category)
-    // When drilling into a category, also filter transactions to it
-    setTxnFilter(category ? { categoryPrefix: category } : {})
+  const handlePrefixChange = useCallback((newPrefix: string | null) => {
+    setPrefix(newPrefix)
+    setMonthFilter(null)
   }, [])
 
-  const handleSubcategoryClick = useCallback((subcategory: string) => {
-    // Filter transactions to a specific subcategory within the drilled-in group
-    // e.g. drillCategory="Housing", subcategory="Rent" → filter to "Housing/Rent"
-    setTxnFilter((prev) => {
-      const fullPath = drillCategory ? `${drillCategory}/${subcategory}` : subcategory
-      // Toggle off if already selected
-      if (prev.categoryPrefix === fullPath) {
-        return drillCategory ? { categoryPrefix: drillCategory } : {}
-      }
-      return { ...prev, categoryPrefix: fullPath }
-    })
-  }, [drillCategory])
-
   const handleBarClick = useCallback((month: string, category: string) => {
-    setTxnFilter((prev) => {
-      const prefix = drillCategory ? `${drillCategory}/${category}` : category
-      if (prev.month === month && prev.categoryPrefix === prefix) return {}
-      return { month, categoryPrefix: prefix }
-    })
-  }, [drillCategory])
+    // Clicking a bar drills into that category and optionally filters by month
+    const childPrefix = prefix ? `${prefix}/${category}` : category
+    setPrefix(childPrefix)
+    setMonthFilter(month)
+  }, [prefix])
 
   const clearFilter = useCallback(() => {
-    setTxnFilter({})
-    setDrillCategory(null)
+    setPrefix(null)
+    setMonthFilter(null)
   }, [])
 
   const handleRulesChanged = useCallback(() => {
@@ -120,35 +102,31 @@ export function Spending() {
   }, [])
 
   const filterFn = useMemo(() => {
-    if (!txnFilter.month && !txnFilter.categoryPrefix) return undefined
+    if (!prefix && !monthFilter) return undefined
     return (t: Transaction) => {
-      if (txnFilter.month && !t.date.startsWith(txnFilter.month)) return false
-      if (txnFilter.categoryPrefix) {
-        if (txnFilter.categoryPrefix === 'Uncategorized') {
+      if (monthFilter && !t.date.startsWith(monthFilter)) return false
+      if (prefix) {
+        if (prefix === 'Uncategorized') {
           if (t.category_path) return false
         } else {
           const path = t.category_path ?? ''
-          // Match if the path starts with the prefix (or equals it)
-          if (path !== txnFilter.categoryPrefix
-            && !path.startsWith(txnFilter.categoryPrefix + '/')) return false
+          if (path !== prefix && !path.startsWith(prefix + '/')) return false
         }
       }
       return true
     }
-  }, [txnFilter])
+  }, [prefix, monthFilter])
 
-  const filterLabel = [txnFilter.month, txnFilter.categoryPrefix].filter(Boolean).join(' / ') || undefined
+  const filterLabel = [monthFilter, prefix].filter(Boolean).join(' / ') || undefined
 
   return (
     <>
       <SummaryCards months={months} />
       <SpendingCharts
         key={refreshKey}
-        selectedCategory={drillCategory}
-        onCategoryChange={handleCategoryChange}
-        onSubcategoryClick={handleSubcategoryClick}
+        prefix={prefix}
+        onPrefixChange={handlePrefixChange}
         onBarClick={handleBarClick}
-        activeSubcategory={txnFilter.categoryPrefix}
       />
       <SuggestionReview onRulesChanged={handleRulesChanged} />
       <TransactionTable

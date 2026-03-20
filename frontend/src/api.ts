@@ -118,10 +118,13 @@ export const fetchTransactions = (opts?: {
 export const fetchSpendingByMonth = () =>
   get<{ months: MonthSummary[] }>('/api/spending/summary?group_by=month').then((d) => d.months)
 
-export const fetchSpendingByCategory = () =>
-  get<{ categories: CategorySummary[] }>('/api/spending/summary?group_by=category').then(
+export const fetchSpendingByCategory = (parent?: string) => {
+  const params = new URLSearchParams({ group_by: 'category' })
+  if (parent) params.set('parent', parent)
+  return get<{ categories: CategorySummary[] }>(`/api/spending/summary?${params}`).then(
     (d) => d.categories,
   )
+}
 
 export interface MonthCategoryData {
   months: Record<string, number | string>[]
