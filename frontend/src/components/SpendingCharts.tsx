@@ -99,23 +99,23 @@ export function SpendingCharts({
     hovertemplate: `%{x}<br>${cat}: $%{y:,.0f}<extra></extra>`,
   }))
 
+  // Color map for top-level buttons (always computed, no conditional hook)
+  const topLevelColorMap = useMemo(() => {
+    const allCats = new Set<string>()
+    if (monthCatData) monthCatData.categories.forEach((c) => allCats.add(c))
+    categories.forEach((c) => allCats.add(c.category))
+    const sorted = [...allCats].sort((a, b) => {
+      const aTotal = categories.find((c) => c.category === a)?.total ?? 0
+      const bTotal = categories.find((c) => c.category === b)?.total ?? 0
+      return aTotal - bTotal
+    })
+    return buildColorMap(sorted)
+  }, [monthCatData, categories])
+
   // Show subcategory buttons when drilled in, otherwise top-level
-  const displayedButtons = selectedCategory && topSubcategories.length > 0
-    ? topSubcategories
-    : topCategories
-  const buttonColorMap = selectedCategory && topSubcategories.length > 0
-    ? colorMap
-    : useMemo(() => {
-        const allCats = new Set<string>()
-        if (monthCatData) monthCatData.categories.forEach((c) => allCats.add(c))
-        categories.forEach((c) => allCats.add(c.category))
-        const sorted = [...allCats].sort((a, b) => {
-          const aTotal = categories.find((c) => c.category === a)?.total ?? 0
-          const bTotal = categories.find((c) => c.category === b)?.total ?? 0
-          return aTotal - bTotal
-        })
-        return buildColorMap(sorted)
-      }, [monthCatData, categories])
+  const isDrilledIn = selectedCategory != null && topSubcategories.length > 0
+  const displayedButtons = isDrilledIn ? topSubcategories : topCategories
+  const buttonColorMap = isDrilledIn ? colorMap : topLevelColorMap
 
   return (
     <>
