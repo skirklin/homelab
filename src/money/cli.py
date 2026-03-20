@@ -171,6 +171,39 @@ def uncategorized(ctx: click.Context, top: int) -> None:
 
 
 @main.command()
+@click.option("-n", "--samples", default=5, help="Sample transactions per category.")
+@click.pass_context
+def category_audit(ctx: click.Context, samples: int) -> None:
+    """Dump sample transactions per category_path for auditing."""
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    paths = db.conn.execute("""
+        SELECT DISTINCT category_path FROM transactions
+        WHERE category_path IS NOT NULL
+        ORDER BY category_path
+    """).fetchall()
+    for row in paths:
+        path = row["category_path"]
+        txns = db.conn.execute("""
+            SELECT t.description, t.category, t.amount, t.date
+            FROM transactions t
+            JOIN accounts a ON t.account_id = a.id
+            WHERE t.category_path = ?
+              AND a.account_type IN ('checking', 'credit_card')
+            ORDER BY RANDOM()
+            LIMIT ?
+        """, (path, samples)).fetchall()
+        click.echo(f"\n=== {path} ({len(txns)} samples) ===")
+        for t in txns:
+            click.echo(
+                f"  {t['date']}  ${abs(t['amount']):>10,.2f}"
+                f"  {t['description']}"
+                f"  [{t['category'] or ''}]"
+            )
+    db.close()
+
+
+@main.command()
 @click.argument("as_of", required=False)
 @click.pass_context
 def net_worth(ctx: click.Context, as_of: str | None) -> None:
