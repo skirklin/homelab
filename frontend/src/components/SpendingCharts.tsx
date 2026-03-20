@@ -35,41 +35,32 @@ export function SpendingByMonth() {
   if (data.length === 0) return null
 
   const avgSpending = data.reduce((s, d) => s + d.spending, 0) / data.length
-  const avgIncome = data.reduce((s, d) => s + d.income, 0) / data.length
+  const chartData = data.map((d) => ({ ...d, absSpending: Math.abs(d.spending) }))
 
   return (
     <section className="chart-section">
       <div className="section-header">
         <div>
-          <h2>Monthly Cash Flow</h2>
+          <h2>Monthly Spending</h2>
           <div className="metric-row">
-            <span className="metric positive">
-              <span className="metric-label">Avg Income</span>
-              <span className="metric-value">{fmtFull(avgIncome)}</span>
-            </span>
             <span className="metric negative">
-              <span className="metric-label">Avg Spending</span>
+              <span className="metric-label">Avg Monthly</span>
               <span className="metric-value">{fmtFull(avgSpending)}</span>
-            </span>
-            <span className="metric">
-              <span className="metric-label">Avg Net</span>
-              <span className="metric-value">{fmtFull(avgIncome + avgSpending)}</span>
             </span>
           </div>
         </div>
       </div>
       <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={data} margin={{ top: 10, right: 30, left: 20, bottom: 0 }}>
+        <BarChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
           <XAxis dataKey="month" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
           <YAxis tickFormatter={fmt} stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} width={60} />
           <Tooltip
             contentStyle={{ backgroundColor: '#1e1e3f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
-            formatter={(value: number, name: string) => [fmtFull(value), name]}
+            formatter={(value: number) => [fmtFull(value), 'Spending']}
             labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
           />
-          <Bar dataKey="income" name="Income" fill="#34d399" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="spending" name="Spending" fill="#f87171" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="absSpending" name="Spending" fill="#f87171" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </section>

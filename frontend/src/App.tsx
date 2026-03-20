@@ -5,6 +5,7 @@ import { fetchAccounts } from './api'
 import { Overview } from './pages/Overview'
 import { Investments } from './pages/Investments'
 import { Spending } from './pages/Spending'
+import { Travel } from './pages/Travel'
 import './App.css'
 
 const fmtDollar = (v: number) =>
@@ -42,6 +43,7 @@ function App() {
             <NavLink to="/" end>Overview</NavLink>
             <NavLink to="/investments">Investments</NavLink>
             <NavLink to="/spending">Spending</NavLink>
+            <NavLink to="/travel">Travel</NavLink>
           </nav>
         </header>
         <main>
@@ -49,6 +51,7 @@ function App() {
             <Route path="/" element={<Overview accounts={accounts} />} />
             <Route path="/investments" element={<Investments />} />
             <Route path="/spending" element={<Spending />} />
+            <Route path="/travel" element={<Travel />} />
           </Routes>
         </main>
       </div>

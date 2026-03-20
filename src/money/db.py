@@ -49,7 +49,8 @@ class Database:
 
         # Ensure holdings table exists (added after initial schema)
         tables = {
-            row[0] for row in self.conn.execute(
+            row[0]
+            for row in self.conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
@@ -72,6 +73,26 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_holdings_account_date
                     ON holdings(account_id, as_of);
                 CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
+            """)
+
+        # Add display_category column to transactions if missing
+        txn_columns = {
+            row["name"] for row in self.conn.execute("PRAGMA table_info(transactions)").fetchall()
+        }
+        if "display_category" not in txn_columns:
+            self.conn.execute("ALTER TABLE transactions ADD COLUMN display_category TEXT")
+            self.conn.commit()
+
+        # Ensure transaction_tags table exists
+        if "transaction_tags" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS transaction_tags (
+                    transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+                    tag            TEXT NOT NULL,
+                    source         TEXT NOT NULL DEFAULT 'rule',
+                    PRIMARY KEY (transaction_id, tag)
+                );
+                CREATE INDEX IF NOT EXISTS idx_txn_tags_tag ON transaction_tags(tag);
             """)
 
     # -- Accounts --
@@ -191,6 +212,31 @@ class Database:
         )
         self.conn.commit()
 
+    def tag_transaction(self, transaction_id: int, tag: str, source: str = "rule") -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO transaction_tags (transaction_id, tag, source) VALUES (?, ?, ?)",
+            (transaction_id, tag, source),
+        )
+        self.conn.commit()
+
+    def set_display_category(self, transaction_id: int, category: str) -> None:
+        self.conn.execute(
+            "UPDATE transactions SET display_category = ? WHERE id = ?",
+            (category, transaction_id),
+        )
+        self.conn.commit()
+
+    def clear_tags(self, source: str | None = None) -> None:
+        if source is not None:
+            self.conn.execute("DELETE FROM transaction_tags WHERE source = ?", (source,))
+        else:
+            self.conn.execute("DELETE FROM transaction_tags")
+        self.conn.commit()
+
+    def clear_display_categories(self) -> None:
+        self.conn.execute("UPDATE transactions SET display_category = NULL")
+        self.conn.commit()
+
     # -- Option Grants --
 
     def insert_option_grant(self, grant: OptionGrant) -> None:
@@ -273,6 +319,38 @@ class Database:
             ],
         )
         self.conn.commit()
+
+    def get_holdings(
+        self,
+        account_id: str | None = None,
+        as_of: date | None = None,
+    ) -> list[Holding]:
+        """Get holdings, optionally filtered by account and date."""
+        conditions: list[str] = []
+        params: list[str] = []
+
+        if as_of:
+            conditions.append("""h.as_of = (
+                SELECT MAX(h2.as_of) FROM holdings h2
+                WHERE h2.account_id = h.account_id AND h2.as_of <= ?
+            )""")
+            params.append(as_of.isoformat())
+        else:
+            conditions.append("""h.as_of = (
+                SELECT MAX(h2.as_of) FROM holdings h2
+                WHERE h2.account_id = h.account_id
+            )""")
+
+        if account_id:
+            conditions.append("h.account_id = ?")
+            params.append(account_id)
+
+        where = " AND ".join(conditions)
+        rows = self.conn.execute(
+            f"SELECT * FROM holdings h WHERE {where} ORDER BY h.value DESC",
+            params,
+        ).fetchall()
+        return [_row_to_holding(r) for r in rows]
 
     # -- Ingestion Log --
 
@@ -397,6 +475,22 @@ def _row_to_option_grant(row: sqlite3.Row) -> OptionGrant:
         cliff_months=row["cliff_months"],
         vesting_schedule=VestingSchedule(row["vesting_schedule"]),
         expiration_date=_parse_date(row["expiration_date"]) if row["expiration_date"] else None,
+    )
+
+
+def _row_to_holding(row: sqlite3.Row) -> Holding:
+    return Holding(
+        id=row["id"],
+        account_id=row["account_id"],
+        as_of=_parse_date(row["as_of"]),
+        symbol=row["symbol"],
+        name=row["name"],
+        asset_class=row["asset_class"],
+        shares=row["shares"],
+        value=row["value"],
+        source=row["source"],
+        raw_file_ref=row["raw_file_ref"],
+        recorded_at=_parse_datetime(row["recorded_at"]),
     )
 
 

@@ -123,6 +123,15 @@ class Holding:
 
 
 @dataclass
+class CategoryRule:
+    pattern: str
+    tag: str
+    priority: int = 0
+    display_category: str | None = None
+    id: int | None = None
+
+
+@dataclass
 class IngestionRecord:
     source: str
     status: IngestionStatus

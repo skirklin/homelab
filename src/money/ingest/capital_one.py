@@ -2,8 +2,9 @@
 
 import json
 import logging
+import urllib.error
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -72,7 +73,10 @@ def _api_get(cookies: dict[str, str], path: str) -> Any:
 
 
 def _encode_ref(ref_id: str) -> str:
-    """URL-encode an account reference ID for use in API paths."""
+    """URL-encode an account reference ID for use in API paths.
+
+    Capital One's frontend double-encodes the reference ID in transaction URLs.
+    """
     return quote(quote(ref_id, safe=""), safe="")
 
 
@@ -85,125 +89,156 @@ def sync_capital_one(
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
-    cookies = _load_cookies(profile)
-    log.info("Loaded %d cookies for capital_one", len(cookies))
+    raw_key = f"capital_one/{timestamp}_accounts.json"
 
-    # 1. Fetch accounts
-    accounts_data = _api_get(cookies, ACCOUNTS_PATH)
-    store.put(
-        f"capital_one/{timestamp}_accounts.json",
-        json.dumps(accounts_data, indent=2).encode(),
-    )
+    try:
+        cookies = _load_cookies(profile)
+        log.info("Loaded %d cookies for capital_one", len(cookies))
 
-    raw_accounts: list[dict[str, Any]] = accounts_data.get("accounts", [])
-    log.info("Found %d Capital One account(s)", len(raw_accounts))
+        # 1. Fetch accounts
+        accounts_data = _api_get(cookies, ACCOUNTS_PATH)
+        store.put(raw_key, json.dumps(accounts_data, indent=2).encode())
 
-    for raw_acct in raw_accounts:
-        card_acct: dict[str, Any] = raw_acct.get("cardAccount", {})
-        ref_id: str = raw_acct.get("accountReferenceId", "")
-        name_info: dict[str, Any] = card_acct.get("nameInfo", {})
-        cycle_info: dict[str, Any] = card_acct.get("cycleInfo", {})
+        raw_accounts: list[dict[str, Any]] = accounts_data.get("accounts", [])
+        log.info("Found %d Capital One account(s)", len(raw_accounts))
 
-        display_name = name_info.get("displayName", name_info.get("name", "Unknown"))
-        last_four = card_acct.get("plasticIdLastFour", ref_id[:8])
+        for raw_acct in raw_accounts:
+            card_acct: dict[str, Any] = raw_acct.get("cardAccount", {})
+            ref_id: str = raw_acct.get("accountReferenceId", "")
+            name_info: dict[str, Any] = card_acct.get("nameInfo", {})
+            cycle_info: dict[str, Any] = card_acct.get("cycleInfo", {})
 
-        account = db.get_or_create_account(
-            name=display_name,
-            account_type=AccountType.CREDIT_CARD,
-            institution="capital_one",
-            external_id=str(last_four),
-        )
-        log.info("Account: %s (id=%s)", display_name, account.id)
+            display_name = name_info.get("displayName", name_info.get("name", "Unknown"))
+            last_four = card_acct.get("plasticIdLastFour", ref_id[:8])
 
-        # 2. Record balance (credit card balance is a liability — store as negative)
-        current_balance = cycle_info.get("currentBalance")
-        if current_balance is not None:
-            balance_val = -float(current_balance)
-            raw_key = f"capital_one/{timestamp}_accounts.json"
-            db.insert_balance(
-                Balance(
-                    account_id=account.id,
-                    as_of=date.today(),
-                    balance=balance_val,
-                    source="capital_one_api",
-                    raw_file_ref=raw_key,
-                )
+            account = db.get_or_create_account(
+                name=display_name,
+                account_type=AccountType.CREDIT_CARD,
+                institution="capital_one",
+                external_id=str(last_four),
             )
-            log.info("  Balance: $%.2f (owed: $%.2f)", balance_val, current_balance)
+            log.info("Account: %s (id=%s)", display_name, account.id)
 
-        # 3. Fetch transactions (last 2 years)
-        end_date = date.today()
-        start_date = date(end_date.year - 2, end_date.month, end_date.day)
-
-        encoded_ref = _encode_ref(ref_id)
-        txn_path = (
-            TRANSACTIONS_PATH.format(ref=encoded_ref)
-            + f"?fromDate={start_date.isoformat()}&toDate={end_date.isoformat()}"
-            + "&include=viewOrderMetadata"
-        )
-
-        try:
-            txn_data = _api_get(cookies, txn_path)
-            store.put(
-                f"capital_one/{timestamp}_{last_four}_transactions.json",
-                json.dumps(txn_data, indent=2).encode(),
-            )
-
-            raw_entries: list[Any]
-            if isinstance(txn_data, dict):
-                raw_entries = txn_data.get("entries", txn_data.get("transactions", []))
-            elif isinstance(txn_data, list):
-                raw_entries = txn_data
-            else:
-                raw_entries = []
-
-            txn_count = 0
-            for raw_entry in raw_entries:
-                entry: dict[str, Any] = raw_entry
-                txn_date_str: str | None = entry.get(
-                    "transactionDate", entry.get("transactionDisplayDate"),
-                )
-                if not txn_date_str:
-                    continue
-
-                # Parse date — format is "2026-03-11T04:00:00.000Z"
-                txn_date = date.fromisoformat(txn_date_str[:10])
-
-                amount = float(entry.get("transactionAmount", 0.0))
-                debit_credit = str(entry.get("transactionDebitCredit", ""))
-                # Capital One: "Debit" means charge (negative for us), "Credit" means payment/refund
-                if debit_credit == "Debit":
-                    amount = -abs(amount)
-                else:
-                    amount = abs(amount)
-
-                description: str = entry.get("transactionDescription", "")
-                category: str | None = entry.get("displayCategory")
-
-                db.insert_transaction(
-                    Transaction(
+            # 2. Record balance (credit card balance is a liability — store as negative)
+            current_balance = cycle_info.get("currentBalance")
+            if current_balance is not None:
+                balance_val = -float(current_balance)
+                db.insert_balance(
+                    Balance(
                         account_id=account.id,
-                        date=txn_date,
-                        amount=amount,
-                        description=description,
-                        category=category,
-                        raw_file_ref=f"capital_one/{timestamp}_{last_four}_transactions.json",
+                        as_of=date.today(),
+                        balance=balance_val,
+                        source="capital_one_api",
+                        raw_file_ref=raw_key,
                     )
                 )
-                txn_count += 1
+                log.info("  Balance: $%.2f (owed: $%.2f)", balance_val, current_balance)
 
-            log.info("  Stored %d transaction(s)", txn_count)
+            # 3. Fetch transactions in 90-day chunks (Capital One rejects long ranges)
+            encoded_ref = _encode_ref(ref_id)
+            chunk_end = date.today()
+            total_txn_count = 0
+            chunk_num = 0
+            # Go back up to 2 years in 90-day chunks
+            earliest = date(chunk_end.year - 2, chunk_end.month, chunk_end.day)
 
-        except Exception as e:
-            log.warning("  Could not fetch transactions for %s: %s", display_name, e)
+            try:
+                while chunk_end > earliest:
+                    chunk_start = chunk_end - timedelta(days=90)
+                    if chunk_start < earliest:
+                        chunk_start = earliest
 
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="capital_one_api",
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref=f"capital_one/{timestamp}_accounts.json",
-            started_at=started_at,
-            finished_at=datetime.now(),
+                    txn_path = (
+                        TRANSACTIONS_PATH.format(ref=encoded_ref)
+                        + f"?fromDate={chunk_start.isoformat()}"
+                        + f"&toDate={chunk_end.isoformat()}"
+                        + "&include=viewOrderMetadata"
+                    )
+
+                    txn_data = _api_get(cookies, txn_path)
+                    txn_key = (
+                        f"capital_one/{timestamp}_{last_four}"
+                        f"_transactions_{chunk_num}.json"
+                    )
+                    store.put(txn_key, json.dumps(txn_data, indent=2).encode())
+
+                    raw_entries: list[dict[str, Any]]
+                    if isinstance(txn_data, dict):
+                        raw_entries = list(
+                            txn_data.get("entries", txn_data.get("transactions", []))
+                        )
+                    elif isinstance(txn_data, list):
+                        raw_entries = list(txn_data)
+                    else:
+                        raw_entries = []
+
+                    chunk_count = 0
+                    for entry in raw_entries:
+                        txn_date_str: str | None = entry.get(
+                            "transactionDate", entry.get("transactionDisplayDate"),
+                        )
+                        if not txn_date_str:
+                            continue
+
+                        txn_date = date.fromisoformat(txn_date_str[:10])
+                        amount = float(entry.get("transactionAmount", 0.0))
+                        debit_credit = str(entry.get("transactionDebitCredit", ""))
+                        amount = -abs(amount) if debit_credit == "Debit" else abs(amount)
+
+                        description: str = entry.get("transactionDescription", "")
+                        category: str | None = entry.get("displayCategory")
+
+                        db.insert_transaction(
+                            Transaction(
+                                account_id=account.id,
+                                date=txn_date,
+                                amount=amount,
+                                description=description,
+                                category=category,
+                                raw_file_ref=txn_key,
+                            )
+                        )
+                        chunk_count += 1
+
+                    total_txn_count += chunk_count
+                    if chunk_count > 0:
+                        log.info("  %s to %s: %d transactions",
+                                 chunk_start, chunk_end, chunk_count)
+
+                    # If we got zero results, no point going further back
+                    if chunk_count == 0 and chunk_num > 0:
+                        break
+
+                    chunk_end = chunk_start - timedelta(days=1)
+                    chunk_num += 1
+
+                log.info("  Stored %d total transaction(s)", total_txn_count)
+
+            except Exception as e:
+                log.warning("  Could not fetch transactions for %s: %s", display_name, e)
+                if total_txn_count > 0:
+                    log.info("  (got %d transactions before error)", total_txn_count)
+
+        db.insert_ingestion_record(
+            IngestionRecord(
+                source="capital_one",
+                status=IngestionStatus.SUCCESS,
+                raw_file_ref=raw_key,
+                started_at=started_at,
+                finished_at=datetime.now(),
+            )
         )
-    )
-    log.info("Capital One sync complete")
+        log.info("Capital One sync complete.")
+
+    except Exception as e:
+        log.error("Capital One sync failed: %s", e)
+        db.insert_ingestion_record(
+            IngestionRecord(
+                source="capital_one",
+                status=IngestionStatus.ERROR,
+                error_message=str(e),
+                started_at=started_at,
+                finished_at=datetime.now(),
+            )
+        )
+        raise

@@ -256,7 +256,7 @@ def _graphql(
     return result
 
 
-def _decode_account_id(graphql_id: str) -> str:
+def decode_account_id(graphql_id: str) -> str:
     """Decode base64 GraphQL ID like 'ManagedAccount:uuid' → uuid."""
     try:
         decoded = base64.b64decode(graphql_id).decode()
@@ -277,7 +277,7 @@ def _resolve_account_type(typename: str, account_name: str) -> AccountType:
     return ACCOUNT_TYPE_MAP.get(typename, AccountType.BROKERAGE)
 
 
-def _cents_to_dollars(cents: int | None) -> float | None:
+def cents_to_dollars(cents: int | None) -> float | None:
     """Convert Betterment's cent amounts to dollars."""
     if cents is None:
         return None
@@ -328,7 +328,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str) -> None:
                     envelope_balance_cents = (
                         purpose_obj.get("envelope", {}).get("balance")
                     )
-                    envelope_balance = _cents_to_dollars(envelope_balance_cents)
+                    envelope_balance = cents_to_dollars(envelope_balance_cents)
             log.info(
                 "Envelope '%s': %d account(s), balance=$%s",
                 purpose_name,
@@ -341,7 +341,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str) -> None:
                 acct_graphql_id = acct["id"]
                 acct_typename = acct.get("__typename", "")
                 acct_name = acct.get("nameOverride") or acct.get("name", "")
-                acct_external_id = _decode_account_id(acct_graphql_id)
+                acct_external_id = decode_account_id(acct_graphql_id)
 
                 account_type = _resolve_account_type(acct_typename, acct_name)
                 display_name = acct_name or f"{purpose_name} — {acct_typename}"
@@ -365,7 +365,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str) -> None:
                     )
                     acct_data = perf_data.get("data", {}).get("account", {})
                     balance_cents = acct_data.get("balance")
-                    balance = _cents_to_dollars(balance_cents)
+                    balance = cents_to_dollars(balance_cents)
                     time_series = (
                         acct_data
                         .get("performanceHistory", {})
@@ -417,8 +417,8 @@ def sync_betterment(db: Database, store: RawStore, profile: str) -> None:
                                 account.id,
                                 point["date"],
                                 bal_cents / 100.0,
-                                _cents_to_dollars(point.get("invested")),
-                                _cents_to_dollars(point.get("earned")),
+                                cents_to_dollars(point.get("invested")),
+                                cents_to_dollars(point.get("earned")),
                             ))
                     db.insert_performance_batch(perf_rows)
                     log.info(

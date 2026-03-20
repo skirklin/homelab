@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from playwright.sync_api import Page
+from playwright.sync_api import BrowserContext, Page
 
 from money.config import cookie_relay_path, load_credentials
 from money.ingest.browser import BrowserSession
@@ -172,30 +172,6 @@ def _load_relay_session() -> dict[str, str] | None:
     return cookies
 
 
-def _api_get(cookies: dict[str, str], path: str) -> Any:
-    """Make an authenticated GET request to Wealthfront's internal API."""
-    import urllib.request
-    import uuid
-    from urllib.parse import unquote
-
-    url = f"https://www.wealthfront.com{path}"
-    req = urllib.request.Request(url)
-    req.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in cookies.items()))
-    req.add_header("Accept", "application/json")
-    req.add_header("User-Agent", (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
-    ))
-    if "xsrf" in cookies:
-        req.add_header("x-csrf-token", unquote(cookies["xsrf"]))
-    req.add_header("wf-session-id", str(uuid.uuid4()))
-    req.add_header("wf-request-id", str(uuid.uuid4()))
-    req.add_header("wf-guest-id", str(uuid.uuid4()))
-
-    resp = urllib.request.urlopen(req)
-    return json.loads(resp.read())
-
 
 def explore_wealthfront_cookies(profile: str) -> None:
     """Use relayed cookies with camoufox to access Wealthfront's authenticated UI."""
@@ -220,28 +196,28 @@ def explore_wealthfront_cookies(profile: str) -> None:
         })
 
     with Camoufox(headless=True, humanize=True) as browser:  # type: ignore[no-untyped-call]
-        context: BrowserContext = browser.new_context()  # type: ignore[assignment]
-        context.add_cookies(pw_cookies)  # type: ignore[arg-type]
+        ctx: BrowserContext = browser.new_context()  # type: ignore[assignment]
+        ctx.add_cookies(pw_cookies)  # type: ignore[arg-type]
 
-        page: Page = context.new_page()
+        pg: Page = ctx.new_page()  # type: ignore[assignment]
         log.info("Navigating to overview...")
-        page.goto(DASHBOARD_URL, wait_until="domcontentloaded")
-        page.wait_for_timeout(8000)
+        pg.goto(DASHBOARD_URL, wait_until="domcontentloaded")
+        pg.wait_for_timeout(8000)
 
-        url = page.url
-        log.info("URL: %s", url)
+        current_url = str(pg.url)
+        log.info("URL: %s", current_url)
 
-        if "login" in url:
+        if "login" in current_url:
             log.error("Redirected to login — cookies didn't work")
-            _print_page_text(page)
+            _print_page_text(pg)
             return
 
-        _print_page_text(page)
+        _print_page_text(pg)
 
         print("\nAll links on page:")
-        links = page.query_selector_all("a[href]")
-        for link in links:
-            href = link.get_attribute("href") or ""
-            text = link.inner_text().strip()
+        all_links: list[Any] = list(pg.query_selector_all("a[href]"))
+        for lnk in all_links:
+            href: str = str(lnk.get_attribute("href") or "")
+            text: str = str(lnk.inner_text()).strip()
             if text:
                 print(f"  {text[:80]} -> {href[:120]}")

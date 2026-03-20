@@ -175,7 +175,7 @@ def _download_supplementary(
             log.warning("  Could not fetch transfers: %s", e)
 
 
-def _ingest_transfers(
+def ingest_transfers(
     db: Database,
     account_id: str,
     transfers_data: dict[str, Any],
@@ -340,7 +340,7 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str) -> None:
             transfers_key = f"wealthfront/{timestamp}_{acct_id}_transfers.json"
             if store.exists(transfers_key):
                 transfers_data = json.loads(store.get(transfers_key))
-                txn_count = _ingest_transfers(
+                txn_count = ingest_transfers(
                     db, account.id, transfers_data, transfers_key
                 )
                 log.info("  Ingested %d transactions from transfers", txn_count)

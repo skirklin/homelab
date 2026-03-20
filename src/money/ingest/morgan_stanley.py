@@ -115,12 +115,12 @@ def _api_get_session(session_uuid: str, path: str) -> Any:
     return json.loads(resp.read())
 
 
-def _parse_money(value: str) -> float:
+def parse_money(value: str) -> float:
     """Parse a Shareworks money string like '33671988.06 USD' to float."""
     return float(value.split()[0])
 
 
-def _determine_grant_type(award_name: str) -> str:
+def determine_grant_type(award_name: str) -> str:
     """Classify a Shareworks award name into ISO, NQ, or RSU."""
     name = award_name.lower()
     if "iso" in name:
@@ -132,7 +132,7 @@ def _determine_grant_type(award_name: str) -> str:
     return award_name
 
 
-def _estimate_vesting_months(vest_dates: list[str]) -> int:
+def estimate_vesting_months(vest_dates: list[str]) -> int:
     """Estimate total vesting period from first vest to last vest date."""
     if not vest_dates:
         return 48  # default 4 years
@@ -142,7 +142,7 @@ def _estimate_vesting_months(vest_dates: list[str]) -> int:
     return max(1, (last.year - first.year) * 12 + (last.month - first.month))
 
 
-def _estimate_cliff_months(grant_date: date, vest_dates: list[str]) -> int:
+def estimate_cliff_months(grant_date: date, vest_dates: list[str]) -> int:
     """Estimate cliff period from grant date to first vest."""
     if not vest_dates:
         return 12
@@ -159,179 +159,193 @@ def sync_morgan_stanley(
     """Sync Morgan Stanley Shareworks stock option/RSU data."""
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
+    raw_key = f"morgan_stanley/{timestamp}_portfolio_summary.json"
 
-    bearer_token, session_uuid = _load_auth_from_network_log()
-    log.info("Loaded auth tokens from network log")
+    try:
+        bearer_token, session_uuid = _load_auth_from_network_log()
+        log.info("Loaded auth tokens from network log")
 
-    # 1. Fetch portfolio overview (for total value)
-    portfolio_data: dict[str, Any] | None = None
-    if session_uuid:
-        try:
-            portfolio_data = _api_get_session(session_uuid, LINKED_PORTFOLIO_PATH)
-            store.put(
-                f"morgan_stanley/{timestamp}_portfolio.json",
-                json.dumps(portfolio_data, indent=2).encode(),
-            )
-        except Exception as e:
-            log.warning("Could not fetch linked portfolio (session may be expired): %s", e)
+        # 1. Fetch portfolio overview (for total value)
+        portfolio_data: dict[str, Any] | None = None
+        if session_uuid:
+            try:
+                portfolio_data = _api_get_session(session_uuid, LINKED_PORTFOLIO_PATH)
+                store.put(
+                    f"morgan_stanley/{timestamp}_portfolio.json",
+                    json.dumps(portfolio_data, indent=2).encode(),
+                )
+            except Exception as e:
+                log.warning("Could not fetch linked portfolio (session may be expired): %s", e)
 
-    # 2. Fetch portfolio summary (per-award breakdown with values)
-    summary_data = _api_get_bearer(bearer_token, PORTFOLIO_SUMMARY_PATH)
-    store.put(
-        f"morgan_stanley/{timestamp}_portfolio_summary.json",
-        json.dumps(summary_data, indent=2).encode(),
-    )
+        # 2. Fetch portfolio summary (per-award breakdown with values)
+        summary_data = _api_get_bearer(bearer_token, PORTFOLIO_SUMMARY_PATH)
+        store.put(raw_key, json.dumps(summary_data, indent=2).encode())
 
-    # 3. Fetch grants (detailed grant info)
-    grants_data = _api_get_bearer(bearer_token, GRANTS_PATH)
-    store.put(
-        f"morgan_stanley/{timestamp}_grants.json",
-        json.dumps(grants_data, indent=2).encode(),
-    )
-
-    summary: dict[str, Any] = summary_data.get("data", {})
-    raw_grants: list[dict[str, Any]] = grants_data.get("data", [])
-
-    # Extract stock prices
-    stock_price_str: str = summary.get("companyStockPrice", "0 USD")
-    fmv_price_str: str = summary.get("valuedAtPrice", "0 USD")
-    stock_price = _parse_money(stock_price_str)
-    fmv_price = _parse_money(fmv_price_str)
-    price_label: str = summary.get("marketPriceLabel", "")
-
-    log.info("Stock price: $%.2f, 409A FMV: $%.4f (label: %s)", stock_price, fmv_price, price_label)
-
-    # Create account
-    account = db.get_or_create_account(
-        name="Anthropic Stock Options",
-        account_type=AccountType.STOCK_OPTIONS,
-        institution="morgan_stanley",
-        external_id="shareworks",
-    )
-    log.info("Account: %s (id=%s)", account.name, account.id)
-
-    # 4. Record total balance
-    total_value: float | None = None
-    if portfolio_data:
-        accounts_list: list[dict[str, Any]] = portfolio_data.get("accounts", [])
-        if accounts_list:
-            total_value = float(accounts_list[0].get("totalValue", {}).get("amount", 0))
-    else:
-        # Fall back to summing available + future from portfolio summary
-        portfolio_items: list[dict[str, Any]] = summary.get("portfolioData", [])
-        available_total = 0.0
-        future_total = 0.0
-        for item in portfolio_items:
-            av: str = item.get("availableValue", "0 USD")
-            available_total += _parse_money(av)
-            future_list: list[dict[str, Any]] = item.get("futureData", [])
-            for f in future_list:
-                fv: str = f.get("value", "0 USD")
-                future_total += _parse_money(fv)
-        total_value = available_total + future_total
-
-    if total_value is not None:
-        raw_key = f"morgan_stanley/{timestamp}_portfolio_summary.json"
-        db.insert_balance(
-            Balance(
-                account_id=account.id,
-                as_of=date.today(),
-                balance=total_value,
-                source="morgan_stanley_api",
-                raw_file_ref=raw_key,
-            )
+        # 3. Fetch grants (detailed grant info)
+        grants_data = _api_get_bearer(bearer_token, GRANTS_PATH)
+        store.put(
+            f"morgan_stanley/{timestamp}_grants.json",
+            json.dumps(grants_data, indent=2).encode(),
         )
-        log.info("Balance: $%.2f", total_value)
 
-    # 5. Record FMV (409A valuation)
-    if fmv_price > 0:
-        db.insert_private_valuation(
-            PrivateValuation(
-                account_id=account.id,
-                as_of=date.today(),
-                fmv_per_share=fmv_price,
-                source="shareworks_409a",
-            )
-        )
-        log.info("Recorded 409A FMV: $%.4f/share", fmv_price)
+        summary: dict[str, Any] = summary_data.get("data", {})
+        raw_grants: list[dict[str, Any]] = grants_data.get("data", [])
 
-    # 6. Record individual grants
-    grant_count = 0
-    for raw_grant in raw_grants:
-        grant_date_str: str = raw_grant.get("grantDate", "")
-        if not grant_date_str:
-            continue
+        # Extract stock prices
+        stock_price_str: str = summary.get("companyStockPrice", "0 USD")
+        fmv_price_str: str = summary.get("valuedAtPrice", "0 USD")
+        stock_price = parse_money(stock_price_str)
+        fmv_price = parse_money(fmv_price_str)
+        price_label: str = summary.get("marketPriceLabel", "")
 
-        grant_date = date.fromisoformat(grant_date_str)
-        award_name: str = raw_grant.get("awardName", "")
-        grant_name: str = raw_grant.get("grantName", "")
-        grant_number: str = raw_grant.get("grantNumber", "")
-        quantity: int = int(raw_grant.get("quantityGranted", 0))
-        expiration_str: str | None = raw_grant.get("expiredDate")
-
-        # Extract strike price from grant name (e.g. "02/05/2024 - ISO - $12.98")
-        strike_price = 0.0
-        parts = grant_name.split("$")
-        if len(parts) > 1:
-            # Take only the numeric portion after $
-            price_str = parts[-1].split()[0].rstrip(" -")
-            with contextlib.suppress(ValueError):
-                strike_price = float(price_str)
-
-        exercise_details: dict[str, Any] = raw_grant.get("exerciseDetails", {})
-        vest_dates: list[str] = exercise_details.get("vestDates", [])
-
-        grant_type = _determine_grant_type(award_name)
-        vesting_months = _estimate_vesting_months(vest_dates)
-        cliff_months = _estimate_cliff_months(grant_date, vest_dates)
-
-        # Use grant_number as external_id to avoid duplicates
-        existing = db.conn.execute(
-            "SELECT id FROM option_grants"
-            " WHERE account_id = ? AND grant_date = ? AND total_shares = ?",
-            (account.id, grant_date.isoformat(), quantity),
-        ).fetchone()
-
-        if existing:
-            log.debug("  Grant %s already exists, skipping", grant_number)
-            continue
-
-        expiration_date = date.fromisoformat(expiration_str) if expiration_str else None
-
-        # Determine vesting schedule from vest dates frequency
-        schedule = VestingSchedule.MONTHLY
-        if len(vest_dates) <= 4 and vesting_months >= 12:
-            schedule = VestingSchedule.QUARTERLY
-
-        db.insert_option_grant(
-            OptionGrant(
-                account_id=account.id,
-                grant_date=grant_date,
-                total_shares=quantity,
-                strike_price=strike_price,
-                vesting_start=grant_date,
-                vesting_months=vesting_months,
-                cliff_months=cliff_months,
-                vesting_schedule=schedule,
-                expiration_date=expiration_date,
-            )
-        )
-        grant_count += 1
         log.info(
-            "  Grant %s: %s %s, %d shares @ $%.2f, vest %d months (cliff %d)",
-            grant_number, grant_type, grant_date, quantity, strike_price,
-            vesting_months, cliff_months,
+            "Stock price: $%.2f, 409A FMV: $%.4f (label: %s)",
+            stock_price, fmv_price, price_label,
         )
 
-    log.info("Stored %d new grant(s)", grant_count)
-
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="morgan_stanley_api",
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref=f"morgan_stanley/{timestamp}_portfolio_summary.json",
-            started_at=started_at,
-            finished_at=datetime.now(),
+        # Create account
+        account = db.get_or_create_account(
+            name="Anthropic Stock Options",
+            account_type=AccountType.STOCK_OPTIONS,
+            institution="morgan_stanley",
+            external_id="shareworks",
         )
-    )
-    log.info("Morgan Stanley sync complete")
+        log.info("Account: %s (id=%s)", account.name, account.id)
+
+        # 4. Record total balance
+        total_value: float | None = None
+        if portfolio_data:
+            accounts_list: list[dict[str, Any]] = portfolio_data.get("accounts", [])
+            if accounts_list:
+                total_value = float(accounts_list[0].get("totalValue", {}).get("amount", 0))
+        else:
+            # Fall back to summing available + future from portfolio summary
+            portfolio_items: list[dict[str, Any]] = summary.get("portfolioData", [])
+            available_total = 0.0
+            future_total = 0.0
+            for item in portfolio_items:
+                av: str = item.get("availableValue", "0 USD")
+                available_total += parse_money(av)
+                future_list: list[dict[str, Any]] = item.get("futureData", [])
+                for f in future_list:
+                    fv: str = f.get("value", "0 USD")
+                    future_total += parse_money(fv)
+            total_value = available_total + future_total
+
+        if total_value is not None:
+            db.insert_balance(
+                Balance(
+                    account_id=account.id,
+                    as_of=date.today(),
+                    balance=total_value,
+                    source="morgan_stanley_api",
+                    raw_file_ref=raw_key,
+                )
+            )
+            log.info("Balance: $%.2f", total_value)
+
+        # 5. Record FMV (409A valuation)
+        if fmv_price > 0:
+            db.insert_private_valuation(
+                PrivateValuation(
+                    account_id=account.id,
+                    as_of=date.today(),
+                    fmv_per_share=fmv_price,
+                    source="shareworks_409a",
+                )
+            )
+            log.info("Recorded 409A FMV: $%.4f/share", fmv_price)
+
+        # 6. Record individual grants
+        grant_count = 0
+        for raw_grant in raw_grants:
+            grant_date_str: str = raw_grant.get("grantDate", "")
+            if not grant_date_str:
+                continue
+
+            grant_date = date.fromisoformat(grant_date_str)
+            award_name: str = raw_grant.get("awardName", "")
+            grant_name: str = raw_grant.get("grantName", "")
+            grant_number: str = raw_grant.get("grantNumber", "")
+            quantity: int = int(raw_grant.get("quantityGranted", 0))
+            expiration_str: str | None = raw_grant.get("expiredDate")
+
+            # Extract strike price from grant name (e.g. "02/05/2024 - ISO - $12.98")
+            strike_price = 0.0
+            parts = grant_name.split("$")
+            if len(parts) > 1:
+                # Take only the numeric portion after $
+                price_str = parts[-1].split()[0].rstrip(" -")
+                with contextlib.suppress(ValueError):
+                    strike_price = float(price_str)
+
+            exercise_details: dict[str, Any] = raw_grant.get("exerciseDetails", {})
+            vest_dates: list[str] = exercise_details.get("vestDates", [])
+
+            grant_type = determine_grant_type(award_name)
+            vesting_months = estimate_vesting_months(vest_dates)
+            cliff_months = estimate_cliff_months(grant_date, vest_dates)
+
+            # Use grant_number as external_id to avoid duplicates
+            existing = db.conn.execute(
+                "SELECT id FROM option_grants"
+                " WHERE account_id = ? AND grant_date = ? AND total_shares = ?",
+                (account.id, grant_date.isoformat(), quantity),
+            ).fetchone()
+
+            if existing:
+                log.debug("  Grant %s already exists, skipping", grant_number)
+                continue
+
+            expiration_date = date.fromisoformat(expiration_str) if expiration_str else None
+
+            # Determine vesting schedule from vest dates frequency
+            schedule = VestingSchedule.MONTHLY
+            if len(vest_dates) <= 4 and vesting_months >= 12:
+                schedule = VestingSchedule.QUARTERLY
+
+            db.insert_option_grant(
+                OptionGrant(
+                    account_id=account.id,
+                    grant_date=grant_date,
+                    total_shares=quantity,
+                    strike_price=strike_price,
+                    vesting_start=grant_date,
+                    vesting_months=vesting_months,
+                    cliff_months=cliff_months,
+                    vesting_schedule=schedule,
+                    expiration_date=expiration_date,
+                )
+            )
+            grant_count += 1
+            log.info(
+                "  Grant %s: %s %s, %d shares @ $%.2f, vest %d months (cliff %d)",
+                grant_number, grant_type, grant_date, quantity, strike_price,
+                vesting_months, cliff_months,
+            )
+
+        log.info("Stored %d new grant(s)", grant_count)
+
+        db.insert_ingestion_record(
+            IngestionRecord(
+                source="morgan_stanley",
+                status=IngestionStatus.SUCCESS,
+                raw_file_ref=raw_key,
+                started_at=started_at,
+                finished_at=datetime.now(),
+            )
+        )
+        log.info("Morgan Stanley sync complete")
+
+    except Exception as e:
+        log.error("Morgan Stanley sync failed: %s", e)
+        db.insert_ingestion_record(
+            IngestionRecord(
+                source="morgan_stanley",
+                status=IngestionStatus.ERROR,
+                error_message=str(e),
+                started_at=started_at,
+                finished_at=datetime.now(),
+            )
+        )
+        raise

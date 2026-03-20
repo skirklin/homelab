@@ -121,3 +121,43 @@ export const fetchSpendingByCategory = () =>
   get<{ categories: CategorySummary[] }>('/api/spending/summary?group_by=category').then(
     (d) => d.categories,
   )
+
+export interface CollectionInfo {
+  id: string
+  label: string
+  description: string
+}
+
+export interface CollectionMonthSummary {
+  month: string
+  total: number
+  count: number
+}
+
+export const fetchCollections = () =>
+  get<{ collections: CollectionInfo[] }>('/api/spending/summary?collection=_list').then(
+    (d) => d.collections,
+  )
+
+export const fetchCollectionByMonth = (collection: string) =>
+  get<{ months: CollectionMonthSummary[] }>(
+    `/api/spending/summary?collection=${collection}&group_by=month`,
+  ).then((d) => d.months)
+
+export const fetchCollectionByCategory = (collection: string) =>
+  get<{ categories: CategorySummary[] }>(
+    `/api/spending/summary?collection=${collection}&group_by=category`,
+  ).then((d) => d.categories)
+
+export interface TripSummary {
+  name: string
+  start: string | null
+  end: string | null
+  duration_days: number | null
+  location: string | null
+  total: number
+  transaction_count: number
+}
+
+export const fetchTravelTrips = () =>
+  get<{ trips: TripSummary[] }>('/api/travel/trips').then((d) => d.trips)

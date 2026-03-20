@@ -21,13 +21,54 @@ def main(ctx: click.Context, db_path: str, verbose: bool) -> None:
     root = logging.getLogger()
     root.setLevel(level)
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(name)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    ))
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(name)s %(levelname)s %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
     root.addHandler(handler)
     ctx.ensure_object(dict)
     ctx.obj["db_path"] = db_path
+
+
+@main.command()
+@click.option("--raw-dir", default=None, type=click.Path(), help="Path to raw data directory.")
+@click.pass_context
+def replay(ctx: click.Context, raw_dir: str | None) -> None:
+    """Delete the database and rebuild from raw captures."""
+    from money.config import RAW_STORE_DIR
+    from money.replay import replay_all
+
+    db_path = ctx.obj["db_path"]
+    raw = Path(raw_dir) if raw_dir else RAW_STORE_DIR
+    replay_all(db_path=db_path, raw_dir=raw)
+    click.echo(f"Replay complete. Database rebuilt at {db_path}")
+
+
+@main.command()
+@click.option("--keep-db", is_flag=True, help="Keep the database (only purge raw data).")
+@click.pass_context
+def purge(ctx: click.Context, keep_db: bool) -> None:
+    """Delete all raw captures and optionally the database."""
+    import shutil
+
+    from money.config import RAW_STORE_DIR
+
+    if RAW_STORE_DIR.exists():
+        shutil.rmtree(RAW_STORE_DIR)
+        RAW_STORE_DIR.mkdir(parents=True)
+        click.echo(f"Purged raw data: {RAW_STORE_DIR}")
+    else:
+        click.echo("No raw data directory found.")
+
+    if not keep_db:
+        db_path = Path(ctx.obj["db_path"])
+        for suffix in ("", "-wal", "-shm"):
+            p = db_path.with_name(db_path.name + suffix) if suffix else db_path
+            if p.exists():
+                p.unlink()
+        click.echo(f"Deleted database: {db_path}")
 
 
 @main.command()
@@ -39,6 +80,21 @@ def init(ctx: click.Context) -> None:
     db.initialize()
     db.close()
     click.echo(f"Initialized database at {db_path}")
+
+
+@main.command()
+@click.pass_context
+def categorize(ctx: click.Context) -> None:
+    """Apply category rules from ~/.config/money/categories.yaml to all transactions."""
+    from money.categorize import apply_rules
+
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    try:
+        count = apply_rules(db)
+        click.echo(f"Categorized {count} transactions.")
+    finally:
+        db.close()
 
 
 @main.command()
@@ -115,29 +171,25 @@ def balances(ctx: click.Context) -> None:
 def holdings(ctx: click.Context, account_name: str | None, as_of: str | None) -> None:
     """Show portfolio holdings as of a date (default: latest)."""
     db = Database(ctx.obj["db_path"])
-    query = """
+    params: list[object] = []
+    as_of_subquery = "SELECT MAX(h2.as_of) FROM holdings h2 WHERE h2.account_id = h.account_id"
+    if as_of:
+        as_of_subquery += " AND h2.as_of <= ?"
+        params.append(as_of)
+
+    conditions = [f"h.as_of = ({as_of_subquery})"]
+    if account_name:
+        conditions.append("a.name LIKE ?")
+        params.append(f"%{account_name}%")
+
+    query = f"""
         SELECT a.name AS account, h.as_of, h.symbol, h.name, h.asset_class,
                h.shares, h.value
         FROM holdings h
         JOIN accounts a ON h.account_id = a.id
-        WHERE h.as_of = (
-            SELECT MAX(h2.as_of) FROM holdings h2
-            WHERE h2.account_id = h.account_id
-        )
+        WHERE {" AND ".join(conditions)}
+        ORDER BY a.name, h.value DESC
     """
-    params: list[object] = []
-    if as_of:
-        query = query.replace(
-            "SELECT MAX(h2.as_of) FROM holdings h2\n"
-            "            WHERE h2.account_id = h.account_id",
-            "SELECT MAX(h2.as_of) FROM holdings h2\n"
-            "            WHERE h2.account_id = h.account_id AND h2.as_of <= ?",
-        )
-        params.append(as_of)
-    if account_name:
-        query += " AND a.name LIKE ?"
-        params.append(f"%{account_name}%")
-    query += " ORDER BY a.name, h.value DESC"
     rows = db.conn.execute(query, params).fetchall()
     if not rows:
         click.echo("No holdings found.")
@@ -186,50 +238,64 @@ def serve(ctx: click.Context, port: int, host: str) -> None:
 
 
 @main.group()
+def login() -> None:
+    """Log into financial institutions to capture auth tokens/cookies."""
+
+
+@login.command("google")
+def login_google_cmd() -> None:
+    """Authenticate with Google Calendar."""
+    from money.calendar import auth
+
+    auth()
+    click.echo("Google Calendar auth complete.")
+
+
+@login.command("ally")
+@click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
+@click.option("--headless", is_flag=True, help="Run headless (no visible browser window).")
+def login_ally_cmd(profile: str, headless: bool) -> None:
+    """Log into Ally Bank to capture auth token."""
+    from money.ingest.scrapers.ally import login_ally
+
+    login_ally(profile, headless=headless)
+    click.echo("Ally login complete — auth token saved.")
+
+
+@main.group()
 def sync() -> None:
     """Sync data from financial institutions."""
 
 
 @sync.command()
 @click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
-@click.option("--cookies", is_flag=True, help="Use relayed auth token from Chrome extension.")
 @click.pass_context
-def ally(ctx: click.Context, profile: str, cookies: bool) -> None:
-    """Sync Ally Bank accounts."""
-    from money.config import RAW_STORE_DIR, load_config
-    from money.storage import DualStore, GCSStore, LocalStore
+def ally(ctx: click.Context, profile: str) -> None:
+    """Sync Ally Bank accounts. Auto-logs in if no auth token exists."""
+    from money.config import RAW_STORE_DIR
+    from money.ingest.ally_api import sync_ally_api
+    from money.ingest.scrapers.ally import auth_token_path, login_ally
+    from money.storage import LocalStore
 
-    config = load_config()
-    local = LocalStore(RAW_STORE_DIR)
-    store: LocalStore | DualStore
-    if config.gcs_bucket:
-        store = DualStore(
-            local, GCSStore(config.gcs_bucket, project=config.gcs_project, prefix="raw")
-        )
-    else:
-        store = local
+    # Capture a fresh token if needed — must use immediately since SPA invalidates it
+    token: str | None = None
+    if not auth_token_path(profile).exists():
+        click.echo("No auth token found — logging in via browser...")
+        token = login_ally(profile, headless=True)
 
     db_path = ctx.obj["db_path"]
     db = Database(db_path)
     db.initialize()
+    store = LocalStore(RAW_STORE_DIR)
 
     try:
-        if cookies:
-            from money.ingest.ally_api import sync_ally_api
-
-            sync_ally_api(db, store, profile=profile)
-        else:
-            from money.ingest.ally import sync_ally
-
-            sync_ally(db, store, profile=profile)
+        sync_ally_api(db, store, profile=profile, token=token)
+        click.echo("Ally sync complete.")
+    except Exception as e:
+        click.echo(f"Ally sync failed: {e}", err=True)
+        raise
     finally:
         db.close()
-
-    # Back up the DB to GCS after sync
-    if config.gcs_bucket:
-        gcs = GCSStore(config.gcs_bucket, project=config.gcs_project)
-        gcs.put("money.db", Path(db_path).read_bytes())
-        click.echo(f"Backed up database to gs://{config.gcs_bucket}/money.db")
 
 
 @sync.command()
@@ -286,6 +352,10 @@ def wealthfront(ctx: click.Context, profile: str, explore: bool) -> None:
 
     try:
         sync_wealthfront(db, store, profile=profile)
+        click.echo("Wealthfront sync complete.")
+    except Exception as e:
+        click.echo(f"Wealthfront sync failed: {e}", err=True)
+        raise
     finally:
         db.close()
 
@@ -306,6 +376,10 @@ def capital_one(ctx: click.Context, profile: str) -> None:
 
     try:
         sync_capital_one(db, store, profile=profile)
+        click.echo("Capital One sync complete.")
+    except Exception as e:
+        click.echo(f"Capital One sync failed: {e}", err=True)
+        raise
     finally:
         db.close()
 
@@ -325,6 +399,10 @@ def chase(ctx: click.Context) -> None:
 
     try:
         sync_chase(db, store)
+        click.echo("Chase sync complete.")
+    except Exception as e:
+        click.echo(f"Chase sync failed: {e}", err=True)
+        raise
     finally:
         db.close()
 
@@ -345,5 +423,9 @@ def morgan_stanley(ctx: click.Context, profile: str) -> None:
 
     try:
         sync_morgan_stanley(db, store, profile=profile)
+        click.echo("Morgan Stanley sync complete.")
+    except Exception as e:
+        click.echo(f"Morgan Stanley sync failed: {e}", err=True)
+        raise
     finally:
         db.close()

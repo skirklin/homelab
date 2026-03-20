@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, cast
+from typing import Any
 
 from money.config import cookie_relay_path
 from money.db import Database
@@ -44,6 +44,12 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/spending/summary"):
             self._handle_spending_summary()
             return
+        if self.path.startswith("/api/holdings"):
+            self._handle_get_holdings()
+            return
+        if self.path.startswith("/api/travel/trips"):
+            self._handle_travel_trips()
+            return
         self._json_response(404, {"error": "not found"})
 
     def _handle_get_accounts(self) -> None:
@@ -57,17 +63,19 @@ class IngestHandler(BaseHTTPRequestHandler):
                    WHERE account_id = ? ORDER BY date DESC LIMIT 1""",
                 (acct.id,),
             ).fetchone()
-            result.append({
-                "id": acct.id,
-                "name": acct.name,
-                "institution": acct.institution,
-                "account_type": acct.account_type.value,
-                "external_id": acct.external_id,
-                "latest_balance": bal.balance if bal else None,
-                "balance_as_of": bal.as_of.isoformat() if bal else None,
-                "total_invested": perf["invested"] if perf else None,
-                "total_earned": perf["earned"] if perf else None,
-            })
+            result.append(
+                {
+                    "id": acct.id,
+                    "name": acct.name,
+                    "institution": acct.institution,
+                    "account_type": acct.account_type.value,
+                    "external_id": acct.external_id,
+                    "latest_balance": bal.balance if bal else None,
+                    "balance_as_of": bal.as_of.isoformat() if bal else None,
+                    "total_invested": perf["invested"] if perf else None,
+                    "total_earned": perf["earned"] if perf else None,
+                }
+            )
         self._json_response(200, {"accounts": result})
 
     def _handle_get_balances(self) -> None:
@@ -91,13 +99,15 @@ class IngestHandler(BaseHTTPRequestHandler):
         rows = self.db.conn.execute(query, query_params).fetchall()
         series: list[dict[str, Any]] = []
         for row in rows:
-            series.append({
-                "account_id": row["account_id"],
-                "account_name": row["name"],
-                "institution": row["institution"],
-                "date": row["as_of"],
-                "balance": row["balance"],
-            })
+            series.append(
+                {
+                    "account_id": row["account_id"],
+                    "account_name": row["name"],
+                    "institution": row["institution"],
+                    "date": row["as_of"],
+                    "balance": row["balance"],
+                }
+            )
         self._json_response(200, {"balances": series})
 
     def _handle_net_worth_history(self) -> None:
@@ -122,12 +132,14 @@ class IngestHandler(BaseHTTPRequestHandler):
             aid = row["account_id"]
             if aid not in account_data:
                 account_data[aid] = []
-            account_data[aid].append((
-                row["date"],
-                row["balance"],
-                row["invested"] or 0.0,
-                row["earned"] or 0.0,
-            ))
+            account_data[aid].append(
+                (
+                    row["date"],
+                    row["balance"],
+                    row["invested"] or 0.0,
+                    row["earned"] or 0.0,
+                )
+            )
 
         # Collect all unique dates and forward-fill each account
         all_dates: set[str] = set()
@@ -163,12 +175,14 @@ class IngestHandler(BaseHTTPRequestHandler):
                     total_bal += bal
                     total_inv += inv
                     total_ear += ear
-            series.append({
-                "date": d,
-                "net_worth": round(total_bal, 2),
-                "invested": round(total_inv, 2),
-                "earned": round(total_ear, 2),
-            })
+            series.append(
+                {
+                    "date": d,
+                    "net_worth": round(total_bal, 2),
+                    "invested": round(total_inv, 2),
+                    "earned": round(total_ear, 2),
+                }
+            )
         self._json_response(200, {"series": series})
 
     def _handle_performance(self) -> None:
@@ -213,12 +227,14 @@ class IngestHandler(BaseHTTPRequestHandler):
                     "account_type": row["account_type"],
                 }
                 account_data[aid] = []
-            account_data[aid].append((
-                row["date"],
-                row["balance"],
-                row["invested"] or 0.0,
-                row["earned"] or 0.0,
-            ))
+            account_data[aid].append(
+                (
+                    row["date"],
+                    row["balance"],
+                    row["invested"] or 0.0,
+                    row["earned"] or 0.0,
+                )
+            )
 
         # Collect all dates and apply forward-fill (LOCF)
         all_dates: set[str] = set()
@@ -245,16 +261,18 @@ class IngestHandler(BaseHTTPRequestHandler):
                 if aid in last_known:
                     bal, inv, ear = last_known[aid]
                     meta = account_meta[aid]
-                    series.append({
-                        "account_id": aid,
-                        "account_name": meta["name"],
-                        "institution": meta["institution"],
-                        "account_type": meta["account_type"],
-                        "date": d,
-                        "balance": bal,
-                        "invested": inv,
-                        "earned": ear,
-                    })
+                    series.append(
+                        {
+                            "account_id": aid,
+                            "account_name": meta["name"],
+                            "institution": meta["institution"],
+                            "account_type": meta["account_type"],
+                            "date": d,
+                            "balance": bal,
+                            "invested": inv,
+                            "earned": ear,
+                        }
+                    )
         self._json_response(200, {"series": series})
 
     def _handle_get_transactions(self) -> None:
@@ -308,97 +326,275 @@ class IngestHandler(BaseHTTPRequestHandler):
         rows = self.db.conn.execute(query, query_params).fetchall()
         transactions: list[dict[str, Any]] = []
         for row in rows:
-            transactions.append({
-                "id": row["id"],
-                "date": row["date"],
-                "amount": row["amount"],
-                "description": row["description"],
-                "category": row["category"],
-                "account_name": row["account_name"],
-                "institution": row["institution"],
-            })
+            transactions.append(
+                {
+                    "id": row["id"],
+                    "date": row["date"],
+                    "amount": row["amount"],
+                    "description": row["description"],
+                    "category": row["category"],
+                    "account_name": row["account_name"],
+                    "institution": row["institution"],
+                }
+            )
         self._json_response(200, {"transactions": transactions})
 
-    def _handle_spending_summary(self) -> None:
+    def _handle_get_holdings(self) -> None:
         from urllib.parse import parse_qs, urlparse
 
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
+        account_id = params.get("account_id", [None])[0]
+        institution = params.get("institution", [None])[0]
+
+        query = """
+            SELECT h.symbol, h.name, h.asset_class, h.shares, h.value,
+                   h.as_of, a.name as account_name, a.institution
+            FROM holdings h
+            JOIN accounts a ON h.account_id = a.id
+            WHERE h.as_of = (
+                SELECT MAX(h2.as_of) FROM holdings h2
+                WHERE h2.account_id = h.account_id
+            )
+        """
+        conditions: list[str] = []
+        query_params: list[str] = []
+        if account_id:
+            conditions.append("h.account_id = ?")
+            query_params.append(account_id)
+        if institution:
+            conditions.append("a.institution = ?")
+            query_params.append(institution)
+        if conditions:
+            query += " AND " + " AND ".join(conditions)
+        query += " ORDER BY a.name, h.value DESC"
+
+        rows = self.db.conn.execute(query, query_params).fetchall()
+        holdings: list[dict[str, Any]] = []
+        for row in rows:
+            holdings.append(
+                {
+                    "symbol": row["symbol"],
+                    "name": row["name"],
+                    "asset_class": row["asset_class"],
+                    "shares": row["shares"],
+                    "value": row["value"],
+                    "as_of": row["as_of"],
+                    "account_name": row["account_name"],
+                    "institution": row["institution"],
+                }
+            )
+        self._json_response(200, {"holdings": holdings})
+
+    def _handle_spending_summary(self) -> None:
+        from urllib.parse import parse_qs, urlparse
+
+        from money.categorize import collection_meta
+
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
         group_by = params.get("group_by", ["month"])[0]
+        collection = params.get("collection", [None])[0]
 
-        # Categories that aren't consumption spending — these are movements
-        # between accounts, not real income or expenses
-        non_spending = (
-            "cc_payment", "transfer", "investment", "wire_transfer",
-            "deposit", "fee_rebate",
-        )
-        non_spending_clause = (
-            "AND d.category NOT IN ("
-            + ",".join(f"'{c}'" for c in non_spending)
-            + ")"
-        )
+        if collection and collection != "_list":
+            self._handle_collection_summary(collection, group_by)
+            return
 
-        # Deduplicate: Ally API returns the same transactions for all checking
-        # accounts. Pick one row per (institution, date, amount, description).
-        # Then exclude inter-account transfers (opposite amounts on same date).
-        deduped_cte = """
-            WITH deduped AS (
-                SELECT MIN(t.id) as id, a.institution, t.date, t.amount,
-                       t.description, t.category
+        if collection == "_list":
+            tag_rows = self.db.conn.execute(
+                "SELECT DISTINCT tag FROM transaction_tags"
+                " WHERE tag NOT IN ('capital', 'consumption')"
+            ).fetchall()
+            dynamic_tags = {row["tag"] for row in tag_rows}
+            meta = collection_meta()
+            collections = [
+                {
+                    "id": tag,
+                    "label": meta.get(tag, {}).get("label", tag.title()),
+                    "description": meta.get(tag, {}).get("description", ""),
+                }
+                for tag in dynamic_tags
+                if tag in meta
+            ]
+            self._json_response(200, {"collections": collections})
+            return
+
+        base_cte = """
+            WITH base AS (
+                SELECT t.id, t.date, t.amount, t.description, t.category,
+                       t.display_category
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.id
                 WHERE a.account_type IN ('checking', 'credit_card')
-                GROUP BY a.institution, t.date, t.amount, t.description
-            ),
-            transfer_ids AS (
-                SELECT d1.id FROM deduped d1
-                JOIN deduped d2 ON d1.date = d2.date
-                    AND d1.id != d2.id
-                    AND ABS(d1.amount + d2.amount) < 0.01
+                  AND t.date >= date('now', '-1 year')
+                  AND t.id NOT IN (
+                      SELECT transaction_id FROM transaction_tags WHERE tag = 'capital'
+                  )
             )
         """
 
         if group_by == "category":
             rows = self.db.conn.execute(f"""
-                {deduped_cte}
-                SELECT COALESCE(d.category, d.description) as category,
-                       SUM(d.amount) as total,
+                {base_cte}
+                SELECT COALESCE(b.display_category, b.category, b.description) as cat,
+                       SUM(b.amount) as total,
                        COUNT(*) as count
-                FROM deduped d
-                WHERE d.amount < 0
-                  AND d.id NOT IN (SELECT id FROM transfer_ids)
-                  {non_spending_clause}
-                GROUP BY category
+                FROM base b
+                WHERE b.amount < 0
+                GROUP BY cat
                 ORDER BY total ASC
             """).fetchall()
             categories: list[dict[str, Any]] = []
             for row in rows:
-                categories.append({
-                    "category": row["category"],
-                    "total": row["total"],
-                    "count": row["count"],
-                })
+                categories.append(
+                    {
+                        "category": row["cat"],
+                        "total": row["total"],
+                        "count": row["count"],
+                    }
+                )
             self._json_response(200, {"categories": categories})
         else:
             rows = self.db.conn.execute(f"""
-                {deduped_cte}
-                SELECT strftime('%Y-%m', d.date) as month,
-                       SUM(CASE WHEN d.amount > 0 THEN d.amount ELSE 0 END) as income,
-                       SUM(CASE WHEN d.amount < 0 THEN d.amount ELSE 0 END) as spending
-                FROM deduped d
-                WHERE d.id NOT IN (SELECT id FROM transfer_ids)
-                  {non_spending_clause}
+                {base_cte}
+                SELECT strftime('%Y-%m', b.date) as month,
+                       SUM(CASE WHEN b.amount > 0 THEN b.amount ELSE 0 END) as income,
+                       SUM(CASE WHEN b.amount < 0 THEN b.amount ELSE 0 END) as spending
+                FROM base b
                 GROUP BY month
                 ORDER BY month ASC
             """).fetchall()
             months: list[dict[str, Any]] = []
             for row in rows:
-                months.append({
-                    "month": row["month"],
-                    "income": row["income"],
-                    "spending": row["spending"],
-                    "net": row["income"] + row["spending"],
-                })
+                months.append(
+                    {
+                        "month": row["month"],
+                        "income": row["income"],
+                        "spending": row["spending"],
+                        "net": row["income"] + row["spending"],
+                    }
+                )
+            self._json_response(200, {"months": months})
+
+    def _handle_travel_trips(self) -> None:
+        """Return travel spending grouped by trip, using calendar data."""
+        from money.calendar import detect_trips, match_transactions_to_trips
+
+        trips = detect_trips()
+
+        rows = self.db.conn.execute("""
+            SELECT t.date, t.amount, t.description, t.category, a.name as account_name
+            FROM transactions t
+            JOIN accounts a ON t.account_id = a.id
+            WHERE t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag = 'travel')
+              AND t.date >= date('now', '-1 year')
+            ORDER BY t.date
+        """).fetchall()
+
+        transactions = [
+            {
+                "date": row["date"],
+                "amount": row["amount"],
+                "description": row["description"],
+                "category": row["category"],
+                "account_name": row["account_name"],
+            }
+            for row in rows
+        ]
+
+        grouped = match_transactions_to_trips(trips, transactions)
+
+        trip_summaries: list[dict[str, Any]] = []
+        trip_lookup = {f"{t['name']} ({t['start'][:7]})": t for t in trips}
+        for key, txns in grouped.items():
+            if key == "Other Travel":
+                continue
+            trip = trip_lookup.get(key, {})
+            total = sum(t["amount"] for t in txns)
+            trip_summaries.append(
+                {
+                    "name": trip.get("name", key),
+                    "start": trip.get("start"),
+                    "end": trip.get("end"),
+                    "duration_days": trip.get("duration_days"),
+                    "location": trip.get("location"),
+                    "total": total,
+                    "transaction_count": len(txns),
+                    "transactions": txns,
+                }
+            )
+
+        trip_summaries.sort(key=lambda t: t.get("start") or "")
+
+        other_txns = grouped.get("Other Travel", [])
+        if other_txns:
+            total = sum(t["amount"] for t in other_txns)
+            trip_summaries.append(
+                {
+                    "name": "Other Travel",
+                    "start": None,
+                    "end": None,
+                    "duration_days": None,
+                    "location": None,
+                    "total": total,
+                    "transaction_count": len(other_txns),
+                    "transactions": other_txns,
+                }
+            )
+
+        self._json_response(200, {"trips": trip_summaries})
+
+    def _handle_collection_summary(self, collection: str, group_by: str) -> None:
+        """Return spending summary filtered to a named collection (by tag)."""
+        if group_by == "category":
+            rows = self.db.conn.execute(
+                """
+                SELECT COALESCE(t.display_category, t.category, t.description) as cat,
+                       SUM(t.amount) as total,
+                       COUNT(*) as count
+                FROM transactions t
+                WHERE t.id IN (
+                    SELECT transaction_id FROM transaction_tags WHERE tag = ?
+                )
+                GROUP BY cat
+                ORDER BY total ASC
+            """,
+                (collection,),
+            ).fetchall()
+            categories: list[dict[str, Any]] = []
+            for row in rows:
+                categories.append(
+                    {
+                        "category": row["cat"],
+                        "total": row["total"],
+                        "count": row["count"],
+                    }
+                )
+            self._json_response(200, {"categories": categories})
+        else:
+            rows = self.db.conn.execute(
+                """
+                SELECT strftime('%Y-%m', t.date) as month,
+                       SUM(t.amount) as total,
+                       COUNT(*) as count
+                FROM transactions t
+                WHERE t.id IN (
+                    SELECT transaction_id FROM transaction_tags WHERE tag = ?
+                )
+                GROUP BY month
+                ORDER BY month ASC
+            """,
+                (collection,),
+            ).fetchall()
+            months: list[dict[str, Any]] = []
+            for row in rows:
+                months.append(
+                    {
+                        "month": row["month"],
+                        "total": row["total"],
+                        "count": row["count"],
+                    }
+                )
             self._json_response(200, {"months": months})
 
     def do_POST(self) -> None:
@@ -443,19 +639,21 @@ class IngestHandler(BaseHTTPRequestHandler):
         if not isinstance(cookies_raw, list):
             self._json_response(400, {"error": "'cookies' must be a list"})
             return
-        cookies_list = cast(list[dict[str, Any]], cookies_raw)
 
         profile = data.get("profile")
         path = cookie_relay_path(institution, profile)
         path.write_text(json.dumps(data, indent=2))
         label = f"{institution}/{profile}" if profile else institution
-        log.info("Stored %d cookies for %s at %s", len(cookies_list), label, path)
+        log.info("Stored %d cookies for %s at %s", len(cookies_raw), label, path)
 
-        self._json_response(200, {
-            "status": "ok",
-            "institution": institution,
-            "cookies_stored": len(cookies_list),
-        })
+        self._json_response(
+            200,
+            {
+                "status": "ok",
+                "institution": institution,
+                "cookies_stored": len(cookies_raw),
+            },
+        )
 
     def _handle_network_log(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
@@ -478,7 +676,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         if not isinstance(entries_raw, list):
             self._json_response(400, {"error": "'entries' must be a list"})
             return
-        entries = cast(list[dict[str, Any]], entries_raw)
+        entries: list[dict[str, Any]] = list(entries_raw)
 
         from money.config import DATA_DIR
 
@@ -503,12 +701,15 @@ class IngestHandler(BaseHTTPRequestHandler):
             for route in sorted(routes):
                 log.info("  %s", route)
 
-        self._json_response(200, {
-            "status": "ok",
-            "institution": institution,
-            "entries_stored": len(entries),
-            "api_routes_found": len(routes),
-        })
+        self._json_response(
+            200,
+            {
+                "status": "ok",
+                "institution": institution,
+                "entries_stored": len(entries),
+                "api_routes_found": len(routes),
+            },
+        )
 
     def _handle_auth_token(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
@@ -536,10 +737,13 @@ class IngestHandler(BaseHTTPRequestHandler):
         path.write_text(json.dumps(data, indent=2))
         log.info("Stored auth token for %s (expires in %ss)", institution, data.get("expiresIn"))
 
-        self._json_response(200, {
-            "status": "ok",
-            "institution": institution,
-        })
+        self._json_response(
+            200,
+            {
+                "status": "ok",
+                "institution": institution,
+            },
+        )
 
     def _handle_ingest(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
@@ -564,7 +768,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         if not isinstance(accounts_raw, list):
             self._json_response(400, {"error": "'accounts' must be a list"})
             return
-        accounts_data = cast(list[dict[str, Any]], accounts_raw)
+        accounts_data: list[dict[str, Any]] = list(accounts_raw)
 
         started_at = datetime.now()
         timestamp = started_at.strftime("%Y%m%d_%H%M%S")
