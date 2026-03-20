@@ -98,6 +98,31 @@ def categorize(ctx: click.Context) -> None:
 
 
 @main.command()
+@click.pass_context
+def detect_recurring(ctx: click.Context) -> None:
+    """Detect recurring transaction patterns."""
+    from money.recurring import detect_recurring as _detect
+    from money.recurring import get_recurring_patterns
+
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    try:
+        count = _detect(db)
+        click.echo(f"Detected {count} recurring patterns.\n")
+        patterns = get_recurring_patterns(db)
+        for p in patterns:
+            status = " [confirmed]" if p["status"] == "confirmed" else ""
+            click.echo(
+                f"  ${p['avg_amount']:>8,.2f}/{p['frequency']:<10s}"
+                f"  (~${p['annual_cost']:>10,.2f}/yr)"
+                f"  {p['match_count']:>3d}x  {p['description']}"
+                f"  [{p['category_path'] or '?'}]{status}"
+            )
+    finally:
+        db.close()
+
+
+@main.command()
 @click.option("-n", "--limit", default=50, help="Max uncategorized transactions to process.")
 @click.pass_context
 def suggest(ctx: click.Context, limit: int) -> None:

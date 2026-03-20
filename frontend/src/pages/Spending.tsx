@@ -5,6 +5,7 @@ import { fetchAccounts } from '../api'
 import { SpendingCharts } from '../components/SpendingCharts'
 import { TransactionTable } from '../components/TransactionTable'
 import { SuggestionReview } from '../components/SuggestionReview'
+import { RecurringPatterns } from '../components/RecurringPatterns'
 
 function startOfMonthsAgo(n: number): string {
   const d = new Date()
@@ -109,6 +110,7 @@ export function Spending() {
         timeKey={timeKey}
         onTimeKeyChange={setTimeKey}
       />
+      <RecurringPatterns />
       <SuggestionReview key={`sug-${suggestionsKey}`} onRulesChanged={handleRulesChanged} />
       <TransactionTable
         key={`txn-${refreshKey}`}

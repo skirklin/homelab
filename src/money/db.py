@@ -136,6 +136,24 @@ class Database:
                 self.conn.execute("ALTER TABLE suggested_rules ADD COLUMN yaml_patch TEXT")
                 self.conn.commit()
 
+        # Recurring patterns table
+        if "recurring_patterns" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS recurring_patterns (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    description   TEXT NOT NULL,
+                    category_path TEXT,
+                    avg_amount    REAL NOT NULL,
+                    frequency     TEXT NOT NULL DEFAULT 'monthly',
+                    match_count   INTEGER NOT NULL,
+                    last_seen     TEXT NOT NULL,
+                    status        TEXT NOT NULL DEFAULT 'detected',
+                    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_recurring_status
+                    ON recurring_patterns(status);
+            """)
+
     # -- Accounts --
 
     def insert_account(self, account: Account) -> None:

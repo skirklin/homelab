@@ -243,3 +243,26 @@ export const generateSuggestions = () =>
 
 export const reclassifyTransaction = (transactionId: number, feedback: string) =>
   post<{ status: string }>('/api/suggestions/reclassify', { transaction_id: transactionId, feedback })
+
+// ── Recurring ────────────────────────────────────────────────────────
+
+export interface RecurringPattern {
+  id: number
+  description: string
+  category_path: string | null
+  avg_amount: number
+  frequency: string
+  match_count: number
+  last_seen: string
+  status: string
+  annual_cost: number
+}
+
+export const fetchRecurring = () =>
+  get<{ patterns: RecurringPattern[] }>('/api/recurring').then((d) => d.patterns)
+
+export const confirmRecurring = (id: number) =>
+  post<{ confirmed: boolean }>(`/api/recurring/${id}/confirm`)
+
+export const dismissRecurring = (id: number) =>
+  post<{ dismissed: boolean }>(`/api/recurring/${id}/dismiss`)

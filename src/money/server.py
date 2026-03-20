@@ -58,6 +58,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/suggestions"):
             self._handle_get_suggestions()
             return
+        if self.path.startswith("/api/recurring"):
+            self._handle_get_recurring()
+            return
         self._json_response(404, {"error": "not found"})
 
     def _handle_get_accounts(self) -> None:
@@ -773,6 +776,36 @@ class IngestHandler(BaseHTTPRequestHandler):
                 )
             self._json_response(200, {"months": months})
 
+    def _handle_get_recurring(self) -> None:
+        from money.recurring import detect_recurring, get_recurring_patterns
+        # Re-detect on each GET (fast enough, keeps data fresh)
+        detect_recurring(self.db)
+        patterns = get_recurring_patterns(self.db)
+        self._json_response(200, {"patterns": patterns})
+
+    def _handle_recurring_action(self) -> None:
+        from money.recurring import confirm_pattern, dismiss_pattern
+
+        parts = self.path.rstrip("/").split("/")
+        if len(parts) < 4:
+            self._json_response(400, {"error": "invalid path"})
+            return
+        action = parts[-1]
+        try:
+            pattern_id = int(parts[-2])
+        except ValueError:
+            self._json_response(400, {"error": "invalid pattern id"})
+            return
+
+        if action == "confirm":
+            confirm_pattern(self.db, pattern_id)
+            self._json_response(200, {"confirmed": True})
+        elif action == "dismiss":
+            dismiss_pattern(self.db, pattern_id)
+            self._json_response(200, {"dismissed": True})
+        else:
+            self._json_response(400, {"error": f"unknown action: {action}"})
+
     def _handle_get_suggestions(self) -> None:
         from money.suggest import get_pending_suggestions
 
@@ -864,6 +897,9 @@ class IngestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/suggestions/generate" or self.path == "/api/suggestions/reclassify":
             self._handle_generate_suggestions()
+            return
+        if self.path.startswith("/api/recurring/"):
+            self._handle_recurring_action()
             return
         if self.path.startswith("/api/suggestions/"):
             self._handle_suggestion_action()
