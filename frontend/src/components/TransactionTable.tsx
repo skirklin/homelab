@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Account, Transaction } from '../api'
-import { fetchTransactions } from '../api'
+import { fetchTransactions, reclassifyTransaction } from '../api'
 
 const fmtDollar = (v: number) =>
   `${v < 0 ? '-' : '+'}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -15,6 +15,7 @@ interface Props {
   filterFn?: (t: Transaction) => boolean
   filterLabel?: string
   onClearFilter?: () => void
+  onReclassifyRequested?: () => void
 }
 
 export function TransactionTable({
@@ -24,6 +25,7 @@ export function TransactionTable({
   filterFn,
   filterLabel,
   onClearFilter,
+  onReclassifyRequested,
 }: Props) {
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([])
   const [search, setSearch] = useState('')
@@ -31,6 +33,8 @@ export function TransactionTable({
   const [hideTransfers, setHideTransfers] = useState(true)
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [reclassifyingId, setReclassifyingId] = useState<number | null>(null)
+  const [reclassifyFeedback, setReclassifyFeedback] = useState('')
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300)
@@ -162,25 +166,66 @@ export function TransactionTable({
               <th className="sortable right" onClick={() => handleSort('amount')}>
                 Amount{sortIndicator('amount')}
               </th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((t) => (
-              <tr key={t.id}>
-                <td className="date">{t.date}</td>
-                <td className="desc">{t.description}</td>
-                <td className="acct">{t.category_path ?? t.description ?? '—'}</td>
-                <td className="acct">
-                  {t.institution ? `${t.institution} / ` : ''}{t.account_name}
-                </td>
-                <td className={`amount right ${t.amount >= 0 ? 'positive' : 'negative'}`}>
-                  {fmtDollar(t.amount)}
-                </td>
-              </tr>
-            ))}
+            {sorted.map((t) => {
+              const isReclassifying = reclassifyingId === t.id
+              return (
+                <tr key={t.id}>
+                  <td className="date">{t.date}</td>
+                  <td className="desc">{t.description}</td>
+                  <td className="acct">{t.category_path ?? t.description ?? '—'}</td>
+                  <td className="acct">
+                    {t.institution ? `${t.institution} / ` : ''}{t.account_name}
+                  </td>
+                  <td className={`amount right ${t.amount >= 0 ? 'positive' : 'negative'}`}>
+                    {fmtDollar(t.amount)}
+                  </td>
+                  <td className="cat-actions">
+                    {isReclassifying ? (
+                      <span className="reclassify-inline">
+                        <input
+                          type="text"
+                          className="reclassify-input"
+                          placeholder="what's wrong?"
+                          value={reclassifyFeedback}
+                          onChange={(e) => setReclassifyFeedback(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && reclassifyFeedback) {
+                              reclassifyTransaction(t.id, reclassifyFeedback)
+                              onReclassifyRequested?.()
+                              setReclassifyingId(null)
+                              setReclassifyFeedback('')
+                            }
+                            if (e.key === 'Escape') {
+                              setReclassifyingId(null)
+                              setReclassifyFeedback('')
+                            }
+                          }}
+                          autoFocus
+                        />
+                      </span>
+                    ) : (
+                      <button
+                        className="reclassify-btn"
+                        title="flag as wrong"
+                        onClick={() => {
+                          setReclassifyingId(t.id)
+                          setReclassifyFeedback('')
+                        }}
+                      >
+                        ?
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ textAlign: 'center', opacity: 0.5, padding: '2rem' }}>
+                <td colSpan={6} style={{ textAlign: 'center', opacity: 0.5, padding: '2rem' }}>
                   No transactions found
                 </td>
               </tr>

@@ -789,6 +789,45 @@ header h1 {
   color: rgba(255, 255, 255, 0.35);
 }
 
+.cat-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.reclassify-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.reclassify-btn:hover {
+  color: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.reclassify-inline {
+  display: flex;
+  gap: 4px;
+}
+
+.reclassify-input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.8);
+  padding: 2px 8px;
+  font-size: 11px;
+  width: 200px;
+}
+
+.reclassify-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
 .cat-stats-totals {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }

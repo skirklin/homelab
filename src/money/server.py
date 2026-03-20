@@ -468,8 +468,9 @@ class IngestHandler(BaseHTTPRequestHandler):
             else:
                 rows = self.db.conn.execute(f"""
                     {base_cte}
-                    SELECT CASE INSTR(b.category_path, '/')
-                             WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
+                    SELECT CASE
+                             WHEN b.category_path IS NULL THEN 'uncategorized'
+                             WHEN INSTR(b.category_path, '/') = 0 THEN b.category_path
                              ELSE SUBSTR(b.category_path, 1,
                                          INSTR(b.category_path, '/') - 1)
                            END as cat,
@@ -815,9 +816,32 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         from money.suggest import generate_suggestions
 
+        content_length = int(self.headers.get("Content-Length", 0))
+        body: dict[str, Any] = {}
+        if content_length > 0:
+            raw = json.loads(self.rfile.read(content_length))
+            if isinstance(raw, dict):
+                body = raw
+
+        transaction_id = body.get("transaction_id")
+        feedback = body.get("feedback")
+
+        db_path = self.db.path
+
         def _run() -> None:
             try:
-                generate_suggestions(self.db)
+                thread_db = Database(db_path)
+                thread_db.initialize()
+                try:
+                    if transaction_id and feedback:
+                        from money.suggest import reclassify_transaction
+                        reclassify_transaction(
+                            thread_db, int(transaction_id), str(feedback),
+                        )
+                    else:
+                        generate_suggestions(thread_db)
+                finally:
+                    thread_db.close()
             except Exception:
                 log.exception("Suggestion generation failed")
 
@@ -838,11 +862,11 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path == "/auth-token":
             self._handle_auth_token()
             return
+        if self.path == "/api/suggestions/generate" or self.path == "/api/suggestions/reclassify":
+            self._handle_generate_suggestions()
+            return
         if self.path.startswith("/api/suggestions/"):
             self._handle_suggestion_action()
-            return
-        if self.path == "/api/suggestions/generate":
-            self._handle_generate_suggestions()
             return
         self._json_response(404, {"error": "not found"})
 

@@ -24,6 +24,7 @@ export function Spending() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [selectedAccount, setSelectedAccount] = useState<string | undefined>()
   const [refreshKey, setRefreshKey] = useState(0)
+  const [suggestionsKey, setSuggestionsKey] = useState(0)
   const [searchParams, setSearchParams] = useSearchParams()
 
   const prefix = searchParams.get('category') || null
@@ -76,6 +77,12 @@ export function Spending() {
     setRefreshKey((k) => k + 1)
   }, [])
 
+  const handleReclassifyRequested = useCallback(() => {
+    // Poll for new suggestions after reclassify (takes ~60-90s)
+    const polls = [5000, 15000, 30000, 60000, 90000]
+    polls.forEach((ms) => setTimeout(() => setSuggestionsKey((k) => k + 1), ms))
+  }, [])
+
   const filterFn = useMemo(() => {
     if (!prefix) return undefined
     return (t: Transaction) => {
@@ -102,7 +109,7 @@ export function Spending() {
         timeKey={timeKey}
         onTimeKeyChange={setTimeKey}
       />
-      <SuggestionReview onRulesChanged={handleRulesChanged} />
+      <SuggestionReview key={`sug-${suggestionsKey}`} onRulesChanged={handleRulesChanged} />
       <TransactionTable
         key={`txn-${refreshKey}`}
         accounts={accounts}
@@ -111,6 +118,7 @@ export function Spending() {
         filterFn={filterFn}
         filterLabel={filterLabel}
         onClearFilter={clearFilter}
+        onReclassifyRequested={handleReclassifyRequested}
       />
     </>
   )

@@ -214,6 +214,7 @@ export interface Suggestion {
   category_path: string
   confidence: number | null
   reasoning: string | null
+  yaml_patch: string | null
   created_at: string
   matches: SuggestionMatch[]
 }
@@ -239,3 +240,6 @@ export const rejectSuggestion = (id: number, feedback?: string) =>
 
 export const generateSuggestions = () =>
   post<{ status: string }>('/api/suggestions/generate')
+
+export const reclassifyTransaction = (transactionId: number, feedback: string) =>
+  post<{ status: string }>('/api/suggestions/reclassify', { transaction_id: transactionId, feedback })
