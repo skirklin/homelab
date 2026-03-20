@@ -427,7 +427,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                 WHERE a.account_type IN ('checking', 'credit_card')
                   {date_filter}
                   AND (t.category_path IS NULL
-                       OR t.category_path NOT LIKE 'Capital%')
+                       OR t.category_path NOT LIKE 'capital%')
             )
         """
 
@@ -662,7 +662,7 @@ class IngestHandler(BaseHTTPRequestHandler):
             SELECT t.date, t.amount, t.description, t.category, a.name as account_name
             FROM transactions t
             JOIN accounts a ON t.account_id = a.id
-            WHERE (t.category_path = 'Travel' OR t.category_path LIKE 'Travel/%')
+            WHERE (t.category_path = 'travel' OR t.category_path LIKE 'travel/%')
               AND t.date >= date('now', '-1 year')
             ORDER BY t.date
         """).fetchall()
