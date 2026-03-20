@@ -21,6 +21,8 @@ const TIME_PRESETS: { label: string; key: string; range: TimeRange }[] = [
   { label: 'all', key: 'all', range: {} },
 ]
 
+type Tab = 'categories' | 'transactions' | 'recurring'
+
 export function Spending() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [selectedAccount, setSelectedAccount] = useState<string | undefined>()
@@ -30,28 +32,32 @@ export function Spending() {
 
   const prefix = searchParams.get('category') || null
   const timeKey = searchParams.get('time') || '1y'
+  const activeTab = (searchParams.get('tab') as Tab) || 'categories'
   const timeRange = useMemo(
     () => TIME_PRESETS.find((p) => p.key === timeKey)?.range ?? {},
     [timeKey],
   )
 
-  const setPrefix = useCallback((newPrefix: string | null) => {
+  const setParam = useCallback((key: string, value: string | null) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      if (newPrefix) next.set('category', newPrefix)
-      else next.delete('category')
+      if (value) next.set(key, value)
+      else next.delete(key)
       return next
     })
   }, [setSearchParams])
 
+  const setPrefix = useCallback((newPrefix: string | null) => {
+    setParam('category', newPrefix)
+  }, [setParam])
+
   const setTimeKey = useCallback((key: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (key === '1y') next.delete('time')
-      else next.set('time', key)
-      return next
-    })
-  }, [setSearchParams])
+    setParam('time', key === '1y' ? null : key)
+  }, [setParam])
+
+  const setTab = useCallback((tab: Tab) => {
+    setParam('tab', tab === 'categories' ? null : tab)
+  }, [setParam])
 
   useEffect(() => {
     fetchAccounts().then(setAccounts)
@@ -63,23 +69,23 @@ export function Spending() {
 
   const handleBarClick = useCallback((_month: string, category: string) => {
     const childPrefix = prefix ? `${prefix}/${category}` : category
-    setPrefix(childPrefix)
-  }, [prefix, setPrefix])
-
-  const clearFilter = useCallback(() => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.delete('category')
+      next.set('category', childPrefix)
+      next.set('tab', 'transactions')
       return next
     })
-  }, [setSearchParams])
+  }, [prefix, setSearchParams])
+
+  const clearFilter = useCallback(() => {
+    setParam('category', null)
+  }, [setParam])
 
   const handleRulesChanged = useCallback(() => {
     setRefreshKey((k) => k + 1)
   }, [])
 
   const handleReclassifyRequested = useCallback(() => {
-    // Poll for new suggestions after reclassify (takes ~60-90s)
     const polls = [5000, 15000, 30000, 60000, 90000]
     polls.forEach((ms) => setTimeout(() => setSuggestionsKey((k) => k + 1), ms))
   }, [])
@@ -87,7 +93,7 @@ export function Spending() {
   const filterFn = useMemo(() => {
     if (!prefix) return undefined
     return (t: Transaction) => {
-      if (prefix === 'Uncategorized') {
+      if (prefix === 'uncategorized') {
         if (t.category_path) return false
       } else {
         const path = t.category_path ?? ''
@@ -101,27 +107,58 @@ export function Spending() {
 
   return (
     <>
-      <SpendingCharts
-        key={refreshKey}
-        prefix={prefix}
-        onPrefixChange={handlePrefixChange}
-        onBarClick={handleBarClick}
-        timeRange={timeRange}
-        timeKey={timeKey}
-        onTimeKeyChange={setTimeKey}
-      />
-      <RecurringPatterns />
-      <SuggestionReview key={`sug-${suggestionsKey}`} onRulesChanged={handleRulesChanged} />
-      <TransactionTable
-        key={`txn-${refreshKey}`}
-        accounts={accounts}
-        accountId={selectedAccount}
-        onAccountChange={setSelectedAccount}
-        filterFn={filterFn}
-        filterLabel={filterLabel}
-        onClearFilter={clearFilter}
-        onReclassifyRequested={handleReclassifyRequested}
-      />
+      <div className="spending-tabs">
+        <button
+          className={`spending-tab ${activeTab === 'categories' ? 'active' : ''}`}
+          onClick={() => setTab('categories')}
+        >
+          categories
+        </button>
+        <button
+          className={`spending-tab ${activeTab === 'transactions' ? 'active' : ''}`}
+          onClick={() => setTab('transactions')}
+        >
+          transactions
+        </button>
+        <button
+          className={`spending-tab ${activeTab === 'recurring' ? 'active' : ''}`}
+          onClick={() => setTab('recurring')}
+        >
+          recurring
+        </button>
+      </div>
+
+      {activeTab === 'categories' && (
+        <>
+          <SpendingCharts
+            key={refreshKey}
+            prefix={prefix}
+            onPrefixChange={handlePrefixChange}
+            onBarClick={handleBarClick}
+            timeRange={timeRange}
+            timeKey={timeKey}
+            onTimeKeyChange={setTimeKey}
+          />
+          <SuggestionReview key={`sug-${suggestionsKey}`} onRulesChanged={handleRulesChanged} />
+        </>
+      )}
+
+      {activeTab === 'transactions' && (
+        <TransactionTable
+          key={`txn-${refreshKey}`}
+          accounts={accounts}
+          accountId={selectedAccount}
+          onAccountChange={setSelectedAccount}
+          filterFn={filterFn}
+          filterLabel={filterLabel}
+          onClearFilter={clearFilter}
+          onReclassifyRequested={handleReclassifyRequested}
+        />
+      )}
+
+      {activeTab === 'recurring' && (
+        <RecurringPatterns />
+      )}
     </>
   )
 }
