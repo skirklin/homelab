@@ -41,7 +41,7 @@ export function TransactionTable({
     fetchTransactions({
       accountId,
       hideTransfers,
-      limit: 500,
+      limit: 5000,
     }).then(setAllTransactions)
   }, [accountId, hideTransfers])
 

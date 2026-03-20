@@ -96,15 +96,10 @@ export function Spending() {
     setPrefix(newPrefix)
   }, [setPrefix])
 
-  const handleBarClick = useCallback((month: string, category: string) => {
+  const handleBarClick = useCallback((_month: string, category: string) => {
     const childPrefix = prefix ? `${prefix}/${category}` : category
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set('category', childPrefix)
-      next.set('month', month)
-      return next
-    })
-  }, [prefix, setSearchParams])
+    setPrefix(childPrefix)
+  }, [prefix, setPrefix])
 
   const clearFilter = useCallback(() => {
     setSearchParams({})
