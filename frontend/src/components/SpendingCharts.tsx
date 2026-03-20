@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Plot from 'react-plotly.js'
-import type { MonthCategoryData, CategorySummary } from '../api'
+import type { MonthCategoryData, CategorySummary, TimeRange } from '../api'
 import { fetchSpendingByMonthCategory, fetchSpendingByCategory } from '../api'
 
 const fmtDollar = (v: number) =>
@@ -73,20 +73,22 @@ interface SpendingChartsProps {
   prefix: string | null
   onPrefixChange: (prefix: string | null) => void
   onBarClick?: (month: string, category: string) => void
+  timeRange?: TimeRange
 }
 
 export function SpendingCharts({
   prefix,
   onPrefixChange,
   onBarClick,
+  timeRange,
 }: SpendingChartsProps) {
   const [monthCatData, setMonthCatData] = useState<MonthCategoryData | null>(null)
   const [categories, setCategories] = useState<CategorySummary[]>([])
 
   useEffect(() => {
-    fetchSpendingByMonthCategory(12, prefix ?? undefined).then(setMonthCatData)
-    fetchSpendingByCategory(prefix ?? undefined).then(setCategories)
-  }, [prefix])
+    fetchSpendingByMonthCategory(12, prefix ?? undefined, timeRange).then(setMonthCatData)
+    fetchSpendingByCategory(prefix ?? undefined, timeRange).then(setCategories)
+  }, [prefix, timeRange])
 
   const colorMap = useMemo(() => {
     const allCats = new Set<string>()

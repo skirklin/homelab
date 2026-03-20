@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import type { Account, MonthSummary, Transaction } from '../api'
+import type { Account, MonthSummary, Transaction, TimeRange } from '../api'
 import { fetchAccounts, fetchSpendingByMonth } from '../api'
 import { SpendingCharts } from '../components/SpendingCharts'
 import { TransactionTable } from '../components/TransactionTable'
@@ -20,6 +20,19 @@ function getPrevMonth(month: string): string {
   const [y, m] = month.split('-').map(Number)
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
 }
+
+function monthsAgo(n: number): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+const TIME_PRESETS: { label: string; key: string; range: TimeRange }[] = [
+  { label: '3m', key: '3m', range: { start: monthsAgo(3) } },
+  { label: '6m', key: '6m', range: { start: monthsAgo(6) } },
+  { label: '1y', key: '1y', range: { start: monthsAgo(12) } },
+  { label: 'all', key: 'all', range: {} },
+]
 
 function SummaryCards({ months }: { months: MonthSummary[] }) {
   if (months.length === 0) return null
@@ -44,15 +57,15 @@ function SummaryCards({ months }: { months: MonthSummary[] }) {
   return (
     <div className="summary-cards">
       <div className="summary-card">
-        <span className="summary-card-label">This Month</span>
+        <span className="summary-card-label">this month</span>
         <span className="summary-card-value negative">{fmtDollar(thisMonthSpending)}</span>
       </div>
       <div className="summary-card">
-        <span className="summary-card-label">Last Month</span>
+        <span className="summary-card-label">last month</span>
         <span className="summary-card-value negative">{fmtDollar(lastMonthSpending)}</span>
       </div>
       <div className="summary-card">
-        <span className="summary-card-label">Month-over-Month</span>
+        <span className="summary-card-label">month-over-month</span>
         <span className={`summary-card-value ${changeIsGood ? 'positive' : 'negative'}`}>
           {changeAbs <= 0 ? '-' : '+'}{fmtDollar(Math.abs(changeAbs))}
         </span>
@@ -61,7 +74,7 @@ function SummaryCards({ months }: { months: MonthSummary[] }) {
         </span>
       </div>
       <div className="summary-card">
-        <span className="summary-card-label">3-Month Avg</span>
+        <span className="summary-card-label">3-month avg</span>
         <span className="summary-card-value negative">{fmtDollar(avg3)}</span>
       </div>
     </div>
@@ -74,23 +87,36 @@ export function Spending() {
   const [months, setMonths] = useState<MonthSummary[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
   const [searchParams, setSearchParams] = useSearchParams()
+
   const prefix = searchParams.get('category') || null
-  const monthFilter = searchParams.get('month') || null
+  const timeKey = searchParams.get('time') || '1y'
+  const timeRange = useMemo(
+    () => TIME_PRESETS.find((p) => p.key === timeKey)?.range ?? {},
+    [timeKey],
+  )
 
   const setPrefix = useCallback((newPrefix: string | null) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       if (newPrefix) next.set('category', newPrefix)
       else next.delete('category')
-      next.delete('month')
+      return next
+    })
+  }, [setSearchParams])
+
+  const setTimeKey = useCallback((key: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (key === '1y') next.delete('time')
+      else next.set('time', key)
       return next
     })
   }, [setSearchParams])
 
   useEffect(() => {
     fetchAccounts().then(setAccounts)
-    fetchSpendingByMonth().then(setMonths)
-  }, [refreshKey])
+    fetchSpendingByMonth(timeRange).then(setMonths)
+  }, [refreshKey, timeRange])
 
   const handlePrefixChange = useCallback((newPrefix: string | null) => {
     setPrefix(newPrefix)
@@ -102,7 +128,11 @@ export function Spending() {
   }, [prefix, setPrefix])
 
   const clearFilter = useCallback(() => {
-    setSearchParams({})
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('category')
+      return next
+    })
   }, [setSearchParams])
 
   const handleRulesChanged = useCallback(() => {
@@ -110,31 +140,42 @@ export function Spending() {
   }, [])
 
   const filterFn = useMemo(() => {
-    if (!prefix && !monthFilter) return undefined
+    if (!prefix) return undefined
     return (t: Transaction) => {
-      if (monthFilter && !t.date.startsWith(monthFilter)) return false
-      if (prefix) {
-        if (prefix === 'Uncategorized') {
-          if (t.category_path) return false
-        } else {
-          const path = t.category_path ?? ''
-          if (path !== prefix && !path.startsWith(prefix + '/')) return false
-        }
+      if (prefix === 'Uncategorized') {
+        if (t.category_path) return false
+      } else {
+        const path = t.category_path ?? ''
+        if (path !== prefix && !path.startsWith(prefix + '/')) return false
       }
       return true
     }
-  }, [prefix, monthFilter])
+  }, [prefix])
 
-  const filterLabel = [monthFilter, prefix].filter(Boolean).join(' / ') || undefined
+  const filterLabel = prefix || undefined
 
   return (
     <>
-      <SummaryCards months={months} />
+      <div className="spending-top-bar">
+        <SummaryCards months={months} />
+        <div className="time-presets">
+          {TIME_PRESETS.map((p) => (
+            <button
+              key={p.key}
+              className={`time-preset-btn ${timeKey === p.key ? 'active' : ''}`}
+              onClick={() => setTimeKey(p.key)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <SpendingCharts
         key={refreshKey}
         prefix={prefix}
         onPrefixChange={handlePrefixChange}
         onBarClick={handleBarClick}
+        timeRange={timeRange}
       />
       <SuggestionReview onRulesChanged={handleRulesChanged} />
       <TransactionTable

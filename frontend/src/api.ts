@@ -115,12 +115,23 @@ export const fetchTransactions = (opts?: {
   )
 }
 
-export const fetchSpendingByMonth = () =>
-  get<{ months: MonthSummary[] }>('/api/spending/summary?group_by=month').then((d) => d.months)
+export interface TimeRange {
+  start?: string
+  end?: string
+}
 
-export const fetchSpendingByCategory = (parent?: string) => {
+export const fetchSpendingByMonth = (range?: TimeRange) => {
+  const params = new URLSearchParams({ group_by: 'month' })
+  if (range?.start) params.set('start', range.start)
+  if (range?.end) params.set('end', range.end)
+  return get<{ months: MonthSummary[] }>(`/api/spending/summary?${params}`).then((d) => d.months)
+}
+
+export const fetchSpendingByCategory = (parent?: string, range?: TimeRange) => {
   const params = new URLSearchParams({ group_by: 'category' })
   if (parent) params.set('parent', parent)
+  if (range?.start) params.set('start', range.start)
+  if (range?.end) params.set('end', range.end)
   return get<{ categories: CategorySummary[] }>(`/api/spending/summary?${params}`).then(
     (d) => d.categories,
   )
@@ -131,9 +142,11 @@ export interface MonthCategoryData {
   categories: string[]
 }
 
-export const fetchSpendingByMonthCategory = (top: number = 10, parent?: string) => {
+export const fetchSpendingByMonthCategory = (top: number = 10, parent?: string, range?: TimeRange) => {
   const params = new URLSearchParams({ group_by: 'month_category', top: String(top) })
   if (parent) params.set('parent', parent)
+  if (range?.start) params.set('start', range.start)
+  if (range?.end) params.set('end', range.end)
   return get<MonthCategoryData>(`/api/spending/summary?${params}`)
 }
 
