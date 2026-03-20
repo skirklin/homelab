@@ -1,120 +1,153 @@
-import { useEffect, useState } from 'react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import type { MonthSummary, CategorySummary } from '../api'
-import { fetchSpendingByMonth, fetchSpendingByCategory } from '../api'
+import { useEffect, useMemo, useState } from 'react'
+import Plot from 'react-plotly.js'
+import type { MonthCategoryData, CategorySummary } from '../api'
+import { fetchSpendingByMonthCategory, fetchSpendingByCategory } from '../api'
 
-const fmt = (v: number) => {
-  const abs = Math.abs(v)
-  if (abs >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(0)}`
+const fmtDollar = (v: number) =>
+  `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+
+const PALETTE = [
+  '#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399',
+  '#22d3ee', '#818cf8', '#c084fc', '#f472b6', '#94a3b8',
+  '#e879f9', '#67e8f9',
+]
+
+function buildColorMap(categories: string[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  categories.forEach((cat, i) => {
+    map[cat] = PALETTE[i % PALETTE.length]
+  })
+  return map
 }
 
-const fmtFull = (v: number) =>
-  `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max) + '...' : s
+interface SpendingChartsProps {
+  selectedCategory: string | null
+  onCategoryChange: (category: string | null) => void
+  onBarClick?: (month: string, category: string) => void
 }
 
-export function SpendingByMonth() {
-  const [data, setData] = useState<MonthSummary[]>([])
+export function SpendingCharts({
+  selectedCategory,
+  onCategoryChange,
+  onBarClick,
+}: SpendingChartsProps) {
+  const [monthCatData, setMonthCatData] = useState<MonthCategoryData | null>(null)
+  const [categories, setCategories] = useState<CategorySummary[]>([])
 
   useEffect(() => {
-    fetchSpendingByMonth().then(setData)
+    fetchSpendingByMonthCategory(12).then(setMonthCatData)
+    fetchSpendingByCategory().then(setCategories)
   }, [])
 
-  if (data.length === 0) return null
-
-  const avgSpending = data.reduce((s, d) => s + d.spending, 0) / data.length
-  const chartData = data.map((d) => ({ ...d, absSpending: Math.abs(d.spending) }))
-
-  return (
-    <section className="chart-section">
-      <div className="section-header">
-        <div>
-          <h2>Monthly Spending</h2>
-          <div className="metric-row">
-            <span className="metric negative">
-              <span className="metric-label">Avg Monthly</span>
-              <span className="metric-value">{fmtFull(avgSpending)}</span>
-            </span>
-          </div>
-        </div>
-      </div>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-          <XAxis dataKey="month" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
-          <YAxis tickFormatter={fmt} stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} width={60} />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#1e1e3f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
-            formatter={(value: number) => [fmtFull(value), 'Spending']}
-            labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
-          />
-          <Bar dataKey="absSpending" name="Spending" fill="#f87171" radius={[4, 4, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </section>
-  )
-}
-
-export function SpendingByCategory() {
-  const [data, setData] = useState<CategorySummary[]>([])
-
-  useEffect(() => {
-    fetchSpendingByCategory().then((cats) => {
-      // Take top 15 by absolute value, group rest
-      const sorted = [...cats].sort((a, b) => a.total - b.total)
-      const top = sorted.slice(0, 15)
-      const rest = sorted.slice(15)
-      if (rest.length > 0) {
-        top.push({
-          category: `Other (${rest.length} categories)`,
-          total: rest.reduce((s, c) => s + c.total, 0),
-          count: rest.reduce((s, c) => s + c.count, 0),
-        })
-      }
-      setData(top)
+  const colorMap = useMemo(() => {
+    const allCats = new Set<string>()
+    if (monthCatData) monthCatData.categories.forEach((c) => allCats.add(c))
+    categories.forEach((c) => allCats.add(c.category))
+    const sorted = [...allCats].sort((a, b) => {
+      const aTotal = categories.find((c) => c.category === a)?.total ?? 0
+      const bTotal = categories.find((c) => c.category === b)?.total ?? 0
+      return aTotal - bTotal
     })
-  }, [])
+    return buildColorMap(sorted)
+  }, [monthCatData, categories])
 
-  if (data.length === 0) return null
+  const topCategories = useMemo(
+    () => [...categories].sort((a, b) => a.total - b.total).slice(0, 12),
+    [categories],
+  )
 
-  const chartData = data.map((d) => ({
-    ...d,
-    category: truncate(d.category ?? 'Unknown', 30),
-    absTotal: Math.abs(d.total),
+  if (!monthCatData || monthCatData.months.length === 0) return null
+
+  const months = monthCatData.months.map((m) => m.month as string)
+  const visibleCats = selectedCategory
+    ? monthCatData.categories.filter((c) => c === selectedCategory)
+    : monthCatData.categories
+
+  const traces: Plotly.Data[] = visibleCats.map((cat) => ({
+    x: months,
+    y: monthCatData.months.map((m) => (m[cat] as number) || 0),
+    name: cat,
+    type: 'bar' as const,
+    marker: { color: colorMap[cat] || '#94a3b8' },
+    hovertemplate: `%{x}<br>${cat}: $%{y:,.0f}<extra></extra>`,
   }))
 
   return (
-    <section className="chart-section">
-      <h2>Top Spending Categories</h2>
-      <ResponsiveContainer width="100%" height={Math.max(300, data.length * 28)}>
-        <BarChart data={chartData} layout="vertical" margin={{ top: 10, right: 30, left: 160, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-          <XAxis type="number" tickFormatter={fmt} stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} />
-          <YAxis type="category" dataKey="category" stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} width={150} />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#1e1e3f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
-            formatter={(value: number) => [fmtFull(-value), 'Total Spent']}
-            labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
-          />
-          <Bar dataKey="absTotal" name="Amount" radius={[0, 4, 4, 0]}>
-            {chartData.map((_, i) => (
-              <Cell key={i} fill={`hsl(${220 + i * 8}, 70%, 65%)`} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </section>
+    <>
+      <section className="chart-section">
+        <div className="section-header">
+          <h2>
+            Monthly Spending
+            {selectedCategory && (
+              <span style={{ fontWeight: 400, fontSize: '0.7em', color: 'rgba(255,255,255,0.4)' }}>
+                {' '}&mdash; {selectedCategory}
+              </span>
+            )}
+          </h2>
+        </div>
+        <Plot
+          data={traces}
+          layout={{
+            barmode: 'stack',
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: 'transparent',
+            font: { color: 'rgba(255,255,255,0.6)', size: 11 },
+            margin: { l: 60, r: 10, t: 10, b: 30 },
+            xaxis: {
+              gridcolor: 'rgba(255,255,255,0.06)',
+              linecolor: 'rgba(255,255,255,0.06)',
+            },
+            yaxis: {
+              gridcolor: 'rgba(255,255,255,0.06)',
+              linecolor: 'rgba(255,255,255,0.06)',
+              tickprefix: '$',
+              separatethousands: true,
+            },
+            showlegend: false,
+            hoverlabel: {
+              bgcolor: '#1e1e3f',
+              bordercolor: 'rgba(255,255,255,0.1)',
+              font: { color: 'rgba(255,255,255,0.8)', size: 12 },
+            },
+          }}
+          config={{ responsive: true, displayModeBar: false }}
+          useResizeHandler
+          style={{ width: '100%', height: 350 }}
+          onClick={(event) => {
+            if (!onBarClick || !event.points || event.points.length === 0) return
+            const pt = event.points[0]
+            onBarClick(pt.x as string, pt.data.name as string)
+          }}
+        />
+      </section>
+
+      <div className="category-buttons">
+        {(() => {
+          const totalSpend = topCategories.reduce((s, c) => s + Math.abs(c.total), 0)
+          return topCategories.map((cat) => {
+            const color = colorMap[cat.category] || '#94a3b8'
+            const isActive = selectedCategory === cat.category
+            const pct = totalSpend > 0 ? (Math.abs(cat.total) / totalSpend) * 100 : 0
+            return (
+              <button
+                key={cat.category}
+                className={`category-btn ${isActive ? 'active' : ''}`}
+                style={{
+                  borderColor: isActive ? color : 'rgba(255,255,255,0.1)',
+                  backgroundColor: isActive ? color + '22' : 'transparent',
+                }}
+                onClick={() => onCategoryChange(isActive ? null : cat.category)}
+              >
+                <span className="category-btn-dot" style={{ backgroundColor: color }} />
+                <span className="category-btn-name">{cat.category}</span>
+                <span className="category-btn-amount">
+                  {fmtDollar(cat.total)} &middot; {pct.toFixed(0)}%
+                </span>
+              </button>
+            )
+          })
+        })()}
+      </div>
+    </>
   )
 }

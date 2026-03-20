@@ -458,3 +458,377 @@ header h1 {
 .txn-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.03);
 }
+
+/* Summary cards */
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+@media (max-width: 900px) {
+  .summary-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.summary-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.summary-card-label {
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.summary-card-value {
+  font-size: 1.5em;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-card-change {
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+/* Top categories list */
+.category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.category-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.category-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.category-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 180px;
+  flex-shrink: 0;
+}
+
+.category-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.category-name {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.category-count {
+  font-size: 0.7em;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+.category-bar-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.category-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.category-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.sparkline-svg {
+  flex-shrink: 0;
+}
+
+.category-total {
+  font-size: 0.9em;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 80px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Filter pill */
+.filter-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 4px 10px;
+  background: rgba(129, 140, 248, 0.15);
+  border: 1px solid #818cf8;
+  color: #818cf8;
+  border-radius: 20px;
+  font-size: 0.75em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.filter-pill:hover {
+  background: rgba(129, 140, 248, 0.25);
+}
+
+.filter-pill-x {
+  font-size: 1.1em;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.spending-chart-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.spending-chart-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+.spending-chart-pie {
+  width: 400px;
+  flex-shrink: 0;
+}
+
+.category-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 4px 16px;
+}
+
+.category-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.category-btn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.category-btn.active {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.category-btn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.category-btn-name {
+  white-space: nowrap;
+}
+
+.category-btn-amount {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+}
+
+/* ── Suggestion Review ──────────────────────────────────────────── */
+
+.suggestion-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #818cf8;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 10px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.suggestion-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.suggestion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  gap: 12px;
+}
+
+.suggestion-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.suggestion-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.suggestion-pattern {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.suggestion-arrow {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 12px;
+}
+
+.suggestion-path {
+  color: #4ade80;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.suggestion-count {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+}
+
+.suggestion-confidence {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.suggestion-confidence.high {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.suggestion-confidence.med {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.suggestion-confidence.low {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+}
+
+.suggestion-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.suggestion-accept,
+.suggestion-reject {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.suggestion-accept {
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.3);
+  color: #4ade80;
+}
+
+.suggestion-accept:hover {
+  background: rgba(74, 222, 128, 0.25);
+}
+
+.suggestion-reject {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.suggestion-reject:hover {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #f87171;
+}
+
+.suggestion-accept:disabled,
+.suggestion-reject:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.suggestion-reasoning {
+  padding: 0 14px 8px;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.suggestion-matches {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.suggestion-matches .txn-table {
+  font-size: 12px;
+}

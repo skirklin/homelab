@@ -3,6 +3,7 @@ import type { Account, MonthSummary, Transaction } from '../api'
 import { fetchAccounts, fetchSpendingByMonth } from '../api'
 import { SpendingCharts } from '../components/SpendingCharts'
 import { TransactionTable } from '../components/TransactionTable'
+import { SuggestionReview } from '../components/SuggestionReview'
 
 const fmtDollar = (v: number) =>
   `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
@@ -76,11 +77,12 @@ export function Spending() {
   const [selectedAccount, setSelectedAccount] = useState<string | undefined>()
   const [months, setMonths] = useState<MonthSummary[]>([])
   const [filter, setFilter] = useState<FilterState>({})
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     fetchAccounts().then(setAccounts)
     fetchSpendingByMonth().then(setMonths)
-  }, [])
+  }, [refreshKey])
 
   const handleBarClick = useCallback((month: string, category: string) => {
     setFilter((prev) =>
@@ -93,6 +95,10 @@ export function Spending() {
   }, [])
 
   const clearFilter = useCallback(() => setFilter({}), [])
+
+  const handleRulesChanged = useCallback(() => {
+    setRefreshKey((k) => k + 1)
+  }, [])
 
   const filterFn = useMemo(() => {
     if (!filter.month && !filter.category) return undefined
@@ -117,11 +123,14 @@ export function Spending() {
     <>
       <SummaryCards months={months} />
       <SpendingCharts
+        key={refreshKey}
         selectedCategory={filter.category ?? null}
         onCategoryChange={handleCategoryChange}
         onBarClick={handleBarClick}
       />
+      <SuggestionReview onRulesChanged={handleRulesChanged} />
       <TransactionTable
+        key={`txn-${refreshKey}`}
         accounts={accounts}
         accountId={selectedAccount}
         onAccountChange={setSelectedAccount}

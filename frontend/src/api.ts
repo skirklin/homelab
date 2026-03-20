@@ -170,3 +170,48 @@ export interface TripSummary {
 
 export const fetchTravelTrips = () =>
   get<{ trips: TripSummary[] }>('/api/travel/trips').then((d) => d.trips)
+
+// ── Suggestions ──────────────────────────────────────────────────────
+
+export interface SuggestionMatch {
+  id: number
+  date: string
+  amount: number
+  description: string | null
+  category: string | null
+  current_category_path: string | null
+  account_name: string
+  institution: string
+}
+
+export interface Suggestion {
+  id: number
+  pattern: string
+  category_path: string
+  confidence: number | null
+  reasoning: string | null
+  created_at: string
+  matches: SuggestionMatch[]
+}
+
+export const fetchSuggestions = () =>
+  get<{ suggestions: Suggestion[] }>('/api/suggestions').then((d) => d.suggestions)
+
+async function post<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  return res.json()
+}
+
+export const acceptSuggestion = (id: number) =>
+  post<{ accepted: boolean; categorized: number }>(`/api/suggestions/${id}/accept`)
+
+export const rejectSuggestion = (id: number) =>
+  post<{ rejected: boolean }>(`/api/suggestions/${id}/reject`)
+
+export const generateSuggestions = () =>
+  post<{ status: string }>('/api/suggestions/generate')
