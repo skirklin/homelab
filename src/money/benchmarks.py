@@ -93,6 +93,70 @@ ETF_ASSET_CLASS: dict[str, str] = {
     "GSG": "Commodities",
 }
 
+# Normalize the various asset class names from different institutions
+# into a consistent two-level hierarchy: broad class / sub-class
+ASSET_CLASS_NORMALIZE: dict[str, str] = {
+    # US Equities
+    "U.S. Large Cap Stocks": "US Equities / Large Cap",
+    "US Large Cap": "US Equities / Large Cap",
+    "US Large Cap (Direct Index)": "US Equities / Large Cap",
+    "US Large-Cap": "US Equities / Large Cap",
+    "US Total Market": "US Equities / Total Market",
+    "US Large Cap Value": "US Equities / Large Cap Value",
+    "US Large Cap Growth": "US Equities / Large Cap Growth",
+    "U.S. Socially Responsible Stocks - Large Cap": "US Equities / Large Cap",
+    "U.S. Quality Factor Stocks": "US Equities / Large Cap",
+    "U.S. Engagement Stocks": "US Equities / Large Cap",
+    "U.S. Mid Cap Stocks": "US Equities / Mid Cap",
+    "US Mid Cap": "US Equities / Mid Cap",
+    "US Mid Cap Value": "US Equities / Mid Cap",
+    "US Mid/Small Cap": "US Equities / Mid Cap",
+    "U.S. Small Cap Stocks": "US Equities / Small Cap",
+    "US Small Cap": "US Equities / Small Cap",
+    "US Small Cap Value": "US Equities / Small Cap",
+    "U.S. Growth Stocks - Small Cap": "US Equities / Small Cap",
+    "U.S. Socially Responsible Stocks - Small Cap": "US Equities / Small Cap",
+    # International Equities
+    "International Developed Market Stocks": "Int'l Equities / Developed",
+    "International Developed": "Int'l Equities / Developed",
+    "International Developed Market Stocks - Europe": "Int'l Equities / Developed",
+    "International Developed Market Stocks - Japan": "Int'l Equities / Developed",
+    "International Emerging Market Stocks": "Int'l Equities / Emerging",
+    "International Emerging": "Int'l Equities / Emerging",
+    "International Emerging Market Socially Responsible Stocks": "Int'l Equities / Emerging",
+    # Bonds
+    "U.S. High Quality Bonds": "Bonds / US Aggregate",
+    "US Total Bond": "Bonds / US Aggregate",
+    "U.S. Municipal Bonds": "Bonds / US Municipal",
+    "US Municipal Bond": "Bonds / US Municipal",
+    "Active Municipal Bonds": "Bonds / US Municipal",
+    "International Bonds": "Bonds / International",
+    "International Developed Market Bonds": "Bonds / International",
+    "International Emerging Market Bonds": "Bonds / Emerging Market",
+    "Emerging Market Bond": "Bonds / Emerging Market",
+    "US Corporate Bond": "Bonds / US Corporate",
+    "U.S. Investment-Grade Corporate Bonds": "Bonds / US Corporate",
+    "U.S. Socially Responsible High Quality Bonds": "Bonds / US Aggregate",
+    "US TIPS": "Bonds / TIPS",
+    "US Short-Term TIPS": "Bonds / TIPS",
+    "U.S. Inflation-Protected Bonds": "Bonds / TIPS",
+    "U.S. Short-Term Treasury Bonds": "Bonds / US Treasury",
+    "US Short-Term Treasury": "Bonds / US Treasury",
+    "US Short-Term Bond": "Bonds / US Treasury",
+    # Real Estate
+    "US REITs": "Real Estate",
+    "International REITs": "Real Estate",
+    # Other
+    "Gold": "Commodities",
+    "Commodities": "Commodities",
+}
+
+
+def normalize_asset_class(raw: str) -> str:
+    """Normalize an asset class name to a canonical two-level hierarchy."""
+    return ASSET_CLASS_NORMALIZE.get(raw, raw)
+
+
 # Broad benchmark tickers for comparison
 BENCHMARKS = {
     "SPY": "S&P 500",

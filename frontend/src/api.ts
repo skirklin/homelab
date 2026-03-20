@@ -281,3 +281,38 @@ export const confirmRecurring = (id: number) =>
 
 export const dismissRecurring = (id: number) =>
   post<{ dismissed: boolean }>(`/api/recurring/${id}/dismiss`)
+
+// ── Investments ─────────────────────────────────────────────────────
+
+export interface AllocationItem {
+  asset_class: string
+  broad_class: string
+  sub_class: string | null
+  value: number
+  by_institution: Record<string, number>
+}
+
+export const fetchAllocation = () =>
+  get<{ allocation: AllocationItem[] }>('/api/allocation').then((d) => d.allocation)
+
+export interface BenchmarkPoint {
+  date: string
+  close: number
+  adj_close: number
+}
+
+export interface BenchmarkSeries {
+  name: string
+  data: BenchmarkPoint[]
+}
+
+export const fetchBenchmarks = (symbols?: string[], start?: string, end?: string) => {
+  const params = new URLSearchParams()
+  if (symbols) symbols.forEach((s) => params.append('symbols', s))
+  if (start) params.set('start', start)
+  if (end) params.set('end', end)
+  const qs = params.toString()
+  return get<{ benchmarks: Record<string, BenchmarkSeries> }>(
+    `/api/benchmarks${qs ? `?${qs}` : ''}`,
+  ).then((d) => d.benchmarks)
+}

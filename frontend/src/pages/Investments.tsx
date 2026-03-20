@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { Account } from '../api'
 import { fetchAccounts } from '../api'
-import { PerformanceChart } from '../components/PerformanceChart'
+import { AllocationChart } from '../components/AllocationChart'
+import { PerformanceVsBenchmark } from '../components/PerformanceVsBenchmark'
 
 const fmtDollar = (v: number) =>
   `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -71,7 +72,8 @@ export function Investments() {
 
   return (
     <>
-      <PerformanceChart />
+      <PerformanceVsBenchmark />
+      <AllocationChart />
 
       <section className="chart-section">
         <div className="section-header">

@@ -362,6 +362,8 @@ class IngestHandler(BaseHTTPRequestHandler):
 
     def _handle_allocation(self) -> None:
         """Return asset allocation breakdown across all investment accounts."""
+        from money.benchmarks import normalize_asset_class
+
         rows = self.db.conn.execute("""
             SELECT COALESCE(h.asset_class, 'Unclassified') as asset_class,
                    SUM(h.value) as total_value,
@@ -375,30 +377,34 @@ class IngestHandler(BaseHTTPRequestHandler):
             ORDER BY total_value DESC
         """).fetchall()
 
-        allocation: list[dict[str, Any]] = []
+        # Normalize asset classes and aggregate
+        by_class: dict[str, float] = {}
+        by_class_inst: dict[str, dict[str, float]] = {}
         for row in rows:
-            allocation.append({
-                "asset_class": row["asset_class"],
-                "value": row["total_value"],
-                "positions": row["position_count"],
-                "institution": row["institution"],
+            normalized = normalize_asset_class(row["asset_class"])
+            inst = row["institution"]
+            val = float(row["total_value"])
+
+            by_class[normalized] = by_class.get(normalized, 0.0) + val
+            if normalized not in by_class_inst:
+                by_class_inst[normalized] = {}
+            by_class_inst[normalized][inst] = (
+                by_class_inst[normalized].get(inst, 0.0) + val
+            )
+
+        # Split into broad class (before /) and sub-class (after /)
+        summary = []
+        for cls, val in sorted(by_class.items(), key=lambda x: -x[1]):
+            parts = cls.split(" / ", 1)
+            summary.append({
+                "asset_class": cls,
+                "broad_class": parts[0],
+                "sub_class": parts[1] if len(parts) > 1 else None,
+                "value": val,
+                "by_institution": by_class_inst.get(cls, {}),
             })
 
-        # Also aggregate by asset class (across institutions)
-        by_class: dict[str, float] = {}
-        for item in allocation:
-            cls = item["asset_class"]
-            by_class[cls] = by_class.get(cls, 0.0) + item["value"]
-
-        summary = [
-            {"asset_class": k, "value": v}
-            for k, v in sorted(by_class.items(), key=lambda x: -x[1])
-        ]
-
-        self._json_response(200, {
-            "by_institution": allocation,
-            "by_asset_class": summary,
-        })
+        self._json_response(200, {"allocation": summary})
 
     def _handle_benchmarks(self) -> None:
         """Return benchmark price history for comparison charts."""
