@@ -3,7 +3,7 @@
   "name": "Money Data Collector",
   "version": "0.1.0",
   "description": "Collects financial data from supported institution websites",
-  "permissions": ["activeTab", "storage", "cookies", "scripting"],
+  "permissions": ["activeTab", "storage", "cookies", "scripting", "webNavigation", "tabs"],
   "host_permissions": [
     "http://localhost:5555/*",
     "https://*.ally.com/*",

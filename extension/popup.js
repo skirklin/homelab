@@ -17,9 +17,8 @@ async function init() {
 }
 
 async function loadSettings() {
-  const result = await chrome.storage.local.get(["serverPort", "profile"]);
+  const result = await chrome.storage.local.get(["serverPort"]);
   document.getElementById("portInput").value = result.serverPort || 5555;
-  document.getElementById("profileInput").value = result.profile || "";
 
   document.getElementById("portInput").addEventListener("change", async (e) => {
     const newPort = parseInt(e.target.value, 10);
@@ -27,10 +26,6 @@ async function loadSettings() {
       await chrome.storage.local.set({ serverPort: newPort });
       await checkServer();
     }
-  });
-
-  document.getElementById("profileInput").addEventListener("change", async (e) => {
-    await chrome.storage.local.set({ profile: e.target.value.trim() });
   });
 }
 
@@ -120,12 +115,10 @@ async function captureCookies(institutionId, btn) {
   btn.disabled = true;
   btn.textContent = "...";
 
-  const profile = document.getElementById("profileInput").value.trim() || undefined;
   const resultEl = document.getElementById(`result-${institutionId}`);
   const response = await chrome.runtime.sendMessage({
     type: "CAPTURE_COOKIES",
     institution: institutionId,
-    profile,
   });
 
   if (response.success) {

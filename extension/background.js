@@ -53,7 +53,7 @@ async function checkServerHealth() {
   }
 }
 
-async function captureCookies(institution, profile) {
+async function captureCookies(institution) {
   const domains = COOKIE_DOMAINS[institution];
   if (!domains) return { success: false, error: `Unknown institution: ${institution}` };
 
@@ -83,7 +83,6 @@ async function captureCookies(institution, profile) {
     cookies: allCookies,
     captured_at: new Date().toISOString(),
   };
-  if (profile) payload.profile = profile;
 
   const result = await sendToServer("/cookies", payload);
 
@@ -107,6 +106,92 @@ function getInstitutionForUrl(url) {
   return null;
 }
 
+// Institutions that need network recording (can't replay cookies)
+const NETWORK_LOG_INSTITUTIONS = new Set(["chase", "morgan_stanley"]);
+
+// Debounce auto-capture: don't re-send cookies for the same institution within 30s
+const lastAutoCapture = {};
+const AUTO_CAPTURE_COOLDOWN_MS = 30_000;
+
+// Auto-capture cookies when navigating to a supported site
+chrome.webNavigation.onCompleted.addListener(async (details) => {
+  // Only main frame, not iframes
+  if (details.frameId !== 0) return;
+
+  const institution = getInstitutionForUrl(details.url);
+  if (!institution) return;
+
+  // Cooldown check
+  const now = Date.now();
+  if (lastAutoCapture[institution] && now - lastAutoCapture[institution] < AUTO_CAPTURE_COOLDOWN_MS) {
+    return;
+  }
+  lastAutoCapture[institution] = now;
+
+  // Auto-capture cookies
+  const result = await captureCookies(institution);
+  if (result.success) {
+    console.log(`[Money] Auto-captured ${result.count} cookies for ${institution}`);
+  }
+
+  // Auto-start network recording for institutions that need it.
+  // The content script is already injected by manifest.json content_scripts,
+  // so we just need to send the START_RECORDING message.
+  if (NETWORK_LOG_INSTITUTIONS.has(institution) && !recordingTabs[details.tabId]) {
+    networkBuffer[institution] = [];
+    recordingTabs[details.tabId] = institution;
+    try {
+      await chrome.tabs.sendMessage(details.tabId, { type: "START_RECORDING" });
+      console.log(`[Money] Auto-started network recording for ${institution}`);
+    } catch (err) {
+      console.warn(`[Money] Could not start recording for ${institution}:`, err);
+    }
+  }
+});
+
+// Auto-flush network log when navigating away from a recorded tab
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (changeInfo.url === undefined) return;
+
+  const institution = recordingTabs[tabId];
+  if (!institution) return;
+
+  // Check if the new URL is still the same institution
+  const newInstitution = getInstitutionForUrl(changeInfo.url);
+  if (newInstitution === institution) return;
+
+  // Navigated away — flush the network log
+  delete recordingTabs[tabId];
+  const entries = networkBuffer[institution] || [];
+  if (entries.length > 0) {
+    const result = await sendToServer("/network-log", {
+      institution,
+      entries,
+      captured_at: new Date().toISOString(),
+    });
+    console.log(`[Money] Auto-flushed ${entries.length} network entries for ${institution}:`, result);
+  }
+  delete networkBuffer[institution];
+});
+
+// Also flush when a recorded tab is closed
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const institution = recordingTabs[tabId];
+  if (!institution) return;
+
+  delete recordingTabs[tabId];
+  const entries = networkBuffer[institution] || [];
+  if (entries.length > 0) {
+    await sendToServer("/network-log", {
+      institution,
+      entries,
+      captured_at: new Date().toISOString(),
+    });
+    console.log(`[Money] Auto-flushed ${entries.length} entries for ${institution} (tab closed)`);
+  }
+  delete networkBuffer[institution];
+});
+
 // Listen for messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CHECK_HEALTH") {
@@ -115,7 +200,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "CAPTURE_COOKIES") {
-    captureCookies(message.institution, message.profile).then(sendResponse);
+    captureCookies(message.institution).then(sendResponse);
     return true;
   }
 
