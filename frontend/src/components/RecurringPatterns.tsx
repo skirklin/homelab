@@ -45,6 +45,20 @@ export function RecurringPatterns() {
   const totalMonthly = confirmed.reduce((s, p) => s + p.annual_cost / 12, 0)
   const totalAnnual = confirmed.reduce((s, p) => s + p.annual_cost, 0)
 
+  // Group by top-level category
+  const grouped = new Map<string, RecurringPattern[]>()
+  for (const p of all) {
+    const topLevel = (p.category_path || 'uncategorized').split('/')[0]
+    if (!grouped.has(topLevel)) grouped.set(topLevel, [])
+    grouped.get(topLevel)!.push(p)
+  }
+  // Sort groups by total annual cost
+  const sortedGroups = [...grouped.entries()].sort((a, b) => {
+    const aTotal = a[1].reduce((s, p) => s + p.annual_cost, 0)
+    const bTotal = b[1].reduce((s, p) => s + p.annual_cost, 0)
+    return bTotal - aTotal
+  })
+
   const now = new Date()
   const stale = confirmed.filter((p) => {
     const last = new Date(p.last_seen)
@@ -73,50 +87,50 @@ export function RecurringPatterns() {
         </div>
       )}
 
-      <table className="cat-stats-table">
-        <thead>
-          <tr>
-            <th>description</th>
-            <th>category</th>
-            <th className="right">amount</th>
-            <th>freq</th>
-            <th className="right">annual</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {all.map((p) => (
-            <tr key={p.id} className="cat-stats-row" onClick={() => toggleExpand(p)}>
-              <td className="cat-name">{p.description}</td>
-              <td className="dim">{p.category_path || '?'}</td>
-              <td className="right num">{fmtDollar(p.avg_amount)}</td>
-              <td className="dim">{p.frequency}</td>
-              <td className="right num">{fmtDollar(p.annual_cost)}</td>
-              <td className="cat-actions">
-                {p.status === 'detected' && (
-                  <>
-                    <button className="suggestion-accept" onClick={(e) => { e.stopPropagation(); handleConfirm(p.id) }}>confirm</button>
-                    <button className="suggestion-reject" onClick={(e) => { e.stopPropagation(); handleDismiss(p.id) }}>dismiss</button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {expandedId && expandedTxns.length > 0 && (
-        <div className="recurring-txns">
-          {expandedTxns.map((t) => (
-            <div key={t.id} className="recurring-txn-row">
-              <span className="dim">{t.date}</span>
-              <span>{t.description}</span>
-              <span className="num">{fmtDollar(t.amount)}</span>
-              <span className="dim">{t.account_name}</span>
+      {sortedGroups.map(([group, items]) => {
+        const groupAnnual = items.reduce((s, p) => s + p.annual_cost, 0)
+        return (
+          <div key={group} className="recurring-group">
+            <div className="recurring-group-header">
+              <span>{group}</span>
+              <span className="dim">{fmtDollar(groupAnnual)}/yr</span>
             </div>
-          ))}
-        </div>
-      )}
+            <table className="cat-stats-table">
+              <tbody>
+                {items.map((p) => (
+                  <tr key={p.id} className="cat-stats-row" onClick={() => toggleExpand(p)}>
+                    <td className="cat-name">{p.description}</td>
+                    <td className="dim">{p.category_path?.split('/').slice(1).join('/') || ''}</td>
+                    <td className="right num">{fmtDollar(p.avg_amount)}</td>
+                    <td className="dim">{p.frequency}</td>
+                    <td className="right num">{fmtDollar(p.annual_cost)}</td>
+                    <td className="cat-actions">
+                      {p.status === 'detected' && (
+                        <>
+                          <button className="suggestion-accept" onClick={(e) => { e.stopPropagation(); handleConfirm(p.id) }}>confirm</button>
+                          <button className="suggestion-reject" onClick={(e) => { e.stopPropagation(); handleDismiss(p.id) }}>dismiss</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {items.some((p) => p.id === expandedId) && expandedTxns.length > 0 && (
+              <div className="recurring-txns">
+                {expandedTxns.map((t) => (
+                  <div key={t.id} className="recurring-txn-row">
+                    <span className="dim">{t.date}</span>
+                    <span>{t.description}</span>
+                    <span className="num">{fmtDollar(t.amount)}</span>
+                    <span className="dim">{t.account_name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </>
   )
 }

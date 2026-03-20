@@ -906,6 +906,21 @@ header h1 {
   flex: 1;
 }
 
+.recurring-group {
+  margin-bottom: 4px;
+}
+
+.recurring-group-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 8px;
+}
+
 .recurring-txns {
   padding: 4px 14px 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
