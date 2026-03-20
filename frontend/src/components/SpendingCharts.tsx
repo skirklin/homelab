@@ -40,13 +40,11 @@ export function SpendingCharts({
   const [subcategories, setSubcategories] = useState<CategorySummary[]>([])
   const [drillMonthData, setDrillMonthData] = useState<MonthCategoryData | null>(null)
 
-  // Fetch top-level data
   useEffect(() => {
     fetchSpendingByMonthCategory(12).then(setMonthCatData)
     fetchSpendingByCategory().then(setCategories)
   }, [])
 
-  // When a category is selected, fetch its subcategory breakdown
   useEffect(() => {
     if (selectedCategory && selectedCategory !== 'Uncategorized') {
       fetchSpendingBySubcategory(selectedCategory).then(setSubcategories)
@@ -57,12 +55,12 @@ export function SpendingCharts({
     }
   }, [selectedCategory])
 
-  // Determine which data to show in the chart
   const activeMonthData = selectedCategory && drillMonthData ? drillMonthData : monthCatData
   const activeCategories = selectedCategory && subcategories.length > 0
     ? subcategories
     : categories
 
+  // Color map for the active chart view (drill-down or top-level)
   const colorMap = useMemo(() => {
     const allCats = new Set<string>()
     if (activeMonthData) activeMonthData.categories.forEach((c) => allCats.add(c))
@@ -75,31 +73,7 @@ export function SpendingCharts({
     return buildColorMap(sorted)
   }, [activeMonthData, activeCategories])
 
-  const topCategories = useMemo(
-    () => [...categories].sort((a, b) => a.total - b.total).slice(0, 12),
-    [categories],
-  )
-
-  const topSubcategories = useMemo(
-    () => [...subcategories].sort((a, b) => a.total - b.total).slice(0, 12),
-    [subcategories],
-  )
-
-  if (!activeMonthData || activeMonthData.months.length === 0) return null
-
-  const months = activeMonthData.months.map((m) => m.month as string)
-  const visibleCats = activeMonthData.categories
-
-  const traces: Plotly.Data[] = visibleCats.map((cat) => ({
-    x: months,
-    y: activeMonthData.months.map((m) => (m[cat] as number) || 0),
-    name: cat,
-    type: 'bar' as const,
-    marker: { color: colorMap[cat] || '#94a3b8' },
-    hovertemplate: `%{x}<br>${cat}: $%{y:,.0f}<extra></extra>`,
-  }))
-
-  // Color map for top-level buttons (always computed, no conditional hook)
+  // Color map for top-level buttons (stable across drill-down)
   const topLevelColorMap = useMemo(() => {
     const allCats = new Set<string>()
     if (monthCatData) monthCatData.categories.forEach((c) => allCats.add(c))
@@ -112,10 +86,33 @@ export function SpendingCharts({
     return buildColorMap(sorted)
   }, [monthCatData, categories])
 
-  // Show subcategory buttons when drilled in, otherwise top-level
+  const topCategories = useMemo(
+    () => [...categories].sort((a, b) => a.total - b.total).slice(0, 12),
+    [categories],
+  )
+
+  const topSubcategories = useMemo(
+    () => [...subcategories].sort((a, b) => a.total - b.total).slice(0, 12),
+    [subcategories],
+  )
+
   const isDrilledIn = selectedCategory != null && topSubcategories.length > 0
   const displayedButtons = isDrilledIn ? topSubcategories : topCategories
   const buttonColorMap = isDrilledIn ? colorMap : topLevelColorMap
+
+  // Early return AFTER all hooks
+  if (!activeMonthData || activeMonthData.months.length === 0) return null
+
+  const months = activeMonthData.months.map((m) => m.month as string)
+
+  const traces: Plotly.Data[] = activeMonthData.categories.map((cat) => ({
+    x: months,
+    y: activeMonthData.months.map((m) => (m[cat] as number) || 0),
+    name: cat,
+    type: 'bar' as const,
+    marker: { color: colorMap[cat] || '#94a3b8' },
+    hovertemplate: `%{x}<br>${cat}: $%{y:,.0f}<extra></extra>`,
+  }))
 
   return (
     <>
@@ -191,8 +188,6 @@ export function SpendingCharts({
                 }}
                 onClick={() => {
                   if (selectedCategory) {
-                    // Already drilled in — clicking a subcategory could filter further
-                    // For now, toggle back to top level
                     onCategoryChange(null)
                   } else {
                     onCategoryChange(cat.category)
