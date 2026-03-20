@@ -12,6 +12,13 @@ const PALETTE = [
   '#e879f9', '#67e8f9',
 ]
 
+const TIME_PRESETS = [
+  { label: '3m', key: '3m' },
+  { label: '6m', key: '6m' },
+  { label: '1y', key: '1y' },
+  { label: 'all', key: 'all' },
+]
+
 function buildColorMap(categories: string[]): Record<string, string> {
   const map: Record<string, string> = {}
   categories.forEach((cat, i) => {
@@ -34,8 +41,8 @@ interface CatStats {
 function computeStats(
   categories: CategorySummary[],
   monthData: MonthCategoryData | null,
+  totalSpend: number,
 ): CatStats[] {
-  const totalSpend = categories.reduce((s, c) => s + Math.abs(c.total), 0)
   if (!monthData) {
     return categories.map((c) => ({
       category: c.category,
@@ -74,6 +81,8 @@ interface SpendingChartsProps {
   onPrefixChange: (prefix: string | null) => void
   onBarClick?: (month: string, category: string) => void
   timeRange?: TimeRange
+  timeKey: string
+  onTimeKeyChange: (key: string) => void
 }
 
 export function SpendingCharts({
@@ -81,12 +90,14 @@ export function SpendingCharts({
   onPrefixChange,
   onBarClick,
   timeRange,
+  timeKey,
+  onTimeKeyChange,
 }: SpendingChartsProps) {
   const [monthCatData, setMonthCatData] = useState<MonthCategoryData | null>(null)
   const [categories, setCategories] = useState<CategorySummary[]>([])
 
   useEffect(() => {
-    fetchSpendingByMonthCategory(12, prefix ?? undefined, timeRange).then(setMonthCatData)
+    fetchSpendingByMonthCategory(15, prefix ?? undefined, timeRange).then(setMonthCatData)
     fetchSpendingByCategory(prefix ?? undefined, timeRange).then(setCategories)
   }, [prefix, timeRange])
 
@@ -107,10 +118,40 @@ export function SpendingCharts({
     [categories],
   )
 
-  const stats = useMemo(
-    () => computeStats(sortedCategories, monthCatData),
-    [sortedCategories, monthCatData],
+  const totalSpend = useMemo(
+    () => categories.reduce((s, c) => s + Math.abs(c.total), 0),
+    [categories],
   )
+
+  const totalCount = useMemo(
+    () => categories.reduce((s, c) => s + c.count, 0),
+    [categories],
+  )
+
+  const stats = useMemo(
+    () => computeStats(sortedCategories, monthCatData, totalSpend),
+    [sortedCategories, monthCatData, totalSpend],
+  )
+
+  // Totals row stats
+  const totalsRow = useMemo(() => {
+    if (!monthCatData) return null
+    const monthlyTotals = monthCatData.months.map((m) => {
+      let sum = 0
+      for (const cat of monthCatData.categories) {
+        sum += (m[cat] as number) || 0
+      }
+      return sum
+    })
+    const n = monthlyTotals.length
+    const avg = n > 0 ? monthlyTotals.reduce((s, v) => s + v, 0) / n : 0
+    const min = n > 0 ? Math.min(...monthlyTotals) : 0
+    const max = n > 0 ? Math.max(...monthlyTotals) : 0
+    const variance = n > 0
+      ? monthlyTotals.reduce((s, v) => s + (v - avg) ** 2, 0) / n
+      : 0
+    return { avg, min, max, stddev: Math.sqrt(variance) }
+  }, [monthCatData])
 
   if (!monthCatData || monthCatData.months.length === 0) return null
 
@@ -154,6 +195,17 @@ export function SpendingCharts({
               )
             })}
           </h2>
+          <div className="time-presets">
+            {TIME_PRESETS.map((p) => (
+              <button
+                key={p.key}
+                className={`time-preset-btn ${timeKey === p.key ? 'active' : ''}`}
+                onClick={() => onTimeKeyChange(p.key)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
         <Plot
           data={traces}
@@ -191,50 +243,61 @@ export function SpendingCharts({
         />
       </section>
 
-      {stats.length > 1 && (
-        <section className="chart-section">
-          <table className="cat-stats-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>category</th>
-                <th className="right">total</th>
-                <th className="right">%</th>
-                <th className="right">avg/mo</th>
-                <th className="right">min/mo</th>
-                <th className="right">max/mo</th>
-                <th className="right">stddev</th>
-                <th className="right">txns</th>
+      <section className="chart-section">
+        <table className="cat-stats-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>category</th>
+              <th className="right">total</th>
+              <th className="right">%</th>
+              <th className="right">avg/mo</th>
+              <th className="right">min/mo</th>
+              <th className="right">max/mo</th>
+              <th className="right">stddev</th>
+              <th className="right">txns</th>
+            </tr>
+          </thead>
+          <tbody>
+            {totalsRow && (
+              <tr className="cat-stats-totals">
+                <td></td>
+                <td className="cat-name">total</td>
+                <td className="right num">{fmtDollar(totalSpend)}</td>
+                <td className="right num dim">100%</td>
+                <td className="right num">{fmtDollar(totalsRow.avg)}</td>
+                <td className="right num dim">{fmtDollar(totalsRow.min)}</td>
+                <td className="right num dim">{fmtDollar(totalsRow.max)}</td>
+                <td className="right num dim">{fmtDollar(totalsRow.stddev)}</td>
+                <td className="right num dim">{totalCount}</td>
               </tr>
-            </thead>
-            <tbody>
-              {stats.map((s) => {
-                const color = colorMap[s.category] || '#94a3b8'
-                const childPrefix = prefix ? `${prefix}/${s.category}` : s.category
-                return (
-                  <tr
-                    key={s.category}
-                    className="cat-stats-row"
-                    onClick={() => onPrefixChange(childPrefix)}
-                  >
-                    <td>
-                      <span className="cat-dot" style={{ backgroundColor: color }} />
-                    </td>
-                    <td className="cat-name">{s.category}</td>
-                    <td className="right num">{fmtDollar(s.total)}</td>
-                    <td className="right num dim">{s.pctOfTotal.toFixed(1)}%</td>
-                    <td className="right num">{fmtDollar(s.avg)}</td>
-                    <td className="right num dim">{fmtDollar(s.min)}</td>
-                    <td className="right num dim">{fmtDollar(s.max)}</td>
-                    <td className="right num dim">{fmtDollar(s.stddev)}</td>
-                    <td className="right num dim">{s.count}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </section>
-      )}
+            )}
+            {stats.map((s) => {
+              const color = colorMap[s.category] || '#94a3b8'
+              const childPrefix = prefix ? `${prefix}/${s.category}` : s.category
+              return (
+                <tr
+                  key={s.category}
+                  className="cat-stats-row"
+                  onClick={() => onPrefixChange(childPrefix)}
+                >
+                  <td>
+                    <span className="cat-dot" style={{ backgroundColor: color }} />
+                  </td>
+                  <td className="cat-name">{s.category}</td>
+                  <td className="right num">{fmtDollar(s.total)}</td>
+                  <td className="right num dim">{s.pctOfTotal.toFixed(1)}%</td>
+                  <td className="right num">{fmtDollar(s.avg)}</td>
+                  <td className="right num dim">{fmtDollar(s.min)}</td>
+                  <td className="right num dim">{fmtDollar(s.max)}</td>
+                  <td className="right num dim">{fmtDollar(s.stddev)}</td>
+                  <td className="right num dim">{s.count}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </section>
     </>
   )
 }

@@ -789,6 +789,23 @@ header h1 {
   color: rgba(255, 255, 255, 0.35);
 }
 
+.cat-stats-totals {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.cat-stats-totals .cat-name {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  font-size: 0.85em;
+  letter-spacing: 0.03em;
+}
+
+.cat-stats-totals .num {
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+}
+
 .breadcrumb-link {
   cursor: pointer;
   color: rgba(255, 255, 255, 0.5);
