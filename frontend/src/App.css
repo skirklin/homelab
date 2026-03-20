@@ -688,6 +688,25 @@ header h1 {
   font-size: 11px;
 }
 
+.drill-back-btn {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 2px 10px;
+  font-size: 0.55em;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.drill-back-btn:hover {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 /* ── Suggestion Review ──────────────────────────────────────────── */
 
 .suggestion-badge {

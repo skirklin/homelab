@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import Plot from 'react-plotly.js'
 import type { MonthCategoryData, CategorySummary } from '../api'
-import { fetchSpendingByMonthCategory, fetchSpendingByCategory } from '../api'
+import {
+  fetchSpendingByMonthCategory,
+  fetchSpendingByCategory,
+  fetchSpendingBySubcategory,
+} from '../api'
 
 const fmtDollar = (v: number) =>
   `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
@@ -33,44 +37,85 @@ export function SpendingCharts({
 }: SpendingChartsProps) {
   const [monthCatData, setMonthCatData] = useState<MonthCategoryData | null>(null)
   const [categories, setCategories] = useState<CategorySummary[]>([])
+  const [subcategories, setSubcategories] = useState<CategorySummary[]>([])
+  const [drillMonthData, setDrillMonthData] = useState<MonthCategoryData | null>(null)
 
+  // Fetch top-level data
   useEffect(() => {
     fetchSpendingByMonthCategory(12).then(setMonthCatData)
     fetchSpendingByCategory().then(setCategories)
   }, [])
 
+  // When a category is selected, fetch its subcategory breakdown
+  useEffect(() => {
+    if (selectedCategory && selectedCategory !== 'Uncategorized') {
+      fetchSpendingBySubcategory(selectedCategory).then(setSubcategories)
+      fetchSpendingByMonthCategory(12, selectedCategory).then(setDrillMonthData)
+    } else {
+      setSubcategories([])
+      setDrillMonthData(null)
+    }
+  }, [selectedCategory])
+
+  // Determine which data to show in the chart
+  const activeMonthData = selectedCategory && drillMonthData ? drillMonthData : monthCatData
+  const activeCategories = selectedCategory && subcategories.length > 0
+    ? subcategories
+    : categories
+
   const colorMap = useMemo(() => {
     const allCats = new Set<string>()
-    if (monthCatData) monthCatData.categories.forEach((c) => allCats.add(c))
-    categories.forEach((c) => allCats.add(c.category))
+    if (activeMonthData) activeMonthData.categories.forEach((c) => allCats.add(c))
+    activeCategories.forEach((c) => allCats.add(c.category))
     const sorted = [...allCats].sort((a, b) => {
-      const aTotal = categories.find((c) => c.category === a)?.total ?? 0
-      const bTotal = categories.find((c) => c.category === b)?.total ?? 0
+      const aTotal = activeCategories.find((c) => c.category === a)?.total ?? 0
+      const bTotal = activeCategories.find((c) => c.category === b)?.total ?? 0
       return aTotal - bTotal
     })
     return buildColorMap(sorted)
-  }, [monthCatData, categories])
+  }, [activeMonthData, activeCategories])
 
   const topCategories = useMemo(
     () => [...categories].sort((a, b) => a.total - b.total).slice(0, 12),
     [categories],
   )
 
-  if (!monthCatData || monthCatData.months.length === 0) return null
+  const topSubcategories = useMemo(
+    () => [...subcategories].sort((a, b) => a.total - b.total).slice(0, 12),
+    [subcategories],
+  )
 
-  const months = monthCatData.months.map((m) => m.month as string)
-  const visibleCats = selectedCategory
-    ? monthCatData.categories.filter((c) => c === selectedCategory)
-    : monthCatData.categories
+  if (!activeMonthData || activeMonthData.months.length === 0) return null
+
+  const months = activeMonthData.months.map((m) => m.month as string)
+  const visibleCats = activeMonthData.categories
 
   const traces: Plotly.Data[] = visibleCats.map((cat) => ({
     x: months,
-    y: monthCatData.months.map((m) => (m[cat] as number) || 0),
+    y: activeMonthData.months.map((m) => (m[cat] as number) || 0),
     name: cat,
     type: 'bar' as const,
     marker: { color: colorMap[cat] || '#94a3b8' },
     hovertemplate: `%{x}<br>${cat}: $%{y:,.0f}<extra></extra>`,
   }))
+
+  // Show subcategory buttons when drilled in, otherwise top-level
+  const displayedButtons = selectedCategory && topSubcategories.length > 0
+    ? topSubcategories
+    : topCategories
+  const buttonColorMap = selectedCategory && topSubcategories.length > 0
+    ? colorMap
+    : useMemo(() => {
+        const allCats = new Set<string>()
+        if (monthCatData) monthCatData.categories.forEach((c) => allCats.add(c))
+        categories.forEach((c) => allCats.add(c.category))
+        const sorted = [...allCats].sort((a, b) => {
+          const aTotal = categories.find((c) => c.category === a)?.total ?? 0
+          const bTotal = categories.find((c) => c.category === b)?.total ?? 0
+          return aTotal - bTotal
+        })
+        return buildColorMap(sorted)
+      }, [monthCatData, categories])
 
   return (
     <>
@@ -79,9 +124,17 @@ export function SpendingCharts({
           <h2>
             Monthly Spending
             {selectedCategory && (
-              <span style={{ fontWeight: 400, fontSize: '0.7em', color: 'rgba(255,255,255,0.4)' }}>
-                {' '}&mdash; {selectedCategory}
-              </span>
+              <>
+                <span style={{ fontWeight: 400, fontSize: '0.7em', color: 'rgba(255,255,255,0.4)' }}>
+                  {' '}&mdash; {selectedCategory}
+                </span>
+                <button
+                  className="drill-back-btn"
+                  onClick={() => onCategoryChange(null)}
+                >
+                  &larr; All Categories
+                </button>
+              </>
             )}
           </h2>
         </div>
@@ -123,10 +176,10 @@ export function SpendingCharts({
 
       <div className="category-buttons">
         {(() => {
-          const totalSpend = topCategories.reduce((s, c) => s + Math.abs(c.total), 0)
-          return topCategories.map((cat) => {
-            const color = colorMap[cat.category] || '#94a3b8'
-            const isActive = selectedCategory === cat.category
+          const totalSpend = displayedButtons.reduce((s, c) => s + Math.abs(c.total), 0)
+          return displayedButtons.map((cat) => {
+            const color = buttonColorMap[cat.category] || '#94a3b8'
+            const isActive = !selectedCategory && cat.category === selectedCategory
             const pct = totalSpend > 0 ? (Math.abs(cat.total) / totalSpend) * 100 : 0
             return (
               <button
@@ -136,7 +189,15 @@ export function SpendingCharts({
                   borderColor: isActive ? color : 'rgba(255,255,255,0.1)',
                   backgroundColor: isActive ? color + '22' : 'transparent',
                 }}
-                onClick={() => onCategoryChange(isActive ? null : cat.category)}
+                onClick={() => {
+                  if (selectedCategory) {
+                    // Already drilled in — clicking a subcategory could filter further
+                    // For now, toggle back to top level
+                    onCategoryChange(null)
+                  } else {
+                    onCategoryChange(cat.category)
+                  }
+                }}
               >
                 <span className="category-btn-dot" style={{ backgroundColor: color }} />
                 <span className="category-btn-name">{cat.category}</span>

@@ -128,8 +128,16 @@ export interface MonthCategoryData {
   categories: string[]
 }
 
-export const fetchSpendingByMonthCategory = (top: number = 10) =>
-  get<MonthCategoryData>(`/api/spending/summary?group_by=month_category&top=${top}`)
+export const fetchSpendingByMonthCategory = (top: number = 10, parent?: string) => {
+  const params = new URLSearchParams({ group_by: 'month_category', top: String(top) })
+  if (parent) params.set('parent', parent)
+  return get<MonthCategoryData>(`/api/spending/summary?${params}`)
+}
+
+export const fetchSpendingBySubcategory = (parent: string) =>
+  get<{ categories: CategorySummary[] }>(
+    `/api/spending/summary?group_by=subcategory&parent=${encodeURIComponent(parent)}`,
+  ).then((d) => d.categories)
 
 export interface CollectionInfo {
   id: string

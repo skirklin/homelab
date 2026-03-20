@@ -493,47 +493,84 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(200, {"categories": categories})
 
         elif group_by == "month_category":
-            # Spending by month × top-level category for stacked charts
+            # Spending by month × category for stacked charts.
+            # When parent is set, drill into subcategories within that parent.
             top_n = int(params.get("top", ["10"])[0])
+            parent = params.get("parent", [None])[0]
 
-            top_rows = self.db.conn.execute(f"""
-                {base_cte}
-                SELECT CASE INSTR(b.category_path, '/')
-                         WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
-                         ELSE SUBSTR(b.category_path, 1, INSTR(b.category_path, '/') - 1)
-                       END as cat,
-                       SUM(b.amount) as total
-                FROM base b
-                WHERE b.amount < 0
-                GROUP BY cat
-                ORDER BY total ASC
-                LIMIT ?
-            """, [*date_params, top_n]).fetchall()
-            top_cats = [row["cat"] for row in top_rows]
+            if parent:
+                # Drill-down: show subcategories within the parent
+                parent_prefix = f"{parent}/"
+                parent_len = len(parent_prefix)
 
-            cat_placeholders = ",".join("?" for _ in top_cats)
-            rows = self.db.conn.execute(f"""
-                {base_cte}
-                SELECT strftime('%Y-%m', b.date) as month,
-                       CASE
-                         WHEN CASE INSTR(b.category_path, '/')
-                                WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
-                                ELSE SUBSTR(b.category_path, 1,
-                                            INSTR(b.category_path, '/') - 1)
-                              END IN ({cat_placeholders})
-                         THEN CASE INSTR(b.category_path, '/')
-                                WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
-                                ELSE SUBSTR(b.category_path, 1,
-                                            INSTR(b.category_path, '/') - 1)
-                              END
-                         ELSE 'Other'
-                       END as cat,
-                       SUM(b.amount) as total
-                FROM base b
-                WHERE b.amount < 0
-                GROUP BY month, cat
-                ORDER BY month ASC
-            """, [*date_params, *top_cats]).fetchall()
+                # Extract the next path segment after the parent prefix
+                # e.g. "Housing/Utilities" with parent="Housing" → "Utilities"
+                cat_expr = """
+                    CASE
+                      WHEN b.category_path = ? THEN ?
+                      WHEN b.category_path LIKE ? THEN
+                        CASE INSTR(SUBSTR(b.category_path, ?), '/')
+                          WHEN 0 THEN SUBSTR(b.category_path, ?)
+                          ELSE SUBSTR(b.category_path, ?,
+                                      INSTR(SUBSTR(b.category_path, ?), '/') - 1)
+                        END
+                      ELSE 'Other'
+                    END
+                """
+                cat_params = [
+                    parent, parent,
+                    parent_prefix + "%",
+                    parent_len + 1, parent_len + 1,
+                    parent_len + 1, parent_len + 1,
+                ]
+
+                rows = self.db.conn.execute(f"""
+                    {base_cte}
+                    SELECT strftime('%Y-%m', b.date) as month,
+                           {cat_expr} as cat,
+                           SUM(b.amount) as total
+                    FROM base b
+                    WHERE b.amount < 0
+                      AND (b.category_path = ? OR b.category_path LIKE ?)
+                    GROUP BY month, cat
+                    ORDER BY month ASC
+                """, [*date_params, *cat_params, parent, parent_prefix + "%"]).fetchall()
+            else:
+                # Top-level view
+                top_cat_expr = """
+                    CASE INSTR(b.category_path, '/')
+                      WHEN 0 THEN COALESCE(b.category_path, 'Uncategorized')
+                      ELSE SUBSTR(b.category_path, 1, INSTR(b.category_path, '/') - 1)
+                    END
+                """
+
+                top_rows = self.db.conn.execute(f"""
+                    {base_cte}
+                    SELECT {top_cat_expr} as cat,
+                           SUM(b.amount) as total
+                    FROM base b
+                    WHERE b.amount < 0
+                    GROUP BY cat
+                    ORDER BY total ASC
+                    LIMIT ?
+                """, [*date_params, top_n]).fetchall()
+                top_cats = [row["cat"] for row in top_rows]
+
+                cat_placeholders = ",".join("?" for _ in top_cats)
+                rows = self.db.conn.execute(f"""
+                    {base_cte}
+                    SELECT strftime('%Y-%m', b.date) as month,
+                           CASE
+                             WHEN {top_cat_expr} IN ({cat_placeholders})
+                             THEN {top_cat_expr}
+                             ELSE 'Other'
+                           END as cat,
+                           SUM(b.amount) as total
+                    FROM base b
+                    WHERE b.amount < 0
+                    GROUP BY month, cat
+                    ORDER BY month ASC
+                """, [*date_params, *top_cats]).fetchall()
 
             months_map: dict[str, dict[str, float]] = {}
             all_cats: set[str] = set()
