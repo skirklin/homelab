@@ -138,17 +138,21 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
         if existing:
             db.conn.execute(
                 """UPDATE recurring_patterns
-                   SET avg_amount = ?, match_count = ?, last_seen = ?, description = ?
+                   SET avg_amount = ?, match_count = ?, last_seen = ?,
+                       description = ?, pattern = ?
                    WHERE id = ?""",
-                (avg_amount, len(txns), last_seen, display_desc, existing["id"]),
+                (avg_amount, len(txns), last_seen, display_desc, pattern,
+                 existing["id"]),
             )
             continue
 
         db.conn.execute(
             """INSERT INTO recurring_patterns
-               (description, category_path, avg_amount, frequency, match_count, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (display_desc, category_path, avg_amount, frequency, len(txns), last_seen),
+               (description, category_path, avg_amount, frequency, match_count,
+                last_seen, pattern)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (display_desc, category_path, avg_amount, frequency, len(txns),
+             last_seen, pattern),
         )
         count += 1
 
@@ -176,7 +180,7 @@ def get_recurring_patterns(db: Database) -> list[dict[str, Any]]:
     """Get all recurring patterns (detected + confirmed)."""
     rows = db.conn.execute("""
         SELECT id, description, display_name, category_path, avg_amount, frequency,
-               match_count, last_seen, status, created_at
+               match_count, last_seen, status, pattern, created_at
         FROM recurring_patterns
         WHERE status IN ('detected', 'confirmed')
         ORDER BY avg_amount DESC
@@ -187,6 +191,7 @@ def get_recurring_patterns(db: Database) -> list[dict[str, Any]]:
             "id": row["id"],
             "description": row["description"],
             "display_name": row["display_name"] or row["description"],
+            "pattern": row["pattern"],
             "category_path": row["category_path"],
             "avg_amount": row["avg_amount"],
             "frequency": row["frequency"],

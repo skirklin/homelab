@@ -494,7 +494,6 @@ class IngestHandler(BaseHTTPRequestHandler):
         end = params.get("end", [None])[0]
 
         # Use category_path for grouping; exclude Capital top-level group.
-        # The "top_category" is the first segment of category_path.
         date_filter = "AND t.date >= date('now', '-1 year')"
         date_params: list[str] = []
         if start and end:

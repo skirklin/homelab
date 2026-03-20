@@ -132,6 +132,7 @@ export interface TimeRange {
   end?: string
 }
 
+
 export const fetchSpendingByMonth = (range?: TimeRange) => {
   const params = new URLSearchParams({ group_by: 'month' })
   if (range?.start) params.set('start', range.start)
@@ -262,6 +263,7 @@ export interface RecurringPattern {
   id: number
   description: string
   display_name: string
+  pattern: string | null
   category_path: string | null
   avg_amount: number
   frequency: string

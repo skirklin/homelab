@@ -163,6 +163,11 @@ class Database:
                     "ALTER TABLE recurring_patterns ADD COLUMN display_name TEXT"
                 )
                 self.conn.commit()
+            if "pattern" not in rp_columns:
+                self.conn.execute(
+                    "ALTER TABLE recurring_patterns ADD COLUMN pattern TEXT"
+                )
+                self.conn.commit()
 
     # -- Accounts --
 
