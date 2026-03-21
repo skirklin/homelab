@@ -1,8 +1,13 @@
 """Google Calendar integration — fetches events and detects trips."""
 
 import logging
+import time
 from datetime import date, datetime, timedelta
 from typing import Any, cast
+
+# Simple in-memory cache for calendar results
+_cache: dict[str, tuple[float, Any]] = {}
+_CACHE_TTL = 300  # 5 minutes
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -139,13 +144,29 @@ def detect_trips(
 
     Uses the dedicated Travel calendar as the primary source.
     Falls back to the primary calendar for periods not covered
-    by the Travel calendar.
+    by the Travel calendar. Results are cached for 5 minutes.
     """
     if start is None:
         start = date.today() - timedelta(days=365)
     if end is None:
         end = date.today() + timedelta(days=30)
 
+    cache_key = f"trips:{start}:{end}:{home_city}"
+    if cache_key in _cache:
+        cached_time, cached_result = _cache[cache_key]
+        if time.time() - cached_time < _CACHE_TTL:
+            return cast(list[dict[str, Any]], cached_result)
+
+    trips = _detect_trips_uncached(start, end, home_city)
+    _cache[cache_key] = (time.time(), trips)
+    return trips
+
+
+def _detect_trips_uncached(
+    start: date,
+    end: date,
+    home_city: str,
+) -> list[dict[str, Any]]:
     # 1. Get trips from the Travel calendar (these are authoritative)
     travel_events = fetch_events(start=start, end=end, calendar_id=TRAVEL_CALENDAR_ID)
 

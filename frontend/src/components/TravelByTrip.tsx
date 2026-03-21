@@ -35,18 +35,12 @@ export function TravelByTrip() {
   }, [])
 
   useEffect(() => {
-    if (!chartRef.current) return
-    echartsRef.current = echarts.init(chartRef.current)
-    const handleResize = () => echartsRef.current?.resize()
-    window.addEventListener('resize', handleResize)
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      echartsRef.current?.dispose()
+    if (!chartRef.current || trips.length === 0) return
+    if (!echartsRef.current) {
+      echartsRef.current = echarts.init(chartRef.current)
+      const handleResize = () => echartsRef.current?.resize()
+      window.addEventListener('resize', handleResize)
     }
-  }, [])
-
-  useEffect(() => {
-    if (!echartsRef.current || trips.length === 0) return
 
     const chartTrips = trips
       .filter((t) => t.name !== 'Other Travel' && Math.abs(t.total) > 50)
