@@ -286,6 +286,7 @@ def sync_morgan_stanley(
 
             db.insert_option_grant(
                 OptionGrant(
+                    id=grant_number,
                     account_id=account.id,
                     grant_date=grant_date,
                     grant_type=grant_type,

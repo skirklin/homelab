@@ -15,6 +15,7 @@ const fmtShares = (v: number) => v.toLocaleString(undefined, { maximumFractionDi
 
 export function GrantsDetail() {
   const [data, setData] = useState<GrantsSummary | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     fetchGrants().then(setData)
@@ -24,9 +25,13 @@ export function GrantsDetail() {
 
   return (
     <section className="chart-section">
-      <div className="section-header">
+      <div className="section-header" style={{ cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
         <div>
-          <h2>Equity Grants</h2>
+          <h2>
+            <span style={{ fontSize: 11, marginRight: 6, color: 'rgba(255,255,255,0.3)' }}>
+              {expanded ? '▾' : '▸'}
+            </span>
+            Equity Grants</h2>
           <div className="metric-row">
             <span className="metric positive">
               <span className="metric-label">Vested (pre-tax)</span>
@@ -47,7 +52,7 @@ export function GrantsDetail() {
           </div>
         </div>
       </div>
-      <table className="portfolio-table" style={{ width: '100%' }}>
+      {!expanded ? null : <table className="portfolio-table" style={{ width: '100%' }}>
         <thead>
           <tr>
             <th>Type</th>
@@ -105,7 +110,7 @@ export function GrantsDetail() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table>}
     </section>
   )
 }

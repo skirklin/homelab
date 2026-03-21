@@ -919,6 +919,7 @@ def _replay_morgan_stanley(db: Database, raw_dir: Path) -> None:
             grant_date = date.fromisoformat(grant_date_str)
             award_name: str = raw_grant.get("awardName", "")
             grant_name: str = raw_grant.get("grantName", "")
+            grant_number: str = raw_grant.get("grantNumber", "")
             quantity = int(raw_grant.get("quantityGranted", 0))
 
             strike_price = 0.0
@@ -940,6 +941,7 @@ def _replay_morgan_stanley(db: Database, raw_dir: Path) -> None:
 
             db.insert_option_grant(
                 OptionGrant(
+                    id=grant_number,
                     account_id=account.id,
                     grant_date=grant_date,
                     grant_type=grant_type,
