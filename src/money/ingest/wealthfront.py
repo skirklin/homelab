@@ -11,6 +11,7 @@ from urllib.parse import unquote
 
 from money.config import cookie_relay_path
 from money.db import Database
+from money.ingest.common import read_json, ts_to_date
 from money.models import (
     AccountType,
     Balance,
@@ -218,18 +219,6 @@ def ingest_transfers(
     return count
 
 
-def _ts_to_date(ts: str) -> date:
-    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
-    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
-
-
-def _read_json(path: Path) -> Any:
-    """Read and parse a JSON file, or return None if missing."""
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
-
-
 def parse_raw_wealthfront(
     db: Database,
     inst_dir: Path,
@@ -246,9 +235,9 @@ def parse_raw_wealthfront(
 
     Returns a summary dict with counts written.
     """
-    as_of = _ts_to_date(timestamp)
+    as_of = ts_to_date(timestamp)
 
-    overviews_data = _read_json(inst_dir / f"{timestamp}_overviews.json")
+    overviews_data = read_json(inst_dir / f"{timestamp}_overviews.json")
     if not overviews_data:
         log.warning("Wealthfront: no overviews file for %s", timestamp)
         return {}
@@ -290,7 +279,7 @@ def parse_raw_wealthfront(
             )
 
         # Performance history
-        perf_data = _read_json(inst_dir / f"{timestamp}_{acct_id}_performance.json")
+        perf_data = read_json(inst_dir / f"{timestamp}_{acct_id}_performance.json")
         if perf_data:
             history: list[dict[str, Any]] = perf_data.get("historyList", [])
             perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
@@ -311,7 +300,7 @@ def parse_raw_wealthfront(
                 log.info("  Performance history: %d points", len(perf_rows))
 
         # Holdings from open lots
-        lots_data = _read_json(inst_dir / f"{timestamp}_{acct_id}_open_lots.json")
+        lots_data = read_json(inst_dir / f"{timestamp}_{acct_id}_open_lots.json")
         if lots_data and isinstance(lots_data, dict):
             lots_list: list[dict[str, Any]] = list(lots_data.get("openLotForDisplayList", []))
             by_symbol: dict[str, dict[str, float]] = {}
@@ -344,7 +333,7 @@ def parse_raw_wealthfront(
                 log.info("  Holdings: %d positions", len(holding_rows))
 
         # Transfers as transactions
-        transfers_data = _read_json(inst_dir / f"{timestamp}_{acct_id}_transfers.json")
+        transfers_data = read_json(inst_dir / f"{timestamp}_{acct_id}_transfers.json")
         if transfers_data and isinstance(transfers_data, dict):
             transfers_key = f"wealthfront/{timestamp}_{acct_id}_transfers.json"
             txn_count = ingest_transfers(db, account.id, transfers_data, transfers_key)

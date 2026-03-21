@@ -8,6 +8,7 @@ from typing import Any
 
 from money.config import DATA_DIR
 from money.db import Database
+from money.ingest.common import read_json, ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
 from money.storage import RawStore
 
@@ -79,18 +80,6 @@ def extract_account_list(
     return []
 
 
-def _ts_to_date(ts: str) -> date:
-    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
-    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
-
-
-def _read_json(path: Path) -> Any:
-    """Read and parse a JSON file, or return None if missing."""
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
-
-
 def _parse_network_log_entries(data: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """Parse a raw network log dict into categorised response lists."""
     results: dict[str, list[dict[str, Any]]] = {
@@ -128,11 +117,11 @@ def parse_raw_chase(
 
     Returns a summary dict with counts written.
     """
-    as_of = _ts_to_date(timestamp)
+    as_of = ts_to_date(timestamp)
     log_file = inst_dir / f"{timestamp}_network_log.json"
     raw_key = f"chase/{timestamp}_network_log.json"
 
-    data = _read_json(log_file)
+    data = read_json(log_file)
     if not data:
         log.warning("Chase: no network log file for %s", timestamp)
         return {}

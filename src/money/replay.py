@@ -2,7 +2,6 @@
 
 import logging
 import re
-from datetime import date
 from pathlib import Path
 
 from money.db import Database
@@ -28,11 +27,6 @@ def _find_timestamps(raw_dir: Path, institution: str, anchor: str) -> list[str]:
             if m:
                 timestamps.add(m.group(1))
     return sorted(timestamps)
-
-
-def _ts_to_date(ts: str) -> date:
-    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
-    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
 
 
 def replay_all(db_path: str, raw_dir: Path, profile: str = "default") -> None:

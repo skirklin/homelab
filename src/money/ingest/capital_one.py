@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from money.config import cookie_relay_path
 from money.db import Database
+from money.ingest.common import read_json, ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
 from money.storage import RawStore
 
@@ -90,18 +91,6 @@ def _encode_ref(ref_id: str) -> str:
     return quote(quote(ref_id, safe=""), safe="")
 
 
-def _ts_to_date(ts: str) -> date:
-    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
-    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
-
-
-def _read_json(path: Path) -> Any:
-    """Read and parse a JSON file, or return None if missing."""
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
-
-
 def parse_raw_capital_one(
     db: Database,
     inst_dir: Path,
@@ -116,9 +105,9 @@ def parse_raw_capital_one(
 
     Returns a summary dict with counts written.
     """
-    as_of = _ts_to_date(timestamp)
+    as_of = ts_to_date(timestamp)
 
-    accounts_data = _read_json(inst_dir / f"{timestamp}_accounts.json")
+    accounts_data = read_json(inst_dir / f"{timestamp}_accounts.json")
     if not accounts_data:
         log.warning("Capital One: no accounts file for %s", timestamp)
         return {}
@@ -166,7 +155,7 @@ def parse_raw_capital_one(
         raw_entries: list[dict[str, Any]] = []
         txn_key = f"capital_one/{txn_files[0].name}"
         for txn_file in txn_files:
-            txn_data = _read_json(txn_file)
+            txn_data = read_json(txn_file)
             if not txn_data:
                 continue
             if isinstance(txn_data, dict):

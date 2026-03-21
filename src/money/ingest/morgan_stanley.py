@@ -11,6 +11,7 @@ from typing import Any
 
 from money.config import DATA_DIR
 from money.db import Database
+from money.ingest.common import read_json, ts_to_date
 from money.models import (
     AccountType,
     Balance,
@@ -132,18 +133,6 @@ def determine_grant_type(award_name: str) -> str:
     return award_name
 
 
-def _ts_to_date(ts: str) -> date:
-    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
-    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
-
-
-def _read_json(path: Path) -> Any:
-    """Read and parse a JSON file, or return None if missing."""
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
-
-
 def parse_raw_morgan_stanley(
     db: Database,
     inst_dir: Path,
@@ -159,15 +148,15 @@ def parse_raw_morgan_stanley(
 
     Returns a summary dict with counts written.
     """
-    as_of = _ts_to_date(timestamp)
+    as_of = ts_to_date(timestamp)
 
-    summary_data = _read_json(inst_dir / f"{timestamp}_portfolio_summary.json")
+    summary_data = read_json(inst_dir / f"{timestamp}_portfolio_summary.json")
     if not summary_data:
         log.warning("Morgan Stanley: no portfolio_summary file for %s", timestamp)
         return {}
 
-    grants_data = _read_json(inst_dir / f"{timestamp}_grants.json")
-    portfolio_data = _read_json(inst_dir / f"{timestamp}_portfolio.json")
+    grants_data = read_json(inst_dir / f"{timestamp}_grants.json")
+    portfolio_data = read_json(inst_dir / f"{timestamp}_portfolio.json")
 
     summary: dict[str, Any] = summary_data.get("data", {})
     raw_grants: list[dict[str, Any]] = grants_data.get("data", []) if grants_data else []

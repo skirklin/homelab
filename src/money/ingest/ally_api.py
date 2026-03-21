@@ -9,6 +9,7 @@ from typing import Any
 
 from money.config import DATA_DIR, cookie_relay_path
 from money.db import Database
+from money.ingest.common import read_json, ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
 from money.storage import RawStore
 
@@ -132,18 +133,6 @@ def _fetch_all_transactions(
     return all_transactions
 
 
-def _ts_to_date(ts: str) -> date:
-    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
-    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
-
-
-def _read_json(path: Path) -> Any:
-    """Read and parse a JSON file, or return None if missing."""
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())
-
-
 def parse_raw_ally(
     db: Database,
     inst_dir: Path,
@@ -158,9 +147,9 @@ def parse_raw_ally(
 
     Returns a summary dict with counts of accounts/balances/transactions written.
     """
-    as_of = _ts_to_date(timestamp)
+    as_of = ts_to_date(timestamp)
 
-    accounts_data = _read_json(inst_dir / f"{timestamp}_accounts.json")
+    accounts_data = read_json(inst_dir / f"{timestamp}_accounts.json")
     if not accounts_data:
         log.warning("Ally: no accounts file for %s", timestamp)
         return {}
@@ -227,7 +216,7 @@ def parse_raw_ally(
 
         # Transactions
         txn_path = inst_dir / f"{timestamp}_{external_id}_transactions.json"
-        txns_raw = _read_json(txn_path)
+        txns_raw = read_json(txn_path)
         if not isinstance(txns_raw, list):
             continue
 
@@ -280,7 +269,7 @@ def parse_raw_ally_extension(
     ext_files = sorted(inst_dir.glob("extension_*.json"))
     balance_count = 0
     for ext_path in ext_files:
-        data = _read_json(ext_path)
+        data = read_json(ext_path)
         if not data:
             continue
         ext_accounts: list[dict[str, Any]] = data.get("accounts", [])

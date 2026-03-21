@@ -17,11 +17,6 @@ class AccountType(Enum):
     REAL_ESTATE = "real_estate"
 
 
-class VestingSchedule(Enum):
-    MONTHLY = "monthly"
-    QUARTERLY = "quarterly"
-
-
 class IngestionStatus(Enum):
     SUCCESS = "success"
     ERROR = "error"

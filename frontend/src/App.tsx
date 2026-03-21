@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import type { NetWorthSummary } from './api'
+import type { Account, NetWorthSummary } from './api'
 import { fetchAccounts, fetchNetWorthSummary } from './api'
 import { Overview } from './pages/Overview'
 import { Investments } from './pages/Investments'

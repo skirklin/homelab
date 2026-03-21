@@ -1,9 +1,26 @@
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 import click
 
 from money.db import Database
+from money.storage import LocalStore
+
+
+@contextmanager
+def sync_context(ctx: click.Context) -> Generator[tuple[Database, LocalStore], None, None]:
+    """Context manager that sets up and tears down db + store for sync commands."""
+    from money.config import RAW_STORE_DIR
+
+    db = Database(ctx.obj["db_path"])
+    db.initialize()
+    store = LocalStore(RAW_STORE_DIR)
+    try:
+        yield db, store
+    finally:
+        db.close()
 
 
 @click.group()
@@ -34,15 +51,16 @@ def main(ctx: click.Context, db_path: str, verbose: bool) -> None:
 
 @main.command()
 @click.option("--raw-dir", default=None, type=click.Path(), help="Path to raw data directory.")
+@click.option("--profile", default="default", help="Profile name to assign to replayed accounts.")
 @click.pass_context
-def replay(ctx: click.Context, raw_dir: str | None) -> None:
+def replay(ctx: click.Context, raw_dir: str | None, profile: str) -> None:
     """Delete the database and rebuild from raw captures."""
     from money.config import RAW_STORE_DIR
     from money.replay import replay_all
 
     db_path = ctx.obj["db_path"]
     raw = Path(raw_dir) if raw_dir else RAW_STORE_DIR
-    replay_all(db_path=db_path, raw_dir=raw)
+    replay_all(db_path=db_path, raw_dir=raw, profile=profile)
     click.echo(f"Replay complete. Database rebuilt at {db_path}")
 
 
@@ -475,10 +493,9 @@ def sync() -> None:
 @click.pass_context
 def ally(ctx: click.Context, login_id: str) -> None:
     """Sync Ally Bank accounts. Auto-logs in if no auth token exists."""
-    from money.config import RAW_STORE_DIR, resolve_login_id
+    from money.config import resolve_login_id
     from money.ingest.ally_api import sync_ally_api
     from money.ingest.scrapers.ally import auth_token_path, login_ally
-    from money.storage import LocalStore
 
     resolved = resolve_login_id("ally", login_id)
 
@@ -488,19 +505,13 @@ def ally(ctx: click.Context, login_id: str) -> None:
         click.echo("No auth token found — logging in via browser...")
         token = login_ally(resolved, headless=True)
 
-    db_path = ctx.obj["db_path"]
-    db = Database(db_path)
-    db.initialize()
-    store = LocalStore(RAW_STORE_DIR)
-
-    try:
-        sync_ally_api(db, store, profile=resolved, token=token)
-        click.echo("Ally sync complete.")
-    except Exception as e:
-        click.echo(f"Ally sync failed: {e}", err=True)
-        raise
-    finally:
-        db.close()
+    with sync_context(ctx) as (db, store):
+        try:
+            sync_ally_api(db, store, profile=resolved, token=token)
+            click.echo("Ally sync complete.")
+        except Exception as e:
+            click.echo(f"Ally sync failed: {e}", err=True)
+            raise
 
 
 @sync.command()
@@ -523,23 +534,15 @@ def betterment(ctx: click.Context, login_id: str, explore: bool) -> None:
         explore_betterment(resolved)
         return
 
-    from money.config import RAW_STORE_DIR
     from money.ingest.betterment import sync_betterment
-    from money.storage import LocalStore
 
-    db_path = ctx.obj["db_path"]
-    db = Database(db_path)
-    db.initialize()
-    store = LocalStore(RAW_STORE_DIR)
-
-    try:
-        sync_betterment(db, store, profile=resolved)
-        click.echo("Betterment sync complete.")
-    except Exception as e:
-        click.echo(f"Betterment sync failed: {e}", err=True)
-        raise
-    finally:
-        db.close()
+    with sync_context(ctx) as (db, store):
+        try:
+            sync_betterment(db, store, profile=resolved)
+            click.echo("Betterment sync complete.")
+        except Exception as e:
+            click.echo(f"Betterment sync failed: {e}", err=True)
+            raise
 
 
 @sync.command()
@@ -562,23 +565,15 @@ def wealthfront(ctx: click.Context, login_id: str, explore: bool) -> None:
         explore_wealthfront(resolved)
         return
 
-    from money.config import RAW_STORE_DIR
     from money.ingest.wealthfront import sync_wealthfront
-    from money.storage import LocalStore
 
-    db_path = ctx.obj["db_path"]
-    db = Database(db_path)
-    db.initialize()
-    store = LocalStore(RAW_STORE_DIR)
-
-    try:
-        sync_wealthfront(db, store, profile=resolved)
-        click.echo("Wealthfront sync complete.")
-    except Exception as e:
-        click.echo(f"Wealthfront sync failed: {e}", err=True)
-        raise
-    finally:
-        db.close()
+    with sync_context(ctx) as (db, store):
+        try:
+            sync_wealthfront(db, store, profile=resolved)
+            click.echo("Wealthfront sync complete.")
+        except Exception as e:
+            click.echo(f"Wealthfront sync failed: {e}", err=True)
+            raise
 
 
 @sync.command()
@@ -590,25 +585,18 @@ def wealthfront(ctx: click.Context, login_id: str, explore: bool) -> None:
 @click.pass_context
 def capital_one(ctx: click.Context, login_id: str) -> None:
     """Sync Capital One credit card accounts."""
-    from money.config import RAW_STORE_DIR, resolve_login_id
+    from money.config import resolve_login_id
     from money.ingest.capital_one import sync_capital_one
-    from money.storage import LocalStore
 
     resolved = resolve_login_id("capital_one", login_id)
 
-    db_path = ctx.obj["db_path"]
-    db = Database(db_path)
-    db.initialize()
-    store = LocalStore(RAW_STORE_DIR)
-
-    try:
-        sync_capital_one(db, store, profile=resolved)
-        click.echo("Capital One sync complete.")
-    except Exception as e:
-        click.echo(f"Capital One sync failed: {e}", err=True)
-        raise
-    finally:
-        db.close()
+    with sync_context(ctx) as (db, store):
+        try:
+            sync_capital_one(db, store, profile=resolved)
+            click.echo("Capital One sync complete.")
+        except Exception as e:
+            click.echo(f"Capital One sync failed: {e}", err=True)
+            raise
 
 
 @sync.command()
@@ -620,25 +608,18 @@ def capital_one(ctx: click.Context, login_id: str) -> None:
 @click.pass_context
 def chase(ctx: click.Context, login_id: str) -> None:
     """Sync Chase accounts from captured network log."""
-    from money.config import RAW_STORE_DIR, resolve_login_id
+    from money.config import resolve_login_id
     from money.ingest.chase import sync_chase
-    from money.storage import LocalStore
 
     resolved = resolve_login_id("chase", login_id)
 
-    db_path = ctx.obj["db_path"]
-    db = Database(db_path)
-    db.initialize()
-    store = LocalStore(RAW_STORE_DIR)
-
-    try:
-        sync_chase(db, store, profile=resolved)
-        click.echo("Chase sync complete.")
-    except Exception as e:
-        click.echo(f"Chase sync failed: {e}", err=True)
-        raise
-    finally:
-        db.close()
+    with sync_context(ctx) as (db, store):
+        try:
+            sync_chase(db, store, profile=resolved)
+            click.echo("Chase sync complete.")
+        except Exception as e:
+            click.echo(f"Chase sync failed: {e}", err=True)
+            raise
 
 
 @sync.command()
@@ -650,22 +631,15 @@ def chase(ctx: click.Context, login_id: str) -> None:
 @click.pass_context
 def morgan_stanley(ctx: click.Context, login_id: str) -> None:
     """Sync Morgan Stanley Shareworks stock options/RSUs."""
-    from money.config import RAW_STORE_DIR, resolve_login_id
+    from money.config import resolve_login_id
     from money.ingest.morgan_stanley import sync_morgan_stanley
-    from money.storage import LocalStore
 
     resolved = resolve_login_id("morgan_stanley", login_id)
 
-    db_path = ctx.obj["db_path"]
-    db = Database(db_path)
-    db.initialize()
-    store = LocalStore(RAW_STORE_DIR)
-
-    try:
-        sync_morgan_stanley(db, store, profile=resolved)
-        click.echo("Morgan Stanley sync complete.")
-    except Exception as e:
-        click.echo(f"Morgan Stanley sync failed: {e}", err=True)
-        raise
-    finally:
-        db.close()
+    with sync_context(ctx) as (db, store):
+        try:
+            sync_morgan_stanley(db, store, profile=resolved)
+            click.echo("Morgan Stanley sync complete.")
+        except Exception as e:
+            click.echo(f"Morgan Stanley sync failed: {e}", err=True)
+            raise
