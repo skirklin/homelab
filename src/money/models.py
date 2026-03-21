@@ -37,6 +37,7 @@ class Account:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     institution: str | None = None
     external_id: str | None = None
+    profile: str | None = None
     currency: str = "USD"
     is_liability: bool = False
     metadata: dict[str, Any] = field(default_factory=lambda: dict[str, Any]())
@@ -133,6 +134,7 @@ class IngestionRecord:
     source: str
     status: IngestionStatus
     id: int | None = None
+    profile: str | None = None
     raw_file_ref: str | None = None
     error_message: str | None = None
     started_at: datetime = field(default_factory=datetime.now)

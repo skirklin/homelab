@@ -14,6 +14,36 @@ async function init() {
   await loadSettings();
   await checkServer();
   await renderInstitutions();
+  await renderActivityLog();
+}
+
+async function renderActivityLog() {
+  const container = document.getElementById("activityLog");
+  const result = await chrome.storage.local.get("activityLog");
+  const log = result.activityLog || [];
+
+  if (log.length === 0) {
+    container.innerHTML = '<div style="color: #aaa; padding: 4px 0;">No recent activity</div>';
+    return;
+  }
+
+  container.innerHTML = log.map(entry => {
+    const time = new Date(entry.time);
+    const ago = timeAgo(time);
+    return `<div style="padding: 2px 0; border-bottom: 1px solid #f0f0f0;">
+      <span style="color: #aaa;">${ago}</span> ${entry.message}
+    </div>`;
+  }).join("");
+}
+
+function timeAgo(date) {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 async function loadSettings() {

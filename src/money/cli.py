@@ -98,6 +98,21 @@ def categorize(ctx: click.Context) -> None:
 
 
 @main.command()
+def open_banks() -> None:
+    """Open all bank sites in the default browser for cookie/data capture."""
+    import webbrowser
+
+    from money.config import load_config
+
+    config = load_config()
+    for inst_id, inst in config.institutions.items():
+        if inst.url:
+            click.echo(f"Opening {inst.label or inst_id}...")
+            webbrowser.open(inst.url)
+    click.echo("All sites opened. The extension will auto-capture cookies and network data.")
+
+
+@main.command()
 @click.pass_context
 def enrich(ctx: click.Context) -> None:
     """Enrich holdings with asset class data and fetch benchmark history."""
@@ -430,12 +445,18 @@ def login_google_cmd() -> None:
 
 
 @login.command("ally")
-@click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
+@click.option(
+    "--login", "--profile", "login_id",
+    required=True,
+    help="Login ID (e.g. 'scott@ally') or bare person name (e.g. 'scott').",
+)
 @click.option("--headless", is_flag=True, help="Run headless (no visible browser window).")
-def login_ally_cmd(profile: str, headless: bool) -> None:
+def login_ally_cmd(login_id: str, headless: bool) -> None:
     """Log into Ally Bank to capture auth token."""
+    from money.config import resolve_login_id
     from money.ingest.scrapers.ally import login_ally
 
+    profile = resolve_login_id("ally", login_id)
     login_ally(profile, headless=headless)
     click.echo("Ally login complete — auth token saved.")
 
@@ -446,20 +467,26 @@ def sync() -> None:
 
 
 @sync.command()
-@click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
+@click.option(
+    "--login", "--profile", "login_id",
+    required=True,
+    help="Login ID (e.g. 'scott@ally') or bare person name (e.g. 'scott').",
+)
 @click.pass_context
-def ally(ctx: click.Context, profile: str) -> None:
+def ally(ctx: click.Context, login_id: str) -> None:
     """Sync Ally Bank accounts. Auto-logs in if no auth token exists."""
-    from money.config import RAW_STORE_DIR
+    from money.config import RAW_STORE_DIR, resolve_login_id
     from money.ingest.ally_api import sync_ally_api
     from money.ingest.scrapers.ally import auth_token_path, login_ally
     from money.storage import LocalStore
 
+    resolved = resolve_login_id("ally", login_id)
+
     # Capture a fresh token if needed — must use immediately since SPA invalidates it
     token: str | None = None
-    if not auth_token_path(profile).exists():
+    if not auth_token_path(resolved).exists():
         click.echo("No auth token found — logging in via browser...")
-        token = login_ally(profile, headless=True)
+        token = login_ally(resolved, headless=True)
 
     db_path = ctx.obj["db_path"]
     db = Database(db_path)
@@ -467,7 +494,7 @@ def ally(ctx: click.Context, profile: str) -> None:
     store = LocalStore(RAW_STORE_DIR)
 
     try:
-        sync_ally_api(db, store, profile=profile, token=token)
+        sync_ally_api(db, store, profile=resolved, token=token)
         click.echo("Ally sync complete.")
     except Exception as e:
         click.echo(f"Ally sync failed: {e}", err=True)
@@ -477,15 +504,23 @@ def ally(ctx: click.Context, profile: str) -> None:
 
 
 @sync.command()
-@click.option("--profile", required=True, help="Credential profile (e.g. 'scott', 'angela').")
+@click.option(
+    "--login", "--profile", "login_id",
+    required=True,
+    help="Login ID (e.g. 'scott@betterment') or bare person name (e.g. 'scott').",
+)
 @click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
 @click.pass_context
-def betterment(ctx: click.Context, profile: str, explore: bool) -> None:
+def betterment(ctx: click.Context, login_id: str, explore: bool) -> None:
     """Sync Betterment accounts."""
+    from money.config import resolve_login_id
+
+    resolved = resolve_login_id("betterment", login_id)
+
     if explore:
         from money.ingest.scrapers.betterment import explore_betterment
 
-        explore_betterment(profile)
+        explore_betterment(resolved)
         return
 
     from money.config import RAW_STORE_DIR
@@ -498,7 +533,7 @@ def betterment(ctx: click.Context, profile: str, explore: bool) -> None:
     store = LocalStore(RAW_STORE_DIR)
 
     try:
-        sync_betterment(db, store, profile=profile)
+        sync_betterment(db, store, profile=resolved)
         click.echo("Betterment sync complete.")
     except Exception as e:
         click.echo(f"Betterment sync failed: {e}", err=True)
@@ -508,15 +543,23 @@ def betterment(ctx: click.Context, profile: str, explore: bool) -> None:
 
 
 @sync.command()
-@click.option("--profile", required=True, help="Credential profile (e.g. 'scott').")
+@click.option(
+    "--login", "--profile", "login_id",
+    required=True,
+    help="Login ID (e.g. 'scott@wealthfront') or bare person name (e.g. 'scott').",
+)
 @click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
 @click.pass_context
-def wealthfront(ctx: click.Context, profile: str, explore: bool) -> None:
+def wealthfront(ctx: click.Context, login_id: str, explore: bool) -> None:
     """Sync Wealthfront accounts."""
+    from money.config import resolve_login_id
+
+    resolved = resolve_login_id("wealthfront", login_id)
+
     if explore:
         from money.ingest.scrapers.wealthfront import explore_wealthfront
 
-        explore_wealthfront(profile)
+        explore_wealthfront(resolved)
         return
 
     from money.config import RAW_STORE_DIR
@@ -529,7 +572,7 @@ def wealthfront(ctx: click.Context, profile: str, explore: bool) -> None:
     store = LocalStore(RAW_STORE_DIR)
 
     try:
-        sync_wealthfront(db, store, profile=profile)
+        sync_wealthfront(db, store, profile=resolved)
         click.echo("Wealthfront sync complete.")
     except Exception as e:
         click.echo(f"Wealthfront sync failed: {e}", err=True)
@@ -539,13 +582,19 @@ def wealthfront(ctx: click.Context, profile: str, explore: bool) -> None:
 
 
 @sync.command()
-@click.option("--profile", required=True, help="Credential profile (e.g. 'scott').")
+@click.option(
+    "--login", "--profile", "login_id",
+    default="scott@capital_one",
+    help="Login ID (e.g. 'scott@capital_one') or bare person name (e.g. 'scott').",
+)
 @click.pass_context
-def capital_one(ctx: click.Context, profile: str) -> None:
+def capital_one(ctx: click.Context, login_id: str) -> None:
     """Sync Capital One credit card accounts."""
-    from money.config import RAW_STORE_DIR
+    from money.config import RAW_STORE_DIR, resolve_login_id
     from money.ingest.capital_one import sync_capital_one
     from money.storage import LocalStore
+
+    resolved = resolve_login_id("capital_one", login_id)
 
     db_path = ctx.obj["db_path"]
     db = Database(db_path)
@@ -553,7 +602,7 @@ def capital_one(ctx: click.Context, profile: str) -> None:
     store = LocalStore(RAW_STORE_DIR)
 
     try:
-        sync_capital_one(db, store, profile=profile)
+        sync_capital_one(db, store, profile=resolved)
         click.echo("Capital One sync complete.")
     except Exception as e:
         click.echo(f"Capital One sync failed: {e}", err=True)
@@ -563,12 +612,19 @@ def capital_one(ctx: click.Context, profile: str) -> None:
 
 
 @sync.command()
+@click.option(
+    "--login", "--profile", "login_id",
+    default="scott@chase",
+    help="Login ID (e.g. 'scott@chase'). Defaults to 'scott@chase'.",
+)
 @click.pass_context
-def chase(ctx: click.Context) -> None:
+def chase(ctx: click.Context, login_id: str) -> None:
     """Sync Chase accounts from captured network log."""
-    from money.config import RAW_STORE_DIR
+    from money.config import RAW_STORE_DIR, resolve_login_id
     from money.ingest.chase import sync_chase
     from money.storage import LocalStore
+
+    resolved = resolve_login_id("chase", login_id)
 
     db_path = ctx.obj["db_path"]
     db = Database(db_path)
@@ -576,7 +632,7 @@ def chase(ctx: click.Context) -> None:
     store = LocalStore(RAW_STORE_DIR)
 
     try:
-        sync_chase(db, store)
+        sync_chase(db, store, profile=resolved)
         click.echo("Chase sync complete.")
     except Exception as e:
         click.echo(f"Chase sync failed: {e}", err=True)
@@ -586,13 +642,19 @@ def chase(ctx: click.Context) -> None:
 
 
 @sync.command()
-@click.option("--profile", required=True, help="Credential profile (e.g. 'scott').")
+@click.option(
+    "--login", "--profile", "login_id",
+    default="scott@morgan_stanley",
+    help="Login ID (e.g. 'scott@morgan_stanley'). Defaults to 'scott@morgan_stanley'.",
+)
 @click.pass_context
-def morgan_stanley(ctx: click.Context, profile: str) -> None:
+def morgan_stanley(ctx: click.Context, login_id: str) -> None:
     """Sync Morgan Stanley Shareworks stock options/RSUs."""
-    from money.config import RAW_STORE_DIR
+    from money.config import RAW_STORE_DIR, resolve_login_id
     from money.ingest.morgan_stanley import sync_morgan_stanley
     from money.storage import LocalStore
+
+    resolved = resolve_login_id("morgan_stanley", login_id)
 
     db_path = ctx.obj["db_path"]
     db = Database(db_path)
@@ -600,7 +662,7 @@ def morgan_stanley(ctx: click.Context, profile: str) -> None:
     store = LocalStore(RAW_STORE_DIR)
 
     try:
-        sync_morgan_stanley(db, store, profile=profile)
+        sync_morgan_stanley(db, store, profile=resolved)
         click.echo("Morgan Stanley sync complete.")
     except Exception as e:
         click.echo(f"Morgan Stanley sync failed: {e}", err=True)

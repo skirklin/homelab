@@ -130,6 +130,7 @@ def sync_chase(
                 account_type=account_type,
                 institution="chase",
                 external_id=mask,
+                profile=profile,
             )
             log.info("Account: %s ••%s (id=%s)", nickname, mask, account.id)
 
@@ -203,6 +204,7 @@ def sync_chase(
                     account_type=AccountType.CREDIT_CARD,
                     institution="chase",
                     external_id=mask,
+                    profile=profile,
                 )
 
                 rewards_balance: int = card.get("currentRewardsBalance", 0)
@@ -215,6 +217,7 @@ def sync_chase(
         db.insert_ingestion_record(
             IngestionRecord(
                 source="chase",
+                profile=profile,
                 status=IngestionStatus.SUCCESS,
                 raw_file_ref=raw_key,
                 started_at=started_at,
@@ -228,6 +231,7 @@ def sync_chase(
         db.insert_ingestion_record(
             IngestionRecord(
                 source="chase",
+                profile=profile,
                 status=IngestionStatus.ERROR,
                 error_message=str(e),
                 started_at=started_at,

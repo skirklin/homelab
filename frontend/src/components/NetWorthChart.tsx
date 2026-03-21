@@ -23,7 +23,7 @@ const fmtFull = (v: number) =>
 
 export function NetWorthChart() {
   const [data, setData] = useState<NetWorthPoint[]>([])
-  const [range, setRange] = useState<TimeRange>('ALL')
+  const [range, setRange] = useState<TimeRange>('1Y')
   const [showBreakdown, setShowBreakdown] = useState(false)
 
   useEffect(() => {
@@ -46,11 +46,13 @@ export function NetWorthChart() {
           <h2>Net Worth</h2>
           <div className="metric-row">
             <span className="big-number">{fmtFull(latest.net_worth)}</span>
-            <span className={`change ${change >= 0 ? 'positive' : 'negative'}`}>
-              {change >= 0 ? '+' : ''}
-              {fmtFull(change)} ({changePct >= 0 ? '+' : ''}
-              {changePct.toFixed(1)}%)
-            </span>
+            {first.net_worth > 0 && (
+              <span className={`change ${change >= 0 ? 'positive' : 'negative'}`}>
+                {change >= 0 ? '+' : ''}
+                {fmtFull(change)} ({changePct >= 0 ? '+' : ''}
+                {changePct.toFixed(1)}%)
+              </span>
+            )}
           </div>
         </div>
         <div className="controls">

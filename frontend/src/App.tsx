@@ -7,6 +7,7 @@ import { Investments } from './pages/Investments'
 import { Spending } from './pages/Spending'
 import { Transactions } from './pages/Transactions'
 import { Travel } from './pages/Travel'
+import { Accounts } from './pages/Accounts'
 import './App.css'
 
 const fmtDollar = (v: number) =>
@@ -67,6 +68,7 @@ function App() {
             <NavLink to="/spending">Spending</NavLink>
             <NavLink to="/transactions">Transactions</NavLink>
             <NavLink to="/travel">Travel</NavLink>
+            <NavLink to="/accounts">Accounts</NavLink>
           </nav>
         </header>
         <main>
@@ -76,6 +78,7 @@ function App() {
             <Route path="/spending" element={<Spending />} />
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/travel" element={<Travel />} />
+            <Route path="/accounts" element={<Accounts />} />
           </Routes>
         </main>
       </div>

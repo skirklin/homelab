@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     name          TEXT NOT NULL,
     institution   TEXT,
     external_id   TEXT,
+    profile       TEXT,
     account_type  TEXT NOT NULL,
     currency      TEXT NOT NULL DEFAULT 'USD',
     is_liability  INTEGER NOT NULL DEFAULT 0,
@@ -103,6 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
 CREATE TABLE IF NOT EXISTS ingestion_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     source        TEXT NOT NULL,
+    profile       TEXT,
     status        TEXT NOT NULL,
     raw_file_ref  TEXT,
     error_message TEXT,

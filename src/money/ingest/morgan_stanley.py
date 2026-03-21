@@ -190,6 +190,7 @@ def sync_morgan_stanley(
             account_type=AccountType.STOCK_OPTIONS,
             institution="morgan_stanley",
             external_id="shareworks",
+            profile=profile,
         )
         log.info("Account: %s (id=%s)", account.name, account.id)
 
@@ -298,7 +299,7 @@ def sync_morgan_stanley(
             )
             grant_count += 1
             log.info(
-                "  Grant %s: %s %s, %d shares @ $%.2f, %d vested ($%,.0f)",
+                "  Grant %s: %s %s, %d shares @ $%.2f, %d vested ($%.0f)",
                 grant_number, grant_type, grant_date, quantity, strike_price,
                 vested_qty, vested_val,
             )
@@ -308,6 +309,7 @@ def sync_morgan_stanley(
         db.insert_ingestion_record(
             IngestionRecord(
                 source="morgan_stanley",
+                profile=profile,
                 status=IngestionStatus.SUCCESS,
                 raw_file_ref=raw_key,
                 started_at=started_at,
@@ -321,6 +323,7 @@ def sync_morgan_stanley(
         db.insert_ingestion_record(
             IngestionRecord(
                 source="morgan_stanley",
+                profile=profile,
                 status=IngestionStatus.ERROR,
                 error_message=str(e),
                 started_at=started_at,

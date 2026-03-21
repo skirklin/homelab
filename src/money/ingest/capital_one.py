@@ -26,9 +26,13 @@ USER_AGENT = (
 )
 
 
-def _load_cookies() -> dict[str, str]:
+def _load_cookies(profile: str | None = None) -> dict[str, str]:
     """Load relayed cookies from the Chrome extension."""
-    path = cookie_relay_path("capital_one")
+    path = (
+        cookie_relay_path("capital_one", profile) if profile else cookie_relay_path("capital_one")
+    )
+    if not path.exists() and profile:
+        path = cookie_relay_path("capital_one")
     if not path.exists():
         raise FileNotFoundError(
             "No cookies found for capital_one. Log into Capital One in Chrome and "
@@ -74,7 +78,7 @@ def _api_get(cookies: dict[str, str], path: str) -> Any:
         return json.loads(body)
     except json.JSONDecodeError:
         preview = body.decode("utf-8", errors="replace")[:200]
-        raise ValueError(f"Non-JSON response from {path}: {preview}")
+        raise ValueError(f"Non-JSON response from {path}: {preview}") from None
 
 
 def _encode_ref(ref_id: str) -> str:
@@ -97,8 +101,8 @@ def sync_capital_one(
     raw_key = f"capital_one/{timestamp}_accounts.json"
 
     try:
-        cookies = _load_cookies()
-        log.info("Loaded %d cookies for capital_one", len(cookies))
+        cookies = _load_cookies(profile)
+        log.info("Loaded %d cookies for capital_one (login: %s)", len(cookies), profile)
 
         # 1. Fetch accounts
         accounts_data = _api_get(cookies, ACCOUNTS_PATH)
@@ -121,6 +125,7 @@ def sync_capital_one(
                 account_type=AccountType.CREDIT_CARD,
                 institution="capital_one",
                 external_id=str(last_four),
+                profile=profile,
             )
             log.info("Account: %s (id=%s)", display_name, account.id)
 
@@ -139,13 +144,24 @@ def sync_capital_one(
                 )
                 log.info("  Balance: $%.2f (owed: $%.2f)", balance_val, current_balance)
 
-            # 3. Fetch transactions in 90-day chunks (Capital One rejects long ranges)
+            # 3. Fetch transactions — only go back to last known transaction
             encoded_ref = _encode_ref(ref_id)
             chunk_end = date.today()
             total_txn_count = 0
             chunk_num = 0
-            # Go back up to 2 years in 90-day chunks
-            earliest = date(chunk_end.year - 2, chunk_end.month, chunk_end.day)
+
+            # Check how far back we need to go
+            last_txn_row = db.conn.execute(
+                "SELECT MAX(date) FROM transactions WHERE account_id = ?",
+                (account.id,),
+            ).fetchone()
+            if last_txn_row and last_txn_row[0]:
+                # Overlap by 7 days to catch any late-posting transactions
+                earliest = date.fromisoformat(last_txn_row[0]) - timedelta(days=7)
+                log.info("  Incremental sync from %s", earliest)
+            else:
+                earliest = date(chunk_end.year - 2, chunk_end.month, chunk_end.day)
+                log.info("  Full backfill to %s", earliest)
 
             try:
                 while chunk_end > earliest:
@@ -227,6 +243,7 @@ def sync_capital_one(
         db.insert_ingestion_record(
             IngestionRecord(
                 source="capital_one",
+                profile=profile,
                 status=IngestionStatus.SUCCESS,
                 raw_file_ref=raw_key,
                 started_at=started_at,
@@ -240,6 +257,7 @@ def sync_capital_one(
         db.insert_ingestion_record(
             IngestionRecord(
                 source="capital_one",
+                profile=profile,
                 status=IngestionStatus.ERROR,
                 error_message=str(e),
                 started_at=started_at,

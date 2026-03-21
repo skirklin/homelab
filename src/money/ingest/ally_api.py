@@ -245,6 +245,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
                 account_type=account_type,
                 institution="ally",
                 external_id=external_id,
+                profile=profile,
             )
             log.info("Synced: %s ••%s [%s]", acct_name, external_id, account_type.value)
 
@@ -340,6 +341,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
         db.insert_ingestion_record(
             IngestionRecord(
                 source="ally_api",
+                profile=profile,
                 status=IngestionStatus.SUCCESS,
                 raw_file_ref=raw_key,
                 started_at=started_at,
@@ -352,6 +354,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
         db.insert_ingestion_record(
             IngestionRecord(
                 source="ally_api",
+                profile=profile,
                 status=IngestionStatus.ERROR,
                 error_message=str(e),
                 started_at=started_at,

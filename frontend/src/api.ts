@@ -284,6 +284,25 @@ export const confirmRecurring = (id: number) =>
 export const dismissRecurring = (id: number) =>
   post<{ dismissed: boolean }>(`/api/recurring/${id}/dismiss`)
 
+// ── Sync Status ─────────────────────────────────────────────────────
+
+export interface SyncStatus {
+  login_id: string
+  institution: string
+  person: string
+  person_name: string
+  label: string
+  url: string | null
+  account_count: number
+  last_balance_date: string | null
+  last_transaction_date: string | null
+  days_stale: number | null
+  is_stale: boolean
+}
+
+export const fetchSyncStatus = () =>
+  get<{ statuses: SyncStatus[] }>('/api/sync-status').then((d) => d.statuses)
+
 // ── Investments ─────────────────────────────────────────────────────
 
 export interface AllocationItem {

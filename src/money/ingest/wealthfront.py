@@ -45,9 +45,14 @@ ACCOUNT_TYPE_MAP: dict[str, AccountType] = {
 }
 
 
-def _load_cookies() -> dict[str, str]:
+def _load_cookies(profile: str | None = None) -> dict[str, str]:
     """Load relayed cookies from the Chrome extension."""
-    path = cookie_relay_path("wealthfront")
+    path = (
+        cookie_relay_path("wealthfront", profile) if profile else cookie_relay_path("wealthfront")
+    )
+    if not path.exists() and profile:
+        # Fall back to institution-level cookie file
+        path = cookie_relay_path("wealthfront")
     if not path.exists():
         raise FileNotFoundError(
             "No cookies found for wealthfront. Log into Wealthfront in Chrome and "
@@ -218,8 +223,8 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
     try:
-        cookies = _load_cookies()
-        log.info("Loaded %d cookies for Wealthfront", len(cookies))
+        cookies = _load_cookies(profile)
+        log.info("Loaded %d cookies for Wealthfront (login: %s)", len(cookies), profile)
 
         data = _api_get(cookies, OVERVIEWS_URL)
         overviews = data.get("overviews", [])
@@ -293,6 +298,7 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
                 account_type=account_type,
                 institution="wealthfront",
                 external_id=acct_id,
+                profile=profile,
             )
             log.info("Synced: %s [%s] %s", display_name, acct_id, account_type.value)
 
@@ -380,6 +386,7 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
         db.insert_ingestion_record(
             IngestionRecord(
                 source="wealthfront",
+                profile=profile,
                 status=IngestionStatus.SUCCESS,
                 raw_file_ref=raw_key,
                 started_at=started_at,
@@ -392,6 +399,7 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
         db.insert_ingestion_record(
             IngestionRecord(
                 source="wealthfront",
+                profile=profile,
                 status=IngestionStatus.ERROR,
                 error_message=str(e),
                 started_at=started_at,

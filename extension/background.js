@@ -20,6 +20,34 @@ async function getServerUrl() {
   return `http://localhost:${port}`;
 }
 
+function setBadge(text, color = "#34d399") {
+  chrome.action.setBadgeText({ text });
+  chrome.action.setBadgeBackgroundColor({ color });
+}
+
+async function logActivity(message) {
+  const result = await chrome.storage.local.get("activityLog");
+  const log = result.activityLog || [];
+  log.unshift({ time: new Date().toISOString(), message });
+  // Keep last 20 entries
+  await chrome.storage.local.set({ activityLog: log.slice(0, 20) });
+}
+
+function updateRecordingBadge() {
+  // Show buffered entry count while any tab is recording
+  const recordingInstitutions = Object.values(recordingTabs);
+  if (recordingInstitutions.length === 0) {
+    setBadge("");
+    return;
+  }
+  let total = 0;
+  for (const inst of recordingInstitutions) {
+    total += (networkBuffer[inst] || []).length;
+  }
+  // Purple = has unbuffered data, green = just flushed (0 buffered)
+  setBadge(String(total), total > 0 ? "#818cf8" : "#34d399");
+}
+
 async function sendToServer(endpoint, data) {
   const baseUrl = await getServerUrl();
   const url = `${baseUrl}${endpoint}`;
@@ -150,7 +178,11 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   // Auto-capture cookies
   const result = await captureCookies(institution);
   if (result.success) {
+    setBadge("✓");
+    logActivity(`Captured ${result.count} cookies for ${institution}`);
     console.log(`[Money] Auto-captured ${result.count} cookies for ${institution}`);
+  } else {
+    setBadge("!", "#f87171");
   }
 
   // Auto-start network recording for institutions that need it.
@@ -161,12 +193,39 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
     recordingTabs[details.tabId] = institution;
     try {
       await chrome.tabs.sendMessage(details.tabId, { type: "START_RECORDING" });
+      updateRecordingBadge();
+      logActivity(`Started recording for ${institution}`);
       console.log(`[Money] Auto-started network recording for ${institution}`);
     } catch (err) {
       console.warn(`[Money] Could not start recording for ${institution}:`, err);
     }
   }
 });
+
+// Periodic flush — send buffered network data every 30s while recording
+setInterval(async () => {
+  for (const [tabId, institution] of Object.entries(recordingTabs)) {
+    const entries = networkBuffer[institution];
+    if (!entries || entries.length === 0) continue;
+
+    // Send a copy and clear the buffer
+    const toSend = [...entries];
+    networkBuffer[institution] = [];
+
+    const result = await sendToServer("/network-log", {
+      institution,
+      entries: toSend,
+      captured_at: new Date().toISOString(),
+    });
+    if (result.success) {
+      updateRecordingBadge();
+      logActivity(`Flushed ${toSend.length} network entries for ${institution}`);
+      console.log(`[Money] Periodic flush: ${toSend.length} entries for ${institution}`);
+    } else {
+      setBadge("!", "#f87171");
+    }
+  }
+}, 30_000);
 
 // Auto-flush network log when navigating away from a recorded tab
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
@@ -191,6 +250,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     console.log(`[Money] Auto-flushed ${entries.length} network entries for ${institution}:`, result);
   }
   delete networkBuffer[institution];
+  updateRecordingBadge();
 });
 
 // Also flush when a recorded tab is closed
@@ -209,6 +269,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
     console.log(`[Money] Auto-flushed ${entries.length} entries for ${institution} (tab closed)`);
   }
   delete networkBuffer[institution];
+  updateRecordingBadge();
 });
 
 // Listen for messages from content scripts and popup
@@ -230,6 +291,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (institution && message.entry) {
       if (!networkBuffer[institution]) networkBuffer[institution] = [];
       networkBuffer[institution].push(message.entry);
+      updateRecordingBadge();
     }
     sendResponse({ buffered: true });
     return true;

@@ -174,14 +174,15 @@ class Database:
 
     def insert_account(self, account: Account) -> None:
         self.conn.execute(
-            """INSERT INTO accounts (id, name, institution, external_id, account_type,
-               currency, is_liability, metadata, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO accounts (id, name, institution, external_id, profile,
+               account_type, currency, is_liability, metadata, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 account.id,
                 account.name,
                 account.institution,
                 account.external_id,
+                account.profile,
                 account.account_type.value,
                 account.currency,
                 int(account.is_liability),
@@ -213,23 +214,36 @@ class Database:
         account_type: AccountType,
         institution: str,
         external_id: str,
+        profile: str | None = None,
     ) -> Account:
         existing = self.get_account_by_external_id(institution, external_id)
         if existing is not None:
-            # Update name if it changed (e.g. user renamed account)
+            updates: list[str] = []
+            params: list[str] = []
             if existing.name != name:
+                updates.append("name = ?")
+                params.append(name)
+                existing.name = name
+            if profile and existing.profile != profile:
+                updates.append("profile = ?")
+                params.append(profile)
+                existing.profile = profile
+            if updates:
+                updates.append("updated_at = ?")
+                params.append(datetime.now().isoformat())
+                params.append(existing.id)
                 self.conn.execute(
-                    "UPDATE accounts SET name = ?, updated_at = ? WHERE id = ?",
-                    (name, datetime.now().isoformat(), existing.id),
+                    f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?",
+                    params,
                 )
                 self.conn.commit()
-                existing.name = name
             return existing
         account = Account(
             name=name,
             account_type=account_type,
             institution=institution,
             external_id=external_id,
+            profile=profile,
         )
         self.insert_account(account)
         return account
@@ -415,11 +429,12 @@ class Database:
 
     def insert_ingestion_record(self, record: IngestionRecord) -> int:
         cursor = self.conn.execute(
-            """INSERT INTO ingestion_log (source, status, raw_file_ref, error_message,
+            """INSERT INTO ingestion_log (source, profile, status, raw_file_ref, error_message,
                started_at, finished_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.source,
+                record.profile,
                 record.status.value,
                 record.raw_file_ref,
                 record.error_message,
@@ -496,11 +511,13 @@ def _parse_date(s: str) -> date:
 def _row_to_account(row: sqlite3.Row) -> Account:
     import json
 
+    columns = set(dict(row).keys())
     return Account(
         id=row["id"],
         name=row["name"],
         institution=row["institution"],
         external_id=row["external_id"],
+        profile=row["profile"] if "profile" in columns else None,
         account_type=AccountType(row["account_type"]),
         currency=row["currency"],
         is_liability=bool(row["is_liability"]),

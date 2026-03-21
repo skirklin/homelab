@@ -182,9 +182,12 @@ query EnvelopeAccountHoldings($id: ID!) \
 }"""
 
 
-def _load_cookies() -> dict[str, str]:
+def _load_cookies(profile: str | None = None) -> dict[str, str]:
     """Load relayed cookies from the Chrome extension."""
-    path = cookie_relay_path("betterment")
+    path = cookie_relay_path("betterment", profile) if profile else cookie_relay_path("betterment")
+    if not path.exists() and profile:
+        # Fall back to institution-level cookie file
+        path = cookie_relay_path("betterment")
     if not path.exists():
         raise FileNotFoundError(
             "No cookies found for betterment. Log into Betterment in Chrome and "
@@ -288,8 +291,8 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
     try:
-        cookies = _load_cookies()
-        log.info("Loaded %d cookies for Betterment", len(cookies))
+        cookies = _load_cookies(profile)
+        log.info("Loaded %d cookies for Betterment (login: %s)", len(cookies), profile)
 
         csrf_token = _fetch_csrf_token(cookies)
         log.info("Fetched CSRF token")
@@ -392,6 +395,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                     account_type=account_type,
                     institution="betterment",
                     external_id=acct_external_id,
+                    profile=profile,
                 )
                 log.info(
                     "  Synced: %s [%s] %s",
@@ -490,6 +494,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
         db.insert_ingestion_record(
             IngestionRecord(
                 source="betterment",
+                profile=profile,
                 status=IngestionStatus.SUCCESS,
                 raw_file_ref=raw_key,
                 started_at=started_at,
@@ -502,6 +507,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
         db.insert_ingestion_record(
             IngestionRecord(
                 source="betterment",
+                profile=profile,
                 status=IngestionStatus.ERROR,
                 error_message=str(e),
                 started_at=started_at,

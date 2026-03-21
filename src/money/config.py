@@ -27,19 +27,30 @@ class Credentials:
 
 
 @dataclass
-class ProfileConfig:
-    op_item: str
-    vault: str = DEFAULT_VAULT
+class PersonConfig:
+    name: str
+
+
+@dataclass
+class LoginConfig:
+    person: str
+    institution: str
+    op_item: str | None = None
+    vault: str | None = None
 
 
 @dataclass
 class InstitutionConfig:
-    profiles: dict[str, ProfileConfig] = field(default_factory=lambda: dict[str, ProfileConfig]())
+    label: str = ""
+    url: str | None = None
+    auth: str = "cookies"
 
 
 @dataclass
 class AppConfig:
     institutions: dict[str, InstitutionConfig]
+    logins: dict[str, LoginConfig] = field(default_factory=lambda: dict[str, LoginConfig]())
+    people: dict[str, PersonConfig] = field(default_factory=lambda: dict[str, PersonConfig]())
     gcs_bucket: str | None = None
     gcs_project: str | None = None
 
@@ -61,16 +72,20 @@ def load_config() -> AppConfig:
     if not CONFIG_FILE.exists():
         msg = (
             f"Config file not found at {CONFIG_FILE}. "
-            f"Create it with institution mappings, e.g.:\n"
+            f"Create it with institution and login mappings, e.g.:\n"
             + json.dumps(
                 {
                     "institutions": {
-                        "ally": {
-                            "profiles": {
-                                "scott": {"op_item": "Ally", "vault": "Finances"}
-                            }
+                        "ally": {"label": "Ally Bank", "auth": "playwright"}
+                    },
+                    "logins": {
+                        "scott@ally": {
+                            "person": "scott",
+                            "institution": "ally",
+                            "op_item": "Ally",
+                            "vault": "Finances",
                         }
-                    }
+                    },
                 },
                 indent=2,
             )
@@ -78,27 +93,52 @@ def load_config() -> AppConfig:
         raise FileNotFoundError(msg)
 
     raw = json.loads(CONFIG_FILE.read_text())
+
     institutions: dict[str, InstitutionConfig] = {}
     for inst_name, inst_data in raw.get("institutions", {}).items():
-        profiles: dict[str, ProfileConfig] = {}
-        for prof_name, prof_data in inst_data.get("profiles", {}).items():
-            profiles[prof_name] = ProfileConfig(
-                op_item=prof_data["op_item"],
-                vault=prof_data.get("vault", DEFAULT_VAULT),
-            )
-        institutions[inst_name] = InstitutionConfig(profiles=profiles)
+        institutions[inst_name] = InstitutionConfig(
+            label=inst_data.get("label", inst_name),
+            url=inst_data.get("url"),
+            auth=inst_data.get("auth", "cookies"),
+        )
+
+    people: dict[str, PersonConfig] = {}
+    for person_id, person_data in raw.get("people", {}).items():
+        people[person_id] = PersonConfig(name=person_data.get("name", person_id))
+
+    logins: dict[str, LoginConfig] = {}
+    for login_id, login_data in raw.get("logins", {}).items():
+        logins[login_id] = LoginConfig(
+            person=login_data["person"],
+            institution=login_data["institution"],
+            op_item=login_data.get("op_item"),
+            vault=login_data.get("vault"),
+        )
 
     return AppConfig(
         institutions=institutions,
+        people=people,
+        logins=logins,
         gcs_bucket=raw.get("gcs_bucket"),
         gcs_project=raw.get("gcs_project"),
     )
 
 
-def _op_read(vault: str, item: str, field: str) -> str:
+def resolve_login_id(institution: str, profile: str) -> str:
+    """Resolve a login_id from institution + profile.
+
+    Accepts either a bare person name (e.g. "scott") or a full login_id
+    (e.g. "scott@ally"). Returns the canonical login_id.
+    """
+    if "@" in profile:
+        return profile  # already a full login_id
+    return f"{profile}@{institution}"
+
+
+def _op_read(vault: str, item: str, field_name: str) -> str:
     _load_env()
     result = subprocess.run(
-        ["op", "read", f"op://{vault}/{item}/{field}"],
+        ["op", "read", f"op://{vault}/{item}/{field_name}"],
         capture_output=True,
         text=True,
     )
@@ -111,32 +151,47 @@ def _op_read(vault: str, item: str, field: str) -> str:
 
 
 def load_credentials(institution: str, profile: str) -> Credentials:
+    """Load credentials for a login.
+
+    Args:
+        institution: Institution key (e.g. "ally").
+        profile: Either a bare person name (e.g. "scott") or a full login_id
+                 (e.g. "scott@ally"). Bare names are resolved to login_ids.
+    """
     config = load_config()
-    if institution not in config.institutions:
-        raise KeyError(f"No institution '{institution}' in {CONFIG_FILE}.")
-    inst = config.institutions[institution]
-    if profile not in inst.profiles:
-        available = ", ".join(inst.profiles) or "(none)"
+    login_id = resolve_login_id(institution, profile)
+
+    if login_id not in config.logins:
+        available = ", ".join(
+            lid for lid in config.logins if config.logins[lid].institution == institution
+        ) or "(none)"
         raise KeyError(
-            f"No profile '{profile}' for '{institution}' in {CONFIG_FILE}. "
-            f"Available profiles: {available}"
+            f"No login '{login_id}' in {CONFIG_FILE}. "
+            f"Available logins for '{institution}': {available}"
         )
 
-    prof = inst.profiles[profile]
-    username = _op_read(prof.vault, prof.op_item, "username")
-    password = _op_read(prof.vault, prof.op_item, "password")
+    login = config.logins[login_id]
+    if not login.op_item or not login.vault:
+        raise KeyError(
+            f"Login '{login_id}' has no op_item/vault — cannot load credentials from 1Password."
+        )
+
+    username = _op_read(login.vault, login.op_item, "username")
+    password = _op_read(login.vault, login.op_item, "password")
     return Credentials(username=username, password=password)
 
 
 def browser_state_path(institution: str, profile: str) -> Path:
+    login_id = resolve_login_id(institution, profile)
     BROWSER_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    return BROWSER_STATE_DIR / f"{institution}_{profile}.json"
+    return BROWSER_STATE_DIR / f"{login_id}.json"
 
 
 def cookie_relay_path(institution: str, profile: str | None = None) -> Path:
     COOKIE_RELAY_DIR.mkdir(parents=True, exist_ok=True)
     if profile:
-        return COOKIE_RELAY_DIR / f"{institution}_{profile}.json"
+        login_id = resolve_login_id(institution, profile)
+        return COOKIE_RELAY_DIR / f"{login_id}.json"
     return COOKIE_RELAY_DIR / f"{institution}.json"
 
 

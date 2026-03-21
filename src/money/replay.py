@@ -44,8 +44,11 @@ def replay_all(db_path: str, raw_dir: Path) -> None:
         _replay_chase(db, raw_dir)
         _replay_morgan_stanley(db, raw_dir)
 
+        from money.benchmarks import enrich_holdings_asset_classes
         from money.categorize import apply_rules
 
+        enriched = enrich_holdings_asset_classes(db)
+        log.info("Enriched %d holdings.", enriched)
         tagged = apply_rules(db)
         log.info("Categorized %d transactions.", tagged)
     finally:

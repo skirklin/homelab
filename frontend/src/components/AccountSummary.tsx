@@ -4,17 +4,25 @@ interface Props {
   accounts: Account[]
 }
 
-const fmtDollar = (v: number) =>
-  `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtDollar = (v: number) => {
+  const abs = Math.abs(v)
+  const sign = v < 0 ? '-' : ''
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
+  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
+  return `${sign}$${abs.toFixed(2)}`
+}
 
 const INST_COLORS: Record<string, string> = {
   betterment: '#818cf8',
   wealthfront: '#34d399',
   ally: '#fb923c',
+  chase: '#22d3ee',
+  capital_one: '#38bdf8',
+  morgan_stanley: '#f472b6',
 }
 
 export function AccountSummary({ accounts }: Props) {
-  // Group by institution
   const byInst: Record<string, Account[]> = {}
   for (const a of accounts) {
     const inst = a.institution ?? 'other'
@@ -22,52 +30,36 @@ export function AccountSummary({ accounts }: Props) {
     byInst[inst].push(a)
   }
 
+  const sorted = Object.entries(byInst).sort(
+    ([, a], [, b]) =>
+      Math.abs(b.reduce((s, x) => s + (x.latest_balance ?? 0), 0)) -
+      Math.abs(a.reduce((s, x) => s + (x.latest_balance ?? 0), 0)),
+  )
+
   return (
-    <section className="chart-section">
-      <h2>Accounts</h2>
-      <div className="account-groups">
-        {Object.entries(byInst).map(([inst, accts]) => {
-          const total = accts.reduce((s, a) => s + (a.latest_balance ?? 0), 0)
-          const color = INST_COLORS[inst] ?? '#a78bfa'
-          return (
-            <div key={inst} className="account-group">
-              <div className="group-header" style={{ borderLeftColor: color }}>
-                <span className="inst-name">{inst}</span>
-                <span className="inst-total">{fmtDollar(total)}</span>
-              </div>
-              {accts.map((a) => {
-                const gain = a.total_earned
-                const gainPct =
-                  gain != null && a.total_invested && a.total_invested > 0
-                    ? (gain / a.total_invested) * 100
-                    : null
-                return (
-                  <div key={a.id} className="account-card">
-                    <div className="account-top">
-                      <span className="account-name">{a.name}</span>
-                      <span className="account-type">{a.account_type}</span>
-                    </div>
-                    <div className="account-balance">
-                      {a.latest_balance != null ? fmtDollar(a.latest_balance) : '—'}
-                    </div>
-                    {gain != null && (
-                      <div className={`account-gain ${gain >= 0 ? 'positive' : 'negative'}`}>
-                        {gain >= 0 ? '+' : ''}
-                        {fmtDollar(gain)}
-                        {gainPct != null && (
-                          <span className="gain-pct">
-                            {' '}({gainPct >= 0 ? '+' : ''}{gainPct.toFixed(1)}%)
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+    <div className="account-sidebar">
+      {sorted.map(([inst, accts]) => {
+        const total = accts.reduce((s, a) => s + (a.latest_balance ?? 0), 0)
+        const color = INST_COLORS[inst] ?? '#a78bfa'
+        return (
+          <div key={inst} className="sidebar-group">
+            <div className="sidebar-group-header">
+              <span className="sidebar-dot" style={{ backgroundColor: color }} />
+              <span className="sidebar-inst">{inst}</span>
+              <span className="sidebar-total">{fmtDollar(total)}</span>
             </div>
-          )
-        })}
-      </div>
-    </section>
+            {accts
+              .filter((a) => a.latest_balance != null)
+              .sort((a, b) => Math.abs(b.latest_balance ?? 0) - Math.abs(a.latest_balance ?? 0))
+              .map((a) => (
+                <div key={a.id} className="sidebar-account">
+                  <span className="sidebar-account-name">{a.name}</span>
+                  <span className="sidebar-account-bal">{fmtDollar(a.latest_balance ?? 0)}</span>
+                </div>
+              ))}
+          </div>
+        )
+      })}
+    </div>
   )
 }
