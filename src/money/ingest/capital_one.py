@@ -5,6 +5,7 @@ import logging
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -89,6 +90,125 @@ def _encode_ref(ref_id: str) -> str:
     return quote(quote(ref_id, safe=""), safe="")
 
 
+def _ts_to_date(ts: str) -> date:
+    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
+    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
+
+
+def _read_json(path: Path) -> Any:
+    """Read and parse a JSON file, or return None if missing."""
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def parse_raw_capital_one(
+    db: Database,
+    inst_dir: Path,
+    timestamp: str,
+    profile: str | None,
+) -> dict[str, int]:
+    """Parse raw Capital One API captures for a given timestamp and write to DB.
+
+    Reads:
+      {inst_dir}/{timestamp}_accounts.json
+      {inst_dir}/{timestamp}_{last_four}_transactions_{chunk}.json  (chunked)
+
+    Returns a summary dict with counts written.
+    """
+    as_of = _ts_to_date(timestamp)
+
+    accounts_data = _read_json(inst_dir / f"{timestamp}_accounts.json")
+    if not accounts_data:
+        log.warning("Capital One: no accounts file for %s", timestamp)
+        return {}
+
+    raw_accounts: list[dict[str, Any]] = accounts_data.get("accounts", [])
+    raw_key = f"capital_one/{timestamp}_accounts.json"
+    account_count = 0
+    txn_count_total = 0
+
+    for raw_acct in raw_accounts:
+        card_acct: dict[str, Any] = raw_acct.get("cardAccount", {})
+        name_info: dict[str, Any] = card_acct.get("nameInfo", {})
+        cycle_info: dict[str, Any] = card_acct.get("cycleInfo", {})
+
+        display_name = name_info.get("displayName", name_info.get("name", "Unknown"))
+        last_four = card_acct.get("plasticIdLastFour", "")
+
+        account = db.get_or_create_account(
+            name=display_name,
+            account_type=AccountType.CREDIT_CARD,
+            institution="capital_one",
+            external_id=str(last_four),
+            profile=profile,
+        )
+        account_count += 1
+        log.info("Capital One: %s (id=%s)", display_name, account.id)
+
+        current_balance = cycle_info.get("currentBalance")
+        if current_balance is not None:
+            db.insert_balance(
+                Balance(
+                    account_id=account.id,
+                    as_of=as_of,
+                    balance=-float(current_balance),
+                    source="capital_one_api",
+                    raw_file_ref=raw_key,
+                )
+            )
+
+        # Transaction files may be a single file or chunked (_0, _1, etc.)
+        txn_files = sorted(inst_dir.glob(f"{timestamp}_{last_four}_transactions*.json"))
+        if not txn_files:
+            continue
+
+        raw_entries: list[dict[str, Any]] = []
+        txn_key = f"capital_one/{txn_files[0].name}"
+        for txn_file in txn_files:
+            txn_data = _read_json(txn_file)
+            if not txn_data:
+                continue
+            if isinstance(txn_data, dict):
+                raw_entries.extend(
+                    txn_data.get("entries", txn_data.get("transactions", []))
+                )
+            elif isinstance(txn_data, list):
+                raw_entries.extend(txn_data)
+
+        txn_count = 0
+        for entry in raw_entries:
+            txn_date_str: str | None = entry.get(
+                "transactionDate",
+                entry.get("transactionDisplayDate"),
+            )
+            if not txn_date_str:
+                continue
+
+            txn_date = date.fromisoformat(txn_date_str[:10])
+            amount = float(entry.get("transactionAmount", 0.0))
+            debit_credit = str(entry.get("transactionDebitCredit", ""))
+            amount = -abs(amount) if debit_credit == "Debit" else abs(amount)
+
+            db.insert_transaction(
+                Transaction(
+                    account_id=account.id,
+                    date=txn_date,
+                    amount=amount,
+                    description=str(entry.get("transactionDescription", "")),
+                    category=entry.get("displayCategory"),
+                    raw_file_ref=txn_key,
+                )
+            )
+            txn_count += 1
+
+        txn_count_total += txn_count
+        log.info("  Capital One %s: %d transactions", last_four, txn_count)
+
+    log.info("Capital One: parsed snapshot %s (%d accounts)", timestamp, len(raw_accounts))
+    return {"accounts": account_count, "transactions": txn_count_total}
+
+
 def sync_capital_one(
     db: Database,
     store: RawStore,
@@ -115,53 +235,33 @@ def sync_capital_one(
             card_acct: dict[str, Any] = raw_acct.get("cardAccount", {})
             ref_id: str = raw_acct.get("accountReferenceId", "")
             name_info: dict[str, Any] = card_acct.get("nameInfo", {})
-            cycle_info: dict[str, Any] = card_acct.get("cycleInfo", {})
 
             display_name = name_info.get("displayName", name_info.get("name", "Unknown"))
             last_four = card_acct.get("plasticIdLastFour", ref_id[:8])
 
-            account = db.get_or_create_account(
-                name=display_name,
-                account_type=AccountType.CREDIT_CARD,
-                institution="capital_one",
-                external_id=str(last_four),
-                profile=profile,
-            )
-            log.info("Account: %s (id=%s)", display_name, account.id)
-
-            # 2. Record balance (credit card balance is a liability — store as negative)
-            current_balance = cycle_info.get("currentBalance")
-            if current_balance is not None:
-                balance_val = -float(current_balance)
-                db.insert_balance(
-                    Balance(
-                        account_id=account.id,
-                        as_of=date.today(),
-                        balance=balance_val,
-                        source="capital_one_api",
-                        raw_file_ref=raw_key,
-                    )
-                )
-                log.info("  Balance: $%.2f (owed: $%.2f)", balance_val, current_balance)
-
-            # 3. Fetch transactions — only go back to last known transaction
+            # 2. Fetch transactions — only go back to last known transaction
             encoded_ref = _encode_ref(ref_id)
             chunk_end = date.today()
-            total_txn_count = 0
             chunk_num = 0
 
-            # Check how far back we need to go
-            last_txn_row = db.conn.execute(
-                "SELECT MAX(date) FROM transactions WHERE account_id = ?",
-                (account.id,),
-            ).fetchone()
-            if last_txn_row and last_txn_row[0]:
-                # Overlap by 7 days to catch any late-posting transactions
-                earliest = date.fromisoformat(last_txn_row[0]) - timedelta(days=7)
-                log.info("  Incremental sync from %s", earliest)
+            # Check how far back we need to go (using placeholder account lookup)
+            # We need the account ID before creating/getting it to check for existing txns.
+            # Use a DB query by institution + external_id.
+            existing = db.get_account_by_external_id("capital_one", str(last_four))
+            if existing:
+                last_txn_row = db.conn.execute(
+                    "SELECT MAX(date) FROM transactions WHERE account_id = ?",
+                    (existing.id,),
+                ).fetchone()
+                if last_txn_row and last_txn_row[0]:
+                    earliest = date.fromisoformat(last_txn_row[0]) - timedelta(days=7)
+                    log.info("  Incremental sync from %s", earliest)
+                else:
+                    earliest = date(chunk_end.year - 2, chunk_end.month, chunk_end.day)
+                    log.info("  Full backfill to %s", earliest)
             else:
                 earliest = date(chunk_end.year - 2, chunk_end.month, chunk_end.day)
-                log.info("  Full backfill to %s", earliest)
+                log.info("  Full backfill to %s (new account: %s)", earliest, display_name)
 
             try:
                 while chunk_end > earliest:
@@ -193,35 +293,7 @@ def sync_capital_one(
                     else:
                         raw_entries = []
 
-                    chunk_count = 0
-                    for entry in raw_entries:
-                        txn_date_str: str | None = entry.get(
-                            "transactionDate", entry.get("transactionDisplayDate"),
-                        )
-                        if not txn_date_str:
-                            continue
-
-                        txn_date = date.fromisoformat(txn_date_str[:10])
-                        amount = float(entry.get("transactionAmount", 0.0))
-                        debit_credit = str(entry.get("transactionDebitCredit", ""))
-                        amount = -abs(amount) if debit_credit == "Debit" else abs(amount)
-
-                        description: str = entry.get("transactionDescription", "")
-                        category: str | None = entry.get("displayCategory")
-
-                        db.insert_transaction(
-                            Transaction(
-                                account_id=account.id,
-                                date=txn_date,
-                                amount=amount,
-                                description=description,
-                                category=category,
-                                raw_file_ref=txn_key,
-                            )
-                        )
-                        chunk_count += 1
-
-                    total_txn_count += chunk_count
+                    chunk_count = len(raw_entries)
                     if chunk_count > 0:
                         log.info("  %s to %s: %d transactions",
                                  chunk_start, chunk_end, chunk_count)
@@ -233,12 +305,13 @@ def sync_capital_one(
                     chunk_end = chunk_start - timedelta(days=1)
                     chunk_num += 1
 
-                log.info("  Stored %d total transaction(s)", total_txn_count)
-
             except Exception as e:
                 log.warning("  Could not fetch transactions for %s: %s", display_name, e)
-                if total_txn_count > 0:
-                    log.info("  (got %d transactions before error)", total_txn_count)
+
+        # Parse all raw data and write to DB
+        from money.config import DATA_DIR as _DATA_DIR
+        inst_dir = _DATA_DIR / "raw" / "capital_one"
+        parse_raw_capital_one(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
             IngestionRecord(

@@ -6,6 +6,7 @@ import logging
 import urllib.error
 import urllib.request
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from money.config import DATA_DIR
@@ -131,6 +132,161 @@ def determine_grant_type(award_name: str) -> str:
     return award_name
 
 
+def _ts_to_date(ts: str) -> date:
+    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
+    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
+
+
+def _read_json(path: Path) -> Any:
+    """Read and parse a JSON file, or return None if missing."""
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def parse_raw_morgan_stanley(
+    db: Database,
+    inst_dir: Path,
+    timestamp: str,
+    profile: str | None,
+) -> dict[str, int]:
+    """Parse raw Morgan Stanley captures for a given timestamp and write to DB.
+
+    Reads:
+      {inst_dir}/{timestamp}_portfolio_summary.json
+      {inst_dir}/{timestamp}_grants.json
+      {inst_dir}/{timestamp}_portfolio.json   (optional legacy)
+
+    Returns a summary dict with counts written.
+    """
+    as_of = _ts_to_date(timestamp)
+
+    summary_data = _read_json(inst_dir / f"{timestamp}_portfolio_summary.json")
+    if not summary_data:
+        log.warning("Morgan Stanley: no portfolio_summary file for %s", timestamp)
+        return {}
+
+    grants_data = _read_json(inst_dir / f"{timestamp}_grants.json")
+    portfolio_data = _read_json(inst_dir / f"{timestamp}_portfolio.json")
+
+    summary: dict[str, Any] = summary_data.get("data", {})
+    raw_grants: list[dict[str, Any]] = grants_data.get("data", []) if grants_data else []
+
+    fmv_price_str: str = summary.get("valuedAtPrice", "0 USD")
+    fmv_price = parse_money(fmv_price_str)
+
+    account = db.get_or_create_account(
+        name="Anthropic Stock Options",
+        account_type=AccountType.STOCK_OPTIONS,
+        institution="morgan_stanley",
+        external_id="shareworks",
+        profile=profile,
+    )
+
+    # Total balance
+    total_value: float | None = None
+    if portfolio_data:
+        accounts_list: list[dict[str, Any]] = portfolio_data.get("accounts", [])
+        if accounts_list:
+            total_value = float(accounts_list[0].get("totalValue", {}).get("amount", 0))
+    else:
+        portfolio_items: list[dict[str, Any]] = summary.get("portfolioData", [])
+        available_total = 0.0
+        future_total = 0.0
+        for item in portfolio_items:
+            available_total += parse_money(item.get("availableValue", "0 USD"))
+            for f in item.get("futureData", []):
+                future_total += parse_money(f.get("value", "0 USD"))
+        total_value = available_total + future_total
+
+    raw_key = f"morgan_stanley/{timestamp}_portfolio_summary.json"
+
+    if total_value is not None:
+        db.insert_balance(
+            Balance(
+                account_id=account.id,
+                as_of=as_of,
+                balance=total_value,
+                source="morgan_stanley_api",
+                raw_file_ref=raw_key,
+            )
+        )
+
+    # FMV (409A valuation)
+    if fmv_price > 0:
+        db.insert_private_valuation(
+            PrivateValuation(
+                account_id=account.id,
+                as_of=as_of,
+                fmv_per_share=fmv_price,
+                source="shareworks_409a",
+            )
+        )
+
+    # Build vested quantity lookup from portfolio summary
+    portfolio_items_list: list[dict[str, Any]] = list(summary.get("portfolioData", []))
+    vested_by_instance: dict[str, tuple[int, float]] = {}
+    for pi in portfolio_items_list:
+        instance_name: str = pi.get("instanceName", "")
+        avail_qty = int(pi.get("availableQuantity", 0))
+        avail_val = parse_money(pi.get("availableValue", "0 USD"))
+        if instance_name:
+            vested_by_instance[instance_name] = (avail_qty, avail_val)
+
+    # Grants
+    grant_count = 0
+    for raw_grant in raw_grants:
+        grant_date_str: str = raw_grant.get("grantDate", "")
+        if not grant_date_str:
+            continue
+
+        grant_date = date.fromisoformat(grant_date_str)
+        award_name: str = raw_grant.get("awardName", "")
+        grant_name: str = raw_grant.get("grantName", "")
+        grant_number: str = raw_grant.get("grantNumber", "")
+        quantity = int(raw_grant.get("quantityGranted", 0))
+        expiration_str: str | None = raw_grant.get("expiredDate")
+
+        # Extract strike price from grant name (e.g. "02/05/2024 - ISO - $12.98")
+        strike_price = 0.0
+        parts = grant_name.split("$")
+        if len(parts) > 1:
+            price_str = parts[-1].split()[0].rstrip(" -")
+            with contextlib.suppress(ValueError):
+                strike_price = float(price_str)
+
+        exercise_details: dict[str, Any] = raw_grant.get("exerciseDetails", {})
+        vest_dates: list[str] = exercise_details.get("vestDates", [])
+        parsed_vest_dates = [date.fromisoformat(d) for d in vest_dates]
+
+        grant_type = determine_grant_type(award_name)
+        vested_qty, vested_val = vested_by_instance.get(grant_name, (0, 0.0))
+        expiration_date = date.fromisoformat(expiration_str) if expiration_str else None
+
+        db.insert_option_grant(
+            OptionGrant(
+                id=grant_number,
+                account_id=account.id,
+                grant_date=grant_date,
+                grant_type=grant_type,
+                total_shares=quantity,
+                vested_shares=vested_qty,
+                strike_price=strike_price,
+                vested_value=vested_val,
+                expiration_date=expiration_date,
+                vest_dates=parsed_vest_dates,
+            )
+        )
+        grant_count += 1
+        log.info(
+            "  Grant %s: %s %s, %d shares @ $%.2f, %d vested ($%.0f)",
+            grant_number, grant_type, grant_date, quantity, strike_price,
+            vested_qty, vested_val,
+        )
+
+    log.info("Morgan Stanley: parsed snapshot %s (%d grants)", timestamp, grant_count)
+    return {"grants": grant_count}
+
 
 def sync_morgan_stanley(
     db: Database,
@@ -147,7 +303,6 @@ def sync_morgan_stanley(
         log.info("Loaded auth tokens from network log")
 
         # 1. Fetch portfolio overview (for total value)
-        portfolio_data: dict[str, Any] | None = None
         if session_uuid:
             try:
                 portfolio_data = _api_get_session(session_uuid, LINKED_PORTFOLIO_PATH)
@@ -170,9 +325,6 @@ def sync_morgan_stanley(
         )
 
         summary: dict[str, Any] = summary_data.get("data", {})
-        raw_grants: list[dict[str, Any]] = grants_data.get("data", [])
-
-        # Extract stock prices
         stock_price_str: str = summary.get("companyStockPrice", "0 USD")
         fmv_price_str: str = summary.get("valuedAtPrice", "0 USD")
         stock_price = parse_money(stock_price_str)
@@ -184,128 +336,10 @@ def sync_morgan_stanley(
             stock_price, fmv_price, price_label,
         )
 
-        # Create account
-        account = db.get_or_create_account(
-            name="Anthropic Stock Options",
-            account_type=AccountType.STOCK_OPTIONS,
-            institution="morgan_stanley",
-            external_id="shareworks",
-            profile=profile,
-        )
-        log.info("Account: %s (id=%s)", account.name, account.id)
-
-        # 4. Record total balance
-        total_value: float | None = None
-        if portfolio_data:
-            accounts_list: list[dict[str, Any]] = portfolio_data.get("accounts", [])
-            if accounts_list:
-                total_value = float(accounts_list[0].get("totalValue", {}).get("amount", 0))
-        else:
-            # Fall back to summing available + future from portfolio summary
-            portfolio_items: list[dict[str, Any]] = summary.get("portfolioData", [])
-            available_total = 0.0
-            future_total = 0.0
-            for item in portfolio_items:
-                av: str = item.get("availableValue", "0 USD")
-                available_total += parse_money(av)
-                future_list: list[dict[str, Any]] = item.get("futureData", [])
-                for f in future_list:
-                    fv: str = f.get("value", "0 USD")
-                    future_total += parse_money(fv)
-            total_value = available_total + future_total
-
-        if total_value is not None:
-            db.insert_balance(
-                Balance(
-                    account_id=account.id,
-                    as_of=date.today(),
-                    balance=total_value,
-                    source="morgan_stanley_api",
-                    raw_file_ref=raw_key,
-                )
-            )
-            log.info("Balance: $%.2f", total_value)
-
-        # 5. Record FMV (409A valuation)
-        if fmv_price > 0:
-            db.insert_private_valuation(
-                PrivateValuation(
-                    account_id=account.id,
-                    as_of=date.today(),
-                    fmv_per_share=fmv_price,
-                    source="shareworks_409a",
-                )
-            )
-            log.info("Recorded 409A FMV: $%.4f/share", fmv_price)
-
-        # 6. Build vested quantity lookup from portfolio summary
-        # The portfolio summary has availableQuantity/availableValue per grant
-        portfolio_data: list[dict[str, Any]] = list(
-            summary_data.get("portfolioData", [])
-        )
-        vested_by_instance: dict[str, tuple[int, float]] = {}
-        for pd in portfolio_data:
-            instance_name: str = pd.get("instanceName", "")
-            avail_qty = int(pd.get("availableQuantity", 0))
-            avail_val = parse_money(pd.get("availableValue", "0 USD"))
-            if instance_name:
-                vested_by_instance[instance_name] = (avail_qty, avail_val)
-
-        # 7. Record individual grants with vested data from portfolio summary
-        grant_count = 0
-        for raw_grant in raw_grants:
-            grant_date_str: str = raw_grant.get("grantDate", "")
-            if not grant_date_str:
-                continue
-
-            grant_date = date.fromisoformat(grant_date_str)
-            award_name: str = raw_grant.get("awardName", "")
-            grant_name: str = raw_grant.get("grantName", "")
-            grant_number: str = raw_grant.get("grantNumber", "")
-            quantity: int = int(raw_grant.get("quantityGranted", 0))
-            expiration_str: str | None = raw_grant.get("expiredDate")
-
-            # Extract strike price from grant name (e.g. "02/05/2024 - ISO - $12.98")
-            strike_price = 0.0
-            parts = grant_name.split("$")
-            if len(parts) > 1:
-                price_str = parts[-1].split()[0].rstrip(" -")
-                with contextlib.suppress(ValueError):
-                    strike_price = float(price_str)
-
-            exercise_details: dict[str, Any] = raw_grant.get("exerciseDetails", {})
-            vest_dates: list[str] = exercise_details.get("vestDates", [])
-            parsed_vest_dates = [date.fromisoformat(d) for d in vest_dates]
-
-            grant_type = determine_grant_type(award_name)
-
-            # Look up vested quantity from portfolio summary
-            vested_qty, vested_val = vested_by_instance.get(grant_name, (0, 0.0))
-
-            expiration_date = date.fromisoformat(expiration_str) if expiration_str else None
-
-            db.insert_option_grant(
-                OptionGrant(
-                    id=grant_number,
-                    account_id=account.id,
-                    grant_date=grant_date,
-                    grant_type=grant_type,
-                    total_shares=quantity,
-                    vested_shares=vested_qty,
-                    strike_price=strike_price,
-                    vested_value=vested_val,
-                    expiration_date=expiration_date,
-                    vest_dates=parsed_vest_dates,
-                )
-            )
-            grant_count += 1
-            log.info(
-                "  Grant %s: %s %s, %d shares @ $%.2f, %d vested ($%.0f)",
-                grant_number, grant_type, grant_date, quantity, strike_price,
-                vested_qty, vested_val,
-            )
-
-        log.info("Stored %d new grant(s)", grant_count)
+        # Parse all raw data and write to DB
+        from money.config import DATA_DIR as _DATA_DIR
+        inst_dir = _DATA_DIR / "raw" / "morgan_stanley"
+        parse_raw_morgan_stanley(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
             IngestionRecord(

@@ -6,6 +6,7 @@ import logging
 import re
 import urllib.request
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from money.config import cookie_relay_path
@@ -285,6 +286,177 @@ def cents_to_dollars(cents: int | None) -> float | None:
     return cents / 100.0
 
 
+def _ts_to_date(ts: str) -> date:
+    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
+    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
+
+
+def _read_json(path: Path) -> Any:
+    """Read and parse a JSON file, or return None if missing."""
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def _build_display_name(
+    acct_name: str,
+    purpose_name: str,
+    acct_typename: str,
+    accounts: list[Any],
+) -> str:
+    """Build the display name for a Betterment account."""
+    display_name = acct_name or purpose_name or acct_typename
+    if len(accounts) > 1 or (acct_name and purpose_name and purpose_name != acct_name):
+        display_name = f"{purpose_name} — {acct_name or acct_typename}"
+    return display_name
+
+
+def parse_raw_betterment(
+    db: Database,
+    inst_dir: Path,
+    timestamp: str,
+    profile: str | None,
+) -> dict[str, int]:
+    """Parse raw Betterment GraphQL captures for a given timestamp and write to DB.
+
+    Reads:
+      {inst_dir}/{timestamp}_sidebar.json
+      {inst_dir}/{timestamp}_{envelope_id}_purpose.json
+      {inst_dir}/{timestamp}_{acct_external_id}_performance.json
+      {inst_dir}/{timestamp}_{acct_external_id}_holdings.json
+
+    Returns a summary dict with counts written.
+    """
+    as_of = _ts_to_date(timestamp)
+
+    sidebar = _read_json(inst_dir / f"{timestamp}_sidebar.json")
+    if not sidebar:
+        log.warning("Betterment: no sidebar file for %s", timestamp)
+        return {}
+
+    envelopes: list[dict[str, Any]] = sidebar.get("data", {}).get("envelopes", [])
+    raw_key = f"betterment/{timestamp}_sidebar.json"
+
+    account_count = 0
+
+    for envelope in envelopes:
+        envelope_id = envelope["id"]
+        purpose_raw = envelope.get("purpose")
+        purpose_name = purpose_raw.get("name", "Unknown") if purpose_raw else "Unknown"
+        accounts = envelope.get("accounts", [])
+
+        # Get envelope balance from purpose file
+        envelope_balance: float | None = None
+        if purpose_raw is not None:
+            purpose_data = _read_json(inst_dir / f"{timestamp}_{envelope_id}_purpose.json")
+            if purpose_data:
+                purpose_obj = purpose_data.get("data", {}).get("purpose")
+                if purpose_obj:
+                    bal_cents = purpose_obj.get("envelope", {}).get("balance")
+                    envelope_balance = cents_to_dollars(bal_cents)
+
+        for acct in accounts:
+            acct_graphql_id = acct["id"]
+            acct_typename = acct.get("__typename", "")
+            acct_name = acct.get("nameOverride") or acct.get("name", "")
+            acct_external_id = decode_account_id(acct_graphql_id)
+
+            account_type = _resolve_account_type(acct_typename, acct_name)
+            display_name = _build_display_name(acct_name, purpose_name, acct_typename, accounts)
+
+            account = db.get_or_create_account(
+                name=display_name,
+                account_type=account_type,
+                institution="betterment",
+                external_id=acct_external_id,
+                profile=profile,
+            )
+            account_count += 1
+
+            # Performance history + balance
+            balance: float | None = None
+            perf_data = _read_json(inst_dir / f"{timestamp}_{acct_external_id}_performance.json")
+            if perf_data:
+                acct_data = perf_data.get("data", {}).get("account", {})
+                bal_cents = acct_data.get("balance")
+                balance = cents_to_dollars(bal_cents)
+
+                time_series: list[dict[str, Any]] = (
+                    acct_data.get("performanceHistory", {}).get("timeSeries", [])
+                )
+                if time_series:
+                    perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
+                    for point in time_series:
+                        pbal = point.get("balance")
+                        if pbal is not None:
+                            perf_rows.append((
+                                account.id,
+                                point["date"],
+                                pbal / 100.0,
+                                cents_to_dollars(point.get("invested")),
+                                cents_to_dollars(point.get("earned")),
+                            ))
+                    db.insert_performance_batch(perf_rows)
+
+            # Fallback to envelope balance
+            if balance is None and envelope_balance is not None:
+                balance = (
+                    envelope_balance if len(accounts) == 1
+                    else envelope_balance / len(accounts)
+                )
+
+            if balance is not None:
+                db.insert_balance(
+                    Balance(
+                        account_id=account.id,
+                        as_of=as_of,
+                        balance=balance,
+                        source="betterment_graphql",
+                        raw_file_ref=raw_key,
+                    )
+                )
+
+            # Holdings for managed accounts
+            if acct_typename == "ManagedAccount":
+                holdings_filename = f"{timestamp}_{acct_external_id}_holdings.json"
+                holdings_key = f"betterment/{holdings_filename}"
+                holdings_data = _read_json(inst_dir / holdings_filename)
+                if holdings_data:
+                    acct_holdings = holdings_data.get("data", {}).get("account", {})
+                    groups = acct_holdings.get("securityGroupPositions", [])
+                    holding_rows: list[Holding] = []
+                    for group in groups:
+                        group_name = group.get("securityGroup", {}).get("name", "")
+                        for pos in group.get("securityPositions", []):
+                            amount_cents = pos.get("amount")
+                            security = pos.get("security", {})
+                            fin_sec = pos.get("financialSecurity", {})
+                            symbol = security.get("symbol") or fin_sec.get("symbol")
+                            name = (
+                                security.get("name")
+                                or fin_sec.get("name")
+                                or symbol
+                                or ""
+                            )
+                            holding_rows.append(Holding(
+                                account_id=account.id,
+                                as_of=as_of,
+                                symbol=symbol,
+                                name=name,
+                                asset_class=group_name,
+                                shares=float(pos.get("shares", 0)),
+                                value=amount_cents / 100.0 if amount_cents else 0.0,
+                                source="betterment_graphql",
+                                raw_file_ref=holdings_key,
+                            ))
+                    if holding_rows:
+                        db.insert_holdings_batch(holding_rows)
+
+        log.info("Betterment: parsed snapshot %s (%d envelopes)", timestamp, len(envelopes))
+
+    return {"accounts": account_count}
+
+
 def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -> None:
     """Sync Betterment accounts and balances via GraphQL API."""
     started_at = datetime.now()
@@ -312,8 +484,6 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
             purpose_name = purpose_raw.get("name", "Unknown") if purpose_raw else "Unknown"
             accounts = envelope.get("accounts", [])
 
-            # Only query PurposeHeader if the envelope has a purpose
-            envelope_balance: float | None = None
             if purpose_raw is not None:
                 purpose_data = _graphql(
                     cookies, csrf_token, "PurposeHeader", PURPOSE_HEADER_QUERY,
@@ -324,37 +494,17 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                     json.dumps(purpose_data, indent=2).encode(),
                 )
 
-                purpose_obj = purpose_data.get("data", {}).get("purpose")
-                if purpose_obj:
-                    envelope_balance_cents = (
-                        purpose_obj.get("envelope", {}).get("balance")
-                    )
-                    envelope_balance = cents_to_dollars(envelope_balance_cents)
-            log.info(
-                "Envelope '%s': %d account(s), balance=$%s",
-                purpose_name,
-                len(accounts),
-                f"{envelope_balance:,.2f}" if envelope_balance is not None else "?",
-            )
+            log.info("Envelope '%s': %d account(s)", purpose_name, len(accounts))
 
-            # 3. For each account in the envelope, fetch performance and record balances
+            # 3. For each account, fetch performance and holdings
             for acct in accounts:
                 acct_graphql_id = acct["id"]
                 acct_typename = acct.get("__typename", "")
                 acct_name = acct.get("nameOverride") or acct.get("name", "")
                 acct_external_id = decode_account_id(acct_graphql_id)
+                display_name = _build_display_name(acct_name, purpose_name, acct_typename, accounts)
 
-                account_type = _resolve_account_type(acct_typename, acct_name)
-                display_name = acct_name or purpose_name or acct_typename
-                # If multiple accounts share the same name, prepend envelope name
-                if len(accounts) > 1 or (
-                    acct_name and purpose_name and purpose_name != acct_name
-                ):
-                    display_name = f"{purpose_name} — {acct_name or acct_typename}"
-
-                # Try performance query for balance + history
-                balance: float | None = None
-                time_series: list[dict[str, Any]] = []
+                # Performance history
                 try:
                     perf_data = _graphql(
                         cookies, csrf_token,
@@ -369,73 +519,10 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                         f"betterment/{timestamp}_{acct_external_id}_performance.json",
                         json.dumps(perf_data, indent=2).encode(),
                     )
-                    acct_data = perf_data.get("data", {}).get("account", {})
-                    balance_cents = acct_data.get("balance")
-                    balance = cents_to_dollars(balance_cents)
-                    time_series = (
-                        acct_data
-                        .get("performanceHistory", {})
-                        .get("timeSeries", [])
-                    )
                 except Exception as e:
-                    log.warning(
-                        "  Could not fetch performance for %s: %s",
-                        display_name, e,
-                    )
+                    log.warning("  Could not fetch performance for %s: %s", display_name, e)
 
-                # Fall back to envelope balance
-                if balance is None and envelope_balance is not None:
-                    if len(accounts) == 1:
-                        balance = envelope_balance
-                    else:
-                        balance = envelope_balance / len(accounts)
-
-                account = db.get_or_create_account(
-                    name=display_name,
-                    account_type=account_type,
-                    institution="betterment",
-                    external_id=acct_external_id,
-                    profile=profile,
-                )
-                log.info(
-                    "  Synced: %s [%s] %s",
-                    display_name, acct_external_id[:12], account_type.value,
-                )
-
-                if balance is not None:
-                    db.insert_balance(
-                        Balance(
-                            account_id=account.id,
-                            as_of=date.today(),
-                            balance=balance,
-                            source="betterment_graphql",
-                            raw_file_ref=raw_key,
-                        )
-                    )
-                    log.info("  Balance: $%s", f"{balance:,.2f}")
-
-                # Ingest performance history (balance + invested + earned)
-                if time_series:
-                    perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
-                    for point in time_series:
-                        bal_cents = point.get("balance")
-                        if bal_cents is not None:
-                            perf_rows.append((
-                                account.id,
-                                point["date"],
-                                bal_cents / 100.0,
-                                cents_to_dollars(point.get("invested")),
-                                cents_to_dollars(point.get("earned")),
-                            ))
-                    db.insert_performance_batch(perf_rows)
-                    log.info(
-                        "  Performance history: %d points (%s to %s)",
-                        len(perf_rows),
-                        time_series[0]["date"],
-                        time_series[-1]["date"],
-                    )
-
-                # Fetch holdings for managed (investment) accounts
+                # Holdings for managed accounts
                 if acct_typename == "ManagedAccount":
                     try:
                         holdings_data = _graphql(
@@ -444,52 +531,17 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                             HOLDINGS_QUERY,
                             variables={"id": acct_graphql_id},
                         )
-                        holdings_key = (
-                            f"betterment/{timestamp}_{acct_external_id}_holdings.json"
-                        )
                         store.put(
-                            holdings_key,
+                            f"betterment/{timestamp}_{acct_external_id}_holdings.json",
                             json.dumps(holdings_data, indent=2).encode(),
                         )
-
-                        acct_holdings = holdings_data.get("data", {}).get("account", {})
-                        groups = acct_holdings.get("securityGroupPositions", [])
-                        holding_rows: list[Holding] = []
-                        for group in groups:
-                            group_name = group.get("securityGroup", {}).get("name", "")
-                            for pos in group.get("securityPositions", []):
-                                amount_cents = pos.get("amount")
-                                security = pos.get("security", {})
-                                fin_sec = pos.get("financialSecurity", {})
-                                symbol = (
-                                    security.get("symbol")
-                                    or fin_sec.get("symbol")
-                                )
-                                name = (
-                                    security.get("name")
-                                    or fin_sec.get("name")
-                                    or symbol
-                                    or ""
-                                )
-                                holding_rows.append(Holding(
-                                    account_id=account.id,
-                                    as_of=date.today(),
-                                    symbol=symbol,
-                                    name=name,
-                                    asset_class=group_name,
-                                    shares=float(pos.get("shares", 0)),
-                                    value=amount_cents / 100.0 if amount_cents else 0.0,
-                                    source="betterment_graphql",
-                                    raw_file_ref=holdings_key,
-                                ))
-                        if holding_rows:
-                            db.insert_holdings_batch(holding_rows)
-                            log.info(
-                                "  Holdings: %d positions across %d asset classes",
-                                len(holding_rows), len(groups),
-                            )
                     except Exception as e:
                         log.warning("  Could not fetch holdings for %s: %s", display_name, e)
+
+        # Parse all raw data and write to DB
+        from money.config import DATA_DIR as _DATA_DIR
+        inst_dir = _DATA_DIR / "raw" / "betterment"
+        parse_raw_betterment(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
             IngestionRecord(

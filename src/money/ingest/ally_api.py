@@ -4,6 +4,7 @@ import json
 import logging
 import urllib.request
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from money.config import DATA_DIR, cookie_relay_path
@@ -131,6 +132,196 @@ def _fetch_all_transactions(
     return all_transactions
 
 
+def _ts_to_date(ts: str) -> date:
+    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
+    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
+
+
+def _read_json(path: Path) -> Any:
+    """Read and parse a JSON file, or return None if missing."""
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def parse_raw_ally(
+    db: Database,
+    inst_dir: Path,
+    timestamp: str,
+    profile: str,
+) -> dict[str, int]:
+    """Parse raw Ally API captures for a given timestamp and write to DB.
+
+    Reads:
+      {inst_dir}/{timestamp}_accounts.json
+      {inst_dir}/{timestamp}_{external_id}_transactions.json  (per account)
+
+    Returns a summary dict with counts of accounts/balances/transactions written.
+    """
+    as_of = _ts_to_date(timestamp)
+
+    accounts_data = _read_json(inst_dir / f"{timestamp}_accounts.json")
+    if not accounts_data:
+        log.warning("Ally: no accounts file for %s", timestamp)
+        return {}
+
+    accounts: list[dict[str, Any]] = list(
+        accounts_data.get("accounts") or accounts_data.get("data") or []
+    )
+    raw_key = f"ally/{timestamp}_accounts.json"
+
+    seen_transactions: set[tuple[str, float, str]] = set()
+    account_count = 0
+    txn_count_total = 0
+    for acct in accounts:
+        details = acct.get("domainDetails", {})
+
+        # Skip external/linked accounts (e.g. Bank of America)
+        if details.get("externalAccountIndicator"):
+            continue
+
+        acct_number = (
+            acct.get("accountNumberPvtEncrypt")
+            or acct.get("accountNumber", "")
+        )
+        acct_name = (
+            acct.get("nickname")
+            or details.get("accountNickname")
+            or acct.get("nickName")
+            or acct.get("name", f"Account {str(acct_number)[-4:]}")
+        )
+        acct_type_str = acct.get("accountType") or acct.get("type", "DDA")
+        status = acct.get("accountStatus") or acct.get("status", "")
+        current_balance = (
+            acct.get("currentBalance")
+            or acct.get("balance", {}).get("current")
+        )
+
+        if status.upper() != "ACTIVE":
+            log.info("Skipping %s account: %s", status, acct_name)
+            continue
+
+        external_id = str(acct_number)[-4:] if acct_number else ""
+        account_type = ACCOUNT_TYPE_MAP.get(acct_type_str, AccountType.CHECKING)
+
+        account = db.get_or_create_account(
+            name=acct_name,
+            account_type=account_type,
+            institution="ally",
+            external_id=external_id,
+            profile=profile,
+        )
+        account_count += 1
+        log.info("Ally: %s ••%s [%s]", acct_name, external_id, account_type.value)
+
+        if current_balance is not None:
+            db.insert_balance(
+                Balance(
+                    account_id=account.id,
+                    as_of=as_of,
+                    balance=float(current_balance),
+                    source="ally_api",
+                    raw_file_ref=raw_key,
+                )
+            )
+
+        # Transactions
+        txn_path = inst_dir / f"{timestamp}_{external_id}_transactions.json"
+        txns_raw = _read_json(txn_path)
+        if not isinstance(txns_raw, list):
+            continue
+
+        txn_key = f"ally/{timestamp}_{external_id}_transactions.json"
+        txn_count = 0
+        for txn in txns_raw:
+            txn_date_str = txn.get("transactionPostingDate", "")
+            txn_amount = txn.get("transactionAmountPvtEncrypt")
+            txn_desc = txn.get("transactionDescription", "")
+
+            if txn_amount is None or not txn_date_str:
+                continue
+
+            fingerprint = (txn_date_str[:10], float(txn_amount), txn_desc)
+            if fingerprint in seen_transactions:
+                continue
+            seen_transactions.add(fingerprint)
+
+            db.insert_transaction(
+                Transaction(
+                    account_id=account.id,
+                    date=date.fromisoformat(txn_date_str[:10]),
+                    amount=float(txn_amount),
+                    description=txn_desc,
+                    category=txn.get("transactionType"),
+                    raw_file_ref=txn_key,
+                )
+            )
+            txn_count += 1
+
+        txn_count_total += txn_count
+        if txn_count:
+            log.info("  Ally %s: %d transactions", external_id, txn_count)
+
+    return {"accounts": account_count, "transactions": txn_count_total}
+
+
+def parse_raw_ally_extension(
+    db: Database,
+    inst_dir: Path,
+    profile: str,
+) -> int:
+    """Parse any extension capture files (extension_*.json) in inst_dir.
+
+    These are separate from the timestamped API captures and should only
+    be processed once per replay, not once per timestamp.
+
+    Returns the number of balance records inserted.
+    """
+    ext_files = sorted(inst_dir.glob("extension_*.json"))
+    balance_count = 0
+    for ext_path in ext_files:
+        data = _read_json(ext_path)
+        if not data:
+            continue
+        ext_accounts: list[dict[str, Any]] = data.get("accounts", [])
+        scraped_at = data.get("scraped_at", "")
+        ext_as_of = (
+            date.fromisoformat(scraped_at[:10]) if scraped_at else date.today()
+        )
+
+        for ext_acct in ext_accounts:
+            name = ext_acct.get("name", "")
+            ext_id = ext_acct.get("external_id", "")
+            raw_type = ext_acct.get("account_type", "checking")
+
+            if not name or not ext_id:
+                continue
+
+            type_map = {"checking": AccountType.CHECKING, "savings": AccountType.SAVINGS}
+            ext_account = db.get_or_create_account(
+                name=name,
+                account_type=type_map.get(raw_type, AccountType.CHECKING),
+                institution="ally",
+                external_id=ext_id,
+                profile=profile,
+            )
+
+            bal = ext_acct.get("balance")
+            if bal is not None:
+                db.insert_balance(
+                    Balance(
+                        account_id=ext_account.id,
+                        as_of=ext_as_of,
+                        balance=float(bal),
+                        source="ally_extension",
+                        raw_file_ref=f"ally/{ext_path.name}",
+                    )
+                )
+                balance_count += 1
+
+    return balance_count
+
+
 def sync_ally_api(db: Database, store: RawStore, profile: str,
                   token: str | None = None) -> None:
     """Sync Ally Bank accounts and transactions via internal API.
@@ -191,17 +382,18 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
 
         if accounts_data is None:
             raise ValueError("Could not fetch accounts from any known endpoint")
+
+        # Store raw accounts response
+        store.put(
+            f"ally/{timestamp}_accounts.json",
+            json.dumps(accounts_data, indent=2).encode(),
+        )
+
         # transfer-accounts returns {"accounts": [...]}, others return {"data": [...]}
         accounts: list[dict[str, Any]] = list(
             accounts_data.get("accounts") or accounts_data.get("data") or []
         )
         log.info("Got %d account(s) from Ally API", len(accounts))
-
-        # Store raw API responses
-        raw_key = f"ally/{timestamp}_accounts.json"
-        store.put(raw_key, json.dumps(accounts_data, indent=2).encode())
-
-        seen_transactions: set[tuple[str, float, str]] = set()
 
         for acct in accounts:
             details = acct.get("domainDetails", {})
@@ -210,7 +402,6 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
             if details.get("externalAccountIndicator"):
                 continue
 
-            # Support both old API format and transfer-accounts format
             acct_id = (
                 details.get("accountId")
                 or acct.get("id", "")
@@ -219,48 +410,11 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
                 acct.get("accountNumberPvtEncrypt")
                 or acct.get("accountNumber", "")
             )
-            acct_name = (
-                acct.get("nickname")
-                or details.get("accountNickname")
-                or acct.get("nickName")
-                or acct.get("name", f"Account {acct_number}")
-            )
-            acct_type_str = acct.get("accountType") or acct.get("type", "DDA")
+            external_id = acct_number[-4:] if acct_number else str(acct_id)[:8]
             status = acct.get("accountStatus") or acct.get("status", "")
-            current_balance = (
-                acct.get("currentBalance")
-                or acct.get("balance", {}).get("current")
-            )
 
             if status.upper() != "ACTIVE":
-                log.info("Skipping %s account: %s", status, acct_name)
                 continue
-
-            # Use last 4 of account number as external_id
-            external_id = acct_number[-4:] if acct_number else str(acct_id)[:8]
-            account_type = _resolve_account_type(acct_type_str)
-
-            account = db.get_or_create_account(
-                name=acct_name,
-                account_type=account_type,
-                institution="ally",
-                external_id=external_id,
-                profile=profile,
-            )
-            log.info("Synced: %s ••%s [%s]", acct_name, external_id, account_type.value)
-
-            # Record balance
-            if current_balance is not None:
-                db.insert_balance(
-                    Balance(
-                        account_id=account.id,
-                        as_of=date.today(),
-                        balance=float(current_balance),
-                        source="ally_api",
-                        raw_file_ref=raw_key,
-                    )
-                )
-                log.info("  Balance: $%s", f"{current_balance:,.2f}")
 
             # Fetch transactions — Ally returns the same consolidated feed for all
             # checking accounts, so we track fingerprints to avoid duplicates.
@@ -272,39 +426,13 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
                 txn_key = f"ally/{timestamp}_{external_id}_transactions.json"
                 store.put(txn_key, json.dumps(txns_raw, indent=2).encode())
 
-                txn_count = 0
-                for txn in txns_raw:
-                    txn_date_str = txn.get("transactionPostingDate", "")
-                    txn_amount = txn.get("transactionAmountPvtEncrypt")
-                    txn_desc = txn.get("transactionDescription", "")
-
-                    if txn_amount is None or not txn_date_str:
-                        continue
-
-                    # Parse date — format is "2026-03-11T03:55:27-04:00"
-                    txn_date = date.fromisoformat(txn_date_str[:10])
-
-                    fingerprint = (txn_date_str[:10], float(txn_amount), txn_desc)
-                    if fingerprint in seen_transactions:
-                        continue
-                    seen_transactions.add(fingerprint)
-
-                    db.insert_transaction(
-                        Transaction(
-                            account_id=account.id,
-                            date=txn_date,
-                            amount=float(txn_amount),
-                            description=txn_desc,
-                            category=txn.get("transactionType"),
-                            raw_file_ref=txn_key,
-                        )
-                    )
-                    txn_count += 1
-
-                log.info("  Stored %d transactions (skipped %d duplicates)",
-                         txn_count, len(txns_raw) - txn_count)
-
             except Exception as e:
+                acct_name = (
+                    acct.get("nickname")
+                    or details.get("accountNickname")
+                    or acct.get("nickName")
+                    or acct.get("name", f"Account {external_id}")
+                )
                 log.warning("  Could not fetch transactions for %s: %s", acct_name, e)
 
             # Fetch monthly trends
@@ -321,29 +449,34 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
                 trends = charts.get("monthlyTrends", [])
                 log.info("  Stored %d months of income/expense trends", len(trends))
             except Exception as e:
-                log.warning("  Could not fetch charts for %s: %s", acct_name, e)
+                log.warning("  Could not fetch charts for %s: %s", acct_id, e)
 
             # Fetch account details
             try:
-                details = _api_request(
+                acct_details = _api_request(
                     token,
                     f"/acs/v1/bank-accounts/{acct_id}",
                     cookies=cookies,
                 )
                 store.put(
                     f"ally/{timestamp}_{external_id}_details.json",
-                    json.dumps(details, indent=2).encode(),
+                    json.dumps(acct_details, indent=2).encode(),
                 )
                 log.info("  Stored account details")
             except Exception as e:
-                log.warning("  Could not fetch details for %s: %s", acct_name, e)
+                log.warning("  Could not fetch details for %s: %s", acct_id, e)
+
+        # Parse all raw data and write to DB
+        from money.config import DATA_DIR as _DATA_DIR
+        inst_dir = _DATA_DIR / "raw" / "ally"
+        parse_raw_ally(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
             IngestionRecord(
                 source="ally_api",
                 profile=profile,
                 status=IngestionStatus.SUCCESS,
-                raw_file_ref=raw_key,
+                raw_file_ref=f"ally/{timestamp}_accounts.json",
                 started_at=started_at,
                 finished_at=datetime.now(),
             )

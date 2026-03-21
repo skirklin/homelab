@@ -5,6 +5,7 @@ import logging
 import urllib.request
 import uuid
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
@@ -217,6 +218,143 @@ def ingest_transfers(
     return count
 
 
+def _ts_to_date(ts: str) -> date:
+    """Convert a YYYYMMDD_HHMMSS timestamp to a date."""
+    return date(int(ts[:4]), int(ts[4:6]), int(ts[6:8]))
+
+
+def _read_json(path: Path) -> Any:
+    """Read and parse a JSON file, or return None if missing."""
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def parse_raw_wealthfront(
+    db: Database,
+    inst_dir: Path,
+    timestamp: str,
+    profile: str | None,
+) -> dict[str, int]:
+    """Parse raw Wealthfront API captures for a given timestamp and write to DB.
+
+    Reads:
+      {inst_dir}/{timestamp}_overviews.json
+      {inst_dir}/{timestamp}_{acct_id}_performance.json
+      {inst_dir}/{timestamp}_{acct_id}_open_lots.json
+      {inst_dir}/{timestamp}_{acct_id}_transfers.json
+
+    Returns a summary dict with counts written.
+    """
+    as_of = _ts_to_date(timestamp)
+
+    overviews_data = _read_json(inst_dir / f"{timestamp}_overviews.json")
+    if not overviews_data:
+        log.warning("Wealthfront: no overviews file for %s", timestamp)
+        return {}
+
+    overviews: list[dict[str, Any]] = overviews_data.get("overviews", [])
+    account_count = 0
+
+    for overview in overviews:
+        acct_id = overview.get("accountId", "")
+        acct_type_str = overview.get("accountType", "")
+        display_name = overview.get("accountDisplayName", f"Account {acct_id}")
+        state = overview.get("state", "")
+        total_value = overview.get("accountValueSummary", {}).get("totalValue")
+
+        if not acct_id or state not in ("FUNDED", "OPENED"):
+            continue
+
+        account_type = ACCOUNT_TYPE_MAP.get(acct_type_str, AccountType.BROKERAGE)
+
+        account = db.get_or_create_account(
+            name=display_name,
+            account_type=account_type,
+            institution="wealthfront",
+            external_id=acct_id,
+            profile=profile,
+        )
+        account_count += 1
+        log.info("Wealthfront: %s [%s] %s", display_name, acct_id, account_type.value)
+
+        if total_value is not None:
+            db.insert_balance(
+                Balance(
+                    account_id=account.id,
+                    as_of=as_of,
+                    balance=float(total_value),
+                    source="wealthfront_api",
+                    raw_file_ref=f"wealthfront/{timestamp}_overviews.json",
+                )
+            )
+
+        # Performance history
+        perf_data = _read_json(inst_dir / f"{timestamp}_{acct_id}_performance.json")
+        if perf_data:
+            history: list[dict[str, Any]] = perf_data.get("historyList", [])
+            perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
+            for entry in history:
+                mv = entry.get("marketValue")
+                if mv is not None:
+                    invested = entry.get("sumNetDeposits")
+                    earned = (mv - invested) if invested is not None else None
+                    perf_rows.append((
+                        account.id,
+                        entry["date"],
+                        float(mv),
+                        float(invested) if invested is not None else None,
+                        float(earned) if earned is not None else None,
+                    ))
+            if perf_rows:
+                db.insert_performance_batch(perf_rows)
+                log.info("  Performance history: %d points", len(perf_rows))
+
+        # Holdings from open lots
+        lots_data = _read_json(inst_dir / f"{timestamp}_{acct_id}_open_lots.json")
+        if lots_data and isinstance(lots_data, dict):
+            lots_list: list[dict[str, Any]] = list(lots_data.get("openLotForDisplayList", []))
+            by_symbol: dict[str, dict[str, float]] = {}
+            for lot in lots_list:
+                sym = lot.get("symbol", "")
+                if not sym:
+                    continue
+                if sym not in by_symbol:
+                    by_symbol[sym] = {"shares": 0.0, "value": 0.0, "cost_basis": 0.0}
+                by_symbol[sym]["shares"] += float(lot.get("quantity", 0))
+                by_symbol[sym]["value"] += float(lot.get("currentValue", 0))
+                by_symbol[sym]["cost_basis"] += float(lot.get("costBasis", 0))
+
+            open_lots_key = f"wealthfront/{timestamp}_{acct_id}_open_lots.json"
+            holding_rows: list[Holding] = []
+            for sym, agg in by_symbol.items():
+                if agg["shares"] > 0:
+                    holding_rows.append(Holding(
+                        account_id=account.id,
+                        as_of=as_of,
+                        symbol=sym,
+                        name=sym,
+                        shares=agg["shares"],
+                        value=agg["value"],
+                        source="wealthfront_api",
+                        raw_file_ref=open_lots_key,
+                    ))
+            if holding_rows:
+                db.insert_holdings_batch(holding_rows)
+                log.info("  Holdings: %d positions", len(holding_rows))
+
+        # Transfers as transactions
+        transfers_data = _read_json(inst_dir / f"{timestamp}_{acct_id}_transfers.json")
+        if transfers_data and isinstance(transfers_data, dict):
+            transfers_key = f"wealthfront/{timestamp}_{acct_id}_transfers.json"
+            txn_count = ingest_transfers(db, account.id, transfers_data, transfers_key)
+            if txn_count:
+                log.info("  Transfers: %d transactions", txn_count)
+
+    log.info("Wealthfront: parsed snapshot %s (%d accounts)", timestamp, len(overviews))
+    return {"accounts": account_count}
+
+
 def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) -> None:
     """Sync Wealthfront accounts and balances via internal API."""
     started_at = datetime.now()
@@ -232,8 +370,7 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
 
         # Store the raw API response
         raw_key = f"wealthfront/{timestamp}_overviews.json"
-        raw_payload = json.dumps(data, indent=2).encode()
-        store.put(raw_key, raw_payload)
+        store.put(raw_key, json.dumps(data, indent=2).encode())
 
         # Store external accounts (linked accounts from other institutions)
         try:
@@ -263,11 +400,8 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
 
         for overview in overviews:
             acct_id = overview.get("accountId", "")
-            acct_type_str = overview.get("accountType", "")
             display_name = overview.get("accountDisplayName", f"Account {acct_id}")
             state = overview.get("state", "")
-            value_summary = overview.get("accountValueSummary", {})
-            total_value = value_summary.get("totalValue")
 
             if not acct_id:
                 log.warning("Skipping account with no ID: %s", overview)
@@ -277,111 +411,13 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
                 log.info("Skipping %s account: %s [%s]", state, display_name, acct_id)
                 continue
 
-            account_type = _resolve_account_type(acct_type_str)
-
-            # Store per-account manifest
-            manifest = {
-                "institution": "wealthfront",
-                "account_name": display_name,
-                "account_type": account_type.value,
-                "external_id": acct_id,
-                "wf_account_type": acct_type_str,
-                "balance": total_value,
-                "state": state,
-                "synced_at": timestamp,
-            }
-            manifest_key = f"wealthfront/{timestamp}_{acct_id}.json"
-            store.put(manifest_key, json.dumps(manifest, indent=2).encode())
-
-            account = db.get_or_create_account(
-                name=display_name,
-                account_type=account_type,
-                institution="wealthfront",
-                external_id=acct_id,
-                profile=profile,
-            )
-            log.info("Synced: %s [%s] %s", display_name, acct_id, account_type.value)
-
-            if total_value is not None:
-                db.insert_balance(
-                    Balance(
-                        account_id=account.id,
-                        as_of=date.today(),
-                        balance=float(total_value),
-                        source="wealthfront_api",
-                        raw_file_ref=raw_key,
-                    )
-                )
-                log.info("  Balance: $%s", f"{total_value:,.2f}")
-
             # Download supplementary data
             _download_supplementary(cookies, store, acct_id, numeric_ids, timestamp)
 
-            # Ingest performance history (balance + invested + earned)
-            perf_key = f"wealthfront/{timestamp}_{acct_id}_performance.json"
-            if store.exists(perf_key):
-                perf_data = json.loads(store.get(perf_key))
-                history = perf_data.get("historyList", [])
-                perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
-                for entry in history:
-                    mv = entry.get("marketValue")
-                    if mv is not None:
-                        invested = entry.get("sumNetDeposits")
-                        earned = (mv - invested) if invested is not None else None
-                        perf_rows.append((
-                            account.id,
-                            entry["date"],
-                            float(mv),
-                            float(invested) if invested is not None else None,
-                            float(earned) if earned is not None else None,
-                        ))
-                db.insert_performance_batch(perf_rows)
-                log.info("  Performance history: %d points", len(perf_rows))
-
-            # Ingest transfers as transactions
-            transfers_key = f"wealthfront/{timestamp}_{acct_id}_transfers.json"
-            if store.exists(transfers_key):
-                transfers_data = json.loads(store.get(transfers_key))
-                txn_count = ingest_transfers(
-                    db, account.id, transfers_data, transfers_key
-                )
-                log.info("  Ingested %d transactions from transfers", txn_count)
-
-            # Ingest holdings from open lots (aggregate by symbol)
-            open_lots_key = f"wealthfront/{timestamp}_{acct_id}_open_lots.json"
-            if store.exists(open_lots_key):
-                lots_raw: Any = json.loads(store.get(open_lots_key))
-                lots_list: list[dict[str, Any]] = lots_raw.get(
-                    "openLotForDisplayList", []
-                )
-                # Aggregate multiple lots per symbol
-                by_symbol: dict[str, dict[str, float]] = {}
-                for lot in lots_list:
-                    sym = lot.get("symbol", "")
-                    if not sym:
-                        continue
-                    if sym not in by_symbol:
-                        by_symbol[sym] = {"shares": 0.0, "value": 0.0, "cost_basis": 0.0}
-                    by_symbol[sym]["shares"] += float(lot.get("quantity", 0))
-                    by_symbol[sym]["value"] += float(lot.get("currentValue", 0))
-                    by_symbol[sym]["cost_basis"] += float(lot.get("costBasis", 0))
-
-                holding_rows: list[Holding] = []
-                for sym, agg in by_symbol.items():
-                    if agg["shares"] > 0:
-                        holding_rows.append(Holding(
-                            account_id=account.id,
-                            as_of=date.today(),
-                            symbol=sym,
-                            name=sym,
-                            shares=agg["shares"],
-                            value=agg["value"],
-                            source="wealthfront_api",
-                            raw_file_ref=open_lots_key,
-                        ))
-                if holding_rows:
-                    db.insert_holdings_batch(holding_rows)
-                    log.info("  Holdings: %d positions", len(holding_rows))
+        # Parse all raw data and write to DB
+        from money.config import DATA_DIR as _DATA_DIR
+        inst_dir = _DATA_DIR / "raw" / "wealthfront"
+        parse_raw_wealthfront(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
             IngestionRecord(
