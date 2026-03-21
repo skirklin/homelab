@@ -46,7 +46,13 @@ async function sendToServer(endpoint, data) {
 async function checkServerHealth() {
   const baseUrl = await getServerUrl();
   try {
-    const response = await fetch(`${baseUrl}/health`, { method: "GET" });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`${baseUrl}/health`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
     return response.ok;
   } catch {
     return false;

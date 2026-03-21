@@ -74,6 +74,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/grants"):
             self._handle_grants()
             return
+        if self.path.startswith("/api/sync-status"):
+            self._handle_sync_status()
+            return
         if self.path.startswith("/api/allocation"):
             self._handle_allocation()
             return
@@ -381,6 +384,76 @@ class IngestHandler(BaseHTTPRequestHandler):
                 }
             )
         self._json_response(200, {"transactions": transactions})
+
+    def _handle_sync_status(self) -> None:
+        """Return per-login freshness status."""
+        from money.config import load_config
+
+        config = load_config()
+
+        # Get freshness data per profile (login_id) from DB
+        rows = self.db.conn.execute("""
+            SELECT a.profile,
+                   a.institution,
+                   MAX(b.as_of) as last_balance,
+                   MAX(t.date) as last_transaction,
+                   COUNT(DISTINCT a.id) as account_count
+            FROM accounts a
+            LEFT JOIN balances b ON b.account_id = a.id
+            LEFT JOIN transactions t ON t.account_id = a.id
+            WHERE a.institution IS NOT NULL
+            GROUP BY a.profile, a.institution
+        """).fetchall()
+
+        # Keyed by (profile, institution) — profile may be None for legacy rows
+        db_data: dict[tuple[str | None, str], dict[str, Any]] = {}
+        for row in rows:
+            key = (row["profile"], row["institution"])
+            db_data[key] = {
+                "last_balance": row["last_balance"],
+                "last_transaction": row["last_transaction"],
+                "account_count": row["account_count"],
+            }
+
+        statuses: list[dict[str, Any]] = []
+        for login_id, login_config in config.logins.items():
+            inst_id = login_config.institution
+            inst_config = config.institutions.get(inst_id)
+
+            # Match by profile first, fall back to institution-only match
+            data = (
+                db_data.get((login_id, inst_id))
+                or db_data.get((None, inst_id))
+                or {}
+            )
+            last_balance = data.get("last_balance")
+            last_txn = data.get("last_transaction")
+            freshest = max(last_balance or "", last_txn or "")
+            days_stale = (
+                (date.today() - date.fromisoformat(freshest)).days
+                if freshest else None
+            )
+
+            person_config = config.people.get(login_config.person)
+            person_name = person_config.name if person_config else login_config.person
+            inst_label = (inst_config.label if inst_config else inst_id) or inst_id
+            url = inst_config.url if inst_config else None
+
+            statuses.append({
+                "login_id": login_id,
+                "institution": inst_id,
+                "person": login_config.person,
+                "person_name": person_name,
+                "label": f"{inst_label} ({person_name})",
+                "url": url,
+                "account_count": data.get("account_count", 0),
+                "last_balance_date": last_balance,
+                "last_transaction_date": last_txn,
+                "days_stale": days_stale,
+                "is_stale": days_stale is not None and days_stale > 3,
+            })
+
+        self._json_response(200, {"statuses": statuses})
 
     def _handle_grants(self) -> None:
         """Return stock option/RSU grants with vested data from Morgan Stanley."""
@@ -1131,10 +1204,26 @@ class IngestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _trigger_auto_sync(self, institution: str) -> None:
-        """Kick off a background sync for an institution."""
+        """Kick off a background sync for an institution.
+
+        Looks up the login_id for the institution from config (uses the first
+        matching login, typically the only one for single-user institutions).
+        """
+        from money.config import load_config
+
+        login_id: str | None = None
+        try:
+            config = load_config()
+            for lid, lc in config.logins.items():
+                if lc.institution == institution:
+                    login_id = lid
+                    break
+        except Exception:
+            pass
+
         thread = threading.Thread(
             target=_run_auto_sync,
-            args=(self.db.path, self.store, institution),
+            args=(self.db.path, self.store, institution, login_id),
             daemon=True,
         )
         thread.start()
@@ -1435,9 +1524,14 @@ def _process_ingest(
     }
 
 
-def _run_auto_sync(db_path: str, store: RawStore, institution: str) -> None:
+def _run_auto_sync(
+    db_path: str,
+    store: RawStore,
+    institution: str,
+    login_id: str | None = None,
+) -> None:
     """Run a sync for an institution in the background after receiving fresh auth data."""
-    sync_key = institution
+    sync_key = login_id or institution
 
     with _sync_lock:
         if sync_key in _active_syncs:
@@ -1448,35 +1542,37 @@ def _run_auto_sync(db_path: str, store: RawStore, institution: str) -> None:
     db = Database(db_path, check_same_thread=False)
     try:
         db.initialize()
-        log.info("Auto-sync starting for %s", sync_key)
+        log.info("Auto-sync starting for %s (login: %s)", institution, login_id)
 
         if institution == "betterment":
             from money.ingest.betterment import sync_betterment
-            sync_betterment(db, store)
+            sync_betterment(db, store, profile=login_id)
         elif institution == "wealthfront":
             from money.ingest.wealthfront import sync_wealthfront
-            sync_wealthfront(db, store)
+            sync_wealthfront(db, store, profile=login_id)
         elif institution == "capital_one":
             from money.ingest.capital_one import sync_capital_one
-            sync_capital_one(db, store)
+            sync_capital_one(db, store, profile=login_id)
         elif institution == "chase":
             from money.ingest.chase import sync_chase
-            sync_chase(db, store)
+            sync_chase(db, store, profile=login_id)
         elif institution == "morgan_stanley":
             from money.ingest.morgan_stanley import sync_morgan_stanley
-            sync_morgan_stanley(db, store)
+            sync_morgan_stanley(db, store, profile=login_id)
         else:
             log.info("No auto-sync configured for %s", institution)
             return
 
-        # Recategorize after sync
+        # Enrich and recategorize after sync
+        from money.benchmarks import enrich_holdings_asset_classes
         from money.categorize import apply_rules
+        enrich_holdings_asset_classes(db)
         apply_rules(db)
 
-        log.info("Auto-sync complete for %s", sync_key)
+        log.info("Auto-sync complete for %s (login: %s)", institution, login_id)
 
     except Exception:
-        log.exception("Auto-sync failed for %s", sync_key)
+        log.exception("Auto-sync failed for %s (login: %s)", institution, login_id)
     finally:
         with _sync_lock:
             _active_syncs.discard(sync_key)
