@@ -29,8 +29,12 @@ export function GrantsDetail() {
           <h2>Equity Grants</h2>
           <div className="metric-row">
             <span className="metric positive">
-              <span className="metric-label">Vested</span>
+              <span className="metric-label">Vested (pre-tax)</span>
               <span className="metric-value">{fmtDollar(data.total_vested_value)}</span>
+            </span>
+            <span className="metric positive">
+              <span className="metric-label">After Tax</span>
+              <span className="metric-value">{fmtDollar(data.total_after_tax_vested_value)}</span>
             </span>
             <span className="metric" style={{ opacity: 0.5 }}>
               <span className="metric-label">Unvested</span>
@@ -53,6 +57,7 @@ export function GrantsDetail() {
             <th className="right">Unvested</th>
             <th className="right">Strike</th>
             <th className="right">Vested Value</th>
+            <th className="right">After Tax</th>
             <th>Vesting</th>
           </tr>
         </thead>
@@ -83,6 +88,12 @@ export function GrantsDetail() {
                 {g.strike_price > 0 ? `$${g.strike_price.toFixed(2)}` : '—'}
               </td>
               <td className="amount right positive">{fmtDollar(g.vested_value)}</td>
+              <td className="amount right positive" style={{ opacity: 0.7 }}>
+                {fmtDollar(g.after_tax_vested_value)}
+                <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginLeft: 4 }}>
+                  {Math.round(g.tax_rate * 100)}%
+                </span>
+              </td>
               <td style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
                 {g.vesting_schedule} / {g.vesting_months}mo
                 {g.pct_vested >= 100 ? (

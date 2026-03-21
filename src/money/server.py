@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 from datetime import date, datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from money.config import cookie_relay_path
@@ -24,10 +24,29 @@ VALID_ACCOUNT_TYPES = {t.value for t in AccountType}
 class IngestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the extension data receiver."""
 
-    db: Database
+    db_path: str
     store: RawStore
 
+    @property
+    def db(self) -> Database:
+        """Get a per-request DB connection (cached on the instance)."""
+        if not hasattr(self, '_db'):
+            self._db = Database(self.db_path)
+            self._db.initialize()
+        return self._db
+
+    def _close_db(self) -> None:
+        if hasattr(self, '_db'):
+            self._db.close()
+            del self._db
+
     def do_GET(self) -> None:
+        try:
+            self._do_GET()
+        finally:
+            self._close_db()
+
+    def _do_GET(self) -> None:
         if self.path == "/health":
             self._json_response(200, {"status": "ok"})
             return
@@ -381,6 +400,10 @@ class IngestHandler(BaseHTTPRequestHandler):
             grant = row_to_option_grant(row)
             per_share = max(0.0, fmv - grant.strike_price)
 
+            # Tax rates: NQ/RSU taxed as ordinary income (~50%), ISO as LTCG (~35%)
+            tax_rate = 0.35 if grant.grant_type == "ISO" else 0.50
+            after_tax_vested = grant.vested_value * (1 - tax_rate)
+
             result.append({
                 "id": grant.id,
                 "type": grant.grant_type,
@@ -392,6 +415,8 @@ class IngestHandler(BaseHTTPRequestHandler):
                 "fmv": fmv,
                 "per_share_value": per_share,
                 "vested_value": grant.vested_value,
+                "after_tax_vested_value": after_tax_vested,
+                "tax_rate": tax_rate,
                 "unvested_value": grant.total_shares * per_share - grant.vested_value,
                 "total_value": grant.total_shares * per_share,
                 "expiration_date": (
@@ -404,10 +429,13 @@ class IngestHandler(BaseHTTPRequestHandler):
                 "vest_dates": [d.isoformat() for d in grant.vest_dates],
             })
 
+        total_after_tax = sum(g["after_tax_vested_value"] for g in result)
+
         self._json_response(200, {
             "grants": result,
             "fmv_per_share": fmv,
             "total_vested_value": sum(g["vested_value"] for g in result),
+            "total_after_tax_vested_value": total_after_tax,
             "total_unvested_value": sum(g["unvested_value"] for g in result),
             "total_value": sum(g["total_value"] for g in result),
         })
@@ -514,11 +542,24 @@ class IngestHandler(BaseHTTPRequestHandler):
         vested_value = float(equity_row[0])
         total_equity_value = float(equity_row[1])
 
+        # After-tax vested: apply ~50% for NQ/RSU, ~35% for ISO
+        after_tax_row = self.db.conn.execute("""
+            SELECT COALESCE(SUM(
+                CASE WHEN grant_type = 'ISO' THEN vested_value * 0.65
+                     ELSE vested_value * 0.50
+                END
+            ), 0)
+            FROM option_grants
+        """).fetchone()
+        after_tax_vested = float(after_tax_row[0])
+
         self._json_response(200, {
             "liquid": liquid,
             "liquid_plus_vested": liquid + vested_value,
+            "liquid_plus_vested_after_tax": liquid + after_tax_vested,
             "liquid_plus_all_equity": liquid + total_equity_value,
             "vested_equity": vested_value,
+            "after_tax_vested_equity": after_tax_vested,
             "total_equity": total_equity_value,
             "fmv_per_share": fmv,
         })
@@ -1054,6 +1095,12 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._json_response(202, {"status": "generating"})
 
     def do_POST(self) -> None:
+        try:
+            self._do_POST()
+        finally:
+            self._close_db()
+
+    def _do_POST(self) -> None:
         if self.path == "/ingest":
             self._handle_ingest()
             return
@@ -1443,11 +1490,12 @@ def run_server(
     host: str = "127.0.0.1",
 ) -> None:
     """Start the HTTP server to receive extension data."""
-    # Attach db and store to the handler class so instances can access them
-    IngestHandler.db = db
+    # Store path and store on the handler class; each request gets its own DB connection
+    IngestHandler.db_path = db.path
     IngestHandler.store = store
+    db.close()  # Close the setup connection; requests will create their own
 
-    server = HTTPServer((host, port), IngestHandler)
+    server = ThreadingHTTPServer((host, port), IngestHandler)
     log.info("Extension receiver listening on http://%s:%d", host, port)
     log.info("Press Ctrl+C to stop")
 

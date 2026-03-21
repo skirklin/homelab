@@ -39,6 +39,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 interface AccountWithPerf extends Account {
   returnPct: number | null
+  notional_value?: number
 }
 
 function getStartDate(range: string): string {
@@ -81,8 +82,13 @@ export function Investments() {
           && !['checking', 'credit_card'].includes(a.account_type))
         .map((a) => ({
           ...a,
-          // For stock options, show vested value instead of total portfolio value
-          latest_balance: a.account_type === 'stock_options' ? vestedValue : a.latest_balance,
+          // For stock options, show after-tax vested value as balance, keep notional
+          latest_balance: a.account_type === 'stock_options'
+            ? grants.total_after_tax_vested_value
+            : a.latest_balance,
+          notional_value: a.account_type === 'stock_options'
+            ? grants.total_vested_value
+            : undefined,
           returnPct:
             a.total_earned != null && a.total_invested != null && a.total_invested > 0
               ? (a.total_earned / a.total_invested) * 100
@@ -258,7 +264,14 @@ export function Investments() {
                             {view === 'institution' && (
                               <td className="acct">{TYPE_LABELS[a.account_type] ?? a.account_type}</td>
                             )}
-                            <td className="amount right">{fmtDollar(a.latest_balance ?? 0)}</td>
+                            <td className="amount right">
+                              {fmtDollar(a.latest_balance ?? 0)}
+                              {a.notional_value != null && (
+                                <div style={{ fontSize: '0.8em', color: 'rgba(255,255,255,0.35)' }}>
+                                  {fmtDollar(a.notional_value)} pre-tax
+                                </div>
+                              )}
+                            </td>
                             <td className="amount right">
                               {pr ? fmtDollar(pr.invested) : '—'}
                             </td>

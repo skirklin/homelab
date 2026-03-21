@@ -77,8 +77,10 @@ export const fetchBalances = (accountId?: string) =>
 export interface NetWorthSummary {
   liquid: number
   liquid_plus_vested: number
+  liquid_plus_vested_after_tax: number
   liquid_plus_all_equity: number
   vested_equity: number
+  after_tax_vested_equity: number
   total_equity: number
   fmv_per_share: number
 }
@@ -317,6 +319,8 @@ export interface Grant {
   fmv: number
   per_share_value: number
   vested_value: number
+  after_tax_vested_value: number
+  tax_rate: number
   unvested_value: number
   total_value: number
   vesting_schedule: string
@@ -330,6 +334,7 @@ export interface GrantsSummary {
   grants: Grant[]
   fmv_per_share: number
   total_vested_value: number
+  total_after_tax_vested_value: number
   total_unvested_value: number
   total_value: number
 }

@@ -22,8 +22,8 @@ function NetWorthHeader({ summary }: { summary: NetWorthSummary | null }) {
         <span className="net-worth-label">Liquid</span>
       </div>
       <div className="net-worth-tier">
-        <span className="net-worth-value">{fmtDollar(summary.liquid_plus_vested)}</span>
-        <span className="net-worth-label">+ Vested</span>
+        <span className="net-worth-value">{fmtDollar(summary.liquid_plus_vested_after_tax)}</span>
+        <span className="net-worth-label">+ Vested (after tax)</span>
       </div>
       <div className="net-worth-tier">
         <span className="net-worth-value">{fmtDollar(summary.liquid_plus_all_equity)}</span>
