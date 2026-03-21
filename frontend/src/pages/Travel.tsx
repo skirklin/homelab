@@ -7,6 +7,7 @@ export function Travel() {
   const [allTxns, setAllTxns] = useState<Transaction[]>([])
   const [trips, setTrips] = useState<TripSummary[]>([])
   const [selectedTrip, setSelectedTrip] = useState<string | null>(null)
+  const [selectedSubcat, setSelectedSubcat] = useState<string | null>(null)
 
   useEffect(() => {
     fetchTransactions({ limit: 10000, hideTransfers: true }).then(setAllTxns)
@@ -29,7 +30,6 @@ export function Travel() {
     })
   }, [allTxns])
 
-  // Assign trip name to each transaction
   const assignTrip = useCallback((t: Transaction): string | null => {
     for (const trip of tripLookup) {
       if (trip.start && trip.end && t.date >= trip.start && t.date <= trip.end) {
@@ -39,35 +39,58 @@ export function Travel() {
     return null
   }, [tripLookup])
 
-  // When drilled into a trip, filter to that trip and group by category
+  const getSubcat = useCallback((t: Transaction): string => {
+    const path = t.category_path ?? ''
+    const rest = path.startsWith('travel/') ? path.slice(7) : path
+    return rest || 'other'
+  }, [])
+
   const filteredTxns = useMemo(() => {
-    if (!selectedTrip) return travelTxns
-    return travelTxns.filter((t) => assignTrip(t) === selectedTrip)
-  }, [travelTxns, selectedTrip, assignTrip])
+    let txns = travelTxns
+    if (selectedTrip) {
+      txns = txns.filter((t) => assignTrip(t) === selectedTrip)
+    }
+    if (selectedSubcat) {
+      txns = txns.filter((t) => getSubcat(t) === selectedSubcat)
+    }
+    return txns
+  }, [travelTxns, selectedTrip, selectedSubcat, assignTrip, getSubcat])
 
   const groupFn = useCallback((t: Transaction) => {
+    if (selectedSubcat) {
+      // Leaf — return a single group so CategoryChart shows transactions
+      return selectedSubcat
+    }
     if (selectedTrip) {
-      // Drilled into a trip — group by travel subcategory
-      const path = t.category_path ?? ''
-      const rest = path.startsWith('travel/') ? path.slice(7) : path
-      return rest || 'other'
+      return getSubcat(t)
     }
     return assignTrip(t)
-  }, [selectedTrip, assignTrip])
+  }, [selectedTrip, selectedSubcat, assignTrip, getSubcat])
 
   const breadcrumbs = useMemo(() => {
-    const crumbs = [{ label: 'travel by trip', onClick: () => setSelectedTrip(null) }]
+    const crumbs = [{
+      label: 'travel by trip',
+      onClick: () => { setSelectedTrip(null); setSelectedSubcat(null) },
+    }]
     if (selectedTrip) {
-      crumbs.push({ label: selectedTrip, onClick: () => {} })
+      crumbs.push({
+        label: selectedTrip,
+        onClick: () => { setSelectedSubcat(null) },
+      })
+    }
+    if (selectedSubcat) {
+      crumbs.push({ label: selectedSubcat, onClick: () => {} })
     }
     return crumbs
-  }, [selectedTrip])
+  }, [selectedTrip, selectedSubcat])
 
   const handleCategoryClick = useCallback((category: string) => {
     if (!selectedTrip) {
       setSelectedTrip(category)
+    } else if (!selectedSubcat) {
+      setSelectedSubcat(category)
     }
-  }, [selectedTrip])
+  }, [selectedTrip, selectedSubcat])
 
   if (allTxns.length === 0) return null
 
