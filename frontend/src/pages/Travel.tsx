@@ -6,13 +6,13 @@ import { CategoryChart } from '../components/CategoryChart'
 export function Travel() {
   const [allTxns, setAllTxns] = useState<Transaction[]>([])
   const [trips, setTrips] = useState<TripSummary[]>([])
+  const [selectedTrip, setSelectedTrip] = useState<string | null>(null)
 
   useEffect(() => {
     fetchTransactions({ limit: 10000, hideTransfers: true }).then(setAllTxns)
     fetchTravelTrips().then(setTrips)
   }, [])
 
-  // Build a map from date ranges to trip names
   const tripLookup = useMemo(() => {
     return trips.filter((t) => t.name !== 'Other Travel').map((t) => ({
       name: t.name,
@@ -21,7 +21,6 @@ export function Travel() {
     }))
   }, [trips])
 
-  // Filter to travel transactions only
   const travelTxns = useMemo(() => {
     return allTxns.filter((t) => {
       if (t.amount >= 0) return false
@@ -30,23 +29,54 @@ export function Travel() {
     })
   }, [allTxns])
 
-  // Group by trip name (match by date range)
-  const groupFn = useCallback((t: Transaction) => {
+  // Assign trip name to each transaction
+  const assignTrip = useCallback((t: Transaction): string | null => {
     for (const trip of tripLookup) {
       if (trip.start && trip.end && t.date >= trip.start && t.date <= trip.end) {
         return trip.name
       }
     }
-    return 'other'
+    return null
   }, [tripLookup])
+
+  // When drilled into a trip, filter to that trip and group by category
+  const filteredTxns = useMemo(() => {
+    if (!selectedTrip) return travelTxns
+    return travelTxns.filter((t) => assignTrip(t) === selectedTrip)
+  }, [travelTxns, selectedTrip, assignTrip])
+
+  const groupFn = useCallback((t: Transaction) => {
+    if (selectedTrip) {
+      // Drilled into a trip — group by travel subcategory
+      const path = t.category_path ?? ''
+      const rest = path.startsWith('travel/') ? path.slice(7) : path
+      return rest || 'other'
+    }
+    return assignTrip(t)
+  }, [selectedTrip, assignTrip])
+
+  const breadcrumbs = useMemo(() => {
+    const crumbs = [{ label: 'travel by trip', onClick: () => setSelectedTrip(null) }]
+    if (selectedTrip) {
+      crumbs.push({ label: selectedTrip, onClick: () => {} })
+    }
+    return crumbs
+  }, [selectedTrip])
+
+  const handleCategoryClick = useCallback((category: string) => {
+    if (!selectedTrip) {
+      setSelectedTrip(category)
+    }
+  }, [selectedTrip])
 
   if (allTxns.length === 0) return null
 
   return (
     <CategoryChart
-      transactions={travelTxns}
+      transactions={filteredTxns}
       groupFn={groupFn}
-      breadcrumbs={[{ label: 'travel by trip', onClick: () => {} }]}
+      onCategoryClick={handleCategoryClick}
+      breadcrumbs={breadcrumbs}
     />
   )
 }
