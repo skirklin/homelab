@@ -12,12 +12,18 @@ const BENCHMARK_COLORS: Record<string, string> = {
 
 interface Props {
   institution?: string
+  onTimeRangeChange?: (range: '1Y' | '3Y' | '5Y' | 'ALL') => void
 }
 
-export function PerformanceVsBenchmark({ institution }: Props) {
+export function PerformanceVsBenchmark({ institution, onTimeRangeChange }: Props) {
   const [perfData, setPerfData] = useState<PerformancePoint[]>([])
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkSeries>>({})
   const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | 'ALL'>('3Y')
+
+  const handleTimeRangeChange = (range: '1Y' | '3Y' | '5Y' | 'ALL') => {
+    setTimeRange(range)
+    onTimeRangeChange?.(range)
+  }
 
   useEffect(() => {
     fetchPerformance({ institution }).then(setPerfData)
@@ -26,12 +32,37 @@ export function PerformanceVsBenchmark({ institution }: Props) {
 
   if (perfData.length === 0) return null
 
-  // Group performance by account
-  const byAccount: Record<string, PerformancePoint[]> = {}
+  // Group performance by account_id, using account_id as key to avoid name collisions
+  const byAccount: Record<string, { label: string; points: PerformancePoint[] }> = {}
   for (const p of perfData) {
-    const key = `${p.institution} / ${p.account_name}`
-    if (!byAccount[key]) byAccount[key] = []
-    byAccount[key].push(p)
+    if (!byAccount[p.account_id]) {
+      let label = p.account_name
+      // "General Investing (ESG) — Joint Automated Investing" → "Joint Auto. (ESG)"
+      // "General Investing — Automated Investing" → "Automated Investing"
+      // "Retirement — Traditional IRA" → "Traditional IRA"
+      const parts = label.split(' — ')
+      if (parts.length === 2) {
+        const envelope = parts[0]
+        const acct = parts[1]
+        const strategyMatch = envelope.match(/\(([^)]+)\)/)
+        label = strategyMatch ? `${acct} (${strategyMatch[1]})` : acct
+      }
+      byAccount[p.account_id] = { label, points: [] }
+    }
+    byAccount[p.account_id].points.push(p)
+  }
+
+  // Deduplicate labels by appending a suffix
+  const labelCounts: Record<string, number> = {}
+  for (const entry of Object.values(byAccount)) {
+    labelCounts[entry.label] = (labelCounts[entry.label] ?? 0) + 1
+  }
+  const labelSeen: Record<string, number> = {}
+  for (const entry of Object.values(byAccount)) {
+    if (labelCounts[entry.label] > 1) {
+      labelSeen[entry.label] = (labelSeen[entry.label] ?? 0) + 1
+      entry.label = `${entry.label} #${labelSeen[entry.label]}`
+    }
   }
 
   // Determine date range
@@ -44,8 +75,9 @@ export function PerformanceVsBenchmark({ institution }: Props) {
   }
   const startDate = cutoff[timeRange].toISOString().slice(0, 10)
 
-  // Normalize to percentage returns from start date for fair comparison
-  function normalizeToReturns(
+  // For accounts: use earned/invested to show actual investment return (not deposit growth)
+  // For benchmarks: normalize price to % return from the start date
+  function benchmarkToReturns(
     dates: string[],
     values: number[],
   ): { dates: string[]; returns: number[] } {
@@ -56,32 +88,37 @@ export function PerformanceVsBenchmark({ institution }: Props) {
     const base = filtered[0].v
     return {
       dates: filtered.map((p) => p.d),
-      returns: filtered.map((p) => ((p.v - base) / base) * 100),
+      returns: filtered.map((p) => Math.round(((p.v - base) / base) * 1000) / 10),
     }
   }
 
-  // Build account traces (normalized returns)
-  const accountNames = Object.keys(byAccount).sort()
-  const traces: Plotly.Data[] = accountNames.map((name, i) => {
-    const points = byAccount[name].sort((a, b) => a.date.localeCompare(b.date))
-    const { dates, returns } = normalizeToReturns(
-      points.map((p) => p.date),
-      points.map((p) => p.balance),
-    )
+  // Build account traces — earned/invested rebased to 0% at the start of the range
+  const accountIds = Object.keys(byAccount).sort()
+  const traces: Plotly.Data[] = accountIds.map((id, i) => {
+    const { label, points: rawPoints } = byAccount[id]
+    const points = rawPoints
+      .filter((p) => p.date >= startDate && p.invested != null && p.invested > 0)
+      .sort((a, b) => a.date.localeCompare(b.date))
+    if (points.length === 0) return { x: [], y: [], name: label, type: 'scatter' as const, mode: 'lines' as const }
+
+    const baseReturn = (points[0].earned ?? 0) / (points[0].invested ?? 1)
     return {
-      x: dates,
-      y: returns,
-      name,
+      x: points.map((p) => p.date),
+      y: points.map((p) => {
+        const totalReturn = (p.earned ?? 0) / (p.invested ?? 1)
+        return Math.round((totalReturn - baseReturn) * 1000) / 10
+      }),
+      name: label,
       type: 'scatter' as const,
       mode: 'lines' as const,
       line: { color: COLORS[i % COLORS.length], width: 2 },
-      hovertemplate: `%{x}<br>${name}: %{y:.1f}%<extra></extra>`,
+      hovertemplate: `%{x}<br>${label}: %{y:+.1f}%<extra></extra>`,
     }
   })
 
-  // Add benchmark traces
+  // Add benchmark traces (price-based normalized returns)
   for (const [symbol, series] of Object.entries(benchmarks)) {
-    const { dates, returns } = normalizeToReturns(
+    const { dates, returns } = benchmarkToReturns(
       series.data.map((p) => p.date),
       series.data.map((p) => p.adj_close),
     )
@@ -112,7 +149,7 @@ export function PerformanceVsBenchmark({ institution }: Props) {
               <button
                 key={r}
                 className={`range-btn ${timeRange === r ? 'active' : ''}`}
-                onClick={() => setTimeRange(r)}
+                onClick={() => handleTimeRangeChange(r)}
               >
                 {r}
               </button>
@@ -135,6 +172,7 @@ export function PerformanceVsBenchmark({ institution }: Props) {
             gridcolor: 'rgba(255,255,255,0.06)',
             linecolor: 'rgba(255,255,255,0.06)',
             ticksuffix: '%',
+            hoverformat: '+.1f',
             zeroline: true,
             zerolinecolor: 'rgba(255,255,255,0.1)',
           },

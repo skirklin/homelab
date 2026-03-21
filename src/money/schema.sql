@@ -63,13 +63,13 @@ CREATE TABLE IF NOT EXISTS option_grants (
     id                TEXT PRIMARY KEY,
     account_id        TEXT NOT NULL REFERENCES accounts(id),
     grant_date        TEXT NOT NULL,
+    grant_type        TEXT NOT NULL DEFAULT 'NQ',
     total_shares      INTEGER NOT NULL,
+    vested_shares     INTEGER NOT NULL DEFAULT 0,
     strike_price      REAL NOT NULL,
-    vesting_start     TEXT NOT NULL,
-    vesting_months    INTEGER NOT NULL,
-    cliff_months      INTEGER NOT NULL DEFAULT 12,
-    vesting_schedule  TEXT NOT NULL DEFAULT 'monthly',
-    expiration_date   TEXT
+    vested_value      REAL NOT NULL DEFAULT 0,
+    expiration_date   TEXT,
+    vest_dates        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS private_valuations (

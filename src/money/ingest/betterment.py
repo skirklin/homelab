@@ -342,7 +342,12 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                 acct_external_id = decode_account_id(acct_graphql_id)
 
                 account_type = _resolve_account_type(acct_typename, acct_name)
-                display_name = acct_name or f"{purpose_name} — {acct_typename}"
+                display_name = acct_name or purpose_name or acct_typename
+                # If multiple accounts share the same name, prepend envelope name
+                if len(accounts) > 1 or (
+                    acct_name and purpose_name and purpose_name != acct_name
+                ):
+                    display_name = f"{purpose_name} — {acct_name or acct_typename}"
 
                 # Try performance query for balance + history
                 balance: float | None = None

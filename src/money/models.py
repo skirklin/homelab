@@ -79,22 +79,14 @@ class Transaction:
 class OptionGrant:
     account_id: str
     grant_date: date
+    grant_type: str
     total_shares: int
+    vested_shares: int
     strike_price: float
-    vesting_start: date
-    vesting_months: int
+    vested_value: float
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    cliff_months: int = 12
-    vesting_schedule: VestingSchedule = VestingSchedule.MONTHLY
     expiration_date: date | None = None
-
-    def vested_shares(self, as_of: date) -> int:
-        months_elapsed = (as_of.year - self.vesting_start.year) * 12 + (
-            as_of.month - self.vesting_start.month
-        )
-        if months_elapsed < self.cliff_months:
-            return 0
-        return min(self.total_shares, self.total_shares * months_elapsed // self.vesting_months)
+    vest_dates: list[date] = field(default_factory=lambda: list[date]())
 
 
 @dataclass

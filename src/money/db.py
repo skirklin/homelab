@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import date, datetime
 from importlib import resources
@@ -12,7 +13,6 @@ from money.models import (
     OptionGrant,
     PrivateValuation,
     Transaction,
-    VestingSchedule,
 )
 
 SCHEMA_VERSION = 1
@@ -293,21 +293,26 @@ class Database:
     # -- Option Grants --
 
     def insert_option_grant(self, grant: OptionGrant) -> None:
+        vest_dates_json = (
+            json.dumps([d.isoformat() for d in grant.vest_dates])
+            if grant.vest_dates else None
+        )
         self.conn.execute(
-            """INSERT INTO option_grants (id, account_id, grant_date, total_shares, strike_price,
-               vesting_start, vesting_months, cliff_months, vesting_schedule, expiration_date)
+            """INSERT OR REPLACE INTO option_grants
+               (id, account_id, grant_date, grant_type, total_shares, vested_shares,
+                strike_price, vested_value, expiration_date, vest_dates)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 grant.id,
                 grant.account_id,
                 grant.grant_date.isoformat(),
+                grant.grant_type,
                 grant.total_shares,
+                grant.vested_shares,
                 grant.strike_price,
-                grant.vesting_start.isoformat(),
-                grant.vesting_months,
-                grant.cliff_months,
-                grant.vesting_schedule.value,
+                grant.vested_value,
                 grant.expiration_date.isoformat() if grant.expiration_date else None,
+                vest_dates_json,
             ),
         )
         self.conn.commit()
@@ -316,7 +321,7 @@ class Database:
         rows = self.conn.execute(
             "SELECT * FROM option_grants WHERE account_id = ?", (account_id,)
         ).fetchall()
-        return [_row_to_option_grant(r) for r in rows]
+        return [row_to_option_grant(r) for r in rows]
 
     # -- Private Valuations --
 
@@ -516,18 +521,25 @@ def _row_to_balance(row: sqlite3.Row) -> Balance:
     )
 
 
-def _row_to_option_grant(row: sqlite3.Row) -> OptionGrant:
+def row_to_option_grant(row: sqlite3.Row) -> OptionGrant:
+    try:
+        vest_dates_raw: str | None = row["vest_dates"]
+    except IndexError:
+        vest_dates_raw = None
+    vest_dates: list[date] = []
+    if vest_dates_raw:
+        vest_dates = [date.fromisoformat(d) for d in json.loads(vest_dates_raw)]
     return OptionGrant(
         id=row["id"],
         account_id=row["account_id"],
         grant_date=_parse_date(row["grant_date"]),
+        grant_type=row["grant_type"],
         total_shares=row["total_shares"],
+        vested_shares=row["vested_shares"],
         strike_price=row["strike_price"],
-        vesting_start=_parse_date(row["vesting_start"]),
-        vesting_months=row["vesting_months"],
-        cliff_months=row["cliff_months"],
-        vesting_schedule=VestingSchedule(row["vesting_schedule"]),
+        vested_value=row["vested_value"],
         expiration_date=_parse_date(row["expiration_date"]) if row["expiration_date"] else None,
+        vest_dates=vest_dates,
     )
 
 

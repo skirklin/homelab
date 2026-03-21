@@ -15,7 +15,6 @@ from money.models import (
     IngestionRecord,
     IngestionStatus,
     Transaction,
-    VestingSchedule,
 )
 
 log = logging.getLogger(__name__)
@@ -135,11 +134,18 @@ def _replay_ally(db: Database, raw_dir: Path) -> None:
                 acct.get("accountNumberPvtEncrypt")
                 or acct.get("accountNumber", "")
             )
+            details = acct.get("domainDetails", {})
             acct_name = (
-                acct.get("nickName")
+                acct.get("nickname")
+                or details.get("accountNickname")
+                or acct.get("nickName")
                 or acct.get("name")
                 or f"Account {str(acct_number)[-4:]}"
             )
+            # Skip external/linked accounts
+            if details.get("externalAccountIndicator"):
+                continue
+
             acct_type_str = acct.get("accountType") or acct.get("type", "DDA")
             status = acct.get("accountStatus") or acct.get("status", "")
             current_balance = (
@@ -817,9 +823,6 @@ def _replay_morgan_stanley(db: Database, raw_dir: Path) -> None:
     import contextlib
 
     from money.ingest.morgan_stanley import (
-        determine_grant_type,
-        estimate_cliff_months,
-        estimate_vesting_months,
         parse_money,
     )
     from money.models import OptionGrant, PrivateValuation
@@ -892,15 +895,27 @@ def _replay_morgan_stanley(db: Database, raw_dir: Path) -> None:
                 )
             )
 
+        # Build vested quantity lookup from portfolio summary
+        portfolio_items: list[dict[str, Any]] = list(summary.get("portfolioData", []))
+        vested_by_instance: dict[str, tuple[int, float]] = {}
+        for pi in portfolio_items:
+            instance_name: str = pi.get("instanceName", "")
+            avail_qty = int(pi.get("availableQuantity", 0))
+            avail_val = parse_money(pi.get("availableValue", "0 USD"))
+            if instance_name:
+                vested_by_instance[instance_name] = (avail_qty, avail_val)
+
         # Grants
+        from money.ingest.morgan_stanley import determine_grant_type
+
         for raw_grant in raw_grants:
             grant_date_str: str = raw_grant.get("grantDate", "")
             if not grant_date_str:
                 continue
 
             grant_date = date.fromisoformat(grant_date_str)
-            grant_name: str = raw_grant.get("grantName", "")
             award_name: str = raw_grant.get("awardName", "")
+            grant_name: str = raw_grant.get("grantName", "")
             quantity = int(raw_grant.get("quantityGranted", 0))
 
             strike_price = 0.0
@@ -912,36 +927,25 @@ def _replay_morgan_stanley(db: Database, raw_dir: Path) -> None:
 
             exercise_details: dict[str, Any] = raw_grant.get("exerciseDetails", {})
             vest_dates: list[str] = exercise_details.get("vestDates", [])
-            determine_grant_type(award_name)  # for logging only
-            vesting_months = estimate_vesting_months(vest_dates)
-            cliff_months = estimate_cliff_months(grant_date, vest_dates)
+            parsed_vest_dates = [date.fromisoformat(d) for d in vest_dates]
 
-            existing = db.conn.execute(
-                "SELECT id FROM option_grants"
-                " WHERE account_id = ? AND grant_date = ? AND total_shares = ?",
-                (account.id, grant_date.isoformat(), quantity),
-            ).fetchone()
-            if existing:
-                continue
+            grant_type = determine_grant_type(award_name)
+            vested_qty, vested_val = vested_by_instance.get(grant_name, (0, 0.0))
 
             expiration_str: str | None = raw_grant.get("expiredDate")
             expiration_date = date.fromisoformat(expiration_str) if expiration_str else None
-
-            schedule = VestingSchedule.MONTHLY
-            if len(vest_dates) <= 4 and vesting_months >= 12:
-                schedule = VestingSchedule.QUARTERLY
 
             db.insert_option_grant(
                 OptionGrant(
                     account_id=account.id,
                     grant_date=grant_date,
+                    grant_type=grant_type,
                     total_shares=quantity,
+                    vested_shares=vested_qty,
                     strike_price=strike_price,
-                    vesting_start=grant_date,
-                    vesting_months=vesting_months,
-                    cliff_months=cliff_months,
-                    vesting_schedule=schedule,
+                    vested_value=vested_val,
                     expiration_date=expiration_date,
+                    vest_dates=parsed_vest_dates,
                 )
             )
 

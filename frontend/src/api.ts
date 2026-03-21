@@ -306,6 +306,36 @@ export interface BenchmarkSeries {
   data: BenchmarkPoint[]
 }
 
+export interface Grant {
+  id: string
+  type: string
+  grant_date: string
+  total_shares: number
+  vested_shares: number
+  unvested_shares: number
+  strike_price: number
+  fmv: number
+  per_share_value: number
+  vested_value: number
+  unvested_value: number
+  total_value: number
+  vesting_schedule: string
+  vesting_months: number
+  cliff_months: number
+  cliff_date: string
+  pct_vested: number
+}
+
+export interface GrantsSummary {
+  grants: Grant[]
+  fmv_per_share: number
+  total_vested_value: number
+  total_unvested_value: number
+  total_value: number
+}
+
+export const fetchGrants = () => get<GrantsSummary>('/api/grants')
+
 export const fetchBenchmarks = (symbols?: string[], start?: string, end?: string) => {
   const params = new URLSearchParams()
   if (symbols) symbols.forEach((s) => params.append('symbols', s))

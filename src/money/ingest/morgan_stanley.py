@@ -17,7 +17,6 @@ from money.models import (
     IngestionStatus,
     OptionGrant,
     PrivateValuation,
-    VestingSchedule,
 )
 from money.storage import RawStore
 
@@ -132,24 +131,6 @@ def determine_grant_type(award_name: str) -> str:
     return award_name
 
 
-def estimate_vesting_months(vest_dates: list[str]) -> int:
-    """Estimate total vesting period from first vest to last vest date."""
-    if not vest_dates:
-        return 48  # default 4 years
-    dates = sorted(date.fromisoformat(d) for d in vest_dates)
-    first = dates[0]
-    last = dates[-1]
-    return max(1, (last.year - first.year) * 12 + (last.month - first.month))
-
-
-def estimate_cliff_months(grant_date: date, vest_dates: list[str]) -> int:
-    """Estimate cliff period from grant date to first vest."""
-    if not vest_dates:
-        return 12
-    first_vest = date.fromisoformat(sorted(vest_dates)[0])
-    months = (first_vest.year - grant_date.year) * 12 + (first_vest.month - grant_date.month)
-    return max(0, months)
-
 
 def sync_morgan_stanley(
     db: Database,
@@ -256,7 +237,20 @@ def sync_morgan_stanley(
             )
             log.info("Recorded 409A FMV: $%.4f/share", fmv_price)
 
-        # 6. Record individual grants
+        # 6. Build vested quantity lookup from portfolio summary
+        # The portfolio summary has availableQuantity/availableValue per grant
+        portfolio_data: list[dict[str, Any]] = list(
+            summary_data.get("portfolioData", [])
+        )
+        vested_by_instance: dict[str, tuple[int, float]] = {}
+        for pd in portfolio_data:
+            instance_name: str = pd.get("instanceName", "")
+            avail_qty = int(pd.get("availableQuantity", 0))
+            avail_val = parse_money(pd.get("availableValue", "0 USD"))
+            if instance_name:
+                vested_by_instance[instance_name] = (avail_qty, avail_val)
+
+        # 7. Record individual grants with vested data from portfolio summary
         grant_count = 0
         for raw_grant in raw_grants:
             grant_date_str: str = raw_grant.get("grantDate", "")
@@ -274,54 +268,39 @@ def sync_morgan_stanley(
             strike_price = 0.0
             parts = grant_name.split("$")
             if len(parts) > 1:
-                # Take only the numeric portion after $
                 price_str = parts[-1].split()[0].rstrip(" -")
                 with contextlib.suppress(ValueError):
                     strike_price = float(price_str)
 
             exercise_details: dict[str, Any] = raw_grant.get("exerciseDetails", {})
             vest_dates: list[str] = exercise_details.get("vestDates", [])
+            parsed_vest_dates = [date.fromisoformat(d) for d in vest_dates]
 
             grant_type = determine_grant_type(award_name)
-            vesting_months = estimate_vesting_months(vest_dates)
-            cliff_months = estimate_cliff_months(grant_date, vest_dates)
 
-            # Use grant_number as external_id to avoid duplicates
-            existing = db.conn.execute(
-                "SELECT id FROM option_grants"
-                " WHERE account_id = ? AND grant_date = ? AND total_shares = ?",
-                (account.id, grant_date.isoformat(), quantity),
-            ).fetchone()
-
-            if existing:
-                log.debug("  Grant %s already exists, skipping", grant_number)
-                continue
+            # Look up vested quantity from portfolio summary
+            vested_qty, vested_val = vested_by_instance.get(grant_name, (0, 0.0))
 
             expiration_date = date.fromisoformat(expiration_str) if expiration_str else None
-
-            # Determine vesting schedule from vest dates frequency
-            schedule = VestingSchedule.MONTHLY
-            if len(vest_dates) <= 4 and vesting_months >= 12:
-                schedule = VestingSchedule.QUARTERLY
 
             db.insert_option_grant(
                 OptionGrant(
                     account_id=account.id,
                     grant_date=grant_date,
+                    grant_type=grant_type,
                     total_shares=quantity,
+                    vested_shares=vested_qty,
                     strike_price=strike_price,
-                    vesting_start=grant_date,
-                    vesting_months=vesting_months,
-                    cliff_months=cliff_months,
-                    vesting_schedule=schedule,
+                    vested_value=vested_val,
                     expiration_date=expiration_date,
+                    vest_dates=parsed_vest_dates,
                 )
             )
             grant_count += 1
             log.info(
-                "  Grant %s: %s %s, %d shares @ $%.2f, vest %d months (cliff %d)",
+                "  Grant %s: %s %s, %d shares @ $%.2f, %d vested ($%,.0f)",
                 grant_number, grant_type, grant_date, quantity, strike_price,
-                vesting_months, cliff_months,
+                vested_qty, vested_val,
             )
 
         log.info("Stored %d new grant(s)", grant_count)

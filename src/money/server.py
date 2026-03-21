@@ -52,6 +52,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/holdings"):
             self._handle_get_holdings()
             return
+        if self.path.startswith("/api/grants"):
+            self._handle_grants()
+            return
         if self.path.startswith("/api/allocation"):
             self._handle_allocation()
             return
@@ -360,6 +363,55 @@ class IngestHandler(BaseHTTPRequestHandler):
             )
         self._json_response(200, {"transactions": transactions})
 
+    def _handle_grants(self) -> None:
+        """Return stock option/RSU grants with vested data from Morgan Stanley."""
+        from money.db import row_to_option_grant
+
+        fmv_row = self.db.conn.execute(
+            "SELECT fmv_per_share FROM private_valuations ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+        fmv = float(fmv_row[0]) if fmv_row else 0.0
+
+        rows = self.db.conn.execute(
+            "SELECT * FROM option_grants ORDER BY grant_date"
+        ).fetchall()
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            grant = row_to_option_grant(row)
+            per_share = max(0.0, fmv - grant.strike_price)
+
+            result.append({
+                "id": grant.id,
+                "type": grant.grant_type,
+                "grant_date": grant.grant_date.isoformat(),
+                "total_shares": grant.total_shares,
+                "vested_shares": grant.vested_shares,
+                "unvested_shares": grant.total_shares - grant.vested_shares,
+                "strike_price": grant.strike_price,
+                "fmv": fmv,
+                "per_share_value": per_share,
+                "vested_value": grant.vested_value,
+                "unvested_value": grant.total_shares * per_share - grant.vested_value,
+                "total_value": grant.total_shares * per_share,
+                "expiration_date": (
+                    grant.expiration_date.isoformat() if grant.expiration_date else None
+                ),
+                "pct_vested": (
+                    round(grant.vested_shares / grant.total_shares * 100, 1)
+                    if grant.total_shares > 0 else 0
+                ),
+                "vest_dates": [d.isoformat() for d in grant.vest_dates],
+            })
+
+        self._json_response(200, {
+            "grants": result,
+            "fmv_per_share": fmv,
+            "total_vested_value": sum(g["vested_value"] for g in result),
+            "total_unvested_value": sum(g["unvested_value"] for g in result),
+            "total_value": sum(g["total_value"] for g in result),
+        })
+
     def _handle_allocation(self) -> None:
         """Return asset allocation breakdown across all investment accounts."""
         from money.benchmarks import normalize_asset_class
@@ -373,6 +425,7 @@ class IngestHandler(BaseHTTPRequestHandler):
             JOIN accounts a ON h.account_id = a.id
             WHERE h.as_of = (SELECT MAX(h2.as_of) FROM holdings h2
                              WHERE h2.account_id = h.account_id)
+              AND h.value > 0.01
             GROUP BY asset_class, a.institution
             ORDER BY total_value DESC
         """).fetchall()
@@ -434,10 +487,6 @@ class IngestHandler(BaseHTTPRequestHandler):
 
     def _handle_net_worth_summary(self) -> None:
         """Return net worth broken into liquid, +vested equity, +all equity."""
-        from datetime import date as date_type
-
-        today = date_type.today()
-
         # Liquid net worth: all accounts except stock_options
         liquid_row = self.db.conn.execute("""
             SELECT COALESCE(SUM(b.balance), 0)
@@ -455,56 +504,15 @@ class IngestHandler(BaseHTTPRequestHandler):
         ).fetchone()
         fmv = float(fmv_row[0]) if fmv_row else 0.0
 
-        # Calculate vested and total equity from grants
-        grants = self.db.conn.execute("""
-            SELECT total_shares, strike_price, vesting_start,
-                   vesting_months, cliff_months, vesting_schedule
+        # Vested and total equity from stored grant data
+        equity_row = self.db.conn.execute("""
+            SELECT COALESCE(SUM(vested_value), 0),
+                   COALESCE(SUM(total_shares * (? - strike_price)), 0)
             FROM option_grants
-        """).fetchall()
-
-        vested_value = 0.0
-        total_equity_value = 0.0
-
-        for g in grants:
-            total_shares = int(g["total_shares"])
-            strike = float(g["strike_price"])
-            vesting_start = date_type.fromisoformat(g["vesting_start"])
-            vest_months = int(g["vesting_months"])
-            cliff_months = int(g["cliff_months"])
-            schedule = g["vesting_schedule"]
-
-            per_share = max(0.0, fmv - strike)
-            total_equity_value += total_shares * per_share
-
-            # Calculate vested shares
-            cliff_month = vesting_start.month - 1 + cliff_months
-            cliff_date = date_type(
-                vesting_start.year + cliff_month // 12,
-                cliff_month % 12 + 1,
-                min(vesting_start.day, 28),
-            )
-
-            if today < cliff_date:
-                continue
-
-            months_elapsed = min(
-                (today.year - vesting_start.year) * 12
-                + (today.month - vesting_start.month),
-                vest_months,
-            )
-
-            if schedule == "monthly":
-                vested = int(total_shares * months_elapsed / vest_months)
-            else:
-                quarters = months_elapsed // 3
-                total_quarters = vest_months // 3
-                vested = (
-                    int(total_shares * quarters / total_quarters)
-                    if total_quarters > 0
-                    else 0
-                )
-
-            vested_value += min(vested, total_shares) * per_share
+            WHERE (? - strike_price) > 0
+        """, (fmv, fmv)).fetchone()
+        vested_value = float(equity_row[0])
+        total_equity_value = float(equity_row[1])
 
         self._json_response(200, {
             "liquid": liquid,
