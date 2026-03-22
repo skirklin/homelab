@@ -12,6 +12,12 @@ from typing import Any
 from money.config import cookie_relay_path
 from money.db import Database
 from money.ingest.common import ts_to_date
+from money.ingest.schemas import (
+    BMHoldingsResponse,
+    BMPerformanceResponse,
+    BMPurposeResponse,
+    BMSidebarResponse,
+)
 from money.models import AccountType, Balance, Holding, IngestionRecord, IngestionStatus
 from money.storage import RawStore
 
@@ -318,8 +324,10 @@ def parse_raw_betterment(
     """
     as_of = ts_to_date(timestamp)
 
-    sidebar = json.loads((inst_dir / f"{timestamp}_sidebar.json").read_text())
-    envelopes: list[dict[str, Any]] = sidebar["data"]["envelopes"]
+    sidebar: BMSidebarResponse = json.loads(
+        (inst_dir / f"{timestamp}_sidebar.json").read_text()
+    )
+    envelopes = sidebar["data"]["envelopes"]
     raw_key = f"betterment/{timestamp}_sidebar.json"
 
     account_count = 0
@@ -327,19 +335,17 @@ def parse_raw_betterment(
     for envelope in envelopes:
         envelope_id = envelope["id"]
         purpose_raw = envelope.get("purpose")
-        purpose_name = purpose_raw.get("name", "Unknown") if purpose_raw else "Unknown"
+        purpose_name = purpose_raw["name"] if purpose_raw else "Unknown"
         accounts = envelope["accounts"]
 
         # Get envelope balance from purpose file
         envelope_balance: float | None = None
         if purpose_raw is not None:
             purpose_path = inst_dir / f"{timestamp}_{envelope_id}_purpose.json"
-            purpose_data = json.loads(purpose_path.read_text()) if purpose_path.exists() else None
-            if purpose_data:
-                purpose_obj = purpose_data.get("data", {}).get("purpose")
-                if purpose_obj:
-                    bal_cents = purpose_obj.get("envelope", {}).get("balance")
-                    envelope_balance = cents_to_dollars(bal_cents)
+            if purpose_path.exists():
+                purpose_resp: BMPurposeResponse = json.loads(purpose_path.read_text())
+                purpose_obj = purpose_resp["data"]["purpose"]
+                envelope_balance = cents_to_dollars(purpose_obj["envelope"]["balance"])
 
         for acct in accounts:
             acct_graphql_id = acct["id"]
@@ -362,28 +368,26 @@ def parse_raw_betterment(
             # Performance history + balance
             balance: float | None = None
             perf_path = inst_dir / f"{timestamp}_{acct_external_id}_performance.json"
-            perf_data = json.loads(perf_path.read_text()) if perf_path.exists() else None
-            if perf_data:
-                acct_data = perf_data["data"]["account"] or {}
-                bal_cents = acct_data.get("balance")
-                balance = cents_to_dollars(bal_cents)
+            if perf_path.exists():
+                perf_resp: BMPerformanceResponse = json.loads(perf_path.read_text())
+                acct_perf = perf_resp["data"]["account"]
+                if acct_perf is not None:
+                    balance = cents_to_dollars(acct_perf.get("balance"))
 
-                time_series: list[dict[str, Any]] = (
-                    acct_data.get("performanceHistory", {}).get("timeSeries", [])
-                )
-                if time_series:
-                    perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
-                    for point in time_series:
-                        pbal = point.get("balance")
-                        if pbal is not None:
+                    perf_history = acct_perf.get("performanceHistory")
+                    time_series = perf_history["timeSeries"] if perf_history else []
+                    if time_series:
+                        perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
+                        for point in time_series:
+                            pbal = point["balance"]
                             perf_rows.append((
                                 account.id,
                                 point["date"],
                                 pbal / 100.0,
-                                cents_to_dollars(point.get("invested")),
-                                cents_to_dollars(point.get("earned")),
+                                cents_to_dollars(point["invested"]),
+                                cents_to_dollars(point["earned"]),
                             ))
-                    db.insert_performance_batch(perf_rows)
+                        db.insert_performance_batch(perf_rows)
 
             # Fallback to envelope balance
             if balance is None and envelope_balance is not None:
@@ -408,39 +412,38 @@ def parse_raw_betterment(
                 holdings_filename = f"{timestamp}_{acct_external_id}_holdings.json"
                 holdings_key = f"betterment/{holdings_filename}"
                 holdings_path = inst_dir / holdings_filename
-                holdings_data = (
-                    json.loads(holdings_path.read_text()) if holdings_path.exists() else None
-                )
-                if holdings_data:
-                    acct_holdings = holdings_data["data"]["account"] or {}
-                    groups = acct_holdings.get("securityGroupPositions", [])
-                    holding_rows: list[Holding] = []
-                    for group in groups:
-                        group_name = group.get("securityGroup", {}).get("name", "")
-                        for pos in group.get("securityPositions", []):
-                            amount_cents = pos.get("amount")
-                            security = pos.get("security", {})
-                            fin_sec = pos.get("financialSecurity", {})
-                            symbol = security.get("symbol") or fin_sec.get("symbol")
-                            name = (
-                                security.get("name")
-                                or fin_sec.get("name")
-                                or symbol
-                                or ""
-                            )
-                            holding_rows.append(Holding(
-                                account_id=account.id,
-                                as_of=as_of,
-                                symbol=symbol,
-                                name=name,
-                                asset_class=group_name,
-                                shares=float(pos.get("shares", 0)),
-                                value=amount_cents / 100.0 if amount_cents else 0.0,
-                                source="betterment_graphql",
-                                raw_file_ref=holdings_key,
-                            ))
-                    if holding_rows:
-                        db.insert_holdings_batch(holding_rows)
+                if holdings_path.exists():
+                    holdings_resp: BMHoldingsResponse = json.loads(holdings_path.read_text())
+                    acct_holdings = holdings_resp["data"]["account"]
+                    if acct_holdings is not None:
+                        groups = acct_holdings.get("securityGroupPositions", [])
+                        holding_rows: list[Holding] = []
+                        for group in groups:
+                            group_name = group["securityGroup"]["name"]
+                            for pos in group["securityPositions"]:
+                                amount_cents = pos["amount"]
+                                security = pos["security"]
+                                fin_sec = pos["financialSecurity"]
+                                symbol = security.get("symbol") or fin_sec.get("symbol")
+                                name = (
+                                    security.get("name")
+                                    or fin_sec.get("name")
+                                    or symbol
+                                    or ""
+                                )
+                                holding_rows.append(Holding(
+                                    account_id=account.id,
+                                    as_of=as_of,
+                                    symbol=symbol,
+                                    name=name,
+                                    asset_class=group_name,
+                                    shares=float(pos["shares"]),
+                                    value=amount_cents / 100.0 if amount_cents else 0.0,
+                                    source="betterment_graphql",
+                                    raw_file_ref=holdings_key,
+                                ))
+                        if holding_rows:
+                            db.insert_holdings_batch(holding_rows)
 
         log.info("Betterment: parsed snapshot %s (%d envelopes)", timestamp, len(envelopes))
 

@@ -12,6 +12,12 @@ from urllib.parse import unquote
 from money.config import cookie_relay_path
 from money.db import Database
 from money.ingest.common import ts_to_date
+from money.ingest.schemas import (
+    WFOpenLotsResponse,
+    WFOverviewsResponse,
+    WFPerformanceResponse,
+    WFTransfersWrapper,
+)
 from money.models import (
     AccountType,
     Balance,
@@ -182,11 +188,11 @@ def _download_supplementary(
 def ingest_transfers(
     db: Database,
     account_id: str,
-    transfers_data: dict[str, Any],
+    transfers_data: WFTransfersWrapper,
     raw_file_ref: str,
 ) -> int:
     """Parse completed transfers into transactions."""
-    completed = transfers_data.get("transfers", {}).get("completed_transfers", [])
+    completed = (transfers_data.get("transfers") or {}).get("completed_transfers", [])
     count = 0
     for t in completed:
         amount_str = t.get("amount", "$0").replace("$", "").replace(",", "")
@@ -201,8 +207,9 @@ def ingest_transfers(
         txn_date = date.fromisoformat(created[:10])
 
         desc_parts = [t.get("type", "")]
-        if t.get("initiator_name"):
-            desc_parts.append(t["initiator_name"])
+        initiator_name = t.get("initiator_name")
+        if initiator_name:
+            desc_parts.append(initiator_name)
         description = " — ".join(p for p in desc_parts if p)
 
         db.insert_transaction(
@@ -237,16 +244,19 @@ def parse_raw_wealthfront(
     """
     as_of = ts_to_date(timestamp)
 
-    overviews_data = json.loads((inst_dir / f"{timestamp}_overviews.json").read_text())
-    overviews: list[dict[str, Any]] = overviews_data["overviews"]
+    overviews_data: WFOverviewsResponse = json.loads(
+        (inst_dir / f"{timestamp}_overviews.json").read_text()
+    )
+    overviews = overviews_data["overviews"]
     account_count = 0
 
     for overview in overviews:
-        acct_id: str = overview["accountId"]
-        acct_type_str: str = overview["accountType"]
+        acct_id: str = overview.get("accountId", "")
+        acct_type_str: str = overview.get("accountType", "")
         display_name: str = overview.get("accountDisplayName", f"Account {acct_id}")
-        state: str = overview["state"]
-        total_value = overview.get("accountValueSummary", {}).get("totalValue")
+        state: str = overview.get("state", "")
+        acct_value_summary = overview.get("accountValueSummary")
+        total_value = acct_value_summary.get("totalValue") if acct_value_summary else None
 
         if not acct_id or state not in ("FUNDED", "OPENED"):
             continue
@@ -276,18 +286,21 @@ def parse_raw_wealthfront(
 
         # Performance history
         perf_path = inst_dir / f"{timestamp}_{acct_id}_performance.json"
-        perf_data = json.loads(perf_path.read_text()) if perf_path.exists() else None
+        perf_data: WFPerformanceResponse | None = (
+            json.loads(perf_path.read_text()) if perf_path.exists() else None
+        )
         if perf_data:
-            history: list[dict[str, Any]] = perf_data.get("historyList", [])
+            history = perf_data.get("historyList") or []
             perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
             for entry in history:
                 mv = entry.get("marketValue")
-                if mv is not None:
+                entry_date = entry.get("date")
+                if mv is not None and entry_date is not None:
                     invested = entry.get("sumNetDeposits")
                     earned = (mv - invested) if invested is not None else None
                     perf_rows.append((
                         account.id,
-                        entry["date"],
+                        entry_date,
                         float(mv),
                         float(invested) if invested is not None else None,
                         float(earned) if earned is not None else None,
@@ -298,9 +311,11 @@ def parse_raw_wealthfront(
 
         # Holdings from open lots
         lots_path = inst_dir / f"{timestamp}_{acct_id}_open_lots.json"
-        lots_data = json.loads(lots_path.read_text()) if lots_path.exists() else None
-        if lots_data and isinstance(lots_data, dict):
-            lots_list: list[dict[str, Any]] = list(lots_data.get("openLotForDisplayList", []))
+        lots_data: WFOpenLotsResponse | None = (
+            json.loads(lots_path.read_text()) if lots_path.exists() else None
+        )
+        if lots_data:
+            lots_list = list(lots_data.get("openLotForDisplayList") or [])
             by_symbol: dict[str, dict[str, float]] = {}
             for lot in lots_list:
                 sym = lot.get("symbol", "")
@@ -332,8 +347,10 @@ def parse_raw_wealthfront(
 
         # Transfers as transactions
         transfers_path = inst_dir / f"{timestamp}_{acct_id}_transfers.json"
-        transfers_data = json.loads(transfers_path.read_text()) if transfers_path.exists() else None
-        if transfers_data and isinstance(transfers_data, dict):
+        transfers_data: WFTransfersWrapper | None = (
+            json.loads(transfers_path.read_text()) if transfers_path.exists() else None
+        )
+        if transfers_data:
             transfers_key = f"wealthfront/{timestamp}_{acct_id}_transfers.json"
             txn_count = ingest_transfers(db, account.id, transfers_data, transfers_key)
             if txn_count:
