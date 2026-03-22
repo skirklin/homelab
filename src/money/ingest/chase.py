@@ -42,7 +42,7 @@ def _load_network_log() -> dict[str, list[dict[str, Any]]]:
     }
 
     for entry in data.get("entries", []):
-        url: str = entry.get("url", "")
+        url: str = entry["url"]
         body: dict[str, Any] | None = entry.get("responseBody")
         if not isinstance(body, dict):
             continue
@@ -89,7 +89,7 @@ def _parse_network_log_entries(data: dict[str, Any]) -> dict[str, list[dict[str,
         "dashboard": [],
     }
     for entry in data.get("entries", []):
-        url: str = entry.get("url", "")
+        url: str = entry["url"]
         body = entry.get("responseBody")
         if not isinstance(body, dict):
             continue
@@ -122,10 +122,6 @@ def parse_raw_chase(
     raw_key = f"chase/{timestamp}_network_log.json"
 
     data = json.loads(log_file.read_text())
-    if not data:
-        log.warning("Chase: no network log file for %s", timestamp)
-        return {}
-
     results = _parse_network_log_entries(data)
 
     account_list = extract_account_list(results["dashboard"])

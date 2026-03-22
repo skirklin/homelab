@@ -238,18 +238,14 @@ def parse_raw_wealthfront(
     as_of = ts_to_date(timestamp)
 
     overviews_data = json.loads((inst_dir / f"{timestamp}_overviews.json").read_text())
-    if not overviews_data:
-        log.warning("Wealthfront: no overviews file for %s", timestamp)
-        return {}
-
-    overviews: list[dict[str, Any]] = overviews_data.get("overviews", [])
+    overviews: list[dict[str, Any]] = overviews_data["overviews"]
     account_count = 0
 
     for overview in overviews:
-        acct_id = overview.get("accountId", "")
-        acct_type_str = overview.get("accountType", "")
-        display_name = overview.get("accountDisplayName", f"Account {acct_id}")
-        state = overview.get("state", "")
+        acct_id: str = overview["accountId"]
+        acct_type_str: str = overview["accountType"]
+        display_name: str = overview.get("accountDisplayName", f"Account {acct_id}")
+        state: str = overview["state"]
         total_value = overview.get("accountValueSummary", {}).get("totalValue")
 
         if not acct_id or state not in ("FUNDED", "OPENED"):

@@ -150,9 +150,6 @@ def parse_raw_ally(
     as_of = ts_to_date(timestamp)
 
     accounts_data = json.loads((inst_dir / f"{timestamp}_accounts.json").read_text())
-    if not accounts_data:
-        log.warning("Ally: no accounts file for %s", timestamp)
-        return {}
 
     accounts: list[dict[str, Any]] = list(
         accounts_data.get("accounts") or accounts_data.get("data") or []
@@ -225,9 +222,9 @@ def parse_raw_ally(
         txn_key = f"ally/{timestamp}_{external_id}_transactions.json"
         txn_count = 0
         for txn in txns_raw:
-            txn_date_str = txn.get("transactionPostingDate", "")
-            txn_amount = txn.get("transactionAmountPvtEncrypt")
-            txn_desc = txn.get("transactionDescription", "")
+            txn_date_str = txn["transactionPostingDate"]
+            txn_amount = txn["transactionAmountPvtEncrypt"]
+            txn_desc = txn["transactionDescription"]
 
             if txn_amount is None or not txn_date_str:
                 continue

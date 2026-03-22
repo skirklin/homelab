@@ -319,11 +319,7 @@ def parse_raw_betterment(
     as_of = ts_to_date(timestamp)
 
     sidebar = json.loads((inst_dir / f"{timestamp}_sidebar.json").read_text())
-    if not sidebar:
-        log.warning("Betterment: no sidebar file for %s", timestamp)
-        return {}
-
-    envelopes: list[dict[str, Any]] = sidebar.get("data", {}).get("envelopes", [])
+    envelopes: list[dict[str, Any]] = sidebar["data"]["envelopes"]
     raw_key = f"betterment/{timestamp}_sidebar.json"
 
     account_count = 0
@@ -332,7 +328,7 @@ def parse_raw_betterment(
         envelope_id = envelope["id"]
         purpose_raw = envelope.get("purpose")
         purpose_name = purpose_raw.get("name", "Unknown") if purpose_raw else "Unknown"
-        accounts = envelope.get("accounts", [])
+        accounts = envelope["accounts"]
 
         # Get envelope balance from purpose file
         envelope_balance: float | None = None
@@ -368,7 +364,7 @@ def parse_raw_betterment(
             perf_path = inst_dir / f"{timestamp}_{acct_external_id}_performance.json"
             perf_data = json.loads(perf_path.read_text()) if perf_path.exists() else None
             if perf_data:
-                acct_data = perf_data.get("data", {}).get("account", {})
+                acct_data = perf_data["data"]["account"] or {}
                 bal_cents = acct_data.get("balance")
                 balance = cents_to_dollars(bal_cents)
 
@@ -416,7 +412,7 @@ def parse_raw_betterment(
                     json.loads(holdings_path.read_text()) if holdings_path.exists() else None
                 )
                 if holdings_data:
-                    acct_holdings = holdings_data.get("data", {}).get("account", {})
+                    acct_holdings = holdings_data["data"]["account"] or {}
                     groups = acct_holdings.get("securityGroupPositions", [])
                     holding_rows: list[Holding] = []
                     for group in groups:

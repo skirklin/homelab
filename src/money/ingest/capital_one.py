@@ -108,22 +108,19 @@ def parse_raw_capital_one(
     as_of = ts_to_date(timestamp)
 
     accounts_data = json.loads((inst_dir / f"{timestamp}_accounts.json").read_text())
-    if not accounts_data:
-        log.warning("Capital One: no accounts file for %s", timestamp)
-        return {}
 
-    raw_accounts: list[dict[str, Any]] = accounts_data.get("accounts", [])
+    raw_accounts: list[dict[str, Any]] = accounts_data["accounts"]
     raw_key = f"capital_one/{timestamp}_accounts.json"
     account_count = 0
     txn_count_total = 0
 
     for raw_acct in raw_accounts:
-        card_acct: dict[str, Any] = raw_acct.get("cardAccount", {})
-        name_info: dict[str, Any] = card_acct.get("nameInfo", {})
-        cycle_info: dict[str, Any] = card_acct.get("cycleInfo", {})
+        card_acct: dict[str, Any] = raw_acct["cardAccount"]
+        name_info: dict[str, Any] = card_acct["nameInfo"]
+        cycle_info: dict[str, Any] = card_acct["cycleInfo"]
 
-        display_name = name_info.get("displayName", name_info.get("name", "Unknown"))
-        last_four = card_acct.get("plasticIdLastFour", "")
+        display_name: str = name_info["displayName"]
+        last_four: str = card_acct["plasticIdLastFour"]
 
         account = db.get_or_create_account(
             name=display_name,
@@ -135,17 +132,16 @@ def parse_raw_capital_one(
         account_count += 1
         log.info("Capital One: %s (id=%s)", display_name, account.id)
 
-        current_balance = cycle_info.get("currentBalance")
-        if current_balance is not None:
-            db.insert_balance(
-                Balance(
-                    account_id=account.id,
-                    as_of=as_of,
-                    balance=-float(current_balance),
-                    source="capital_one_api",
-                    raw_file_ref=raw_key,
-                )
+        current_balance = float(cycle_info["currentBalance"])
+        db.insert_balance(
+            Balance(
+                account_id=account.id,
+                as_of=as_of,
+                balance=-current_balance,
+                source="capital_one_api",
+                raw_file_ref=raw_key,
             )
+        )
 
         # Transaction files may be a single file or chunked (_0, _1, etc.)
         txn_files = sorted(inst_dir.glob(f"{timestamp}_{last_four}_transactions*.json"))

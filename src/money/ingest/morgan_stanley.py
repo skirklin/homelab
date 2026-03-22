@@ -151,19 +151,11 @@ def parse_raw_morgan_stanley(
     as_of = ts_to_date(timestamp)
 
     summary_data = json.loads((inst_dir / f"{timestamp}_portfolio_summary.json").read_text())
-    if not summary_data:
-        log.warning("Morgan Stanley: no portfolio_summary file for %s", timestamp)
-        return {}
-
     grants_data = json.loads((inst_dir / f"{timestamp}_grants.json").read_text())
-    portfolio_path = inst_dir / f"{timestamp}_portfolio.json"
-    portfolio_data = json.loads(portfolio_path.read_text()) if portfolio_path.exists() else None
+    summary: dict[str, Any] = summary_data["data"]
+    raw_grants: list[dict[str, Any]] = grants_data["data"]
 
-    summary: dict[str, Any] = summary_data.get("data", {})
-    raw_grants: list[dict[str, Any]] = grants_data.get("data", []) if grants_data else []
-
-    fmv_price_str: str = summary.get("valuedAtPrice", "0 USD")
-    fmv_price = parse_money(fmv_price_str)
+    fmv_price = parse_money(summary["valuedAtPrice"])
 
     account = db.get_or_create_account(
         name="Anthropic Stock Options",
@@ -173,34 +165,27 @@ def parse_raw_morgan_stanley(
         profile=profile,
     )
 
-    # Total balance
-    total_value: float | None = None
-    if portfolio_data:
-        accounts_list: list[dict[str, Any]] = portfolio_data.get("accounts", [])
-        if accounts_list:
-            total_value = float(accounts_list[0].get("totalValue", {}).get("amount", 0))
-    else:
-        portfolio_items: list[dict[str, Any]] = summary.get("portfolioData", [])
-        available_total = 0.0
-        future_total = 0.0
-        for item in portfolio_items:
-            available_total += parse_money(item.get("availableValue", "0 USD"))
-            for f in item.get("futureData", []):
-                future_total += parse_money(f.get("value", "0 USD"))
-        total_value = available_total + future_total
+    # Total balance from portfolio summary
+    portfolio_items: list[dict[str, Any]] = summary["portfolioData"]
+    available_total = 0.0
+    future_total = 0.0
+    for item in portfolio_items:
+        available_total += parse_money(item["availableValue"])
+        for f in item["futureData"]:
+            future_total += parse_money(f["value"])
+    total_value = available_total + future_total
 
     raw_key = f"morgan_stanley/{timestamp}_portfolio_summary.json"
 
-    if total_value is not None:
-        db.insert_balance(
-            Balance(
-                account_id=account.id,
-                as_of=as_of,
-                balance=total_value,
-                source="morgan_stanley_api",
-                raw_file_ref=raw_key,
-            )
+    db.insert_balance(
+        Balance(
+            account_id=account.id,
+            as_of=as_of,
+            balance=total_value,
+            source="morgan_stanley_api",
+            raw_file_ref=raw_key,
         )
+    )
 
     # FMV (409A valuation)
     if fmv_price > 0:
@@ -214,27 +199,21 @@ def parse_raw_morgan_stanley(
         )
 
     # Build vested quantity lookup from portfolio summary
-    portfolio_items_list: list[dict[str, Any]] = list(summary.get("portfolioData", []))
     vested_by_instance: dict[str, tuple[int, float]] = {}
-    for pi in portfolio_items_list:
-        instance_name: str = pi.get("instanceName", "")
-        avail_qty = int(pi.get("availableQuantity", 0))
-        avail_val = parse_money(pi.get("availableValue", "0 USD"))
-        if instance_name:
-            vested_by_instance[instance_name] = (avail_qty, avail_val)
+    for pi in portfolio_items:
+        instance_name: str = pi["instanceName"]
+        avail_qty = int(pi["availableQuantity"])
+        avail_val = parse_money(pi["availableValue"])
+        vested_by_instance[instance_name] = (avail_qty, avail_val)
 
     # Grants
     grant_count = 0
     for raw_grant in raw_grants:
-        grant_date_str: str = raw_grant.get("grantDate", "")
-        if not grant_date_str:
-            continue
-
-        grant_date = date.fromisoformat(grant_date_str)
-        award_name: str = raw_grant.get("awardName", "")
-        grant_name: str = raw_grant.get("grantName", "")
-        grant_number: str = raw_grant.get("grantNumber", "")
-        quantity = int(raw_grant.get("quantityGranted", 0))
+        grant_date = date.fromisoformat(raw_grant["grantDate"])
+        award_name: str = raw_grant["awardName"]
+        grant_name: str = raw_grant["grantName"]
+        grant_number: str = raw_grant["grantNumber"]
+        quantity = int(raw_grant["quantityGranted"])
         expiration_str: str | None = raw_grant.get("expiredDate")
 
         # Extract strike price from grant name (e.g. "02/05/2024 - ISO - $12.98")
@@ -245,8 +224,8 @@ def parse_raw_morgan_stanley(
             with contextlib.suppress(ValueError):
                 strike_price = float(price_str)
 
-        exercise_details: dict[str, Any] = raw_grant.get("exerciseDetails", {})
-        vest_dates: list[str] = exercise_details.get("vestDates", [])
+        exercise_details: dict[str, Any] = raw_grant["exerciseDetails"]
+        vest_dates: list[str] = exercise_details["vestDates"]
         parsed_vest_dates = [date.fromisoformat(d) for d in vest_dates]
 
         grant_type = determine_grant_type(award_name)
