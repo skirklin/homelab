@@ -107,17 +107,20 @@ def parse_raw_capital_one(
     """
     as_of = ts_to_date(timestamp)
 
-    accounts_data = json.loads((inst_dir / f"{timestamp}_accounts.json").read_text())
+    from money.ingest.schemas import COAccount, COAccountsResponse
 
-    raw_accounts: list[dict[str, Any]] = accounts_data["accounts"]
+    accounts_response: COAccountsResponse = json.loads(
+        (inst_dir / f"{timestamp}_accounts.json").read_text()
+    )
+    raw_accounts: list[COAccount] = accounts_response["accounts"]
     raw_key = f"capital_one/{timestamp}_accounts.json"
     account_count = 0
     txn_count_total = 0
 
     for raw_acct in raw_accounts:
-        card_acct: dict[str, Any] = raw_acct["cardAccount"]
-        name_info: dict[str, Any] = card_acct["nameInfo"]
-        cycle_info: dict[str, Any] = card_acct["cycleInfo"]
+        card_acct = raw_acct["cardAccount"]
+        name_info = card_acct["nameInfo"]
+        cycle_info = card_acct["cycleInfo"]
 
         display_name: str = name_info["displayName"]
         last_four: str = card_acct["plasticIdLastFour"]

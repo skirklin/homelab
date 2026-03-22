@@ -150,10 +150,22 @@ def parse_raw_morgan_stanley(
     """
     as_of = ts_to_date(timestamp)
 
-    summary_data = json.loads((inst_dir / f"{timestamp}_portfolio_summary.json").read_text())
-    grants_data = json.loads((inst_dir / f"{timestamp}_grants.json").read_text())
-    summary: dict[str, Any] = summary_data["data"]
-    raw_grants: list[dict[str, Any]] = grants_data["data"]
+    from money.ingest.schemas import (
+        MSGrant,
+        MSGrantsResponse,
+        MSPortfolioItem,
+        MSPortfolioSummary,
+        MSPortfolioSummaryResponse,
+    )
+
+    summary_response: MSPortfolioSummaryResponse = json.loads(
+        (inst_dir / f"{timestamp}_portfolio_summary.json").read_text()
+    )
+    grants_response: MSGrantsResponse = json.loads(
+        (inst_dir / f"{timestamp}_grants.json").read_text()
+    )
+    summary: MSPortfolioSummary = summary_response["data"]
+    raw_grants: list[MSGrant] = grants_response["data"]
 
     fmv_price = parse_money(summary["valuedAtPrice"])
 
@@ -166,7 +178,7 @@ def parse_raw_morgan_stanley(
     )
 
     # Total balance from portfolio summary
-    portfolio_items: list[dict[str, Any]] = summary["portfolioData"]
+    portfolio_items: list[MSPortfolioItem] = summary["portfolioData"]
     available_total = 0.0
     future_total = 0.0
     for item in portfolio_items:
@@ -224,8 +236,8 @@ def parse_raw_morgan_stanley(
             with contextlib.suppress(ValueError):
                 strike_price = float(price_str)
 
-        exercise_details: dict[str, Any] = raw_grant["exerciseDetails"]
-        vest_dates: list[str] = exercise_details["vestDates"]
+        exercise_details = raw_grant["exerciseDetails"]
+        vest_dates = exercise_details["vestDates"]
         parsed_vest_dates = [date.fromisoformat(d) for d in vest_dates]
 
         grant_type = determine_grant_type(award_name)

@@ -149,11 +149,13 @@ def parse_raw_ally(
     """
     as_of = ts_to_date(timestamp)
 
+    from money.ingest.schemas import AllyAccount
+
     accounts_data = json.loads((inst_dir / f"{timestamp}_accounts.json").read_text())
 
-    accounts: list[dict[str, Any]] = list(
-        accounts_data.get("accounts") or accounts_data.get("data") or []
-    )
+    # transfer-accounts format uses "accounts" key, old format uses "data"
+    raw_list = accounts_data.get("accounts") or accounts_data.get("data") or []
+    accounts: list[AllyAccount] = list(raw_list)
     raw_key = f"ally/{timestamp}_accounts.json"
 
     seen_transactions: set[tuple[str, float, str]] = set()
