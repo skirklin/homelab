@@ -9,7 +9,7 @@ from typing import Any
 
 from money.config import DATA_DIR, cookie_relay_path
 from money.db import Database
-from money.ingest.common import read_json, ts_to_date
+from money.ingest.common import ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
 from money.storage import RawStore
 
@@ -149,7 +149,7 @@ def parse_raw_ally(
     """
     as_of = ts_to_date(timestamp)
 
-    accounts_data = read_json(inst_dir / f"{timestamp}_accounts.json")
+    accounts_data = json.loads((inst_dir / f"{timestamp}_accounts.json").read_text())
     if not accounts_data:
         log.warning("Ally: no accounts file for %s", timestamp)
         return {}
@@ -216,7 +216,9 @@ def parse_raw_ally(
 
         # Transactions
         txn_path = inst_dir / f"{timestamp}_{external_id}_transactions.json"
-        txns_raw = read_json(txn_path)
+        if not txn_path.exists():
+            continue
+        txns_raw = json.loads(txn_path.read_text())
         if not isinstance(txns_raw, list):
             continue
 
@@ -269,7 +271,7 @@ def parse_raw_ally_extension(
     ext_files = sorted(inst_dir.glob("extension_*.json"))
     balance_count = 0
     for ext_path in ext_files:
-        data = read_json(ext_path)
+        data = json.loads(ext_path.read_text())
         if not data:
             continue
         ext_accounts: list[dict[str, Any]] = data.get("accounts", [])

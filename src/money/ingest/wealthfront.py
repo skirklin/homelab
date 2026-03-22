@@ -11,7 +11,7 @@ from urllib.parse import unquote
 
 from money.config import cookie_relay_path
 from money.db import Database
-from money.ingest.common import read_json, ts_to_date
+from money.ingest.common import ts_to_date
 from money.models import (
     AccountType,
     Balance,
@@ -237,7 +237,7 @@ def parse_raw_wealthfront(
     """
     as_of = ts_to_date(timestamp)
 
-    overviews_data = read_json(inst_dir / f"{timestamp}_overviews.json")
+    overviews_data = json.loads((inst_dir / f"{timestamp}_overviews.json").read_text())
     if not overviews_data:
         log.warning("Wealthfront: no overviews file for %s", timestamp)
         return {}
@@ -279,7 +279,8 @@ def parse_raw_wealthfront(
             )
 
         # Performance history
-        perf_data = read_json(inst_dir / f"{timestamp}_{acct_id}_performance.json")
+        perf_path = inst_dir / f"{timestamp}_{acct_id}_performance.json"
+        perf_data = json.loads(perf_path.read_text()) if perf_path.exists() else None
         if perf_data:
             history: list[dict[str, Any]] = perf_data.get("historyList", [])
             perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
@@ -300,7 +301,8 @@ def parse_raw_wealthfront(
                 log.info("  Performance history: %d points", len(perf_rows))
 
         # Holdings from open lots
-        lots_data = read_json(inst_dir / f"{timestamp}_{acct_id}_open_lots.json")
+        lots_path = inst_dir / f"{timestamp}_{acct_id}_open_lots.json"
+        lots_data = json.loads(lots_path.read_text()) if lots_path.exists() else None
         if lots_data and isinstance(lots_data, dict):
             lots_list: list[dict[str, Any]] = list(lots_data.get("openLotForDisplayList", []))
             by_symbol: dict[str, dict[str, float]] = {}
@@ -333,7 +335,8 @@ def parse_raw_wealthfront(
                 log.info("  Holdings: %d positions", len(holding_rows))
 
         # Transfers as transactions
-        transfers_data = read_json(inst_dir / f"{timestamp}_{acct_id}_transfers.json")
+        transfers_path = inst_dir / f"{timestamp}_{acct_id}_transfers.json"
+        transfers_data = json.loads(transfers_path.read_text()) if transfers_path.exists() else None
         if transfers_data and isinstance(transfers_data, dict):
             transfers_key = f"wealthfront/{timestamp}_{acct_id}_transfers.json"
             txn_count = ingest_transfers(db, account.id, transfers_data, transfers_key)

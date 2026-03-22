@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from money.config import cookie_relay_path
 from money.db import Database
-from money.ingest.common import read_json, ts_to_date
+from money.ingest.common import ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
 from money.storage import RawStore
 
@@ -107,7 +107,7 @@ def parse_raw_capital_one(
     """
     as_of = ts_to_date(timestamp)
 
-    accounts_data = read_json(inst_dir / f"{timestamp}_accounts.json")
+    accounts_data = json.loads((inst_dir / f"{timestamp}_accounts.json").read_text())
     if not accounts_data:
         log.warning("Capital One: no accounts file for %s", timestamp)
         return {}
@@ -155,7 +155,7 @@ def parse_raw_capital_one(
         raw_entries: list[dict[str, Any]] = []
         txn_key = f"capital_one/{txn_files[0].name}"
         for txn_file in txn_files:
-            txn_data = read_json(txn_file)
+            txn_data = json.loads(txn_file.read_text())
             if not txn_data:
                 continue
             if isinstance(txn_data, dict):

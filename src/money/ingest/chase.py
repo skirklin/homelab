@@ -8,7 +8,7 @@ from typing import Any
 
 from money.config import DATA_DIR
 from money.db import Database
-from money.ingest.common import read_json, ts_to_date
+from money.ingest.common import ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
 from money.storage import RawStore
 
@@ -121,7 +121,7 @@ def parse_raw_chase(
     log_file = inst_dir / f"{timestamp}_network_log.json"
     raw_key = f"chase/{timestamp}_network_log.json"
 
-    data = read_json(log_file)
+    data = json.loads(log_file.read_text())
     if not data:
         log.warning("Chase: no network log file for %s", timestamp)
         return {}

@@ -11,7 +11,7 @@ from typing import Any
 
 from money.config import cookie_relay_path
 from money.db import Database
-from money.ingest.common import read_json, ts_to_date
+from money.ingest.common import ts_to_date
 from money.models import AccountType, Balance, Holding, IngestionRecord, IngestionStatus
 from money.storage import RawStore
 
@@ -318,7 +318,7 @@ def parse_raw_betterment(
     """
     as_of = ts_to_date(timestamp)
 
-    sidebar = read_json(inst_dir / f"{timestamp}_sidebar.json")
+    sidebar = json.loads((inst_dir / f"{timestamp}_sidebar.json").read_text())
     if not sidebar:
         log.warning("Betterment: no sidebar file for %s", timestamp)
         return {}
@@ -337,7 +337,8 @@ def parse_raw_betterment(
         # Get envelope balance from purpose file
         envelope_balance: float | None = None
         if purpose_raw is not None:
-            purpose_data = read_json(inst_dir / f"{timestamp}_{envelope_id}_purpose.json")
+            purpose_path = inst_dir / f"{timestamp}_{envelope_id}_purpose.json"
+            purpose_data = json.loads(purpose_path.read_text()) if purpose_path.exists() else None
             if purpose_data:
                 purpose_obj = purpose_data.get("data", {}).get("purpose")
                 if purpose_obj:
@@ -364,7 +365,8 @@ def parse_raw_betterment(
 
             # Performance history + balance
             balance: float | None = None
-            perf_data = read_json(inst_dir / f"{timestamp}_{acct_external_id}_performance.json")
+            perf_path = inst_dir / f"{timestamp}_{acct_external_id}_performance.json"
+            perf_data = json.loads(perf_path.read_text()) if perf_path.exists() else None
             if perf_data:
                 acct_data = perf_data.get("data", {}).get("account", {})
                 bal_cents = acct_data.get("balance")
@@ -409,7 +411,10 @@ def parse_raw_betterment(
             if acct_typename == "ManagedAccount":
                 holdings_filename = f"{timestamp}_{acct_external_id}_holdings.json"
                 holdings_key = f"betterment/{holdings_filename}"
-                holdings_data = read_json(inst_dir / holdings_filename)
+                holdings_path = inst_dir / holdings_filename
+                holdings_data = (
+                    json.loads(holdings_path.read_text()) if holdings_path.exists() else None
+                )
                 if holdings_data:
                     acct_holdings = holdings_data.get("data", {}).get("account", {})
                     groups = acct_holdings.get("securityGroupPositions", [])

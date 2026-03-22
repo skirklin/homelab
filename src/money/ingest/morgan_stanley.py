@@ -11,7 +11,7 @@ from typing import Any
 
 from money.config import DATA_DIR
 from money.db import Database
-from money.ingest.common import read_json, ts_to_date
+from money.ingest.common import ts_to_date
 from money.models import (
     AccountType,
     Balance,
@@ -150,13 +150,14 @@ def parse_raw_morgan_stanley(
     """
     as_of = ts_to_date(timestamp)
 
-    summary_data = read_json(inst_dir / f"{timestamp}_portfolio_summary.json")
+    summary_data = json.loads((inst_dir / f"{timestamp}_portfolio_summary.json").read_text())
     if not summary_data:
         log.warning("Morgan Stanley: no portfolio_summary file for %s", timestamp)
         return {}
 
-    grants_data = read_json(inst_dir / f"{timestamp}_grants.json")
-    portfolio_data = read_json(inst_dir / f"{timestamp}_portfolio.json")
+    grants_data = json.loads((inst_dir / f"{timestamp}_grants.json").read_text())
+    portfolio_path = inst_dir / f"{timestamp}_portfolio.json"
+    portfolio_data = json.loads(portfolio_path.read_text()) if portfolio_path.exists() else None
 
     summary: dict[str, Any] = summary_data.get("data", {})
     raw_grants: list[dict[str, Any]] = grants_data.get("data", []) if grants_data else []
