@@ -3,50 +3,29 @@ from datetime import date
 from money.models import Account, AccountType, OptionGrant
 
 
-def test_option_grant_vesting_before_cliff() -> None:
+def test_option_grant_fields() -> None:
     grant = OptionGrant(
         account_id="test",
-        grant_date=date(2024, 1, 1),
+        grant_date=date(2024, 2, 5),
+        grant_type="ISO",
         total_shares=4800,
-        strike_price=1.0,
-        vesting_start=date(2024, 1, 1),
-        vesting_months=48,
-        cliff_months=12,
+        vested_shares=1200,
+        strike_price=12.98,
+        vested_value=500000.0,
+        vest_dates=[
+            date(2025, 2, 5),
+            date(2026, 2, 5),
+            date(2027, 2, 5),
+            date(2028, 2, 5),
+        ],
+        expiration_date=date(2034, 2, 5),
     )
-
-    assert grant.vested_shares(date(2024, 6, 1)) == 0  # before cliff
-    assert grant.vested_shares(date(2024, 12, 1)) == 0  # exactly at cliff boundary
-
-
-def test_option_grant_vesting_after_cliff() -> None:
-    grant = OptionGrant(
-        account_id="test",
-        grant_date=date(2024, 1, 1),
-        total_shares=4800,
-        strike_price=1.0,
-        vesting_start=date(2024, 1, 1),
-        vesting_months=48,
-        cliff_months=12,
-    )
-
-    assert grant.vested_shares(date(2025, 1, 1)) == 1200  # 12 months = 25%
-    assert grant.vested_shares(date(2026, 1, 1)) == 2400  # 24 months = 50%
-    assert grant.vested_shares(date(2028, 1, 1)) == 4800  # fully vested
-
-
-def test_option_grant_vesting_caps_at_total() -> None:
-    grant = OptionGrant(
-        account_id="test",
-        grant_date=date(2024, 1, 1),
-        total_shares=4800,
-        strike_price=1.0,
-        vesting_start=date(2024, 1, 1),
-        vesting_months=48,
-        cliff_months=12,
-    )
-
-    # Well past vesting end
-    assert grant.vested_shares(date(2030, 1, 1)) == 4800
+    assert grant.total_shares == 4800
+    assert grant.vested_shares == 1200
+    assert grant.grant_type == "ISO"
+    assert grant.strike_price == 12.98
+    assert grant.expiration_date == date(2034, 2, 5)
+    assert len(grant.vest_dates) == 4
 
 
 def test_credit_card_auto_liability() -> None:

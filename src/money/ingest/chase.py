@@ -1,6 +1,5 @@
 """Chase ingester — parses captured network log data."""
 
-import json
 import logging
 from datetime import date, datetime
 from pathlib import Path
@@ -9,15 +8,12 @@ from money.config import DATA_DIR
 from money.db import Database
 from money.ingest.common import ts_to_date
 from money.ingest.schemas import (
+    CHActivityAccount,
     CHActivityOptionsResponse,
-    CHCardReward,
     CHCardRewardsResponse,
-    CHDashboardCacheEntry,
     CHDashboardResponse,
     CHDdaDetailResponse,
     CHNetworkLog,
-    CHNetworkLogEntry,
-    CHTransaction,
     CHTransactionsResponse,
 )
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
@@ -25,16 +21,16 @@ from money.storage import RawStore
 
 log = logging.getLogger(__name__)
 
-# Union of all possible response body types keyed in the parsed results dict.
-_CHResponseBody = (
-    CHDdaDetailResponse | CHTransactionsResponse | CHCardRewardsResponse | CHDashboardResponse
-)
 
-
-def _load_network_log() -> dict[str, list[_CHResponseBody]]:
+def _load_network_log() -> tuple[
+    list[CHDdaDetailResponse],
+    list[CHTransactionsResponse],
+    list[CHCardRewardsResponse],
+    list[CHDashboardResponse],
+]:
     """Load the most recent Chase network log and extract API responses by endpoint.
 
-    Returns a dict mapping endpoint keys to response bodies.
+    Returns four lists: dda_details, transactions, card_rewards, dashboard.
     """
     log_dir = DATA_DIR / "network_logs"
     if not log_dir.exists():
@@ -48,7 +44,7 @@ def _load_network_log() -> dict[str, list[_CHResponseBody]]:
 
     latest = logs[-1]
     log.info("Using network log: %s", latest.name)
-    data: CHNetworkLog = json.loads(latest.read_text())
+    data = CHNetworkLog.model_validate_json(latest.read_text())
     return _parse_network_log_entries(data)
 
 
@@ -62,41 +58,42 @@ def extract_account_list(
 ) -> list[CHActivityOptionsResponse]:
     """Extract account list from dashboard module cache."""
     for resp in dashboard_responses:
-        cached: list[CHDashboardCacheEntry] = resp.get("cache", [])
-        for entry in cached:
-            url: str = entry.get("url", "")
-            if "activity/options" in url:
-                inner = entry.get("response", {})
-                if inner.get("accounts"):
-                    return [inner]
+        for entry in resp.cache:
+            if "activity/options" in entry.url:
+                parsed = CHActivityOptionsResponse.model_validate(entry.response)
+                if parsed.accounts:
+                    return [parsed]
     return []
 
 
 def _parse_network_log_entries(
     data: CHNetworkLog,
-) -> dict[str, list[_CHResponseBody]]:
-    """Parse a raw network log dict into categorised response lists."""
-    results: dict[str, list[_CHResponseBody]] = {
-        "dda_details": [],
-        "transactions": [],
-        "card_rewards": [],
-        "dashboard": [],
-    }
-    entries: list[CHNetworkLogEntry] = data.get("entries", [])
-    for entry in entries:
-        url: str = entry.get("url", "")
-        body = entry.get("responseBody")
+) -> tuple[
+    list[CHDdaDetailResponse],
+    list[CHTransactionsResponse],
+    list[CHCardRewardsResponse],
+    list[CHDashboardResponse],
+]:
+    """Parse a raw network log into categorised response lists."""
+    dda_details: list[CHDdaDetailResponse] = []
+    transactions: list[CHTransactionsResponse] = []
+    card_rewards: list[CHCardRewardsResponse] = []
+    dashboard: list[CHDashboardResponse] = []
+
+    for entry in data.entries:
+        url = entry.url or ""
+        body = entry.responseBody
         if not isinstance(body, dict):
             continue
         if "account/detail/dda/list" in url:
-            results["dda_details"].append(body)  # type: ignore[arg-type]
+            dda_details.append(CHDdaDetailResponse.model_validate(body))
         elif "etu-dda-transactions" in url:
-            results["transactions"].append(body)  # type: ignore[arg-type]
+            transactions.append(CHTransactionsResponse.model_validate(body))
         elif "rewards" in url and "summary" in url:
-            results["card_rewards"].append(body)  # type: ignore[arg-type]
+            card_rewards.append(CHCardRewardsResponse.model_validate(body))
         elif "dashboard/module" in url:
-            results["dashboard"].append(body)  # type: ignore[arg-type]
-    return results
+            dashboard.append(CHDashboardResponse.model_validate(body))
+    return dda_details, transactions, card_rewards, dashboard
 
 
 def parse_raw_chase(
@@ -114,53 +111,47 @@ def parse_raw_chase(
     """
     as_of = ts_to_date(timestamp)
     log_file = inst_dir / f"{timestamp}_network_log.json"
-    raw_key = f"chase/{timestamp}_network_log.json"
+    raw_key = f"chase/{profile}/{timestamp}_network_log.json"
 
-    raw_data: CHNetworkLog = json.loads(log_file.read_text())
-    results = _parse_network_log_entries(raw_data)
+    raw_data = CHNetworkLog.model_validate_json(log_file.read_text())
+    dda_details, transactions, card_rewards, dashboard = _parse_network_log_entries(raw_data)
 
     # Build account map from dashboard activity/options cache
-    dda_account_map: dict[int, CHActivityOptionsResponse] = {}
-    for dashboard_resp in results["dashboard"]:
-        dr = dashboard_resp  # type: ignore[assignment]
-        for cache_entry in dr.get("cache", []):
-            if "activity/options" in cache_entry.get("url", ""):
-                inner: CHActivityOptionsResponse = cache_entry.get("response", {})
-                for acct in inner.get("accounts", []):
-                    acct_id = acct.get("id", 0)
-                    if acct_id:
-                        dda_account_map[acct_id] = acct  # type: ignore[assignment]
+    dda_account_map: dict[int, CHActivityAccount] = {}
+    for dr in dashboard:
+        for cache_entry in dr.cache:
+            if "activity/options" in cache_entry.url:
+                inner = CHActivityOptionsResponse.model_validate(cache_entry.response)
+                for acct in inner.accounts:
+                    if acct.id:
+                        dda_account_map[acct.id] = acct
 
     account_count = 0
 
     # DDA accounts
     seen_dda: set[str] = set()
-    for detail_resp in results["dda_details"]:
-        dda_resp: CHDdaDetailResponse = detail_resp  # type: ignore[assignment]
-        acct_id: int = dda_resp.get("accountId", 0)
-        nickname: str = dda_resp.get("nickname", "Unknown")
-        mask: str = dda_resp.get("mask", "")
+    for dda_resp in dda_details:
+        mask = dda_resp.mask
 
         if mask in seen_dda:
             continue
         seen_dda.add(mask)
 
-        acct_info = dda_account_map.get(acct_id, {})
-        acct_type_str: str = acct_info.get("accountType", "CHK")  # type: ignore[attr-defined]
+        acct_info = dda_account_map.get(dda_resp.accountId)
+        acct_type_str = (acct_info.accountType if acct_info else None) or "CHK"
         account_type = AccountType.SAVINGS if acct_type_str == "SAV" else AccountType.CHECKING
 
         account = db.get_or_create_account(
-            name=nickname,
+            name=dda_resp.nickname,
             account_type=account_type,
             institution="chase",
             external_id=mask,
             profile=profile,
         )
         account_count += 1
-        log.info("Chase: %s ••%s (id=%s)", nickname, mask, account.id)
+        log.info("Chase: %s ••%s (id=%s)", dda_resp.nickname, mask, account.id)
 
-        detail: CHDdaDetailResponse = dda_resp.get("detail", {})  # type: ignore[assignment]
-        available = float(detail.get("available", 0))  # type: ignore[arg-type]
+        available = dda_resp.detail.available
         db.insert_balance(
             Balance(
                 account_id=account.id,
@@ -173,21 +164,17 @@ def parse_raw_chase(
 
     # Transactions
     txn_count_total = 0
-    for txn_resp_raw in results["transactions"]:
-        txn_resp: CHTransactionsResponse = txn_resp_raw  # type: ignore[assignment]
-        txn_list: list[CHTransaction] = txn_resp.get("transactions", [])
+    for txn_resp in transactions:
+        txn_list = txn_resp.transactions
         if not txn_list:
             continue
 
-        last_balance = float(txn_list[0].get("runningLedgerBalanceAmount", 0))
+        last_balance = txn_list[0].runningLedgerBalanceAmount
         matched_account_id: str | None = None
 
-        for dda_raw in results["dda_details"]:
-            dda: CHDdaDetailResponse = dda_raw  # type: ignore[assignment]
-            detail2: CHDdaDetailResponse = dda.get("detail", {})  # type: ignore[assignment]
-            if abs(float(detail2.get("presentBalance", 0)) - last_balance) < 0.01:  # type: ignore[arg-type]
-                mask = dda.get("mask", "")
-                acct = db.get_account_by_external_id("chase", mask)
+        for dda in dda_details:
+            if abs(dda.detail.presentBalance - last_balance) < 0.01:
+                acct = db.get_account_by_external_id("chase", dda.mask)
                 if acct:
                     matched_account_id = acct.id
                     break
@@ -198,15 +185,15 @@ def parse_raw_chase(
 
         txn_count = 0
         for txn in txn_list:
-            txn_date_str: str = txn.get("transactionPostDate", "")
+            txn_date_str = txn.transactionPostDate
             if not txn_date_str:
                 continue
             db.insert_transaction(
                 Transaction(
                     account_id=matched_account_id,
                     date=parse_chase_date(txn_date_str),
-                    amount=float(txn.get("transactionAmount", 0)),
-                    description=txn.get("transactionDescription", ""),
+                    amount=txn.transactionAmount,
+                    description=txn.transactionDescription,
                     raw_file_ref=raw_key,
                 )
             )
@@ -215,15 +202,11 @@ def parse_raw_chase(
         log.info("  Chase: stored %d transaction(s) for account %s", txn_count, matched_account_id)
 
     # Credit cards
-    for rewards_raw in results["card_rewards"]:
-        rewards_resp: CHCardRewardsResponse = rewards_raw  # type: ignore[assignment]
-        cards: list[CHCardReward] = rewards_resp.get("cardRewardsSummary", [])
-        for card in cards:
-            mask = str(card.get("mask", ""))
-            card_nickname: str = card.get("nickname", "Unknown")
-            card_type: str = card.get("cardType", "")
+    for rewards_resp in card_rewards:
+        for card in rewards_resp.cardRewardsSummary:
+            mask = str(card.mask)
             db.get_or_create_account(
-                name=f"{card_nickname} ({card_type.replace('_', ' ').title()})",
+                name=f"{card.nickname} ({card.cardType.replace('_', ' ').title()})",
                 account_type=AccountType.CREDIT_CARD,
                 institution="chase",
                 external_id=mask,
@@ -238,7 +221,7 @@ def parse_raw_chase(
 def sync_chase(
     db: Database,
     store: RawStore,
-    profile: str | None = None,
+    profile: str,
 ) -> None:
     """Sync Chase accounts from captured network log data.
 
@@ -248,7 +231,7 @@ def sync_chase(
     """
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
-    raw_key = f"chase/{timestamp}_network_log.json"
+    raw_key = f"chase/{profile}/{timestamp}_network_log.json"
 
     try:
         # Load and store the raw network log
@@ -269,7 +252,7 @@ def sync_chase(
         # Parse raw data and write to DB using inst_dir from store location
         from money.config import DATA_DIR as _DATA_DIR
 
-        inst_dir = _DATA_DIR / "raw" / "chase"
+        inst_dir = _DATA_DIR / "raw" / "chase" / (profile or "default")
         parse_raw_chase(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
@@ -297,3 +280,15 @@ def sync_chase(
             )
         )
         raise
+
+
+from money.ingest.registry import InstitutionInfo
+
+INSTITUTION = InstitutionInfo(
+    name="chase",
+    dir_name="chase",
+    sync_fn=sync_chase,
+    parse_fn=parse_raw_chase,
+    anchor_file="network_log.json",
+    display_name="Chase",
+)

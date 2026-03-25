@@ -7,6 +7,7 @@ from pathlib import Path
 # Project-local data directory (gitignored)
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_DIR / ".data"
+DB_PATH = DATA_DIR / "money.db"
 BROWSER_STATE_DIR = DATA_DIR / "browser_state"
 COOKIE_RELAY_DIR = DATA_DIR / "cookies"
 RAW_STORE_DIR = DATA_DIR / "raw"

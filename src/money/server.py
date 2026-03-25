@@ -7,7 +7,6 @@ from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from money.config import cookie_relay_path
 from money.db import Database
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus
 from money.storage import RawStore
@@ -49,6 +48,9 @@ class IngestHandler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         if self.path == "/health":
             self._json_response(200, {"status": "ok"})
+            return
+        if self.path.startswith("/api/last-sync"):
+            self._handle_last_sync()
             return
         if self.path == "/api/accounts":
             self._handle_get_accounts()
@@ -96,6 +98,32 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._handle_get_recurring()
             return
         self._json_response(404, {"error": "not found"})
+
+    def _handle_last_sync(self) -> None:
+        """Return the most recent transaction/balance date per institution."""
+        from urllib.parse import parse_qs, urlparse
+
+        params = parse_qs(urlparse(self.path).query)
+        institution = params.get("institution", [None])[0]
+
+        if not institution:
+            self._json_response(400, {"error": "missing 'institution' parameter"})
+            return
+
+        row = self.db.conn.execute(
+            """SELECT MAX(t.date) as last_transaction, MAX(b.as_of) as last_balance
+               FROM accounts a
+               LEFT JOIN transactions t ON t.account_id = a.id
+               LEFT JOIN balances b ON b.account_id = a.id
+               WHERE a.institution = ?""",
+            (institution,),
+        ).fetchone()
+
+        self._json_response(200, {
+            "institution": institution,
+            "last_transaction": row["last_transaction"] if row else None,
+            "last_balance": row["last_balance"] if row else None,
+        })
 
     def _handle_get_accounts(self) -> None:
         accounts = self.db.list_accounts()
@@ -1186,6 +1214,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path == "/auth-token":
             self._handle_auth_token()
             return
+        if self.path == "/trigger-sync":
+            self._handle_trigger_sync()
+            return
         if self.path == "/api/suggestions/generate" or self.path == "/api/suggestions/reclassify":
             self._handle_generate_suggestions()
             return
@@ -1203,27 +1234,30 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._set_cors_headers()
         self.end_headers()
 
-    def _trigger_auto_sync(self, institution: str) -> None:
-        """Kick off a background sync for an institution.
-
-        Looks up the login_id for the institution from config (uses the first
-        matching login, typically the only one for single-user institutions).
-        """
+    def _resolve_login_id(self, institution: str) -> str | None:
+        """Look up the login_id for an institution from config."""
         from money.config import load_config
 
-        login_id: str | None = None
         try:
             config = load_config()
             for lid, lc in config.logins.items():
                 if lc.institution == institution:
-                    login_id = lid
-                    break
+                    return lid
         except Exception:
             pass
+        return None
 
+    def _trigger_auto_sync(
+        self,
+        institution: str,
+        login_id: str | None,
+        cookies: dict[str, str] | None = None,
+    ) -> None:
+        """Kick off a background sync for an institution."""
         thread = threading.Thread(
             target=_run_auto_sync,
             args=(self.db.path, self.store, institution, login_id),
+            kwargs={"cookies": cookies},
             daemon=True,
         )
         thread.start()
@@ -1250,13 +1284,23 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": "'cookies' must be a list"})
             return
 
-        path = cookie_relay_path(institution)
-        path.write_text(json.dumps(data, indent=2))
-        log.info("Stored %d cookies for %s at %s", len(cookies_raw), institution, path)
+        from money.config import DATA_DIR
 
-        # Ally uses Playwright login, not cookie relay — skip auto-sync
-        if institution != "ally":
-            self._trigger_auto_sync(institution)
+        login_id = self._resolve_login_id(institution)
+
+        # Persist cookies for CLI use
+        cookies_dir = DATA_DIR / "cookies"
+        cookies_dir.mkdir(parents=True, exist_ok=True)
+        persist_key = login_id or institution
+        persist_path = cookies_dir / f"{persist_key}.json"
+        persist_path.write_text(json.dumps(data, indent=2))
+        log.info(
+            "Stored %d cookies for %s at %s", len(cookies_raw), institution, persist_path,
+        )
+
+        # Convert cookie list to dict and pass directly to sync
+        cookies_dict: dict[str, str] = {c["name"]: c["value"] for c in cookies_raw}
+        self._trigger_auto_sync(institution, login_id, cookies=cookies_dict)
 
         self._json_response(
             200,
@@ -1313,7 +1357,8 @@ class IngestHandler(BaseHTTPRequestHandler):
             for route in sorted(routes):
                 log.info("  %s", route)
 
-        self._trigger_auto_sync(institution)
+        login_id = self._resolve_login_id(institution)
+        self._trigger_auto_sync(institution, login_id)
 
         self._json_response(
             200,
@@ -1324,6 +1369,40 @@ class IngestHandler(BaseHTTPRequestHandler):
                 "api_routes_found": len(routes),
             },
         )
+
+    def _handle_trigger_sync(self) -> None:
+        """Handle a sync trigger from the extension (e.g. Ally needs Playwright)."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self._json_response(400, {"error": "empty request body"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length))
+        except json.JSONDecodeError as e:
+            self._json_response(400, {"error": f"invalid JSON: {e}"})
+            return
+
+        institution = data.get("institution")
+        if not institution:
+            self._json_response(400, {"error": "missing 'institution'"})
+            return
+
+        login_id = self._resolve_login_id(institution)
+        log.info("Sync triggered for %s (login: %s)", institution, login_id)
+
+        self._trigger_playwright_sync(institution, login_id)
+
+        self._json_response(200, {"status": "ok", "institution": institution, "login_id": login_id})
+
+    def _trigger_playwright_sync(self, institution: str, login_id: str | None) -> None:
+        """Run a Playwright-based sync in a background thread."""
+        thread = threading.Thread(
+            target=_run_playwright_sync,
+            args=(self.db.path, self.store, institution, login_id),
+            daemon=True,
+        )
+        thread.start()
 
     def _handle_auth_token(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
@@ -1524,11 +1603,58 @@ def _process_ingest(
     }
 
 
+def _run_playwright_sync(
+    db_path: str,
+    store: RawStore,
+    institution: str,
+    login_id: str | None,
+) -> None:
+    """Run a Playwright-based sync (e.g. Ally) in the background."""
+    sync_key = login_id or institution
+
+    with _sync_lock:
+        if sync_key in _active_syncs:
+            log.info("Sync already in progress for %s, skipping", sync_key)
+            return
+        _active_syncs.add(sync_key)
+
+    db = Database(db_path, check_same_thread=False)
+    try:
+        db.initialize()
+        log.info("Playwright sync starting for %s (login: %s)", institution, login_id)
+
+        from money.ingest.scrapers.ally import login_ally
+
+        profile = login_id or institution
+        token, cookies_dict = login_ally(profile, headless=True)
+        cookies_dict["Ally-CIAM-Token"] = token
+
+        from money.ingest.ally_api import sync_ally_api
+
+        sync_ally_api(db, store, profile=profile, cookies=cookies_dict)
+
+        from money.benchmarks import enrich_holdings_asset_classes
+        from money.categorize import apply_rules
+
+        enrich_holdings_asset_classes(db)
+        apply_rules(db)
+
+        log.info("Playwright sync complete for %s (login: %s)", institution, login_id)
+
+    except Exception:
+        log.exception("Playwright sync failed for %s (login: %s)", institution, login_id)
+    finally:
+        with _sync_lock:
+            _active_syncs.discard(sync_key)
+        db.close()
+
+
 def _run_auto_sync(
     db_path: str,
     store: RawStore,
     institution: str,
     login_id: str | None = None,
+    cookies: dict[str, str] | None = None,
 ) -> None:
     """Run a sync for an institution in the background after receiving fresh auth data."""
     sync_key = login_id or institution
@@ -1544,24 +1670,24 @@ def _run_auto_sync(
         db.initialize()
         log.info("Auto-sync starting for %s (login: %s)", institution, login_id)
 
-        if institution == "betterment":
-            from money.ingest.betterment import sync_betterment
-            sync_betterment(db, store, profile=login_id)
-        elif institution == "wealthfront":
-            from money.ingest.wealthfront import sync_wealthfront
-            sync_wealthfront(db, store, profile=login_id)
-        elif institution == "capital_one":
-            from money.ingest.capital_one import sync_capital_one
-            sync_capital_one(db, store, profile=login_id)
-        elif institution == "chase":
-            from money.ingest.chase import sync_chase
-            sync_chase(db, store, profile=login_id)
-        elif institution == "morgan_stanley":
-            from money.ingest.morgan_stanley import sync_morgan_stanley
-            sync_morgan_stanley(db, store, profile=login_id)
-        else:
+        from money.ingest.registry import get as get_institution
+
+        try:
+            inst = get_institution(institution)
+        except KeyError:
             log.info("No auto-sync configured for %s", institution)
             return
+
+        if inst.playwright_sync:
+            log.info("Skipping auto-sync for %s (requires Playwright)", institution)
+            return
+
+        # Cookie-based institutions get cookies passed through;
+        # network-log institutions (chase, morgan_stanley) don't use cookies.
+        if cookies is not None:
+            inst.sync_fn(db, store, profile=login_id, cookies=cookies)
+        else:
+            inst.sync_fn(db, store, profile=login_id)
 
         # Enrich and recategorize after sync
         from money.benchmarks import enrich_holdings_asset_classes
@@ -1583,7 +1709,7 @@ def run_server(
     db: Database,
     store: RawStore,
     port: int = 5555,
-    host: str = "127.0.0.1",
+    host: str = "0.0.0.0",
 ) -> None:
     """Start the HTTP server to receive extension data."""
     # Store path and store on the handler class; each request gets its own DB connection

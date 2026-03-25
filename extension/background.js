@@ -1,18 +1,38 @@
 // Background service worker for Money Data Collector extension.
-// Receives data from content scripts and forwards to the local server.
+// Routes browser events to per-institution handlers.
+
+import ally from "./institutions/ally.js";
+import betterment from "./institutions/betterment.js";
+import capital_one from "./institutions/capital_one.js";
+import chase from "./institutions/chase.js";
+import morgan_stanley from "./institutions/morgan_stanley.js";
+import wealthfront from "./institutions/wealthfront.js";
 
 const DEFAULT_PORT = 5555;
 
-// Cookie domains per institution
-const COOKIE_DOMAINS = {
-  ally: [".ally.com", "secure.ally.com", "wwws.ally.com"],
-  wealthfront: [".wealthfront.com", "www.wealthfront.com"],
-  betterment: [".betterment.com", "wwws.betterment.com"],
-  morgan_stanley: [".morganstanley.com", "stockplanconnect.morganstanley.com", "www.morganstanley.com", ".solium.com", "shareworks.solium.com"],
-  capital_one: [".capitalone.com", "myaccounts.capitalone.com", "www.capitalone.com"],
-  bofa: [".bankofamerica.com", "secure.bankofamerica.com", "www.bankofamerica.com"],
-  chase: [".chase.com", "secure.chase.com", "secure03b.chase.com", "www.chase.com"],
+// ── Institution registry ─────────────────────────────────────────────
+
+const HANDLERS = {
+  ally,
+  betterment,
+  capital_one,
+  chase,
+  morgan_stanley,
+  wealthfront,
 };
+
+// Build URL→institution lookup from handler domains
+function getInstitutionForUrl(url) {
+  if (!url) return null;
+  for (const [id, handler] of Object.entries(HANDLERS)) {
+    for (const domain of handler.domains) {
+      if (url.includes(domain.replace(/^\./, ""))) return id;
+    }
+  }
+  return null;
+}
+
+// ── Server communication ─────────────────────────────────────────────
 
 async function getServerUrl() {
   const result = await chrome.storage.local.get("serverPort");
@@ -20,52 +40,19 @@ async function getServerUrl() {
   return `http://localhost:${port}`;
 }
 
-function setBadge(text, color = "#34d399") {
-  chrome.action.setBadgeText({ text });
-  chrome.action.setBadgeBackgroundColor({ color });
-}
-
-async function logActivity(message) {
-  const result = await chrome.storage.local.get("activityLog");
-  const log = result.activityLog || [];
-  log.unshift({ time: new Date().toISOString(), message });
-  // Keep last 20 entries
-  await chrome.storage.local.set({ activityLog: log.slice(0, 20) });
-}
-
-function updateRecordingBadge() {
-  // Show buffered entry count while any tab is recording
-  const recordingInstitutions = Object.values(recordingTabs);
-  if (recordingInstitutions.length === 0) {
-    setBadge("");
-    return;
-  }
-  let total = 0;
-  for (const inst of recordingInstitutions) {
-    total += (networkBuffer[inst] || []).length;
-  }
-  // Purple = has unbuffered data, green = just flushed (0 buffered)
-  setBadge(String(total), total > 0 ? "#818cf8" : "#34d399");
-}
-
 async function sendToServer(endpoint, data) {
   const baseUrl = await getServerUrl();
-  const url = `${baseUrl}${endpoint}`;
-
   try {
-    const response = await fetch(url, {
+    const response = await fetch(`${baseUrl}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-
     if (!response.ok) {
       const text = await response.text();
       return { success: false, error: `Server returned ${response.status}: ${text}` };
     }
-
-    const result = await response.json();
-    return { success: true, data: result };
+    return { success: true, data: await response.json() };
   } catch (err) {
     return { success: false, error: `Connection failed: ${err.message}` };
   }
@@ -76,10 +63,7 @@ async function checkServerHealth() {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`${baseUrl}/health`, {
-      method: "GET",
-      signal: controller.signal,
-    });
+    const response = await fetch(`${baseUrl}/health`, { signal: controller.signal });
     clearTimeout(timeout);
     return response.ok;
   } catch {
@@ -87,14 +71,25 @@ async function checkServerHealth() {
   }
 }
 
-async function captureCookies(institution) {
-  const domains = COOKIE_DOMAINS[institution];
-  if (!domains) return { success: false, error: `Unknown institution: ${institution}` };
+// ── Badge & logging ──────────────────────────────────────────────────
 
+function setBadge(text, color = "#34d399") {
+  chrome.action.setBadgeText({ text });
+  chrome.action.setBadgeBackgroundColor({ color });
+}
+
+async function logActivity(message) {
+  const result = await chrome.storage.local.get("activityLog");
+  const log = result.activityLog || [];
+  log.unshift({ time: new Date().toISOString(), message });
+  await chrome.storage.local.set({ activityLog: log.slice(0, 20) });
+}
+
+// ── Cookie capture ───────────────────────────────────────────────────
+
+async function getAllCookiesForDomains(domains) {
   const allCookies = [];
   const seen = new Set();
-
-  // Query by domain AND by URL to catch all cookies
   for (const domain of domains) {
     const byDomain = await chrome.cookies.getAll({ domain });
     const byUrl = await chrome.cookies.getAll({ url: `https://${domain.replace(/^\./, "")}` });
@@ -106,109 +101,195 @@ async function captureCookies(institution) {
       }
     }
   }
+  return allCookies;
+}
 
-  if (allCookies.length === 0) {
-    return { success: false, error: `No cookies found for ${institution}` };
-  }
-
-  // Send cookies to local server
-  const payload = {
+async function sendCookiesToServer(institution, cookies) {
+  if (cookies.length === 0) return { success: false, error: "No cookies" };
+  return await sendToServer("/cookies", {
     institution,
-    cookies: allCookies,
+    cookies,
     captured_at: new Date().toISOString(),
+  });
+}
+
+// ── Network recording state ──────────────────────────────────────────
+
+const networkBuffer = {};    // institution -> [entries]
+const recordingTabs = {};    // tabId -> institution
+
+function updateRecordingBadge() {
+  const institutions = Object.values(recordingTabs);
+  if (institutions.length === 0) { setBadge(""); return; }
+  let total = 0;
+  for (const inst of institutions) {
+    total += (networkBuffer[inst] || []).length;
+  }
+  setBadge(String(total), total > 0 ? "#818cf8" : "#34d399");
+}
+
+// ── Handler context ──────────────────────────────────────────────────
+// Passed to each handler's onPageLoad — provides the tools they need.
+
+function makeContext(institution, tabId) {
+  const handler = HANDLERS[institution];
+
+  return {
+    institution,
+    tabId,
+
+    async triggerSync() {
+      const result = await sendToServer("/trigger-sync", { institution });
+      return { type: "sync_triggered", ...result };
+    },
+
+    async captureCookies() {
+      const cookies = await getAllCookiesForDomains(handler.domains);
+      const result = await sendCookiesToServer(institution, cookies);
+      return { type: "cookies", count: cookies.length, ...result };
+    },
+
+    async waitForCookies(requiredNames, { timeout = 15000, interval = 1000 } = {}) {
+      const deadline = Date.now() + timeout;
+      while (Date.now() < deadline) {
+        const cookies = await getAllCookiesForDomains(handler.domains);
+        const names = new Set(cookies.map(c => c.name));
+        const missing = requiredNames.filter(n => !names.has(n));
+        if (missing.length === 0) {
+          const result = await sendCookiesToServer(institution, cookies);
+          return { type: "cookies", count: cookies.length, ...result };
+        }
+        console.log(`[Money] ${institution}: waiting for cookies: ${missing.join(", ")}`);
+        await new Promise(resolve => setTimeout(resolve, interval));
+      }
+      // Timeout — send whatever we have
+      console.warn(`[Money] ${institution}: timed out waiting for required cookies`);
+      const cookies = await getAllCookiesForDomains(handler.domains);
+      const result = await sendCookiesToServer(institution, cookies);
+      return { type: "cookies", count: cookies.length, timedOut: true, ...result };
+    },
+
+    async startNetworkRecording() {
+      networkBuffer[institution] = [];
+      recordingTabs[tabId] = institution;
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: "START_RECORDING" });
+        updateRecordingBadge();
+        logActivity(`Started recording for ${institution}`);
+      } catch (err) {
+        console.warn(`[Money] Could not start recording for ${institution}:`, err);
+      }
+    },
+
+    async executeInPage(fn, args = undefined) {
+      // Inject as a <script> tag in the page DOM so it runs with the page's
+      // full session (cookies, auth). chrome.scripting.executeScript with
+      // world: "MAIN" doesn't share the page's credentials for fetch.
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (fnSource, fnArgs) => {
+          const script = document.createElement("script");
+          script.textContent = `(${fnSource})(${JSON.stringify(fnArgs)});`;
+          document.documentElement.appendChild(script);
+          script.remove();
+        },
+        args: [fn.toString(), args],
+        world: "MAIN",
+      });
+    },
+
+    async getLastSync() {
+      const baseUrl = await getServerUrl();
+      try {
+        const resp = await fetch(`${baseUrl}/api/last-sync?institution=${institution}`);
+        if (resp.ok) return await resp.json();
+      } catch { /* server not available */ }
+      return null;
+    },
+
+    async flushNetworkLog() {
+      const entries = networkBuffer[institution] || [];
+      if (entries.length === 0) {
+        return { type: "network_log", count: 0, success: true };
+      }
+      const toSend = [...entries];
+      networkBuffer[institution] = [];
+      const result = await sendToServer("/network-log", {
+        institution,
+        entries: toSend,
+        captured_at: new Date().toISOString(),
+      });
+      if (result.success) {
+        updateRecordingBadge();
+        logActivity(`Flushed ${toSend.length} network entries for ${institution}`);
+      }
+      return { type: "network_log", count: toSend.length, ...result };
+    },
   };
-
-  const result = await sendToServer("/cookies", payload);
-
-  if (result.success) {
-    return { success: true, count: allCookies.length };
-  }
-  return result;
 }
 
-// Network recording state
-const networkBuffer = {}; // institutionId -> [entries]
-const recordingTabs = {}; // tabId -> institutionId
+// ── Cooldown tracking ────────────────────────────────────────────────
 
-function getInstitutionForUrl(url) {
-  if (!url) return null;
-  for (const [id, domains] of Object.entries(COOKIE_DOMAINS)) {
-    for (const domain of domains) {
-      if (url.includes(domain.replace(/^\./, ""))) return id;
-    }
-  }
-  return null;
-}
+const lastCapture = {};
+const COOLDOWN_MS = 30_000;
 
-// Institutions that need network recording (can't replay cookies)
-const NETWORK_LOG_INSTITUTIONS = new Set(["chase", "morgan_stanley"]);
+// Track institutions with an active handler running (suppresses periodic flush)
+const activeHandlers = new Set();
 
-// Debounce auto-capture: don't re-send cookies for the same institution within 30s
-const lastAutoCapture = {};
-const AUTO_CAPTURE_COOLDOWN_MS = 30_000;
+// ── Navigation handler (the router) ──────────────────────────────────
 
-// URL patterns that indicate an authenticated session (past login)
-const AUTHENTICATED_URL_PATTERNS = {
-  capital_one: /myaccounts\.capitalone\.com\/(accountSummary|accountDetail)/,
-  betterment: /app\.betterment\.com\/(investing|summary|goals)/,
-  wealthfront: /www\.wealthfront\.com\/(dashboard|portfolio|transfers)/,
-};
-
-// Auto-capture cookies when navigating to an authenticated page
 chrome.webNavigation.onCompleted.addListener(async (details) => {
-  // Only main frame, not iframes
   if (details.frameId !== 0) return;
 
   const institution = getInstitutionForUrl(details.url);
   if (!institution) return;
 
-  // Only auto-capture if the URL looks like an authenticated page
-  const authPattern = AUTHENTICATED_URL_PATTERNS[institution];
-  if (authPattern && !authPattern.test(details.url)) {
-    return;
-  }
+  const handler = HANDLERS[institution];
+  if (!handler) return;
 
-  // Cooldown check
+  // Check auth pattern
+  if (handler.authPattern && !handler.authPattern.test(details.url)) return;
+
+  // Cooldown
   const now = Date.now();
-  if (lastAutoCapture[institution] && now - lastAutoCapture[institution] < AUTO_CAPTURE_COOLDOWN_MS) {
-    return;
-  }
-  lastAutoCapture[institution] = now;
+  if (lastCapture[institution] && now - lastCapture[institution] < COOLDOWN_MS) return;
+  lastCapture[institution] = now;
 
-  // Auto-capture cookies
-  const result = await captureCookies(institution);
-  if (result.success) {
-    setBadge("✓");
-    logActivity(`Captured ${result.count} cookies for ${institution}`);
-    console.log(`[Money] Auto-captured ${result.count} cookies for ${institution}`);
-  } else {
-    setBadge("!", "#f87171");
-  }
-
-  // Auto-start network recording for institutions that need it.
-  // The content script is already injected by manifest.json content_scripts,
-  // so we just need to send the START_RECORDING message.
-  if (NETWORK_LOG_INSTITUTIONS.has(institution) && !recordingTabs[details.tabId]) {
-    networkBuffer[institution] = [];
-    recordingTabs[details.tabId] = institution;
-    try {
-      await chrome.tabs.sendMessage(details.tabId, { type: "START_RECORDING" });
-      updateRecordingBadge();
-      logActivity(`Started recording for ${institution}`);
-      console.log(`[Money] Auto-started network recording for ${institution}`);
-    } catch (err) {
-      console.warn(`[Money] Could not start recording for ${institution}:`, err);
+  // Dispatch to handler
+  const ctx = makeContext(institution, details.tabId);
+  activeHandlers.add(institution);
+  try {
+    const result = await handler.onPageLoad(ctx);
+    if (result && result.success !== false) {
+      setBadge("✓");
+      const desc = result.count
+        ? `Captured ${result.count} entries for ${institution}`
+        : `Completed ${institution}`;
+      logActivity(desc);
+      console.log(`[Money] ${desc}`);
+    } else {
+      setBadge("!", "#f87171");
+      logActivity(`Failed for ${institution}: ${result?.error || "unknown"}`);
     }
+  } catch (err) {
+    setBadge("!", "#f87171");
+    console.error(`[Money] Handler error for ${institution}:`, err);
+    logActivity(`Error for ${institution}: ${err.message}`);
+  } finally {
+    activeHandlers.delete(institution);
   }
 });
 
-// Periodic flush — send buffered network data every 30s while recording
+// ── Periodic network flush ───────────────────────────────────────────
+
 setInterval(async () => {
   for (const [tabId, institution] of Object.entries(recordingTabs)) {
+    // Don't flush while a handler is actively running — it controls its own flush
+    if (activeHandlers.has(institution)) continue;
+
     const entries = networkBuffer[institution];
     if (!entries || entries.length === 0) continue;
 
-    // Send a copy and clear the buffer
     const toSend = [...entries];
     networkBuffer[institution] = [];
 
@@ -220,40 +301,32 @@ setInterval(async () => {
     if (result.success) {
       updateRecordingBadge();
       logActivity(`Flushed ${toSend.length} network entries for ${institution}`);
-      console.log(`[Money] Periodic flush: ${toSend.length} entries for ${institution}`);
     } else {
       setBadge("!", "#f87171");
     }
   }
 }, 30_000);
 
-// Auto-flush network log when navigating away from a recorded tab
+// ── Tab navigation/close → flush network logs ────────────────────────
+
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (changeInfo.url === undefined) return;
-
   const institution = recordingTabs[tabId];
   if (!institution) return;
 
-  // Check if the new URL is still the same institution
-  const newInstitution = getInstitutionForUrl(changeInfo.url);
-  if (newInstitution === institution) return;
+  if (getInstitutionForUrl(changeInfo.url) === institution) return;
 
-  // Navigated away — flush the network log
   delete recordingTabs[tabId];
   const entries = networkBuffer[institution] || [];
   if (entries.length > 0) {
-    const result = await sendToServer("/network-log", {
-      institution,
-      entries,
-      captured_at: new Date().toISOString(),
+    await sendToServer("/network-log", {
+      institution, entries, captured_at: new Date().toISOString(),
     });
-    console.log(`[Money] Auto-flushed ${entries.length} network entries for ${institution}:`, result);
   }
   delete networkBuffer[institution];
   updateRecordingBadge();
 });
 
-// Also flush when a recorded tab is closed
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   const institution = recordingTabs[tabId];
   if (!institution) return;
@@ -262,43 +335,52 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   const entries = networkBuffer[institution] || [];
   if (entries.length > 0) {
     await sendToServer("/network-log", {
-      institution,
-      entries,
-      captured_at: new Date().toISOString(),
+      institution, entries, captured_at: new Date().toISOString(),
     });
-    console.log(`[Money] Auto-flushed ${entries.length} entries for ${institution} (tab closed)`);
   }
   delete networkBuffer[institution];
   updateRecordingBadge();
 });
 
-// Listen for messages from content scripts and popup
+// ── Message handler (popup, content scripts) ─────────────────────────
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CHECK_HEALTH") {
-    checkServerHealth().then((healthy) => sendResponse({ healthy }));
+    checkServerHealth().then(healthy => sendResponse({ healthy }));
     return true;
   }
 
   if (message.type === "CAPTURE_COOKIES") {
-    captureCookies(message.institution).then(sendResponse);
+    const handler = HANDLERS[message.institution];
+    if (!handler) {
+      sendResponse({ success: false, error: `Unknown institution: ${message.institution}` });
+      return true;
+    }
+    getAllCookiesForDomains(handler.domains).then(async cookies => {
+      const result = await sendCookiesToServer(message.institution, cookies);
+      sendResponse({ ...result, count: cookies.length });
+    });
     return true;
   }
 
   if (message.type === "NETWORK_REQUEST") {
-    // Buffer a captured network request from a content script
     const tabId = sender.tab?.id;
     const institution = tabId ? recordingTabs[tabId] : null;
     if (institution && message.entry) {
-      if (!networkBuffer[institution]) networkBuffer[institution] = [];
-      networkBuffer[institution].push(message.entry);
-      updateRecordingBadge();
+      // Apply per-institution capture filter if defined
+      const handler = HANDLERS[institution];
+      const url = message.entry.url || "";
+      if (!handler?.captureFilter || handler.captureFilter.test(url)) {
+        if (!networkBuffer[institution]) networkBuffer[institution] = [];
+        networkBuffer[institution].push(message.entry);
+        updateRecordingBadge();
+      }
     }
     sendResponse({ buffered: true });
     return true;
   }
 
   if (message.type === "AUTH_TOKEN") {
-    // Relay captured auth token to the server
     const tabUrl = sender.tab?.url || "";
     const institution = getInstitutionForUrl(tabUrl);
     if (institution && message.token) {
@@ -316,43 +398,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "START_NETWORK_RECORDING") {
-    const tabId = message.tabId;
-    const institution = message.institution;
+    const { tabId, institution } = message;
     networkBuffer[institution] = [];
     recordingTabs[tabId] = institution;
-    // Inject content script if not already present, then start recording
     chrome.scripting.executeScript({
       target: { tabId },
       files: ["content/network_recorder.js"],
-    }).then(() => {
-      return chrome.tabs.sendMessage(tabId, { type: "START_RECORDING" });
-    }).then(sendResponse).catch((err) => {
-      sendResponse({ started: false, error: err.message });
-    });
+    }).then(() => chrome.tabs.sendMessage(tabId, { type: "START_RECORDING" }))
+      .then(sendResponse)
+      .catch(err => sendResponse({ started: false, error: err.message }));
     return true;
   }
 
   if (message.type === "STOP_NETWORK_RECORDING") {
-    const tabId = message.tabId;
-    const institution = message.institution;
+    const { tabId, institution } = message;
     delete recordingTabs[tabId];
-    // Tell the content script to stop
     chrome.tabs.sendMessage(tabId, { type: "STOP_RECORDING" }).then(async () => {
       const entries = networkBuffer[institution] || [];
       const result = await sendToServer("/network-log", {
-        institution,
-        entries,
-        captured_at: new Date().toISOString(),
+        institution, entries, captured_at: new Date().toISOString(),
       });
       delete networkBuffer[institution];
       sendResponse({ ...result, count: entries.length });
     }).catch(async () => {
-      // Content script gone — just flush what we have
       const entries = networkBuffer[institution] || [];
       const result = await sendToServer("/network-log", {
-        institution,
-        entries,
-        captured_at: new Date().toISOString(),
+        institution, entries, captured_at: new Date().toISOString(),
       });
       delete networkBuffer[institution];
       sendResponse({ ...result, count: entries.length });
@@ -361,7 +432,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "GET_RECORDING_STATUS") {
-    const tabId = message.tabId;
+    const { tabId } = message;
     const institution = recordingTabs[tabId] || null;
     const count = institution ? (networkBuffer[institution] || []).length : 0;
     sendResponse({ recording: !!institution, institution, count });
@@ -369,7 +440,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "CHECK_RECORDING_FOR_TAB") {
-    // Content script asking on load if it should be recording
     const tabId = sender.tab?.id;
     const shouldRecord = tabId && tabId in recordingTabs;
     sendResponse({ shouldRecord: !!shouldRecord });

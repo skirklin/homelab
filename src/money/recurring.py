@@ -37,13 +37,13 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
         ORDER BY t.date
     """).fetchall()
 
-    # Import the LIKE matcher
-    from money.categorize import _like_match, _pattern_specificity
+    from money.categorize import like_to_regex, pattern_specificity
 
     # For each transaction, find its best matching rule pattern
     # (same logic as apply_rules but we track the pattern)
     desc_rules = [r for r in rules if not r.pattern.startswith("category:")]
     cat_rules = [r for r in rules if r.pattern.startswith("category:")]
+    desc_regexes = [like_to_regex(r.pattern) for r in desc_rules]
 
     pattern_groups: dict[str, list[dict[str, Any]]] = {}
 
@@ -54,10 +54,9 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
         best_pattern: str | None = None
         best_specificity = -1
 
-        for rule in desc_rules:
-            pat = rule.pattern.upper()
-            if _like_match(description, pat):
-                spec = _pattern_specificity(rule.pattern)
+        for rule, regex in zip(desc_rules, desc_regexes, strict=True):
+            if regex.match(description):
+                spec = pattern_specificity(rule.pattern)
                 if spec > best_specificity:
                     best_specificity = spec
                     best_pattern = rule.pattern
@@ -65,7 +64,7 @@ def detect_recurring(db: Database, min_occurrences: int = 3) -> int:
         for rule in cat_rules:
             cat_value = rule.pattern.removeprefix("category:")
             if category == cat_value:
-                spec = _pattern_specificity(rule.pattern)
+                spec = pattern_specificity(rule.pattern)
                 if spec > best_specificity:
                     best_specificity = spec
                     best_pattern = rule.pattern

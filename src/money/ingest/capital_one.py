@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from money.config import cookie_relay_path
 from money.db import Database
 from money.ingest.common import ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
@@ -27,33 +26,6 @@ USER_AGENT = (
     "Chrome/145.0.0.0 Safari/537.36"
 )
 
-
-def _load_cookies(profile: str | None = None) -> dict[str, str]:
-    """Load relayed cookies from the Chrome extension."""
-    path = (
-        cookie_relay_path("capital_one", profile) if profile else cookie_relay_path("capital_one")
-    )
-    if not path.exists() and profile:
-        path = cookie_relay_path("capital_one")
-    if not path.exists():
-        raise FileNotFoundError(
-            "No cookies found for capital_one. Log into Capital One in Chrome and "
-            "click the Cookies button in the extension."
-        )
-
-    data = json.loads(path.read_text())
-    cookies: dict[str, str] = {}
-    for c in data.get("cookies", []):
-        domain: str = c.get("domain", "")
-        # Include cookies from myaccounts and the broader .capitalone.com domain
-        if "capitalone" not in domain:
-            continue
-        cookies[c["name"]] = c["value"]
-
-    if "JSESSIONID" not in cookies:
-        raise ValueError("Cookie file missing JSESSIONID — recapture from extension.")
-    log.info("Relevant cookies: %s", ", ".join(cookies.keys()))
-    return cookies
 
 
 def _api_get(cookies: dict[str, str], path: str) -> Any:
@@ -107,23 +79,23 @@ def parse_raw_capital_one(
     """
     as_of = ts_to_date(timestamp)
 
-    from money.ingest.schemas import COAccount, COAccountsResponse
+    from money.ingest.schemas import COAccountsResponse
 
-    accounts_response: COAccountsResponse = json.loads(
+    accounts_response = COAccountsResponse.model_validate_json(
         (inst_dir / f"{timestamp}_accounts.json").read_text()
     )
-    raw_accounts: list[COAccount] = accounts_response["accounts"]
-    raw_key = f"capital_one/{timestamp}_accounts.json"
+    raw_accounts = accounts_response.accounts
+    raw_key = f"capital_one/{profile}/{timestamp}_accounts.json"
     account_count = 0
     txn_count_total = 0
 
     for raw_acct in raw_accounts:
-        card_acct = raw_acct["cardAccount"]
-        name_info = card_acct["nameInfo"]
-        cycle_info = card_acct["cycleInfo"]
+        card_acct = raw_acct.cardAccount
+        name_info = card_acct.nameInfo
+        cycle_info = card_acct.cycleInfo
 
-        display_name: str = name_info["displayName"]
-        last_four: str = card_acct["plasticIdLastFour"]
+        display_name = name_info.displayName
+        last_four = card_acct.plasticIdLastFour
 
         account = db.get_or_create_account(
             name=display_name,
@@ -135,7 +107,7 @@ def parse_raw_capital_one(
         account_count += 1
         log.info("Capital One: %s (id=%s)", display_name, account.id)
 
-        current_balance = float(cycle_info["currentBalance"])
+        current_balance = cycle_info.currentBalance
         db.insert_balance(
             Balance(
                 account_id=account.id,
@@ -152,7 +124,7 @@ def parse_raw_capital_one(
             continue
 
         raw_entries: list[dict[str, Any]] = []
-        txn_key = f"capital_one/{txn_files[0].name}"
+        txn_key = f"capital_one/{profile}/{txn_files[0].name}"
         for txn_file in txn_files:
             txn_data = json.loads(txn_file.read_text())
             if not txn_data:
@@ -200,16 +172,16 @@ def parse_raw_capital_one(
 def sync_capital_one(
     db: Database,
     store: RawStore,
-    profile: str | None = None,
+    profile: str,
+    cookies: dict[str, str],
 ) -> None:
     """Sync Capital One credit card accounts, balances, and transactions."""
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
-    raw_key = f"capital_one/{timestamp}_accounts.json"
+    raw_key = f"capital_one/{profile}/{timestamp}_accounts.json"
 
     try:
-        cookies = _load_cookies(profile)
         log.info("Loaded %d cookies for capital_one (login: %s)", len(cookies), profile)
 
         # 1. Fetch accounts
@@ -245,10 +217,10 @@ def sync_capital_one(
                     earliest = date.fromisoformat(last_txn_row[0]) - timedelta(days=7)
                     log.info("  Incremental sync from %s", earliest)
                 else:
-                    earliest = date(chunk_end.year - 2, chunk_end.month, chunk_end.day)
+                    earliest = chunk_end - timedelta(days=730)
                     log.info("  Full backfill to %s", earliest)
             else:
-                earliest = date(chunk_end.year - 2, chunk_end.month, chunk_end.day)
+                earliest = chunk_end - timedelta(days=730)
                 log.info("  Full backfill to %s (new account: %s)", earliest, display_name)
 
             try:
@@ -266,7 +238,7 @@ def sync_capital_one(
 
                     txn_data = _api_get(cookies, txn_path)
                     txn_key = (
-                        f"capital_one/{timestamp}_{last_four}"
+                        f"capital_one/{profile}/{timestamp}_{last_four}"
                         f"_transactions_{chunk_num}.json"
                     )
                     store.put(txn_key, json.dumps(txn_data, indent=2).encode())
@@ -298,7 +270,7 @@ def sync_capital_one(
 
         # Parse all raw data and write to DB
         from money.config import DATA_DIR as _DATA_DIR
-        inst_dir = _DATA_DIR / "raw" / "capital_one"
+        inst_dir = _DATA_DIR / "raw" / "capital_one" / (profile or "default")
         parse_raw_capital_one(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
@@ -326,3 +298,15 @@ def sync_capital_one(
             )
         )
         raise
+
+
+from money.ingest.registry import InstitutionInfo
+
+INSTITUTION = InstitutionInfo(
+    name="capital_one",
+    dir_name="capital_one",
+    sync_fn=sync_capital_one,
+    parse_fn=parse_raw_capital_one,
+    anchor_file="accounts.json",
+    display_name="Capital One",
+)

@@ -186,10 +186,10 @@ def test_cookies_endpoint_stores_cookies(server):
     assert result["institution"] == "wealthfront"
     assert result["cookies_stored"] == 2
 
-    # Verify cookies written to disk
-    from money.config import cookie_relay_path
+    # Verify cookies written to disk (persisted as {login_id}.json)
+    from money.config import DATA_DIR
 
-    path = cookie_relay_path("wealthfront")
+    path = DATA_DIR / "cookies" / "scott@wealthfront.json"
     assert path.exists()
     stored = json.loads(path.read_text())
     assert len(stored["cookies"]) == 2

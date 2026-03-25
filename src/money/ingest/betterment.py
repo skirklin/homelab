@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from money.config import cookie_relay_path
 from money.db import Database
 from money.ingest.common import ts_to_date
 from money.ingest.schemas import (
@@ -190,25 +189,6 @@ query EnvelopeAccountHoldings($id: ID!) \
 }"""
 
 
-def _load_cookies(profile: str | None = None) -> dict[str, str]:
-    """Load relayed cookies from the Chrome extension."""
-    path = cookie_relay_path("betterment", profile) if profile else cookie_relay_path("betterment")
-    if not path.exists() and profile:
-        # Fall back to institution-level cookie file
-        path = cookie_relay_path("betterment")
-    if not path.exists():
-        raise FileNotFoundError(
-            "No cookies found for betterment. Log into Betterment in Chrome and "
-            "click the Cookies button in the extension."
-        )
-
-    data = json.loads(path.read_text())
-    cookies: dict[str, str] = {}
-    for c in data.get("cookies", []):
-        cookies[c["name"]] = c["value"]
-
-    return cookies
-
 
 def _fetch_csrf_token(cookies: dict[str, str]) -> str:
     """Fetch CSRF token from Betterment's HTML page (Rails meta tag)."""
@@ -222,7 +202,7 @@ def _fetch_csrf_token(cookies: dict[str, str]) -> str:
     ))
     req.add_header("Accept", "text/html")
 
-    resp = urllib.request.urlopen(req)
+    resp = urllib.request.urlopen(req, timeout=30)
     html = resp.read().decode()
 
     match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', html)
@@ -258,7 +238,7 @@ def _graphql(
         "Chrome/131.0.0.0 Safari/537.36"
     ))
 
-    resp = urllib.request.urlopen(req)
+    resp = urllib.request.urlopen(req, timeout=30)
     result: dict[str, Any] = json.loads(resp.read())
     if "errors" in result:
         log.warning("GraphQL errors for %s: %s", operation_name, result["errors"])
@@ -324,33 +304,33 @@ def parse_raw_betterment(
     """
     as_of = ts_to_date(timestamp)
 
-    sidebar: BMSidebarResponse = json.loads(
+    sidebar = BMSidebarResponse.model_validate_json(
         (inst_dir / f"{timestamp}_sidebar.json").read_text()
     )
-    envelopes = sidebar["data"]["envelopes"]
-    raw_key = f"betterment/{timestamp}_sidebar.json"
+    envelopes = sidebar.data.envelopes
+    raw_key = f"betterment/{profile}/{timestamp}_sidebar.json"
 
     account_count = 0
 
     for envelope in envelopes:
-        envelope_id = envelope["id"]
-        purpose_raw = envelope.get("purpose")
-        purpose_name = purpose_raw["name"] if purpose_raw else "Unknown"
-        accounts = envelope["accounts"]
+        envelope_id = envelope.id
+        purpose_raw = envelope.purpose
+        purpose_name = purpose_raw.name if purpose_raw else "Unknown"
+        accounts = envelope.accounts
 
         # Get envelope balance from purpose file
         envelope_balance: float | None = None
         if purpose_raw is not None:
             purpose_path = inst_dir / f"{timestamp}_{envelope_id}_purpose.json"
             if purpose_path.exists():
-                purpose_resp: BMPurposeResponse = json.loads(purpose_path.read_text())
-                purpose_obj = purpose_resp["data"]["purpose"]
-                envelope_balance = cents_to_dollars(purpose_obj["envelope"]["balance"])
+                purpose_resp = BMPurposeResponse.model_validate_json(purpose_path.read_text())
+                purpose_obj = purpose_resp.data.purpose
+                envelope_balance = cents_to_dollars(purpose_obj.envelope.balance)
 
         for acct in accounts:
-            acct_graphql_id = acct["id"]
-            acct_typename = acct.get("__typename", "")
-            acct_name = acct.get("nameOverride") or acct.get("name", "")
+            acct_graphql_id = acct.id
+            acct_typename = acct.typename or ""
+            acct_name = acct.nameOverride or acct.name or ""
             acct_external_id = decode_account_id(acct_graphql_id)
 
             account_type = _resolve_account_type(acct_typename, acct_name)
@@ -369,23 +349,23 @@ def parse_raw_betterment(
             balance: float | None = None
             perf_path = inst_dir / f"{timestamp}_{acct_external_id}_performance.json"
             if perf_path.exists():
-                perf_resp: BMPerformanceResponse = json.loads(perf_path.read_text())
-                acct_perf = perf_resp["data"]["account"]
+                perf_resp = BMPerformanceResponse.model_validate_json(perf_path.read_text())
+                acct_perf = perf_resp.data.account
                 if acct_perf is not None:
-                    balance = cents_to_dollars(acct_perf.get("balance"))
+                    balance = cents_to_dollars(acct_perf.balance)
 
-                    perf_history = acct_perf.get("performanceHistory")
-                    time_series = perf_history["timeSeries"] if perf_history else []
+                    perf_history = acct_perf.performanceHistory
+                    time_series = perf_history.timeSeries if perf_history else []
                     if time_series:
                         perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
                         for point in time_series:
-                            pbal = point["balance"]
+                            pbal = point.balance
                             perf_rows.append((
                                 account.id,
-                                point["date"],
+                                point.date,
                                 pbal / 100.0,
-                                cents_to_dollars(point["invested"]),
-                                cents_to_dollars(point["earned"]),
+                                cents_to_dollars(point.invested),
+                                cents_to_dollars(point.earned),
                             ))
                         db.insert_performance_batch(perf_rows)
 
@@ -410,24 +390,26 @@ def parse_raw_betterment(
             # Holdings for managed accounts
             if acct_typename == "ManagedAccount":
                 holdings_filename = f"{timestamp}_{acct_external_id}_holdings.json"
-                holdings_key = f"betterment/{holdings_filename}"
+                holdings_key = f"betterment/{profile}/{holdings_filename}"
                 holdings_path = inst_dir / holdings_filename
                 if holdings_path.exists():
-                    holdings_resp: BMHoldingsResponse = json.loads(holdings_path.read_text())
-                    acct_holdings = holdings_resp["data"]["account"]
+                    holdings_resp = BMHoldingsResponse.model_validate_json(
+                        holdings_path.read_text()
+                    )
+                    acct_holdings = holdings_resp.data.account
                     if acct_holdings is not None:
-                        groups = acct_holdings.get("securityGroupPositions", [])
+                        groups = acct_holdings.securityGroupPositions or []
                         holding_rows: list[Holding] = []
                         for group in groups:
-                            group_name = group["securityGroup"]["name"]
-                            for pos in group["securityPositions"]:
-                                amount_cents = pos["amount"]
-                                security = pos["security"]
-                                fin_sec = pos["financialSecurity"]
-                                symbol = security.get("symbol") or fin_sec.get("symbol")
+                            group_name = group.securityGroup.name
+                            for pos in group.securityPositions:
+                                amount_cents = pos.amount
+                                security = pos.security
+                                fin_sec = pos.financialSecurity
+                                symbol = security.symbol or fin_sec.symbol
                                 name = (
-                                    security.get("name")
-                                    or fin_sec.get("name")
+                                    security.name
+                                    or fin_sec.name
                                     or symbol
                                     or ""
                                 )
@@ -437,7 +419,7 @@ def parse_raw_betterment(
                                     symbol=symbol,
                                     name=name,
                                     asset_class=group_name,
-                                    shares=float(pos["shares"]),
+                                    shares=pos.shares,
                                     value=amount_cents / 100.0 if amount_cents else 0.0,
                                     source="betterment_graphql",
                                     raw_file_ref=holdings_key,
@@ -450,13 +432,13 @@ def parse_raw_betterment(
     return {"accounts": account_count}
 
 
-def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -> None:
+def sync_betterment(db: Database, store: RawStore, profile: str,
+                    cookies: dict[str, str]) -> None:
     """Sync Betterment accounts and balances via GraphQL API."""
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
     try:
-        cookies = _load_cookies(profile)
         log.info("Loaded %d cookies for Betterment (login: %s)", len(cookies), profile)
 
         csrf_token = _fetch_csrf_token(cookies)
@@ -467,7 +449,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
         envelopes = sidebar_data.get("data", {}).get("envelopes", [])
         log.info("Got %d envelope(s) from Betterment", len(envelopes))
 
-        raw_key = f"betterment/{timestamp}_sidebar.json"
+        raw_key = f"betterment/{profile}/{timestamp}_sidebar.json"
         store.put(raw_key, json.dumps(sidebar_data, indent=2).encode())
 
         # 2. For each envelope, get balance via PurposeHeader
@@ -483,7 +465,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                     variables={"id": envelope_id},
                 )
                 store.put(
-                    f"betterment/{timestamp}_{envelope_id}_purpose.json",
+                    f"betterment/{profile}/{timestamp}_{envelope_id}_purpose.json",
                     json.dumps(purpose_data, indent=2).encode(),
                 )
 
@@ -509,7 +491,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                         },
                     )
                     store.put(
-                        f"betterment/{timestamp}_{acct_external_id}_performance.json",
+                        f"betterment/{profile}/{timestamp}_{acct_external_id}_performance.json",
                         json.dumps(perf_data, indent=2).encode(),
                     )
                 except Exception as e:
@@ -525,7 +507,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
                             variables={"id": acct_graphql_id},
                         )
                         store.put(
-                            f"betterment/{timestamp}_{acct_external_id}_holdings.json",
+                            f"betterment/{profile}/{timestamp}_{acct_external_id}_holdings.json",
                             json.dumps(holdings_data, indent=2).encode(),
                         )
                     except Exception as e:
@@ -533,7 +515,7 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
 
         # Parse all raw data and write to DB
         from money.config import DATA_DIR as _DATA_DIR
-        inst_dir = _DATA_DIR / "raw" / "betterment"
+        inst_dir = _DATA_DIR / "raw" / "betterment" / (profile or "default")
         parse_raw_betterment(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
@@ -560,3 +542,15 @@ def sync_betterment(db: Database, store: RawStore, profile: str | None = None) -
             )
         )
         raise
+
+
+from money.ingest.registry import InstitutionInfo
+
+INSTITUTION = InstitutionInfo(
+    name="betterment",
+    dir_name="betterment",
+    sync_fn=sync_betterment,
+    parse_fn=parse_raw_betterment,
+    anchor_file="sidebar.json",
+    display_name="Betterment",
+)

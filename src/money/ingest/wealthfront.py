@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
-from money.config import cookie_relay_path
+from pydantic import ValidationError
+
 from money.db import Database
 from money.ingest.common import ts_to_date
 from money.ingest.schemas import (
@@ -53,30 +54,6 @@ ACCOUNT_TYPE_MAP: dict[str, AccountType] = {
 }
 
 
-def _load_cookies(profile: str | None = None) -> dict[str, str]:
-    """Load relayed cookies from the Chrome extension."""
-    path = (
-        cookie_relay_path("wealthfront", profile) if profile else cookie_relay_path("wealthfront")
-    )
-    if not path.exists() and profile:
-        # Fall back to institution-level cookie file
-        path = cookie_relay_path("wealthfront")
-    if not path.exists():
-        raise FileNotFoundError(
-            "No cookies found for wealthfront. Log into Wealthfront in Chrome and "
-            "click the Cookies button in the extension."
-        )
-
-    data = json.loads(path.read_text())
-    cookies: dict[str, str] = {}
-    for c in data.get("cookies", []):
-        cookies[c["name"]] = c["value"]
-
-    if "token" not in cookies or "xsrf" not in cookies:
-        raise ValueError("Cookie file missing 'token' or 'xsrf' — recapture from extension.")
-
-    return cookies
-
 
 def _api_get(cookies: dict[str, str], path: str) -> Any:
     """Make an authenticated GET to Wealthfront's internal API."""
@@ -110,9 +87,10 @@ def _download_supplementary(
     acct_id: str,
     numeric_ids: dict[str, int],
     timestamp: str,
+    profile: str | None = None,
 ) -> None:
     """Download and store supplementary data for an account."""
-    prefix = f"wealthfront/{timestamp}_{acct_id}"
+    prefix = f"wealthfront/{profile}/{timestamp}_{acct_id}"
 
     # Closed tax lots for current year
     try:
@@ -192,25 +170,21 @@ def ingest_transfers(
     raw_file_ref: str,
 ) -> int:
     """Parse completed transfers into transactions."""
-    completed = (transfers_data.get("transfers") or {}).get("completed_transfers", [])
+    completed = transfers_data.transfers.completed_transfers
     count = 0
     for t in completed:
-        amount_str = t.get("amount", "$0").replace("$", "").replace(",", "")
+        amount_str = t.amount.replace("$", "").replace(",", "")
         try:
             amount = float(amount_str)
         except ValueError:
             continue
 
-        created = t.get("created_at", "")
-        if not created:
-            continue
-        txn_date = date.fromisoformat(created[:10])
+        txn_date = date.fromisoformat(t.created_at[:10])
 
-        desc_parts = [t.get("type", "")]
-        initiator_name = t.get("initiator_name")
-        if initiator_name:
-            desc_parts.append(initiator_name)
-        description = " — ".join(p for p in desc_parts if p)
+        desc_parts = [t.type]
+        if t.initiator_name:
+            desc_parts.append(t.initiator_name)
+        description = " — ".join(desc_parts)
 
         db.insert_transaction(
             Transaction(
@@ -218,7 +192,7 @@ def ingest_transfers(
                 date=txn_date,
                 amount=amount,
                 description=description,
-                category=t.get("class_type"),
+                category=t.class_type,
                 raw_file_ref=raw_file_ref,
             )
         )
@@ -244,21 +218,20 @@ def parse_raw_wealthfront(
     """
     as_of = ts_to_date(timestamp)
 
-    overviews_data: WFOverviewsResponse = json.loads(
+    overviews_data = WFOverviewsResponse.model_validate_json(
         (inst_dir / f"{timestamp}_overviews.json").read_text()
     )
-    overviews = overviews_data["overviews"]
+    overviews = overviews_data.overviews
     account_count = 0
 
     for overview in overviews:
-        acct_id: str = overview.get("accountId", "")
-        acct_type_str: str = overview.get("accountType", "")
-        display_name: str = overview.get("accountDisplayName", f"Account {acct_id}")
-        state: str = overview.get("state", "")
-        acct_value_summary = overview.get("accountValueSummary")
-        total_value = acct_value_summary.get("totalValue") if acct_value_summary else None
+        acct_id = overview.accountId
+        acct_type_str = overview.accountType
+        display_name = overview.accountDisplayName
+        state = overview.state
+        total_value = overview.accountValueSummary.totalValue
 
-        if not acct_id or state not in ("FUNDED", "OPENED"):
+        if state not in ("FUNDED", "OPENED"):
             continue
 
         account_type = ACCOUNT_TYPE_MAP.get(acct_type_str, AccountType.BROKERAGE)
@@ -273,38 +246,34 @@ def parse_raw_wealthfront(
         account_count += 1
         log.info("Wealthfront: %s [%s] %s", display_name, acct_id, account_type.value)
 
-        if total_value is not None:
-            db.insert_balance(
-                Balance(
-                    account_id=account.id,
-                    as_of=as_of,
-                    balance=float(total_value),
-                    source="wealthfront_api",
-                    raw_file_ref=f"wealthfront/{timestamp}_overviews.json",
-                )
+        db.insert_balance(
+            Balance(
+                account_id=account.id,
+                as_of=as_of,
+                balance=total_value,
+                source="wealthfront_api",
+                raw_file_ref=f"wealthfront/{profile}/{timestamp}_overviews.json",
             )
+        )
 
         # Performance history
         perf_path = inst_dir / f"{timestamp}_{acct_id}_performance.json"
         perf_data: WFPerformanceResponse | None = (
-            json.loads(perf_path.read_text()) if perf_path.exists() else None
+            WFPerformanceResponse.model_validate_json(perf_path.read_text())
+            if perf_path.exists()
+            else None
         )
         if perf_data:
-            history = perf_data.get("historyList") or []
             perf_rows: list[tuple[str, str, float, float | None, float | None]] = []
-            for entry in history:
-                mv = entry.get("marketValue")
-                entry_date = entry.get("date")
-                if mv is not None and entry_date is not None:
-                    invested = entry.get("sumNetDeposits")
-                    earned = (mv - invested) if invested is not None else None
-                    perf_rows.append((
-                        account.id,
-                        entry_date,
-                        float(mv),
-                        float(invested) if invested is not None else None,
-                        float(earned) if earned is not None else None,
-                    ))
+            for entry in perf_data.historyList:
+                earned = entry.marketValue - entry.sumNetDeposits
+                perf_rows.append((
+                    account.id,
+                    entry.date,
+                    entry.marketValue,
+                    entry.sumNetDeposits,
+                    earned,
+                ))
             if perf_rows:
                 db.insert_performance_batch(perf_rows)
                 log.info("  Performance history: %d points", len(perf_rows))
@@ -312,22 +281,21 @@ def parse_raw_wealthfront(
         # Holdings from open lots
         lots_path = inst_dir / f"{timestamp}_{acct_id}_open_lots.json"
         lots_data: WFOpenLotsResponse | None = (
-            json.loads(lots_path.read_text()) if lots_path.exists() else None
+            WFOpenLotsResponse.model_validate_json(lots_path.read_text())
+            if lots_path.exists()
+            else None
         )
         if lots_data:
-            lots_list = list(lots_data.get("openLotForDisplayList") or [])
             by_symbol: dict[str, dict[str, float]] = {}
-            for lot in lots_list:
-                sym = lot.get("symbol", "")
-                if not sym:
-                    continue
+            for lot in lots_data.openLotForDisplayList:
+                sym = lot.symbol
                 if sym not in by_symbol:
                     by_symbol[sym] = {"shares": 0.0, "value": 0.0, "cost_basis": 0.0}
-                by_symbol[sym]["shares"] += float(lot.get("quantity", 0))
-                by_symbol[sym]["value"] += float(lot.get("currentValue", 0))
-                by_symbol[sym]["cost_basis"] += float(lot.get("costBasis", 0))
+                by_symbol[sym]["shares"] += lot.quantity
+                by_symbol[sym]["value"] += lot.currentValue
+                by_symbol[sym]["cost_basis"] += lot.costBasis
 
-            open_lots_key = f"wealthfront/{timestamp}_{acct_id}_open_lots.json"
+            open_lots_key = f"wealthfront/{profile}/{timestamp}_{acct_id}_open_lots.json"
             holding_rows: list[Holding] = []
             for sym, agg in by_symbol.items():
                 if agg["shares"] > 0:
@@ -347,11 +315,19 @@ def parse_raw_wealthfront(
 
         # Transfers as transactions
         transfers_path = inst_dir / f"{timestamp}_{acct_id}_transfers.json"
-        transfers_data: WFTransfersWrapper | None = (
-            json.loads(transfers_path.read_text()) if transfers_path.exists() else None
-        )
+        transfers_data: WFTransfersWrapper | None = None
+        if transfers_path.exists():
+            try:
+                transfers_data = WFTransfersWrapper.model_validate_json(
+                    transfers_path.read_text()
+                )
+            except ValidationError:
+                log.warning(
+                    "  Skipping transfers file (invalid/error response): %s",
+                    transfers_path.name,
+                )
         if transfers_data:
-            transfers_key = f"wealthfront/{timestamp}_{acct_id}_transfers.json"
+            transfers_key = f"wealthfront/{profile}/{timestamp}_{acct_id}_transfers.json"
             txn_count = ingest_transfers(db, account.id, transfers_data, transfers_key)
             if txn_count:
                 log.info("  Transfers: %d transactions", txn_count)
@@ -360,13 +336,13 @@ def parse_raw_wealthfront(
     return {"accounts": account_count}
 
 
-def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) -> None:
+def sync_wealthfront(db: Database, store: RawStore, profile: str,
+                     cookies: dict[str, str]) -> None:
     """Sync Wealthfront accounts and balances via internal API."""
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
     try:
-        cookies = _load_cookies(profile)
         log.info("Loaded %d cookies for Wealthfront (login: %s)", len(cookies), profile)
 
         data = _api_get(cookies, OVERVIEWS_URL)
@@ -374,14 +350,14 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
         log.info("Got %d account(s) from Wealthfront API", len(overviews))
 
         # Store the raw API response
-        raw_key = f"wealthfront/{timestamp}_overviews.json"
+        raw_key = f"wealthfront/{profile}/{timestamp}_overviews.json"
         store.put(raw_key, json.dumps(data, indent=2).encode())
 
         # Store external accounts (linked accounts from other institutions)
         try:
             external = _api_get(cookies, "/api/external_accounts")
             store.put(
-                f"wealthfront/{timestamp}_external_accounts.json",
+                f"wealthfront/{profile}/{timestamp}_external_accounts.json",
                 json.dumps(external, indent=2).encode(),
             )
             link_count = len(external.get("linkStatuses", []))
@@ -417,11 +393,11 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
                 continue
 
             # Download supplementary data
-            _download_supplementary(cookies, store, acct_id, numeric_ids, timestamp)
+            _download_supplementary(cookies, store, acct_id, numeric_ids, timestamp, profile)
 
         # Parse all raw data and write to DB
         from money.config import DATA_DIR as _DATA_DIR
-        inst_dir = _DATA_DIR / "raw" / "wealthfront"
+        inst_dir = _DATA_DIR / "raw" / "wealthfront" / (profile or "default")
         parse_raw_wealthfront(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
@@ -448,3 +424,15 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str | None = None) 
             )
         )
         raise
+
+
+from money.ingest.registry import InstitutionInfo
+
+INSTITUTION = InstitutionInfo(
+    name="wealthfront",
+    dir_name="wealthfront",
+    sync_fn=sync_wealthfront,
+    parse_fn=parse_raw_wealthfront,
+    anchor_file="overviews.json",
+    display_name="Wealthfront",
+)

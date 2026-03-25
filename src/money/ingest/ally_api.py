@@ -3,11 +3,11 @@
 import json
 import logging
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from money.config import DATA_DIR, cookie_relay_path
+from money.config import DATA_DIR
 from money.db import Database
 from money.ingest.common import ts_to_date
 from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
@@ -24,33 +24,6 @@ ACCOUNT_TYPE_MAP: dict[str, AccountType] = {
     "CD": AccountType.SAVINGS,
     "IRA": AccountType.IRA,
 }
-
-
-def _load_auth_token(profile: str) -> str:
-    """Load the saved auth token for a profile."""
-    path = DATA_DIR / "auth_tokens" / f"ally_{profile}.json"
-    if not path.exists():
-        raise FileNotFoundError(
-            f"No auth token at {path}. Run 'money login ally --profile {profile}' first."
-        )
-    data = json.loads(path.read_text())
-    token = data.get("token")
-    if not token:
-        raise ValueError("Auth token file missing 'token' field.")
-    return str(token)
-
-
-def _load_cookies(profile: str) -> dict[str, str]:
-    """Load relayed cookies for a profile."""
-    path = cookie_relay_path("ally", profile)
-    if not path.exists():
-        return {}
-
-    data = json.loads(path.read_text())
-    cookies: dict[str, str] = {}
-    for c in data.get("cookies", []):
-        cookies[c["name"]] = c["value"]
-    return cookies
 
 
 def _api_request(
@@ -93,8 +66,13 @@ def _fetch_all_transactions(
     token: str,
     account_id: str,
     cookies: dict[str, str] | None = None,
+    cutoff_date: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch all posted transactions for an account, handling pagination."""
+    """Fetch posted transactions for an account, handling pagination.
+
+    If cutoff_date is provided (YYYY-MM-DD), stops paginating once it reaches
+    transactions older than that date.
+    """
     all_transactions: list[dict[str, Any]] = []
 
     request_body: dict[str, Any] = {
@@ -120,6 +98,13 @@ def _fetch_all_transactions(
 
                 txns = history.get("transactions", [])
                 all_transactions.extend(txns)
+
+                # Stop if we've reached transactions we already have
+                if cutoff_date and txns:
+                    oldest = txns[-1].get("transactionPostingDate", "")[:10]
+                    if oldest < cutoff_date:
+                        log.info("  Reached cutoff date %s at page %d", cutoff_date, page)
+                        return all_transactions
 
                 # Check for next page
                 next_page = history.get("nextPageRequestDetails")
@@ -156,7 +141,7 @@ def parse_raw_ally(
     # transfer-accounts format uses "accounts" key, old format uses "data"
     raw_list = accounts_data.get("accounts") or accounts_data.get("data") or []
     accounts: list[AllyAccount] = list(raw_list)
-    raw_key = f"ally/{timestamp}_accounts.json"
+    raw_key = f"ally/{profile}/{timestamp}_accounts.json"
 
     seen_transactions: set[tuple[str, float, str]] = set()
     account_count = 0
@@ -221,7 +206,7 @@ def parse_raw_ally(
         if not isinstance(txns_raw, list):
             continue
 
-        txn_key = f"ally/{timestamp}_{external_id}_transactions.json"
+        txn_key = f"ally/{profile}/{timestamp}_{external_id}_transactions.json"
         txn_count = 0
         for txn in txns_raw:
             txn_date_str = txn["transactionPostingDate"]
@@ -304,7 +289,7 @@ def parse_raw_ally_extension(
                         as_of=ext_as_of,
                         balance=float(bal),
                         source="ally_extension",
-                        raw_file_ref=f"ally/{ext_path.name}",
+                        raw_file_ref=f"ally/{profile}/{ext_path.name}",
                     )
                 )
                 balance_count += 1
@@ -313,18 +298,16 @@ def parse_raw_ally_extension(
 
 
 def sync_ally_api(db: Database, store: RawStore, profile: str,
-                  token: str | None = None) -> None:
+                  cookies: dict[str, str]) -> None:
     """Sync Ally Bank accounts and transactions via internal API.
 
-    If token is provided, uses it directly. Otherwise loads from saved file.
+    Requires cookies from a Playwright login session (including Ally-CIAM-Token).
     """
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
     try:
-        if not token:
-            token = _load_auth_token(profile)
-        cookies = _load_cookies(profile)
+        token = cookies["Ally-CIAM-Token"]
         log.info("Loaded auth token and %d cookies for Ally", len(cookies))
 
         # Fetch customer info and accounts
@@ -333,7 +316,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
 
         # Store customer response for debugging
         store.put(
-            f"ally/{timestamp}_customer.json",
+            f"ally/{profile}/{timestamp}_customer.json",
             json.dumps(customer, indent=2).encode(),
         )
 
@@ -375,7 +358,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
 
         # Store raw accounts response
         store.put(
-            f"ally/{timestamp}_accounts.json",
+            f"ally/{profile}/{timestamp}_accounts.json",
             json.dumps(accounts_data, indent=2).encode(),
         )
 
@@ -406,14 +389,25 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
             if status.upper() != "ACTIVE":
                 continue
 
-            # Fetch transactions — Ally returns the same consolidated feed for all
-            # checking accounts, so we track fingerprints to avoid duplicates.
+            # Compute cutoff: 14 days before the most recent transaction we have
+            existing = db.get_account_by_external_id("ally", external_id)
+            cutoff_date: str | None = None
+            if existing:
+                last_row = db.conn.execute(
+                    "SELECT MAX(date) FROM transactions WHERE account_id = ?",
+                    (existing.id,),
+                ).fetchone()
+                if last_row and last_row[0]:
+                    cutoff = date.fromisoformat(last_row[0]) - timedelta(days=14)
+                    cutoff_date = cutoff.isoformat()
+                    log.info("  Incremental sync from %s", cutoff_date)
+
             try:
-                txns_raw = _fetch_all_transactions(token, acct_id, cookies)
+                txns_raw = _fetch_all_transactions(token, acct_id, cookies, cutoff_date)
                 log.info("  Fetched %d transactions", len(txns_raw))
 
                 # Store raw transactions
-                txn_key = f"ally/{timestamp}_{external_id}_transactions.json"
+                txn_key = f"ally/{profile}/{timestamp}_{external_id}_transactions.json"
                 store.put(txn_key, json.dumps(txns_raw, indent=2).encode())
 
             except Exception as e:
@@ -433,7 +427,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
                     cookies=cookies,
                 )
                 store.put(
-                    f"ally/{timestamp}_{external_id}_charts.json",
+                    f"ally/{profile}/{timestamp}_{external_id}_charts.json",
                     json.dumps(charts, indent=2).encode(),
                 )
                 trends = charts.get("monthlyTrends", [])
@@ -449,7 +443,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
                     cookies=cookies,
                 )
                 store.put(
-                    f"ally/{timestamp}_{external_id}_details.json",
+                    f"ally/{profile}/{timestamp}_{external_id}_details.json",
                     json.dumps(acct_details, indent=2).encode(),
                 )
                 log.info("  Stored account details")
@@ -458,7 +452,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
 
         # Parse all raw data and write to DB
         from money.config import DATA_DIR as _DATA_DIR
-        inst_dir = _DATA_DIR / "raw" / "ally"
+        inst_dir = _DATA_DIR / "raw" / "ally" / profile
         parse_raw_ally(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
@@ -466,7 +460,7 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
                 source="ally_api",
                 profile=profile,
                 status=IngestionStatus.SUCCESS,
-                raw_file_ref=f"ally/{timestamp}_accounts.json",
+                raw_file_ref=f"ally/{profile}/{timestamp}_accounts.json",
                 started_at=started_at,
                 finished_at=datetime.now(),
             )
@@ -485,3 +479,17 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
             )
         )
         raise
+
+
+from money.ingest.registry import InstitutionInfo
+
+INSTITUTION = InstitutionInfo(
+    name="ally",
+    dir_name="ally",
+    sync_fn=sync_ally_api,
+    parse_fn=parse_raw_ally,
+    anchor_file="accounts.json",
+    display_name="Ally Bank",
+    post_replay_fn=parse_raw_ally_extension,
+    playwright_sync=True,
+)

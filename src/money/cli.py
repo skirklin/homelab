@@ -27,13 +27,13 @@ def sync_context(ctx: click.Context) -> Generator[tuple[Database, LocalStore], N
 @click.option(
     "--db",
     "db_path",
-    default="money.db",
+    default=None,
     type=click.Path(),
-    help="Path to SQLite database.",
+    help="Path to SQLite database (default: .data/money.db).",
 )
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging.")
 @click.pass_context
-def main(ctx: click.Context, db_path: str, verbose: bool) -> None:
+def main(ctx: click.Context, db_path: str | None, verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     root = logging.getLogger()
     root.setLevel(level)
@@ -45,22 +45,23 @@ def main(ctx: click.Context, db_path: str, verbose: bool) -> None:
         )
     )
     root.addHandler(handler)
+    from money.config import DB_PATH
+
     ctx.ensure_object(dict)
-    ctx.obj["db_path"] = db_path
+    ctx.obj["db_path"] = db_path or str(DB_PATH)
 
 
 @main.command()
 @click.option("--raw-dir", default=None, type=click.Path(), help="Path to raw data directory.")
-@click.option("--profile", default="default", help="Profile name to assign to replayed accounts.")
 @click.pass_context
-def replay(ctx: click.Context, raw_dir: str | None, profile: str) -> None:
+def replay(ctx: click.Context, raw_dir: str | None) -> None:
     """Delete the database and rebuild from raw captures."""
     from money.config import RAW_STORE_DIR
     from money.replay import replay_all
 
     db_path = ctx.obj["db_path"]
     raw = Path(raw_dir) if raw_dir else RAW_STORE_DIR
-    replay_all(db_path=db_path, raw_dir=raw, profile=profile)
+    replay_all(db_path=db_path, raw_dir=raw)
     click.echo(f"Replay complete. Database rebuilt at {db_path}")
 
 
@@ -427,7 +428,7 @@ def holdings(ctx: click.Context, account_name: str | None, as_of: str | None) ->
 
 @main.command()
 @click.option("-p", "--port", default=5555, help="Port to listen on.")
-@click.option("--host", default="127.0.0.1", help="Host to bind to.")
+@click.option("--host", default="0.0.0.0", help="Host to bind to.")
 @click.pass_context
 def serve(ctx: click.Context, port: int, host: str) -> None:
     """Start local server to receive data from the Chrome extension."""
@@ -492,154 +493,76 @@ def sync() -> None:
 )
 @click.pass_context
 def ally(ctx: click.Context, login_id: str) -> None:
-    """Sync Ally Bank accounts. Auto-logs in if no auth token exists."""
+    """Sync Ally Bank accounts. Logs in via Playwright to get fresh auth."""
     from money.config import resolve_login_id
     from money.ingest.ally_api import sync_ally_api
-    from money.ingest.scrapers.ally import auth_token_path, login_ally
+    from money.ingest.scrapers.ally import login_ally
 
     resolved = resolve_login_id("ally", login_id)
 
-    # Capture a fresh token if needed — must use immediately since SPA invalidates it
-    token: str | None = None
-    if not auth_token_path(resolved).exists():
-        click.echo("No auth token found — logging in via browser...")
-        token = login_ally(resolved, headless=True)
+    click.echo("Logging in via browser...")
+    token, cookies_dict = login_ally(resolved, headless=True)
+    cookies_dict["Ally-CIAM-Token"] = token
 
     with sync_context(ctx) as (db, store):
-        try:
-            sync_ally_api(db, store, profile=resolved, token=token)
-            click.echo("Ally sync complete.")
-        except Exception as e:
-            click.echo(f"Ally sync failed: {e}", err=True)
-            raise
+        sync_ally_api(db, store, profile=resolved, cookies=cookies_dict)
+        click.echo("Ally sync complete.")
 
 
-@sync.command()
-@click.option(
-    "--login", "--profile", "login_id",
-    required=True,
-    help="Login ID (e.g. 'scott@betterment') or bare person name (e.g. 'scott').",
-)
-@click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
-@click.pass_context
-def betterment(ctx: click.Context, login_id: str, explore: bool) -> None:
-    """Sync Betterment accounts."""
-    from money.config import resolve_login_id
 
-    resolved = resolve_login_id("betterment", login_id)
+def _load_cookies_for_sync(login_id: str, institution: str) -> dict[str, str]:
+    """Load persisted cookies for a login."""
+    import json
 
-    if explore:
-        from money.ingest.scrapers.betterment import explore_betterment
+    from money.config import DATA_DIR
 
-        explore_betterment(resolved)
-        return
-
-    from money.ingest.betterment import sync_betterment
-
-    with sync_context(ctx) as (db, store):
-        try:
-            sync_betterment(db, store, profile=resolved)
-            click.echo("Betterment sync complete.")
-        except Exception as e:
-            click.echo(f"Betterment sync failed: {e}", err=True)
-            raise
+    path = DATA_DIR / "cookies" / f"{login_id}.json"
+    if not path.exists():
+        raise click.ClickException(
+            f"No cookies for {login_id}. Visit {institution} in Chrome to capture cookies."
+        )
+    data = json.loads(path.read_text())
+    return {c["name"]: c["value"] for c in data.get("cookies", [])}
 
 
-@sync.command()
-@click.option(
-    "--login", "--profile", "login_id",
-    required=True,
-    help="Login ID (e.g. 'scott@wealthfront') or bare person name (e.g. 'scott').",
-)
-@click.option("--explore", is_flag=True, help="Exploratory mode: login and inspect page.")
-@click.pass_context
-def wealthfront(ctx: click.Context, login_id: str, explore: bool) -> None:
-    """Sync Wealthfront accounts."""
-    from money.config import resolve_login_id
-
-    resolved = resolve_login_id("wealthfront", login_id)
-
-    if explore:
-        from money.ingest.scrapers.wealthfront import explore_wealthfront
-
-        explore_wealthfront(resolved)
-        return
-
-    from money.ingest.wealthfront import sync_wealthfront
-
-    with sync_context(ctx) as (db, store):
-        try:
-            sync_wealthfront(db, store, profile=resolved)
-            click.echo("Wealthfront sync complete.")
-        except Exception as e:
-            click.echo(f"Wealthfront sync failed: {e}", err=True)
-            raise
+# Institutions that use cookies for auth (as opposed to network logs)
+_COOKIE_INSTITUTIONS = {"ally", "betterment", "wealthfront", "capital_one"}
 
 
-@sync.command()
-@click.option(
-    "--login", "--profile", "login_id",
-    default="scott@capital_one",
-    help="Login ID (e.g. 'scott@capital_one') or bare person name (e.g. 'scott').",
-)
-@click.pass_context
-def capital_one(ctx: click.Context, login_id: str) -> None:
-    """Sync Capital One credit card accounts."""
-    from money.config import resolve_login_id
-    from money.ingest.capital_one import sync_capital_one
+def _register_sync_commands() -> None:
+    """Dynamically create sync subcommands from the institution registry."""
+    from money.ingest.registry import all_institutions
 
-    resolved = resolve_login_id("capital_one", login_id)
+    for inst in all_institutions():
+        if inst.name == "ally":
+            continue  # has manual Playwright-based command above
+        cmd_name = inst.name.replace("_", "-")
+        label = inst.display_name or inst.name
 
-    with sync_context(ctx) as (db, store):
-        try:
-            sync_capital_one(db, store, profile=resolved)
-            click.echo("Capital One sync complete.")
-        except Exception as e:
-            click.echo(f"Capital One sync failed: {e}", err=True)
-            raise
+        @sync.command(name=cmd_name, help=f"Sync {label} accounts.")
+        @click.option(
+            "--login", "--profile", "login_id",
+            required=True,
+            help=f"Login ID (e.g. 'scott@{inst.name}').",
+        )
+        @click.pass_context
+        def sync_cmd(
+            ctx: click.Context,
+            login_id: str,
+            _inst: object = inst,
+        ) -> None:
+            from money.config import resolve_login_id
+            from money.ingest.registry import InstitutionInfo
 
-
-@sync.command()
-@click.option(
-    "--login", "--profile", "login_id",
-    default="scott@chase",
-    help="Login ID (e.g. 'scott@chase'). Defaults to 'scott@chase'.",
-)
-@click.pass_context
-def chase(ctx: click.Context, login_id: str) -> None:
-    """Sync Chase accounts from captured network log."""
-    from money.config import resolve_login_id
-    from money.ingest.chase import sync_chase
-
-    resolved = resolve_login_id("chase", login_id)
-
-    with sync_context(ctx) as (db, store):
-        try:
-            sync_chase(db, store, profile=resolved)
-            click.echo("Chase sync complete.")
-        except Exception as e:
-            click.echo(f"Chase sync failed: {e}", err=True)
-            raise
+            assert isinstance(_inst, InstitutionInfo)
+            resolved = resolve_login_id(_inst.name, login_id)
+            with sync_context(ctx) as (db, store):
+                if _inst.name in _COOKIE_INSTITUTIONS:
+                    cookies = _load_cookies_for_sync(resolved, _inst.name)
+                    _inst.sync_fn(db, store, profile=resolved, cookies=cookies)
+                else:
+                    _inst.sync_fn(db, store, profile=resolved)
+                click.echo(f"{_inst.display_name or _inst.name} sync complete.")
 
 
-@sync.command()
-@click.option(
-    "--login", "--profile", "login_id",
-    default="scott@morgan_stanley",
-    help="Login ID (e.g. 'scott@morgan_stanley'). Defaults to 'scott@morgan_stanley'.",
-)
-@click.pass_context
-def morgan_stanley(ctx: click.Context, login_id: str) -> None:
-    """Sync Morgan Stanley Shareworks stock options/RSUs."""
-    from money.config import resolve_login_id
-    from money.ingest.morgan_stanley import sync_morgan_stanley
-
-    resolved = resolve_login_id("morgan_stanley", login_id)
-
-    with sync_context(ctx) as (db, store):
-        try:
-            sync_morgan_stanley(db, store, profile=resolved)
-            click.echo("Morgan Stanley sync complete.")
-        except Exception as e:
-            click.echo(f"Morgan Stanley sync failed: {e}", err=True)
-            raise
+_register_sync_commands()

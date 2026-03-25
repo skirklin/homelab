@@ -1,23 +1,43 @@
-"""Typed schemas for raw API responses from financial institutions.
+"""Pydantic schemas for raw API responses from financial institutions.
 
-These TypedDicts represent the structure of raw JSON data as captured
-from each institution's API. They're used to cast json.loads() output
-so pyright can type-check field access throughout the parsers.
+These models represent the structure of raw JSON data as captured
+from each institution's API. They validate at parse time so schema
+mismatches surface immediately with clear error messages.
+
+Fields are required by default. A field is only `| None` when there is a
+documented structural reason it can be absent (GraphQL inline fragments,
+account-type-dependent fields, etc.) — never to paper over data issues.
 """
 
-from typing import TypedDict
+from pydantic import BaseModel, ConfigDict, Field
+
+# All institution schemas ignore extra fields — APIs often return
+# more than we need, and we don't want to break on new fields.
+
+
+class _Base(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class _GraphQLBase(_Base):
+    """Base for Betterment GraphQL types that include __typename."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    typename: str | None = Field(default=None, alias="__typename")
+
 
 # ── Morgan Stanley ────────────────────────────────────────────────────
+# All fields always present in Shareworks API responses.
 
 
-class MSFutureVest(TypedDict):
+class MSFutureVest(_Base):
     year: int
     monthIndex: int
     quantity: float
     value: str
 
 
-class MSPortfolioItem(TypedDict):
+class MSPortfolioItem(_Base):
     typeName: str
     instanceName: str
     modellingCategory: str
@@ -32,7 +52,7 @@ class MSPortfolioItem(TypedDict):
     cashFund: bool
 
 
-class MSPortfolioSummary(TypedDict):
+class MSPortfolioSummary(_Base):
     companyStockFundId: int
     companyStockLabel: str
     companyStockPrice: str
@@ -41,16 +61,16 @@ class MSPortfolioSummary(TypedDict):
     portfolioData: list[MSPortfolioItem]
 
 
-class MSPortfolioSummaryResponse(TypedDict):
+class MSPortfolioSummaryResponse(_Base):
     data: MSPortfolioSummary
 
 
-class MSExerciseDetails(TypedDict):
+class MSExerciseDetails(_Base):
     vestDates: list[str]
     eligibleForExercise: bool
 
 
-class MSGrant(TypedDict):
+class MSGrant(_Base):
     awardName: str
     awardId: int
     fundId: int
@@ -64,42 +84,49 @@ class MSGrant(TypedDict):
     isAutoExEnabled: bool
 
 
-class MSGrantsResponse(TypedDict):
+class MSGrantsResponse(_Base):
     data: list[MSGrant]
 
 
 # ── Capital One ───────────────────────────────────────────────────────
+# All fields always present except CONameInfo.nickname (absent on some cards
+# like REI — key missing entirely).
 
 
-class CONameInfo(TypedDict):
+class CONameInfo(_Base):
     name: str
     displayName: str
     productName: str
-    nickname: str
+    nickname: str | None = None  # absent on some card types (e.g. REI)
 
 
-class COCycleInfo(TypedDict):
+class COLastStatement(_Base):
+    balance: float
+    date: str
+
+
+class COCycleInfo(_Base):
     currentBalance: float
-    lastStatement: float
+    lastStatement: COLastStatement
     accountCycleDay: int
 
 
-class COCardAccount(TypedDict):
+class COCardAccount(_Base):
     plasticIdLastFour: str
     nameInfo: CONameInfo
     cycleInfo: COCycleInfo
 
 
-class COAccount(TypedDict):
+class COAccount(_Base):
     cardAccount: COCardAccount
     accountReferenceId: str
 
 
-class COAccountsResponse(TypedDict):
+class COAccountsResponse(_Base):
     accounts: list[COAccount]
 
 
-class COTransaction(TypedDict):
+class COTransaction(_Base):
     transactionDate: str
     transactionAmount: float
     transactionDebitCredit: str
@@ -108,175 +135,186 @@ class COTransaction(TypedDict):
 
 
 # ── Betterment ────────────────────────────────────────────────────────
+# GraphQL API — inline fragments (`... on ManagedAccount`) produce fields
+# that are absent for non-matching account types. Those are `| None`.
+# Fields on the base query (not inside fragments) are always present.
 
 
-class BMPurposeRef(TypedDict):
+class BMPurposeRef(_GraphQLBase):
     id: str
     name: str
-    __typename: str
 
 
-class _BMAccountRequired(TypedDict):
-    __typename: str
+class BMAccount(_GraphQLBase):
+    """Betterment account from sidebar query.
+
+    name/nameOverride/accountDescription come from GraphQL inline fragments
+    (`... on ManagedAccount`, `... on CashAccount`, etc.) and are absent
+    for account types that don't match any fragment.
+    """
+
     id: str
+    name: str | None = None  # from inline fragment
+    nameOverride: str | None = None  # from inline fragment
+    accountDescription: str | None = None  # from inline fragment
 
 
-class BMAccount(_BMAccountRequired, total=False):
-    name: str
-    nameOverride: str | None
-    accountDescription: str
-
-
-class BMEnvelope(TypedDict):
+class BMEnvelope(_GraphQLBase):
     id: str
-    accountsDescription: str
-    orderPosition: int | None
-    purpose: BMPurposeRef | None
+    accountsDescription: str | None = None  # null on Cash Reserve envelopes
+    orderPosition: int | None = None  # null on unordered envelopes
+    purpose: BMPurposeRef | None = None  # null on orphan/cash envelopes
     accounts: list[BMAccount]
-    __typename: str
 
 
-class BMSidebarData(TypedDict):
+class BMSidebarData(_Base):
     envelopes: list[BMEnvelope]
 
 
-class BMSidebarResponse(TypedDict):
+class BMSidebarResponse(_Base):
     data: BMSidebarData
 
 
-class BMLegalAccount(TypedDict):
+class BMLegalAccount(_GraphQLBase):
     taxationType: str
-    __typename: str
 
 
-class BMLegalSubAccount(TypedDict):
+class BMLegalSubAccount(_GraphQLBase):
     id: str
     legacySubAccountId: int
     legalAccount: BMLegalAccount
-    __typename: str
 
 
-class BMPurposeEnvelope(TypedDict):
+class BMPurposeEnvelope(_GraphQLBase):
     id: str
     balance: int
     legalSubAccounts: list[BMLegalSubAccount]
-    __typename: str
 
 
-class BMPurpose(TypedDict):
+class BMPurpose(_GraphQLBase):
     id: str
     name: str
     envelope: BMPurposeEnvelope
-    __typename: str
 
 
-class BMPurposeData(TypedDict):
+class BMPurposeData(_Base):
     purpose: BMPurpose
 
 
-class BMPurposeResponse(TypedDict):
+class BMPurposeResponse(_Base):
     data: BMPurposeData
 
 
-class BMPerformanceHistoryItem(TypedDict):
+class BMPerformanceHistoryItem(_GraphQLBase):
     date: str
     balance: int
     invested: int
     earned: int
-    __typename: str
 
 
-class BMPerformanceHistory(TypedDict):
+class BMPerformanceHistory(_GraphQLBase):
     timeSeries: list[BMPerformanceHistoryItem]
     recencyDescription: str
-    __typename: str
 
 
-class BMPerformanceTotalsInvesting(TypedDict):
+class BMPerformanceTotalsInvesting(_GraphQLBase):
     earned: int
-    __typename: str
 
 
-class BMPerformanceTotals(TypedDict):
+class BMPerformanceTotals(_GraphQLBase):
     investing: BMPerformanceTotalsInvesting
-    __typename: str
 
 
-class BMPerformanceAccount(TypedDict, total=False):
+class BMPerformanceAccount(_GraphQLBase):
+    """Performance data from GraphQL inline fragment.
+
+    Fields beyond id come from `... on ManagedAccount` and are absent
+    for other account types (CashAccount, CheckingAccount).
+    """
+
     id: str
-    legacyGoalId: int
-    balance: int
-    performanceHistory: BMPerformanceHistory
-    performanceTotals: BMPerformanceTotals
-    __typename: str
+    legacyGoalId: int | None = None  # inline fragment
+    balance: int | None = None  # inline fragment
+    performanceHistory: BMPerformanceHistory | None = None  # inline fragment
+    performanceTotals: BMPerformanceTotals | None = None  # inline fragment
 
 
-class BMPerformanceData(TypedDict):
-    account: BMPerformanceAccount | None
+class BMPerformanceData(_Base):
+    account: BMPerformanceAccount | None = None  # null when account not found
 
 
-class BMPerformanceResponse(TypedDict):
+class BMPerformanceResponse(_Base):
     data: BMPerformanceData
 
 
-class BMSecurityGroup(TypedDict):
+class BMSecurityGroup(_GraphQLBase):
     name: str
     targetWeight: float
-    __typename: str
 
 
-class BMSecurity(TypedDict, total=False):
-    symbol: str
-    name: str
-    __typename: str
+class BMSecurity(_GraphQLBase):
+    """Security from GraphQL — symbol/name come from inline fragment."""
+
+    symbol: str | None = None  # from `... on SecurityFund` fragment
+    name: str | None = None  # from `... on SecurityFund` fragment
 
 
-class BMFinancialSecurity(TypedDict, total=False):
-    name: str
-    symbol: str
-    __typename: str
+class BMFinancialSecurity(_GraphQLBase):
+    name: str | None = None  # sometimes absent in API response
+    symbol: str | None = None  # sometimes absent in API response
 
 
-class BMSecurityPosition(TypedDict):
+class BMSecurityPosition(_GraphQLBase):
     amount: int
     shares: float
     security: BMSecurity
     financialSecurity: BMFinancialSecurity
-    __typename: str
 
 
-class BMSecurityGroupPosition(TypedDict):
+class BMSecurityGroupPosition(_GraphQLBase):
     amount: int
     currentWeight: float
     securityGroup: BMSecurityGroup
     securityPositions: list[BMSecurityPosition]
-    __typename: str
 
 
-class BMHoldingsAccount(TypedDict, total=False):
+class BMHoldingsAccount(_GraphQLBase):
+    """Holdings from GraphQL inline fragment.
+
+    securityGroupPositions comes from `... on ManagedAccount`.
+    """
+
     id: str
-    securityGroupPositions: list[BMSecurityGroupPosition]
-    __typename: str
+    securityGroupPositions: list[BMSecurityGroupPosition] | None = None  # inline fragment
 
 
-class BMHoldingsData(TypedDict):
-    account: BMHoldingsAccount | None
+class BMHoldingsData(_Base):
+    account: BMHoldingsAccount | None = None  # null when account not found
 
 
-class BMHoldingsResponse(TypedDict):
+class BMHoldingsResponse(_Base):
     data: BMHoldingsData
 
 
 # ── Ally ──────────────────────────────────────────────────────────────
+# Only one response format in practice (transfer-accounts endpoint).
+# External accounts (externalAccountIndicator=true) are missing nickname
+# and currentBalance, but we skip them before field access. Internal
+# accounts always have all fields.
+#
+# We validate after filtering out external accounts, so all fields are
+# required. The AllyAccount model represents an internal Ally account.
 
 
-class AllyDomainDetails(TypedDict, total=False):
+class AllyDomainDetails(_Base):
     accountNickname: str
     externalAccountIndicator: bool
     accountId: str
 
 
-class AllyAccount(TypedDict, total=False):
+class AllyAccount(_Base):
+    """Internal Ally bank account. External accounts are filtered before validation."""
+
     accountNumberPvtEncrypt: str
     accountStatus: str
     accountType: str
@@ -285,11 +323,11 @@ class AllyAccount(TypedDict, total=False):
     domainDetails: AllyDomainDetails
 
 
-class AllyAccountsResponse(TypedDict):
+class AllyAccountsResponse(_Base):
     accounts: list[AllyAccount]
 
 
-class AllyTransaction(TypedDict):
+class AllyTransaction(_Base):
     transactionPostingDate: str
     transactionAmountPvtEncrypt: float
     transactionDescription: str
@@ -297,22 +335,24 @@ class AllyTransaction(TypedDict):
 
 
 # ── Wealthfront ────────────────────────────────────────────────────────
+# All fields always present in real data for funded accounts.
+# Transfers endpoint currently returns errors — not modeled here.
 
 
-class WFAccountValueBreakdown(TypedDict):
+class WFAccountValueBreakdown(_Base):
     name: str
     label: str
     value: float
     formattedValue: str
 
 
-class WFAccountValueSummary(TypedDict):
+class WFAccountValueSummary(_Base):
     totalValue: float
     formattedTotalValue: str
     breakdown: list[WFAccountValueBreakdown]
 
 
-class WFOverview(TypedDict, total=False):
+class WFOverview(_Base):
     type: str
     accountId: str
     state: str
@@ -325,11 +365,11 @@ class WFOverview(TypedDict, total=False):
     needsReview: bool
 
 
-class WFOverviewsResponse(TypedDict):
+class WFOverviewsResponse(_Base):
     overviews: list[WFOverview]
 
 
-class WFHistoryEntry(TypedDict, total=False):
+class WFHistoryEntry(_Base):
     date: str
     marketValue: float
     sumNetDeposits: float
@@ -337,7 +377,7 @@ class WFHistoryEntry(TypedDict, total=False):
     timeWeightedReturn: float
 
 
-class WFPerformanceResponse(TypedDict, total=False):
+class WFPerformanceResponse(_Base):
     accountId: str
     startDate: str
     endDate: str
@@ -346,7 +386,7 @@ class WFPerformanceResponse(TypedDict, total=False):
     historyList: list[WFHistoryEntry]
 
 
-class WFOpenLot(TypedDict, total=False):
+class WFOpenLot(_Base):
     openDate: str
     symbol: str
     quantity: float
@@ -355,53 +395,60 @@ class WFOpenLot(TypedDict, total=False):
     currentValue: float
 
 
-class WFOpenLotsResponse(TypedDict, total=False):
+class WFOpenLotsResponse(_Base):
     openLotForDisplayList: list[WFOpenLot]
 
 
-class WFTransfer(TypedDict, total=False):
+class WFTransfer(_Base):
     type: str
     amount: str
     created_at: str
-    initiator_name: str
-    class_type: str
+    initiator_name: str | None = None  # absent on some transfer types
+    class_type: str | None = None  # absent on some transfer types
 
 
-class WFTransfersCompleted(TypedDict, total=False):
+class WFTransfersCompleted(_Base):
     completed_transfers: list[WFTransfer]
 
 
-class WFTransfersWrapper(TypedDict, total=False):
+class WFTransfersWrapper(_Base):
     transfers: WFTransfersCompleted
 
 
 # ── Chase ──────────────────────────────────────────────────────────────
+# Network log entries have variable fields (not all requests have bodies).
+# But parsed API responses (DDA detail, transactions, etc.) are always
+# complete — every field is present.
 
 
-class CHNetworkLogEntry(TypedDict, total=False):
-    """A single captured network request/response in a Chase network log."""
+class CHNetworkLogEntry(_Base):
+    """A single captured network request/response in a Chase network log.
 
-    type: str
-    url: str
-    method: str
-    status: int
-    contentType: str
-    requestBody: str | None
-    requestHeaders: dict[str, str]
-    responseBody: dict[str, object] | None
-    responseSize: int | None
-    duration: int
-    timestamp: str
+    Fields vary per entry — not all requests have response bodies,
+    request bodies, etc. This is the raw extension capture format.
+    """
+
+    type: str | None = None
+    url: str | None = None
+    method: str | None = None
+    status: int | None = None
+    contentType: str | None = None
+    requestBody: str | None = None
+    requestHeaders: dict[str, str] | None = None
+    responseBody: dict[str, object] | None = None
+    responseSize: int | None = None
+    duration: int | None = None
+    timestamp: str | None = None
 
 
-class CHNetworkLog(TypedDict):
+class CHNetworkLog(_Base):
     """Top-level structure of a Chase network log file."""
 
     institution: str
     entries: list[CHNetworkLogEntry]
 
 
-class CHActivityAccount(TypedDict, total=False):
+class CHActivityAccount(_Base):
     """Account entry from the activity/options/list cache."""
 
     id: int
@@ -411,23 +458,23 @@ class CHActivityAccount(TypedDict, total=False):
     accountType: str
 
 
-class CHActivityOptionsResponse(TypedDict, total=False):
+class CHActivityOptionsResponse(_Base):
     """Response body from /activity/options/list (embedded in dashboard cache)."""
 
     code: str
     accounts: list[CHActivityAccount]
 
 
-class CHDashboardCacheEntry(TypedDict, total=False):
+class CHDashboardCacheEntry(_Base):
     """A single entry in the dashboard module list cache array."""
 
     url: str
     request: dict[str, object]
-    response: CHActivityOptionsResponse
+    response: dict[str, object]  # validated per-entry based on URL
     usage: str
 
 
-class CHDashboardResponse(TypedDict, total=False):
+class CHDashboardResponse(_Base):
     """Response body from /dashboard/module/list."""
 
     code: str
@@ -435,7 +482,7 @@ class CHDashboardResponse(TypedDict, total=False):
     cache: list[CHDashboardCacheEntry]
 
 
-class CHDdaDetail(TypedDict, total=False):
+class CHDdaDetail(_Base):
     """The nested 'detail' object inside a DDA account detail response."""
 
     detailType: str
@@ -448,7 +495,7 @@ class CHDdaDetail(TypedDict, total=False):
     extendedAccountStatus: str
 
 
-class CHDdaDetailResponse(TypedDict, total=False):
+class CHDdaDetailResponse(_Base):
     """Response body from /account/detail/dda/list."""
 
     accountId: int
@@ -458,7 +505,7 @@ class CHDdaDetailResponse(TypedDict, total=False):
     detail: CHDdaDetail
 
 
-class CHTransaction(TypedDict, total=False):
+class CHTransaction(_Base):
     """A single transaction entry from the etu-dda-transactions response."""
 
     transactionIdentifier: str
@@ -476,17 +523,20 @@ class CHTransaction(TypedDict, total=False):
     accountIdentifier: str
 
 
-class CHTransactionsResponse(TypedDict, total=False):
+class CHTransactionsResponse(_Base):
     """Response body from the etu-dda-transactions endpoint."""
 
     moreRecordsIndicator: bool
-    scrollKeyPageOffsetRecordIdentifier: str
+    scrollKeyPageOffsetRecordIdentifier: str | None = None  # absent when no more pages
     sourceSystemName: str
     transactions: list[CHTransaction]
 
 
-class CHCardReward(TypedDict, total=False):
-    """A single card entry in the cardRewardsSummary list."""
+class CHCardReward(_Base):
+    """A single card entry in the cardRewardsSummary list.
+
+    memberStatus is only present on co-branded cards (e.g. Southwest).
+    """
 
     accountId: int
     mask: str
@@ -495,10 +545,10 @@ class CHCardReward(TypedDict, total=False):
     balance: int
     currentRewardsBalance: int
     nickname: str
-    memberStatus: str
+    memberStatus: str | None = None  # only on co-branded cards (e.g. Southwest)
 
 
-class CHCardRewardsResponse(TypedDict, total=False):
+class CHCardRewardsResponse(_Base):
     """Response body from the rewards summary endpoint."""
 
     code: str

@@ -70,13 +70,13 @@ def _extract_token(response_body: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def login_ally(profile: str, headless: bool = False) -> str:
+def login_ally(profile: str, headless: bool = False) -> tuple[str, dict[str, str]]:
     """Log into Ally Bank, capture the auth token, and save it.
 
     Runs headed by default so MFA prompts are visible.
     Browser state is persisted, so "remember this device" works across runs.
 
-    Returns the captured token string for immediate use.
+    Returns (token, cookies_dict) for immediate use.
     """
     creds = load_credentials("ally", profile)
     captured_token: dict[str, str | int | None] = {}
@@ -129,7 +129,11 @@ def login_ally(profile: str, headless: bool = False) -> str:
                     captured_token.get("expires_in"),  # type: ignore[arg-type]
                 )
                 _save_cookies(session.context, profile)
-                return token_str
+                cookies_dict = {
+                    c.get("name", ""): c.get("value", "")
+                    for c in session.context.cookies(["https://secure.ally.com"])
+                }
+                return token_str, cookies_dict
             # Session is active but no token — need to force a fresh login
             # by navigating to the logout URL then back to login
             log.info("Authenticated but no token captured — forcing re-login...")
@@ -199,6 +203,10 @@ def login_ally(profile: str, headless: bool = False) -> str:
             )
 
         token_str = str(captured_token["token"])
+        cookies_dict = {
+            c.get("name", ""): c.get("value", "")
+            for c in session.context.cookies(["https://secure.ally.com"])
+        }
         _save_cookies(session.context, profile)
         _save_token(
             profile, token_str,
@@ -206,4 +214,4 @@ def login_ally(profile: str, headless: bool = False) -> str:
             captured_token.get("expires_in"),  # type: ignore[arg-type]
         )
 
-    return token_str
+    return token_str, cookies_dict

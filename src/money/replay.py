@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from money.db import Database
+from money.ingest.registry import InstitutionInfo, all_institutions
 from money.models import IngestionRecord, IngestionStatus
 
 log = logging.getLogger(__name__)
@@ -12,30 +13,25 @@ log = logging.getLogger(__name__)
 _TS_RE = re.compile(r"^(\d{8}_\d{6})_")
 
 
-def _find_timestamps(raw_dir: Path, institution: str, anchor: str) -> list[str]:
-    """Find all sync timestamps for an institution that have the anchor file.
-
-    Returns timestamps sorted oldest-first.
-    """
-    inst_dir = raw_dir / institution
+def _find_timestamps(inst_dir: Path, anchor: str) -> list[str]:
+    """Find all sync timestamps that have the anchor file. Sorted oldest-first."""
     if not inst_dir.exists():
         return []
     timestamps: set[str] = set()
     for f in inst_dir.iterdir():
-        if f.name.endswith(f"_{anchor}") or f.name == anchor:
+        if f.name.endswith(f"_{anchor}"):
             m = _TS_RE.match(f.name)
             if m:
                 timestamps.add(m.group(1))
     return sorted(timestamps)
 
 
-def replay_all(db_path: str, raw_dir: Path, profile: str = "default") -> None:
+def replay_all(db_path: str, raw_dir: Path) -> None:
     """Delete and rebuild the database from raw captures."""
     db_file = Path(db_path)
     if db_file.exists():
         db_file.unlink()
         log.info("Deleted existing database: %s", db_path)
-    # Also clean up WAL/SHM files
     for suffix in ("-wal", "-shm"):
         wal = db_file.with_name(db_file.name + suffix)
         if wal.exists():
@@ -46,12 +42,8 @@ def replay_all(db_path: str, raw_dir: Path, profile: str = "default") -> None:
     log.info("Initialized fresh database: %s", db_path)
 
     try:
-        _replay_ally(db, raw_dir, profile)
-        _replay_betterment(db, raw_dir, profile)
-        _replay_wealthfront(db, raw_dir, profile)
-        _replay_capital_one(db, raw_dir, profile)
-        _replay_chase(db, raw_dir, profile)
-        _replay_morgan_stanley(db, raw_dir, profile)
+        for inst in all_institutions():
+            _replay_institution(db, raw_dir, inst)
 
         from money.benchmarks import enrich_holdings_asset_classes
         from money.categorize import apply_rules
@@ -66,159 +58,32 @@ def replay_all(db_path: str, raw_dir: Path, profile: str = "default") -> None:
     log.info("Replay complete.")
 
 
-def _replay_ally(db: Database, raw_dir: Path, profile: str) -> None:
-    """Replay all Ally snapshots from raw captures."""
-    from money.ingest.ally_api import parse_raw_ally, parse_raw_ally_extension
-
-    inst_dir = raw_dir / "ally"
-    if not inst_dir.exists():
-        log.info("No Ally raw data found, skipping.")
+def _replay_institution(db: Database, raw_dir: Path, inst: InstitutionInfo) -> None:
+    """Replay all snapshots for a single institution across all login profiles."""
+    base_dir = raw_dir / inst.dir_name
+    if not base_dir.exists():
+        log.info("No %s raw data found, skipping.", inst.display_name or inst.name)
         return
 
-    timestamps = _find_timestamps(raw_dir, "ally", "accounts.json")
-    if not timestamps:
-        log.info("No Ally API snapshots found, skipping.")
-    else:
-        for ts in timestamps:
-            parse_raw_ally(db, inst_dir, ts, profile)
-            log.info("Replayed Ally snapshot %s", ts)
-
-    # Extension captures are processed once, independent of API snapshots
-    parse_raw_ally_extension(db, inst_dir, profile)
-
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="ally",
-            profile=profile,
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref="replay",
-        )
-    )
-
-
-def _replay_betterment(db: Database, raw_dir: Path, profile: str) -> None:
-    """Replay all Betterment snapshots from raw captures."""
-    from money.ingest.betterment import parse_raw_betterment
-
-    timestamps = _find_timestamps(raw_dir, "betterment", "sidebar.json")
-    if not timestamps:
-        log.info("No Betterment raw data found, skipping.")
-        return
-
-    inst_dir = raw_dir / "betterment"
-    for ts in timestamps:
-        parse_raw_betterment(db, inst_dir, ts, profile)
-        log.info("Replayed Betterment snapshot %s", ts)
-
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="betterment",
-            profile=profile,
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref="replay",
-        )
-    )
-
-
-def _replay_wealthfront(db: Database, raw_dir: Path, profile: str) -> None:
-    """Replay all Wealthfront snapshots from raw captures."""
-    from money.ingest.wealthfront import parse_raw_wealthfront
-
-    timestamps = _find_timestamps(raw_dir, "wealthfront", "overviews.json")
-    if not timestamps:
-        log.info("No Wealthfront raw data found, skipping.")
-        return
-
-    inst_dir = raw_dir / "wealthfront"
-    for ts in timestamps:
-        parse_raw_wealthfront(db, inst_dir, ts, profile)
-        log.info("Replayed Wealthfront snapshot %s", ts)
-
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="wealthfront",
-            profile=profile,
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref="replay",
-        )
-    )
-
-
-def _replay_capital_one(db: Database, raw_dir: Path, profile: str) -> None:
-    """Replay all Capital One snapshots from raw captures."""
-    from money.ingest.capital_one import parse_raw_capital_one
-
-    timestamps = _find_timestamps(raw_dir, "capital_one", "accounts.json")
-    if not timestamps:
-        log.info("No Capital One raw data found, skipping.")
-        return
-
-    inst_dir = raw_dir / "capital_one"
-    for ts in timestamps:
-        parse_raw_capital_one(db, inst_dir, ts, profile)
-        log.info("Replayed Capital One snapshot %s", ts)
-
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="capital_one",
-            profile=profile,
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref="replay",
-        )
-    )
-
-
-def _replay_chase(db: Database, raw_dir: Path, profile: str) -> None:
-    """Replay all Chase network log snapshots from raw captures."""
-    from money.ingest.chase import parse_raw_chase
-
-    inst_dir = raw_dir / "chase"
-    if not inst_dir.exists():
-        log.info("No Chase raw data found, skipping.")
-        return
-
-    log_files = sorted(inst_dir.glob("*_network_log.json"))
-    if not log_files:
-        log.info("No Chase network logs found, skipping.")
-        return
-
-    for log_file in log_files:
-        m = _TS_RE.match(log_file.name)
-        if not m:
+    for login_dir in sorted(base_dir.iterdir()):
+        if not login_dir.is_dir():
             continue
-        ts = m.group(1)
-        parse_raw_chase(db, inst_dir, ts, profile)
-        log.info("Replayed Chase network log %s", ts)
+        login_id = login_dir.name
 
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="chase",
-            profile=profile,
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref="replay",
-        )
-    )
+        timestamps = _find_timestamps(login_dir, inst.anchor_file)
+        for ts in timestamps:
+            inst.parse_fn(db, login_dir, ts, login_id)
+            log.info("Replayed %s snapshot %s (%s)", inst.name, ts, login_id)
 
+        if inst.post_replay_fn is not None:
+            inst.post_replay_fn(db, login_dir, login_id)
 
-def _replay_morgan_stanley(db: Database, raw_dir: Path, profile: str) -> None:
-    """Replay all Morgan Stanley snapshots from raw captures."""
-    from money.ingest.morgan_stanley import parse_raw_morgan_stanley
-
-    timestamps = _find_timestamps(raw_dir, "morgan_stanley", "portfolio_summary.json")
-    if not timestamps:
-        log.info("No Morgan Stanley raw data found, skipping.")
-        return
-
-    inst_dir = raw_dir / "morgan_stanley"
-    for ts in timestamps:
-        parse_raw_morgan_stanley(db, inst_dir, ts, profile)
-        log.info("Replayed Morgan Stanley snapshot %s", ts)
-
-    db.insert_ingestion_record(
-        IngestionRecord(
-            source="morgan_stanley",
-            profile=profile,
-            status=IngestionStatus.SUCCESS,
-            raw_file_ref="replay",
-        )
-    )
+        if timestamps:
+            db.insert_ingestion_record(
+                IngestionRecord(
+                    source=inst.name,
+                    profile=login_id,
+                    status=IngestionStatus.SUCCESS,
+                    raw_file_ref="replay",
+                )
+            )

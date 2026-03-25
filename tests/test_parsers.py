@@ -26,34 +26,54 @@ def db(tmp_path: Path) -> Database:
     return d
 
 
-def _first_ts(institution: str, anchor: str) -> str:
-    """Find the first available timestamp for an institution."""
+def _find_login_dir(institution: str) -> Path:
+    """Find the first login subdirectory for an institution."""
     inst_dir = RAW_DIR / institution
     if not inst_dir.exists():
         pytest.skip(f"No {institution} raw data")
-    for f in sorted(inst_dir.iterdir()):
-        if anchor in f.name:
-            m = TS_RE.match(f.name)
-            if m:
-                return m.group(1)
+    for d in sorted(inst_dir.iterdir()):
+        if d.is_dir():
+            return d
+    pytest.skip(f"No {institution} login directories")
+    return inst_dir  # unreachable
+
+
+def _first_ts(institution: str, anchor: str) -> tuple[str, Path]:
+    """Find the first available timestamp and its login dir for an institution."""
+    inst_dir = RAW_DIR / institution
+    if not inst_dir.exists():
+        pytest.skip(f"No {institution} raw data")
+    for login_dir in sorted(inst_dir.iterdir()):
+        if not login_dir.is_dir():
+            continue
+        for f in sorted(login_dir.iterdir()):
+            if anchor in f.name:
+                m = TS_RE.match(f.name)
+                if m:
+                    return m.group(1), login_dir
     pytest.skip(f"No {institution} {anchor} files")
-    return ""  # unreachable
+    return "", inst_dir  # unreachable
 
 
-def _latest_ts(institution: str, anchor: str) -> str:
-    """Find the latest available timestamp for an institution."""
+def _latest_ts(institution: str, anchor: str) -> tuple[str, Path]:
+    """Find the latest available timestamp and its login dir for an institution."""
     inst_dir = RAW_DIR / institution
     if not inst_dir.exists():
         pytest.skip(f"No {institution} raw data")
-    timestamps: list[str] = []
-    for f in sorted(inst_dir.iterdir()):
-        if anchor in f.name:
-            m = TS_RE.match(f.name)
-            if m:
-                timestamps.append(m.group(1))
-    if not timestamps:
+    best_ts = ""
+    best_dir = inst_dir
+    for login_dir in sorted(inst_dir.iterdir()):
+        if not login_dir.is_dir():
+            continue
+        for f in sorted(login_dir.iterdir()):
+            if anchor in f.name:
+                m = TS_RE.match(f.name)
+                if m and m.group(1) > best_ts:
+                    best_ts = m.group(1)
+                    best_dir = login_dir
+    if not best_ts:
         pytest.skip(f"No {institution} {anchor} files")
-    return timestamps[-1]
+    return best_ts, best_dir
 
 
 # ── Ally ──────────────────────────────────────────────────────────────
@@ -63,8 +83,8 @@ class TestAlly:
     def test_creates_accounts_with_profile(self, db: Database) -> None:
         from money.ingest.ally_api import parse_raw_ally
 
-        ts = _first_ts("ally", "accounts.json")
-        parse_raw_ally(db, RAW_DIR / "ally", ts, "scott@ally")
+        ts, login_dir = _first_ts("ally", "accounts.json")
+        parse_raw_ally(db, login_dir, ts, "scott@ally")
 
         accounts = [a for a in db.list_accounts() if a.institution == "ally"]
         assert len(accounts) >= 2  # at least Spending + Joint Checking
@@ -76,8 +96,8 @@ class TestAlly:
     def test_creates_balances(self, db: Database) -> None:
         from money.ingest.ally_api import parse_raw_ally
 
-        ts = _latest_ts("ally", "accounts.json")
-        parse_raw_ally(db, RAW_DIR / "ally", ts, "scott@ally")
+        ts, login_dir = _latest_ts("ally", "accounts.json")
+        parse_raw_ally(db, login_dir, ts, "scott@ally")
 
         balances = db.conn.execute("SELECT COUNT(*) FROM balances").fetchone()[0]
         assert balances > 0
@@ -85,8 +105,8 @@ class TestAlly:
     def test_creates_transactions(self, db: Database) -> None:
         from money.ingest.ally_api import parse_raw_ally
 
-        ts = _latest_ts("ally", "accounts.json")
-        parse_raw_ally(db, RAW_DIR / "ally", ts, "scott@ally")
+        ts, login_dir = _latest_ts("ally", "accounts.json")
+        parse_raw_ally(db, login_dir, ts, "scott@ally")
 
         txns = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
         assert txns > 100  # hundreds of transactions expected
@@ -94,8 +114,8 @@ class TestAlly:
     def test_skips_external_accounts(self, db: Database) -> None:
         from money.ingest.ally_api import parse_raw_ally
 
-        ts = _first_ts("ally", "accounts.json")
-        parse_raw_ally(db, RAW_DIR / "ally", ts, "scott@ally")
+        ts, login_dir = _first_ts("ally", "accounts.json")
+        parse_raw_ally(db, login_dir, ts, "scott@ally")
 
         for a in db.list_accounts():
             assert a.institution == "ally"
@@ -103,11 +123,11 @@ class TestAlly:
     def test_dedup_on_reparse(self, db: Database) -> None:
         from money.ingest.ally_api import parse_raw_ally
 
-        ts = _latest_ts("ally", "accounts.json")
-        parse_raw_ally(db, RAW_DIR / "ally", ts, "scott@ally")
+        ts, login_dir = _latest_ts("ally", "accounts.json")
+        parse_raw_ally(db, login_dir, ts, "scott@ally")
         count1 = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
 
-        parse_raw_ally(db, RAW_DIR / "ally", ts, "scott@ally")
+        parse_raw_ally(db, login_dir, ts, "scott@ally")
         count2 = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
 
         assert count1 == count2
@@ -120,8 +140,8 @@ class TestBetterment:
     def test_creates_accounts_with_profile(self, db: Database) -> None:
         from money.ingest.betterment import parse_raw_betterment
 
-        ts = _first_ts("betterment", "sidebar.json")
-        parse_raw_betterment(db, RAW_DIR / "betterment", ts, "scott@betterment")
+        ts, login_dir = _first_ts("betterment", "sidebar.json")
+        parse_raw_betterment(db, login_dir, ts, "scott@betterment")
 
         accounts = [a for a in db.list_accounts() if a.institution == "betterment"]
         assert len(accounts) >= 3  # multiple investment accounts
@@ -131,8 +151,8 @@ class TestBetterment:
     def test_creates_balances(self, db: Database) -> None:
         from money.ingest.betterment import parse_raw_betterment
 
-        ts = _latest_ts("betterment", "sidebar.json")
-        parse_raw_betterment(db, RAW_DIR / "betterment", ts, "scott@betterment")
+        ts, login_dir = _latest_ts("betterment", "sidebar.json")
+        parse_raw_betterment(db, login_dir, ts, "scott@betterment")
 
         balances = db.conn.execute("SELECT COUNT(*) FROM balances").fetchone()[0]
         assert balances > 0
@@ -140,8 +160,8 @@ class TestBetterment:
     def test_creates_performance_history(self, db: Database) -> None:
         from money.ingest.betterment import parse_raw_betterment
 
-        ts = _latest_ts("betterment", "sidebar.json")
-        parse_raw_betterment(db, RAW_DIR / "betterment", ts, "scott@betterment")
+        ts, login_dir = _latest_ts("betterment", "sidebar.json")
+        parse_raw_betterment(db, login_dir, ts, "scott@betterment")
 
         perf = db.conn.execute("SELECT COUNT(*) FROM performance_history").fetchone()[0]
         assert perf > 100  # years of daily data
@@ -149,8 +169,8 @@ class TestBetterment:
     def test_creates_holdings(self, db: Database) -> None:
         from money.ingest.betterment import parse_raw_betterment
 
-        ts = _latest_ts("betterment", "sidebar.json")
-        parse_raw_betterment(db, RAW_DIR / "betterment", ts, "scott@betterment")
+        ts, login_dir = _latest_ts("betterment", "sidebar.json")
+        parse_raw_betterment(db, login_dir, ts, "scott@betterment")
 
         holdings = db.conn.execute("SELECT COUNT(*) FROM holdings").fetchone()[0]
         assert holdings > 10  # multiple positions across accounts
@@ -158,8 +178,8 @@ class TestBetterment:
     def test_disambiguates_account_names(self, db: Database) -> None:
         from money.ingest.betterment import parse_raw_betterment
 
-        ts = _latest_ts("betterment", "sidebar.json")
-        parse_raw_betterment(db, RAW_DIR / "betterment", ts, "scott@betterment")
+        ts, login_dir = _latest_ts("betterment", "sidebar.json")
+        parse_raw_betterment(db, login_dir, ts, "scott@betterment")
 
         names = [a.name for a in db.list_accounts() if a.institution == "betterment"]
         # Should not have duplicate names (ESG vs Smart Beta should be distinct)
@@ -173,8 +193,8 @@ class TestWealthfront:
     def test_creates_accounts_with_profile(self, db: Database) -> None:
         from money.ingest.wealthfront import parse_raw_wealthfront
 
-        ts = _first_ts("wealthfront", "overviews.json")
-        parse_raw_wealthfront(db, RAW_DIR / "wealthfront", ts, "scott@wealthfront")
+        ts, login_dir = _first_ts("wealthfront", "overviews.json")
+        parse_raw_wealthfront(db, login_dir, ts, "scott@wealthfront")
 
         accounts = [a for a in db.list_accounts() if a.institution == "wealthfront"]
         assert len(accounts) >= 1
@@ -184,8 +204,8 @@ class TestWealthfront:
     def test_creates_balances(self, db: Database) -> None:
         from money.ingest.wealthfront import parse_raw_wealthfront
 
-        ts = _latest_ts("wealthfront", "overviews.json")
-        parse_raw_wealthfront(db, RAW_DIR / "wealthfront", ts, "scott@wealthfront")
+        ts, login_dir = _latest_ts("wealthfront", "overviews.json")
+        parse_raw_wealthfront(db, login_dir, ts, "scott@wealthfront")
 
         balances = db.conn.execute("SELECT COUNT(*) FROM balances").fetchone()[0]
         assert balances > 0
@@ -193,8 +213,8 @@ class TestWealthfront:
     def test_creates_performance_history(self, db: Database) -> None:
         from money.ingest.wealthfront import parse_raw_wealthfront
 
-        ts = _latest_ts("wealthfront", "overviews.json")
-        parse_raw_wealthfront(db, RAW_DIR / "wealthfront", ts, "scott@wealthfront")
+        ts, login_dir = _latest_ts("wealthfront", "overviews.json")
+        parse_raw_wealthfront(db, login_dir, ts, "scott@wealthfront")
 
         perf = db.conn.execute("SELECT COUNT(*) FROM performance_history").fetchone()[0]
         assert perf > 1000  # years of daily data
@@ -202,8 +222,8 @@ class TestWealthfront:
     def test_creates_holdings(self, db: Database) -> None:
         from money.ingest.wealthfront import parse_raw_wealthfront
 
-        ts = _latest_ts("wealthfront", "overviews.json")
-        parse_raw_wealthfront(db, RAW_DIR / "wealthfront", ts, "scott@wealthfront")
+        ts, login_dir = _latest_ts("wealthfront", "overviews.json")
+        parse_raw_wealthfront(db, login_dir, ts, "scott@wealthfront")
 
         holdings = db.conn.execute("SELECT COUNT(*) FROM holdings").fetchone()[0]
         assert holdings > 5  # at least several positions
@@ -211,8 +231,8 @@ class TestWealthfront:
     def test_holdings_have_symbols(self, db: Database) -> None:
         from money.ingest.wealthfront import parse_raw_wealthfront
 
-        ts = _latest_ts("wealthfront", "overviews.json")
-        parse_raw_wealthfront(db, RAW_DIR / "wealthfront", ts, "scott@wealthfront")
+        ts, login_dir = _latest_ts("wealthfront", "overviews.json")
+        parse_raw_wealthfront(db, login_dir, ts, "scott@wealthfront")
 
         null_symbols = db.conn.execute(
             "SELECT COUNT(*) FROM holdings WHERE symbol IS NULL"
@@ -227,8 +247,8 @@ class TestCapitalOne:
     def test_creates_accounts_with_profile(self, db: Database) -> None:
         from money.ingest.capital_one import parse_raw_capital_one
 
-        ts = _first_ts("capital_one", "accounts.json")
-        parse_raw_capital_one(db, RAW_DIR / "capital_one", ts, "scott@capital_one")
+        ts, login_dir = _first_ts("capital_one", "accounts.json")
+        parse_raw_capital_one(db, login_dir, ts, "scott@capital_one")
 
         accounts = [a for a in db.list_accounts() if a.institution == "capital_one"]
         assert len(accounts) >= 1
@@ -239,8 +259,8 @@ class TestCapitalOne:
     def test_balances_are_negative(self, db: Database) -> None:
         from money.ingest.capital_one import parse_raw_capital_one
 
-        ts = _latest_ts("capital_one", "accounts.json")
-        parse_raw_capital_one(db, RAW_DIR / "capital_one", ts, "scott@capital_one")
+        ts, login_dir = _latest_ts("capital_one", "accounts.json")
+        parse_raw_capital_one(db, login_dir, ts, "scott@capital_one")
 
         rows = db.conn.execute("SELECT balance FROM balances").fetchall()
         assert len(rows) > 0
@@ -251,9 +271,9 @@ class TestCapitalOne:
         from money.ingest.capital_one import parse_raw_capital_one
 
         # Find a timestamp with chunked files
-        inst_dir = RAW_DIR / "capital_one"
+        login_dir = _find_login_dir("capital_one")
         chunked_ts = None
-        for f in sorted(inst_dir.iterdir()):
+        for f in sorted(login_dir.iterdir()):
             if "_transactions_1.json" in f.name:
                 m = TS_RE.match(f.name)
                 if m:
@@ -262,19 +282,18 @@ class TestCapitalOne:
         if not chunked_ts:
             pytest.skip("No chunked transaction files")
 
-        parse_raw_capital_one(db, inst_dir, chunked_ts, "scott@capital_one")
+        parse_raw_capital_one(db, login_dir, chunked_ts, "scott@capital_one")
         txns = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
         assert txns > 500  # chunked = lots of transactions
 
     def test_dedup_on_reparse(self, db: Database) -> None:
         from money.ingest.capital_one import parse_raw_capital_one
 
-        ts = _latest_ts("capital_one", "accounts.json")
-        inst_dir = RAW_DIR / "capital_one"
-        parse_raw_capital_one(db, inst_dir, ts, "scott@capital_one")
+        ts, login_dir = _latest_ts("capital_one", "accounts.json")
+        parse_raw_capital_one(db, login_dir, ts, "scott@capital_one")
         count1 = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
 
-        parse_raw_capital_one(db, inst_dir, ts, "scott@capital_one")
+        parse_raw_capital_one(db, login_dir, ts, "scott@capital_one")
         count2 = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
         assert count1 == count2
 
@@ -286,9 +305,8 @@ class TestChase:
     def test_creates_accounts_with_profile(self, db: Database) -> None:
         from money.ingest.chase import parse_raw_chase
 
-        inst_dir = RAW_DIR / "chase"
-        ts = _first_ts("chase", "network_log.json")
-        parse_raw_chase(db, inst_dir, ts, "angela@chase")
+        ts, login_dir = _first_ts("chase", "network_log.json")
+        parse_raw_chase(db, login_dir, ts, "angela@chase")
 
         accounts = [a for a in db.list_accounts() if a.institution == "chase"]
         assert len(accounts) >= 2  # checking + trust
@@ -298,8 +316,8 @@ class TestChase:
     def test_creates_balances(self, db: Database) -> None:
         from money.ingest.chase import parse_raw_chase
 
-        ts = _first_ts("chase", "network_log.json")
-        parse_raw_chase(db, RAW_DIR / "chase", ts, "angela@chase")
+        ts, login_dir = _first_ts("chase", "network_log.json")
+        parse_raw_chase(db, login_dir, ts, "angela@chase")
 
         balances = db.conn.execute("SELECT COUNT(*) FROM balances").fetchone()[0]
         assert balances > 0
@@ -307,8 +325,8 @@ class TestChase:
     def test_creates_transactions(self, db: Database) -> None:
         from money.ingest.chase import parse_raw_chase
 
-        ts = _first_ts("chase", "network_log.json")
-        parse_raw_chase(db, RAW_DIR / "chase", ts, "angela@chase")
+        ts, login_dir = _first_ts("chase", "network_log.json")
+        parse_raw_chase(db, login_dir, ts, "angela@chase")
 
         txns = db.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
         assert txns > 10
@@ -321,8 +339,8 @@ class TestMorganStanley:
     def test_creates_account_with_profile(self, db: Database) -> None:
         from money.ingest.morgan_stanley import parse_raw_morgan_stanley
 
-        ts = _first_ts("morgan_stanley", "portfolio_summary.json")
-        parse_raw_morgan_stanley(db, RAW_DIR / "morgan_stanley", ts, "scott@morgan_stanley")
+        ts, login_dir = _first_ts("morgan_stanley", "portfolio_summary.json")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
 
         accounts = [a for a in db.list_accounts() if a.institution == "morgan_stanley"]
         assert len(accounts) == 1
@@ -332,8 +350,8 @@ class TestMorganStanley:
     def test_creates_exactly_12_grants(self, db: Database) -> None:
         from money.ingest.morgan_stanley import parse_raw_morgan_stanley
 
-        ts = _first_ts("morgan_stanley", "portfolio_summary.json")
-        parse_raw_morgan_stanley(db, RAW_DIR / "morgan_stanley", ts, "scott@morgan_stanley")
+        ts, login_dir = _first_ts("morgan_stanley", "portfolio_summary.json")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
 
         count = db.conn.execute("SELECT COUNT(*) FROM option_grants").fetchone()[0]
         assert count == 12
@@ -341,8 +359,8 @@ class TestMorganStanley:
     def test_grants_have_stable_ids(self, db: Database) -> None:
         from money.ingest.morgan_stanley import parse_raw_morgan_stanley
 
-        ts = _first_ts("morgan_stanley", "portfolio_summary.json")
-        parse_raw_morgan_stanley(db, RAW_DIR / "morgan_stanley", ts, "scott@morgan_stanley")
+        ts, login_dir = _first_ts("morgan_stanley", "portfolio_summary.json")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
 
         ids = [r[0] for r in db.conn.execute("SELECT id FROM option_grants").fetchall()]
         # IDs should be grant numbers like "ES-0414", not random UUIDs
@@ -352,10 +370,9 @@ class TestMorganStanley:
     def test_grant_dedup_on_reparse(self, db: Database) -> None:
         from money.ingest.morgan_stanley import parse_raw_morgan_stanley
 
-        ts = _first_ts("morgan_stanley", "portfolio_summary.json")
-        inst_dir = RAW_DIR / "morgan_stanley"
-        parse_raw_morgan_stanley(db, inst_dir, ts, "scott@morgan_stanley")
-        parse_raw_morgan_stanley(db, inst_dir, ts, "scott@morgan_stanley")
+        ts, login_dir = _first_ts("morgan_stanley", "portfolio_summary.json")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
 
         count = db.conn.execute("SELECT COUNT(*) FROM option_grants").fetchone()[0]
         assert count == 12  # no duplicates
@@ -363,8 +380,8 @@ class TestMorganStanley:
     def test_vested_shares_from_portfolio_summary(self, db: Database) -> None:
         from money.ingest.morgan_stanley import parse_raw_morgan_stanley
 
-        ts = _first_ts("morgan_stanley", "portfolio_summary.json")
-        parse_raw_morgan_stanley(db, RAW_DIR / "morgan_stanley", ts, "scott@morgan_stanley")
+        ts, login_dir = _first_ts("morgan_stanley", "portfolio_summary.json")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
 
         # NQ split grant should have ~94,550 vested from MS dashboard
         row = db.conn.execute(
@@ -376,8 +393,8 @@ class TestMorganStanley:
     def test_creates_balance(self, db: Database) -> None:
         from money.ingest.morgan_stanley import parse_raw_morgan_stanley
 
-        ts = _first_ts("morgan_stanley", "portfolio_summary.json")
-        parse_raw_morgan_stanley(db, RAW_DIR / "morgan_stanley", ts, "scott@morgan_stanley")
+        ts, login_dir = _first_ts("morgan_stanley", "portfolio_summary.json")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
 
         balances = db.conn.execute("SELECT COUNT(*) FROM balances").fetchone()[0]
         assert balances > 0
@@ -385,8 +402,8 @@ class TestMorganStanley:
     def test_creates_fmv_valuation(self, db: Database) -> None:
         from money.ingest.morgan_stanley import parse_raw_morgan_stanley
 
-        ts = _first_ts("morgan_stanley", "portfolio_summary.json")
-        parse_raw_morgan_stanley(db, RAW_DIR / "morgan_stanley", ts, "scott@morgan_stanley")
+        ts, login_dir = _first_ts("morgan_stanley", "portfolio_summary.json")
+        parse_raw_morgan_stanley(db, login_dir, ts, "scott@morgan_stanley")
 
         fmv = db.conn.execute(
             "SELECT fmv_per_share FROM private_valuations"

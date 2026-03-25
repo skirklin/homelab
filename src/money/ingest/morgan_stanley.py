@@ -1,6 +1,5 @@
 """Morgan Stanley Shareworks ingester — uses JWT from network log + REST API."""
 
-import contextlib
 import json
 import logging
 import urllib.error
@@ -151,23 +150,20 @@ def parse_raw_morgan_stanley(
     as_of = ts_to_date(timestamp)
 
     from money.ingest.schemas import (
-        MSGrant,
         MSGrantsResponse,
-        MSPortfolioItem,
-        MSPortfolioSummary,
         MSPortfolioSummaryResponse,
     )
 
-    summary_response: MSPortfolioSummaryResponse = json.loads(
+    summary_response = MSPortfolioSummaryResponse.model_validate_json(
         (inst_dir / f"{timestamp}_portfolio_summary.json").read_text()
     )
-    grants_response: MSGrantsResponse = json.loads(
+    grants_response = MSGrantsResponse.model_validate_json(
         (inst_dir / f"{timestamp}_grants.json").read_text()
     )
-    summary: MSPortfolioSummary = summary_response["data"]
-    raw_grants: list[MSGrant] = grants_response["data"]
+    summary = summary_response.data
+    raw_grants = grants_response.data
 
-    fmv_price = parse_money(summary["valuedAtPrice"])
+    fmv_price = parse_money(summary.valuedAtPrice)
 
     account = db.get_or_create_account(
         name="Anthropic Stock Options",
@@ -178,16 +174,16 @@ def parse_raw_morgan_stanley(
     )
 
     # Total balance from portfolio summary
-    portfolio_items: list[MSPortfolioItem] = summary["portfolioData"]
+    portfolio_items = summary.portfolioData
     available_total = 0.0
     future_total = 0.0
     for item in portfolio_items:
-        available_total += parse_money(item["availableValue"])
-        for f in item["futureData"]:
-            future_total += parse_money(f["value"])
+        available_total += parse_money(item.availableValue)
+        for f in item.futureData:
+            future_total += parse_money(f.value)
     total_value = available_total + future_total
 
-    raw_key = f"morgan_stanley/{timestamp}_portfolio_summary.json"
+    raw_key = f"morgan_stanley/{profile}/{timestamp}_portfolio_summary.json"
 
     db.insert_balance(
         Balance(
@@ -213,31 +209,32 @@ def parse_raw_morgan_stanley(
     # Build vested quantity lookup from portfolio summary
     vested_by_instance: dict[str, tuple[int, float]] = {}
     for pi in portfolio_items:
-        instance_name: str = pi["instanceName"]
-        avail_qty = int(pi["availableQuantity"])
-        avail_val = parse_money(pi["availableValue"])
+        instance_name = pi.instanceName
+        avail_qty = int(pi.availableQuantity)
+        avail_val = parse_money(pi.availableValue)
         vested_by_instance[instance_name] = (avail_qty, avail_val)
 
     # Grants
     grant_count = 0
     for raw_grant in raw_grants:
-        grant_date = date.fromisoformat(raw_grant["grantDate"])
-        award_name: str = raw_grant["awardName"]
-        grant_name: str = raw_grant["grantName"]
-        grant_number: str = raw_grant["grantNumber"]
-        quantity = int(raw_grant["quantityGranted"])
-        expiration_str: str | None = raw_grant.get("expiredDate")
+        grant_date = date.fromisoformat(raw_grant.grantDate)
+        award_name = raw_grant.awardName
+        grant_name = raw_grant.grantName
+        grant_number = raw_grant.grantNumber
+        quantity = int(raw_grant.quantityGranted)
+        expiration_str = raw_grant.expiredDate
 
         # Extract strike price from grant name (e.g. "02/05/2024 - ISO - $12.98")
-        strike_price = 0.0
+        # Legacy/donation grants may not include a $ price — default to 0.0
         parts = grant_name.split("$")
-        if len(parts) > 1:
-            price_str = parts[-1].split()[0].rstrip(" -")
-            with contextlib.suppress(ValueError):
-                strike_price = float(price_str)
+        if len(parts) >= 2:
+            strike_price = float(parts[-1].split()[0].rstrip(" -"))
+        else:
+            strike_price = 0.0
+            log.warning("No strike price in grant name %r, defaulting to $0.00", grant_name)
 
-        exercise_details = raw_grant["exerciseDetails"]
-        vest_dates = exercise_details["vestDates"]
+        exercise_details = raw_grant.exerciseDetails
+        vest_dates = exercise_details.vestDates
         parsed_vest_dates = [date.fromisoformat(d) for d in vest_dates]
 
         grant_type = determine_grant_type(award_name)
@@ -272,12 +269,12 @@ def parse_raw_morgan_stanley(
 def sync_morgan_stanley(
     db: Database,
     store: RawStore,
-    profile: str | None = None,
+    profile: str,
 ) -> None:
     """Sync Morgan Stanley Shareworks stock option/RSU data."""
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
-    raw_key = f"morgan_stanley/{timestamp}_portfolio_summary.json"
+    raw_key = f"morgan_stanley/{profile}/{timestamp}_portfolio_summary.json"
 
     try:
         bearer_token, session_uuid = _load_auth_from_network_log()
@@ -288,7 +285,7 @@ def sync_morgan_stanley(
             try:
                 portfolio_data = _api_get_session(session_uuid, LINKED_PORTFOLIO_PATH)
                 store.put(
-                    f"morgan_stanley/{timestamp}_portfolio.json",
+                    f"morgan_stanley/{profile}/{timestamp}_portfolio.json",
                     json.dumps(portfolio_data, indent=2).encode(),
                 )
             except Exception as e:
@@ -301,7 +298,7 @@ def sync_morgan_stanley(
         # 3. Fetch grants (detailed grant info)
         grants_data = _api_get_bearer(bearer_token, GRANTS_PATH)
         store.put(
-            f"morgan_stanley/{timestamp}_grants.json",
+            f"morgan_stanley/{profile}/{timestamp}_grants.json",
             json.dumps(grants_data, indent=2).encode(),
         )
 
@@ -319,7 +316,7 @@ def sync_morgan_stanley(
 
         # Parse all raw data and write to DB
         from money.config import DATA_DIR as _DATA_DIR
-        inst_dir = _DATA_DIR / "raw" / "morgan_stanley"
+        inst_dir = _DATA_DIR / "raw" / "morgan_stanley" / (profile or "default")
         parse_raw_morgan_stanley(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(
@@ -347,3 +344,15 @@ def sync_morgan_stanley(
             )
         )
         raise
+
+
+from money.ingest.registry import InstitutionInfo
+
+INSTITUTION = InstitutionInfo(
+    name="morgan_stanley",
+    dir_name="morgan_stanley",
+    sync_fn=sync_morgan_stanley,
+    parse_fn=parse_raw_morgan_stanley,
+    anchor_file="portfolio_summary.json",
+    display_name="Morgan Stanley",
+)

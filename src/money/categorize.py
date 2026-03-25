@@ -28,6 +28,7 @@ This produces rules:
 """
 
 import logging
+import re
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
@@ -87,7 +88,7 @@ def load_rules() -> list[CategoryRule]:
     return _parse_rules_recursive(rules_tree, [])
 
 
-def _pattern_specificity(pattern: str) -> int:
+def pattern_specificity(pattern: str) -> int:
     """Score a pattern by specificity for longest-match-wins resolution.
 
     Strips SQL LIKE wildcards (%) and counts remaining characters.
@@ -120,6 +121,9 @@ def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
     desc_rules = [r for r in rules if not r.pattern.startswith("category:")]
     cat_rules = [r for r in rules if r.pattern.startswith("category:")]
 
+    # Pre-compile LIKE patterns to regexes
+    desc_regexes = [like_to_regex(r.pattern) for r in desc_rules]
+
     txn_filter = ""
     txn_params: list[object] = []
     if transaction_ids is not None:
@@ -149,11 +153,9 @@ def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
         best_rule: CategoryRule | None = None
         best_specificity = -1
 
-        for rule in desc_rules:
-            # Convert SQL LIKE pattern to a simple match
-            pat = rule.pattern.upper()
-            if _like_match(description, pat):
-                spec = _pattern_specificity(rule.pattern)
+        for rule, regex in zip(desc_rules, desc_regexes, strict=True):
+            if regex.match(description):
+                spec = pattern_specificity(rule.pattern)
                 if spec > best_specificity:
                     best_specificity = spec
                     best_rule = rule
@@ -161,7 +163,7 @@ def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
         for rule in cat_rules:
             cat_value = rule.pattern.removeprefix("category:")
             if category == cat_value:
-                spec = _pattern_specificity(rule.pattern)
+                spec = pattern_specificity(rule.pattern)
                 if spec > best_specificity:
                     best_specificity = spec
                     best_rule = rule
@@ -181,34 +183,21 @@ def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
     return count
 
 
-def _like_match(text: str, pattern: str) -> bool:
-    """Match a SQL LIKE pattern (with % wildcards) against text.
+def like_to_regex(pattern: str) -> re.Pattern[str]:
+    """Convert a SQL LIKE pattern to a compiled regex.
 
-    Both text and pattern should already be uppercased.
+    Handles % (any sequence) and _ (single char) wildcards.
+    The match is case-insensitive and anchored to the full string.
     """
-    # Simple recursive LIKE matcher
-    return _like_match_impl(text, 0, pattern, 0)
-
-
-def _like_match_impl(text: str, ti: int, pattern: str, pi: int) -> bool:
-    while pi < len(pattern):
-        if pattern[pi] == "%":
-            # Skip consecutive %
-            while pi < len(pattern) and pattern[pi] == "%":
-                pi += 1
-            if pi == len(pattern):
-                return True
-            # Try matching the rest from every position
-            return any(
-                _like_match_impl(text, ti2, pattern, pi)
-                for ti2 in range(ti, len(text) + 1)
-            )
+    parts: list[str] = []
+    for ch in pattern:
+        if ch == "%":
+            parts.append(".*")
+        elif ch == "_":
+            parts.append(".")
         else:
-            if ti >= len(text) or text[ti] != pattern[pi]:
-                return False
-            ti += 1
-            pi += 1
-    return ti == len(text)
+            parts.append(re.escape(ch))
+    return re.compile("^" + "".join(parts) + "$", re.IGNORECASE)
 
 
 def dry_run_pattern(
