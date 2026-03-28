@@ -262,17 +262,24 @@ header h1 {
 
 .sidebar-account {
   display: flex;
-  justify-content: space-between;
-  padding: 2px 0 2px 12px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0 2px 8px;
   font-size: 11px;
 }
 
+.sidebar-account .sidebar-dot {
+  width: 5px;
+  height: 5px;
+}
+
 .sidebar-account-name {
+  flex: 1;
+  min-width: 0;
   color: rgba(255, 255, 255, 0.45);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-right: 8px;
 }
 
 .sidebar-account-bal {

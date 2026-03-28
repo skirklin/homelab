@@ -481,15 +481,116 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
         raise
 
 
+def sync_ally(db: Database, store: RawStore, profile: str) -> None:
+    """Sync Ally Bank from captured network log data.
+
+    The extension captures API responses made by the SPA (including injected
+    transaction fetches). This function extracts accounts and transactions
+    from those captured responses.
+    """
+    started_at = datetime.now()
+    timestamp = started_at.strftime("%Y%m%d_%H%M%S")
+
+    try:
+        log_dir = DATA_DIR / "network_logs"
+        logs = sorted(log_dir.glob("ally_*.json")) if log_dir.exists() else []
+        if not logs:
+            raise FileNotFoundError(
+                "No Ally network logs found. Visit Ally in Chrome to capture data."
+            )
+
+        entries: list[dict[str, Any]] = []
+        for log_file in logs:
+            file_data: dict[str, Any] = json.loads(log_file.read_text())
+            entries.extend(file_data.get("entries", []))
+        log.info("Loaded %d entries from %d network log files", len(entries), len(logs))
+
+        accounts_data: dict[str, Any] | None = None
+        all_transactions: list[dict[str, Any]] = []
+
+        for entry in entries:
+            url: str = entry.get("url", "")
+            body = entry.get("responseBody")
+            if not isinstance(body, dict):
+                continue
+
+            if "transfer-accounts" in url or ("/customers/" in url and "/accounts" in url):
+                if body.get("accounts") or body.get("data"):
+                    accounts_data = body
+                    log.info("Found accounts response from %s", url)
+            elif "transactions/search" in url:
+                for result in body.get("searchResults", []):
+                    for history in result.get("transactionHistory", []):
+                        txns = history.get("transactions", [])
+                        all_transactions.extend(txns)
+
+        if accounts_data is None:
+            raise ValueError("No accounts response found in network log")
+
+        store.put(
+            f"ally/{profile}/{timestamp}_accounts.json",
+            json.dumps(accounts_data, indent=2).encode(),
+        )
+
+        raw_accounts: list[dict[str, Any]] = list(
+            accounts_data.get("accounts") or accounts_data.get("data") or []
+        )
+        log.info("Found %d account(s) and %d transactions in network log",
+                 len(raw_accounts), len(all_transactions))
+
+        for acct in raw_accounts:
+            details = acct.get("domainDetails", {})
+            if details.get("externalAccountIndicator"):
+                continue
+            acct_number = acct.get("accountNumberPvtEncrypt", "")
+            external_id = acct_number[-4:] if acct_number else ""
+            if external_id and all_transactions:
+                store.put(
+                    f"ally/{profile}/{timestamp}_{external_id}_transactions.json",
+                    json.dumps(all_transactions, indent=2).encode(),
+                )
+
+        inst_dir = DATA_DIR / "raw" / "ally" / profile
+        parse_raw_ally(db, inst_dir, timestamp, profile)
+
+        db.insert_ingestion_record(
+            IngestionRecord(
+                source="ally",
+                profile=profile,
+                status=IngestionStatus.SUCCESS,
+                raw_file_ref=f"ally/{profile}/{timestamp}_accounts.json",
+                started_at=started_at,
+                finished_at=datetime.now(),
+            )
+        )
+
+        for log_file in logs:
+            log_file.unlink()
+        log.info("Ally sync complete (cleaned up %d network log files)", len(logs))
+
+    except Exception as e:
+        log.error("Ally sync failed: %s", e)
+        db.insert_ingestion_record(
+            IngestionRecord(
+                source="ally",
+                profile=profile,
+                status=IngestionStatus.ERROR,
+                error_message=str(e),
+                started_at=started_at,
+                finished_at=datetime.now(),
+            )
+        )
+        raise
+
+
 from money.ingest.registry import InstitutionInfo
 
 INSTITUTION = InstitutionInfo(
     name="ally",
     dir_name="ally",
-    sync_fn=sync_ally_api,
+    sync_fn=sync_ally,
     parse_fn=parse_raw_ally,
     anchor_file="accounts.json",
     display_name="Ally Bank",
     post_replay_fn=parse_raw_ally_extension,
-    playwright_sync=True,
 )

@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import re
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -238,7 +239,12 @@ def _graphql(
         "Chrome/131.0.0.0 Safari/537.36"
     ))
 
-    resp = urllib.request.urlopen(req, timeout=30)
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:500]
+        log.error("HTTP %d on GraphQL %s: %s", e.code, operation_name, body)
+        raise
     result: dict[str, Any] = json.loads(resp.read())
     if "errors" in result:
         log.warning("GraphQL errors for %s: %s", operation_name, result["errors"])
@@ -452,66 +458,84 @@ def sync_betterment(db: Database, store: RawStore, profile: str,
         raw_key = f"betterment/{profile}/{timestamp}_sidebar.json"
         store.put(raw_key, json.dumps(sidebar_data, indent=2).encode())
 
-        # 2. For each envelope, get balance via PurposeHeader
-        for envelope in envelopes:
-            envelope_id = envelope["id"]
-            purpose_raw = envelope.get("purpose")
-            purpose_name = purpose_raw.get("name", "Unknown") if purpose_raw else "Unknown"
-            accounts = envelope.get("accounts", [])
+        # 2. Fetch all supplementary data in parallel (purpose, performance, holdings)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            if purpose_raw is not None:
-                purpose_data = _graphql(
-                    cookies, csrf_token, "PurposeHeader", PURPOSE_HEADER_QUERY,
-                    variables={"id": envelope_id},
+        def _fetch_purpose(envelope_id: str) -> None:
+            data = _graphql(
+                cookies, csrf_token, "PurposeHeader", PURPOSE_HEADER_QUERY,
+                variables={"id": envelope_id},
+            )
+            store.put(
+                f"betterment/{profile}/{timestamp}_{envelope_id}_purpose.json",
+                json.dumps(data, indent=2).encode(),
+            )
+
+        def _fetch_performance(acct_graphql_id: str, acct_external_id: str, name: str) -> None:
+            try:
+                data = _graphql(
+                    cookies, csrf_token,
+                    "EnvelopeAccountPerformanceHistory",
+                    PERFORMANCE_HISTORY_QUERY,
+                    variables={"id": acct_graphql_id, "dateRangeOption": "ALL_TIME"},
                 )
                 store.put(
-                    f"betterment/{profile}/{timestamp}_{envelope_id}_purpose.json",
-                    json.dumps(purpose_data, indent=2).encode(),
+                    f"betterment/{profile}/{timestamp}_{acct_external_id}_performance.json",
+                    json.dumps(data, indent=2).encode(),
                 )
+            except Exception as e:
+                log.warning("  Could not fetch performance for %s: %s", name, e)
 
-            log.info("Envelope '%s': %d account(s)", purpose_name, len(accounts))
+        def _fetch_holdings(acct_graphql_id: str, acct_external_id: str, name: str) -> None:
+            try:
+                data = _graphql(
+                    cookies, csrf_token,
+                    "EnvelopeAccountHoldings",
+                    HOLDINGS_QUERY,
+                    variables={"id": acct_graphql_id},
+                )
+                store.put(
+                    f"betterment/{profile}/{timestamp}_{acct_external_id}_holdings.json",
+                    json.dumps(data, indent=2).encode(),
+                )
+            except Exception as e:
+                log.warning("  Could not fetch holdings for %s: %s", name, e)
 
-            # 3. For each account, fetch performance and holdings
-            for acct in accounts:
-                acct_graphql_id = acct["id"]
-                acct_typename = acct.get("__typename", "")
-                acct_name = acct.get("nameOverride") or acct.get("name", "")
-                acct_external_id = decode_account_id(acct_graphql_id)
-                display_name = _build_display_name(acct_name, purpose_name, acct_typename, accounts)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = []
 
-                # Performance history
-                try:
-                    perf_data = _graphql(
-                        cookies, csrf_token,
-                        "EnvelopeAccountPerformanceHistory",
-                        PERFORMANCE_HISTORY_QUERY,
-                        variables={
-                            "id": acct_graphql_id,
-                            "dateRangeOption": "ALL_TIME",
-                        },
+            for envelope in envelopes:
+                envelope_id = envelope["id"]
+                purpose_raw = envelope.get("purpose")
+                purpose_name = purpose_raw.get("name", "Unknown") if purpose_raw else "Unknown"
+                accounts = envelope.get("accounts", [])
+
+                if purpose_raw is not None:
+                    futures.append(pool.submit(_fetch_purpose, envelope_id))
+
+                for acct in accounts:
+                    acct_graphql_id = acct["id"]
+                    acct_typename = acct.get("__typename", "")
+                    acct_name = acct.get("nameOverride") or acct.get("name", "")
+                    acct_external_id = decode_account_id(acct_graphql_id)
+                    display_name = _build_display_name(
+                        acct_name, purpose_name, acct_typename, accounts,
                     )
-                    store.put(
-                        f"betterment/{profile}/{timestamp}_{acct_external_id}_performance.json",
-                        json.dumps(perf_data, indent=2).encode(),
-                    )
-                except Exception as e:
-                    log.warning("  Could not fetch performance for %s: %s", display_name, e)
 
-                # Holdings for managed accounts
-                if acct_typename == "ManagedAccount":
-                    try:
-                        holdings_data = _graphql(
-                            cookies, csrf_token,
-                            "EnvelopeAccountHoldings",
-                            HOLDINGS_QUERY,
-                            variables={"id": acct_graphql_id},
-                        )
-                        store.put(
-                            f"betterment/{profile}/{timestamp}_{acct_external_id}_holdings.json",
-                            json.dumps(holdings_data, indent=2).encode(),
-                        )
-                    except Exception as e:
-                        log.warning("  Could not fetch holdings for %s: %s", display_name, e)
+                    futures.append(pool.submit(
+                        _fetch_performance, acct_graphql_id, acct_external_id, display_name,
+                    ))
+
+                    if acct_typename == "ManagedAccount":
+                        futures.append(pool.submit(
+                            _fetch_holdings, acct_graphql_id, acct_external_id, display_name,
+                        ))
+
+                log.info("Envelope '%s': %d account(s)", purpose_name, len(accounts))
+
+            # Wait for all fetches to complete
+            for future in as_completed(futures):
+                future.result()  # re-raises exceptions from purpose fetches
 
         # Parse all raw data and write to DB
         from money.config import DATA_DIR as _DATA_DIR

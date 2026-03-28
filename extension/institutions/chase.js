@@ -1,4 +1,5 @@
 // Chase handler — records network log (API can't be replayed with cookies).
+// Waits for the user to browse the dashboard, then flushes captured data.
 
 export default {
   domains: [".chase.com", "secure.chase.com", "secure03b.chase.com"],
@@ -6,9 +7,16 @@ export default {
   recordNetwork: true,
 
   async onPageLoad(ctx) {
-    // Chase needs network recording, not cookie capture.
-    // Start recording and let the periodic flush handle sending data.
     await ctx.startNetworkRecording();
-    return { type: "recording_started" };
+
+    // Wait for the SPA to make its API calls
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
+    const flushResult = await ctx.flushNetworkLog();
+    if (flushResult.sync_id) {
+      const syncResult = await ctx.pollSyncResult(flushResult.sync_id);
+      return { type: "sync", ...syncResult };
+    }
+    return flushResult;
   },
 };

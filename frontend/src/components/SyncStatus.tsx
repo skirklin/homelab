@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import type { SyncStatus } from '../api'
 import { fetchSyncStatus } from '../api'
 
-function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00'))
-  const now = new Date()
-  const days = Math.floor((now.getTime() - d.getTime()) / 86400000)
-  if (days === 0) return 'today'
-  if (days === 1) return 'yesterday'
+function timeAgo(secondsAgo: number | null): string {
+  if (secondsAgo == null) return 'never'
+  if (secondsAgo < 60) return 'just now'
+  const minutes = Math.floor(secondsAgo / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
   if (days < 7) return `${days}d ago`
   if (days < 30) return `${Math.floor(days / 7)}w ago`
   return `${Math.floor(days / 30)}mo ago`
@@ -81,7 +83,6 @@ export function SyncStatusBar() {
           </button>
         )}
         {statuses.map((s) => {
-          const freshest = s.last_balance_date || s.last_transaction_date
           return (
             <span
               key={s.login_id}
@@ -97,7 +98,7 @@ export function SyncStatusBar() {
               />
               <span style={{ color: 'rgba(255,255,255,0.6)' }}>{s.label}</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>
-                {freshest ? timeAgo(freshest) : 'never'}
+                {timeAgo(s.seconds_ago)}
               </span>
             </span>
           )

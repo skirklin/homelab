@@ -21,10 +21,12 @@ const fmt = (v: number) => {
 const fmtFull = (v: number) =>
   `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
+type ViewMode = 'liquid' | 'with_equity' | 'breakdown'
+
 export function NetWorthChart() {
   const [data, setData] = useState<NetWorthPoint[]>([])
   const [range, setRange] = useState<TimeRange>('1Y')
-  const [showBreakdown, setShowBreakdown] = useState(false)
+  const [view, setView] = useState<ViewMode>('liquid')
 
   useEffect(() => {
     const start = getStartDate(range)
@@ -35,9 +37,12 @@ export function NetWorthChart() {
 
   const latest = data[data.length - 1]
   const first = data[0]
-  const change = latest.net_worth - first.net_worth
-  const changePct = first.net_worth > 0 ? (change / first.net_worth) * 100 : 0
-  const hasInvestedData = data.some((d) => d.invested != null)
+
+  const displayValue = view === 'liquid' ? latest.liquid : latest.net_worth
+  const startValue = view === 'liquid' ? first.liquid : first.net_worth
+  const change = displayValue - startValue
+  const changePct = startValue > 0 ? (change / startValue) * 100 : 0
+  const hasEquity = data.some((d) => d.equity > 0)
 
   return (
     <section className="chart-section">
@@ -45,8 +50,8 @@ export function NetWorthChart() {
         <div>
           <h2>Net Worth</h2>
           <div className="metric-row">
-            <span className="big-number">{fmtFull(latest.net_worth)}</span>
-            {first.net_worth > 0 && (
+            <span className="big-number">{fmtFull(displayValue)}</span>
+            {startValue > 0 && (
               <span className={`change ${change >= 0 ? 'positive' : 'negative'}`}>
                 {change >= 0 ? '+' : ''}
                 {fmtFull(change)} ({changePct >= 0 ? '+' : ''}
@@ -56,13 +61,27 @@ export function NetWorthChart() {
           </div>
         </div>
         <div className="controls">
-          {hasInvestedData && (
-            <button
-              className={`toggle-btn ${showBreakdown ? 'active' : ''}`}
-              onClick={() => setShowBreakdown(!showBreakdown)}
-            >
-              Invested vs Earned
-            </button>
+          {hasEquity && (
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                className={`toggle-btn ${view === 'liquid' ? 'active' : ''}`}
+                onClick={() => setView('liquid')}
+              >
+                Liquid
+              </button>
+              <button
+                className={`toggle-btn ${view === 'with_equity' ? 'active' : ''}`}
+                onClick={() => setView('with_equity')}
+              >
+                + Equity
+              </button>
+              <button
+                className={`toggle-btn ${view === 'breakdown' ? 'active' : ''}`}
+                onClick={() => setView('breakdown')}
+              >
+                Breakdown
+              </button>
+            </div>
           )}
           <TimeRangeSelector value={range} onChange={setRange} />
         </div>
@@ -77,16 +96,25 @@ export function NetWorthChart() {
             formatter={(value: number, name: string) => [fmtFull(value), name]}
             labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
           />
-          {showBreakdown ? (
+          {view === 'liquid' && (
+            <Area type="monotone" dataKey="liquid" name="Liquid Net Worth"
+              stroke="#818cf8" fill="#818cf8" fillOpacity={0.2} />
+          )}
+          {view === 'with_equity' && (
+            <>
+              <Area type="monotone" dataKey="liquid" name="Liquid" stackId="1"
+                stroke="#818cf8" fill="#818cf8" fillOpacity={0.3} />
+              <Area type="monotone" dataKey="equity" name="Equity" stackId="1"
+                stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.2} />
+            </>
+          )}
+          {view === 'breakdown' && (
             <>
               <Area type="monotone" dataKey="invested" name="Invested" stackId="1"
                 stroke="#818cf8" fill="#818cf8" fillOpacity={0.4} />
               <Area type="monotone" dataKey="earned" name="Earned" stackId="1"
                 stroke="#34d399" fill="#34d399" fillOpacity={0.4} />
             </>
-          ) : (
-            <Area type="monotone" dataKey="net_worth" name="Net Worth"
-              stroke="#818cf8" fill="#818cf8" fillOpacity={0.2} />
           )}
         </AreaChart>
       </ResponsiveContainer>

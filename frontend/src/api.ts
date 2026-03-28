@@ -1,9 +1,11 @@
 export interface Account {
   id: string
   name: string
+  raw_name: string
   institution: string | null
   account_type: string
   external_id: string | null
+  profile: string | null
   latest_balance: number | null
   balance_as_of: string | null
   total_invested: number | null
@@ -20,6 +22,8 @@ export interface BalancePoint {
 
 export interface NetWorthPoint {
   date: string
+  liquid: number
+  equity: number
   net_worth: number
   invested: number | null
   earned: number | null
@@ -65,6 +69,12 @@ async function get<T>(url: string): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }
+
+export const renameAccount = (accountId: string, displayName: string | null) =>
+  post<{ status: string }>('/api/accounts/rename', {
+    account_id: accountId,
+    display_name: displayName,
+  })
 
 export const fetchAccounts = () =>
   get<{ accounts: Account[] }>('/api/accounts').then((d) => d.accounts)
@@ -247,6 +257,15 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
   return res.json()
 }
 
+async function del<T>(url: string): Promise<T> {
+  const res = await fetch(url, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  return res.json()
+}
+
+export const deleteAccount = (accountId: string) =>
+  del<{ status: string }>(`/api/accounts/${accountId}`)
+
 export const acceptSuggestion = (id: number) =>
   post<{ accepted: boolean; categorized: number }>(`/api/suggestions/${id}/accept`)
 
@@ -294,14 +313,33 @@ export interface SyncStatus {
   label: string
   url: string | null
   account_count: number
-  last_balance_date: string | null
-  last_transaction_date: string | null
+  last_sync: string | null
+  seconds_ago: number | null
   days_stale: number | null
   is_stale: boolean
 }
 
 export const fetchSyncStatus = () =>
   get<{ statuses: SyncStatus[] }>('/api/sync-status').then((d) => d.statuses)
+
+export interface SyncHistoryEntry {
+  id: string
+  institution: string
+  profile: string | null
+  status: 'running' | 'complete' | 'error'
+  started_at: string
+  finished_at: string | null
+  accounts: number | null
+  transactions: number | null
+  balances: number | null
+  holdings: number | null
+  error_message: string | null
+}
+
+export const fetchSyncHistory = (limit = 20) =>
+  get<{ syncs: SyncHistoryEntry[] }>(`/api/sync-history?limit=${limit}`).then(
+    (d) => d.syncs,
+  )
 
 // ── Investments ─────────────────────────────────────────────────────
 
@@ -359,6 +397,91 @@ export interface GrantsSummary {
 }
 
 export const fetchGrants = () => get<GrantsSummary>('/api/grants')
+
+export interface Holding {
+  symbol: string
+  name: string
+  asset_class: string
+  shares: number
+  value: number
+  as_of: string
+  account_name: string
+  institution: string
+}
+
+export const fetchHoldings = (accountId?: string) => {
+  const params = new URLSearchParams()
+  if (accountId) params.set('account_id', accountId)
+  const qs = params.toString()
+  return get<{ holdings: Holding[] }>(`/api/holdings${qs ? `?${qs}` : ''}`).then(
+    (d) => d.holdings,
+  )
+}
+
+export const createManualAccount = (
+  name: string,
+  accountType: string,
+  initialValue: number,
+) =>
+  post<{ account_id: string }>('/api/accounts', {
+    name,
+    account_type: accountType,
+    initial_value: initialValue,
+  })
+
+export const updateManualBalance = (accountId: string, value: number, asOf?: string) =>
+  post<{ status: string }>(`/api/accounts/${accountId}/balance`, {
+    value,
+    as_of: asOf,
+  })
+
+// ── People & Institutions ────────────────────────────────────────────
+
+export interface PersonSummary {
+  person_id: string
+  name: string
+  account_count: number
+  total_balance: number
+  last_sync: string | null
+}
+
+export interface InstitutionSummary {
+  institution_id: string
+  label: string
+  url: string | null
+  account_count: number
+  total_balance: number
+  last_sync: string | null
+}
+
+export interface PersonDetail {
+  person_id: string
+  name: string
+  accounts: Account[]
+  total_balance: number
+  balance_history: { date: string; balance: number }[]
+  by_institution: { institution: string; label: string; balance: number }[]
+}
+
+export interface InstitutionDetail {
+  institution_id: string
+  label: string
+  url: string | null
+  accounts: Account[]
+  total_balance: number
+  balance_history_by_account: {
+    account_id: string
+    account_name: string
+    points: { date: string; balance: number }[]
+  }[]
+  by_person: { person: string; name: string; balance: number }[]
+}
+
+export const fetchPeople = () => get<{ people: PersonSummary[] }>('/api/people').then(d => d.people)
+export const fetchPersonDetail = (id: string) => get<PersonDetail>(`/api/people/${id}`)
+export const fetchInstitutions = () =>
+  get<{ institutions: InstitutionSummary[] }>('/api/institutions').then(d => d.institutions)
+export const fetchInstitutionDetail = (id: string) => get<InstitutionDetail>(`/api/institutions/${id}`)
 
 export const fetchBenchmarks = (symbols?: string[], start?: string, end?: string) => {
   const params = new URLSearchParams()

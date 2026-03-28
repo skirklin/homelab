@@ -13,13 +13,12 @@ const fmtDollar = (v: number) => {
   return `${sign}$${abs.toFixed(2)}`
 }
 
-const INST_COLORS: Record<string, string> = {
-  betterment: '#818cf8',
-  wealthfront: '#34d399',
-  ally: '#fb923c',
-  chase: '#22d3ee',
-  capital_one: '#38bdf8',
-  morgan_stanley: '#f472b6',
+function isStale(a: Account): boolean {
+  if (!a.balance_as_of) return true
+  const days = Math.floor(
+    (Date.now() - new Date(a.balance_as_of + 'T00:00:00').getTime()) / 86400000,
+  )
+  return days > 3
 }
 
 export function AccountSummary({ accounts }: Props) {
@@ -40,11 +39,10 @@ export function AccountSummary({ accounts }: Props) {
     <div className="account-sidebar">
       {sorted.map(([inst, accts]) => {
         const total = accts.reduce((s, a) => s + (a.latest_balance ?? 0), 0)
-        const color = INST_COLORS[inst] ?? '#a78bfa'
+        const anyStale = accts.some(isStale)
         return (
           <div key={inst} className="sidebar-group">
             <div className="sidebar-group-header">
-              <span className="sidebar-dot" style={{ backgroundColor: color }} />
               <span className="sidebar-inst">{inst}</span>
               <span className="sidebar-total">{fmtDollar(total)}</span>
             </div>
@@ -53,6 +51,10 @@ export function AccountSummary({ accounts }: Props) {
               .sort((a, b) => Math.abs(b.latest_balance ?? 0) - Math.abs(a.latest_balance ?? 0))
               .map((a) => (
                 <div key={a.id} className="sidebar-account">
+                  <span
+                    className="sidebar-dot"
+                    style={{ backgroundColor: isStale(a) ? '#f87171' : '#34d399' }}
+                  />
                   <span className="sidebar-account-name">{a.name}</span>
                   <span className="sidebar-account-bal">{fmtDollar(a.latest_balance ?? 0)}</span>
                 </div>

@@ -40,6 +40,10 @@ class Database:
         columns = {
             row["name"] for row in self.conn.execute("PRAGMA table_info(accounts)").fetchall()
         }
+        if "display_name" not in columns:
+            self.conn.execute("ALTER TABLE accounts ADD COLUMN display_name TEXT")
+            self.conn.commit()
+
         if "external_id" not in columns:
             self.conn.execute("ALTER TABLE accounts ADD COLUMN external_id TEXT")
             self.conn.execute(
@@ -136,6 +140,24 @@ class Database:
             if "yaml_patch" not in sr_columns:
                 self.conn.execute("ALTER TABLE suggested_rules ADD COLUMN yaml_patch TEXT")
                 self.conn.commit()
+
+        # Sync history table
+        if "sync_history" not in tables:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS sync_history (
+                    id TEXT PRIMARY KEY,
+                    institution TEXT NOT NULL,
+                    profile TEXT,
+                    status TEXT NOT NULL DEFAULT 'running',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    accounts INTEGER,
+                    transactions INTEGER,
+                    balances INTEGER,
+                    holdings INTEGER,
+                    error_message TEXT
+                );
+            """)
 
         # Recurring patterns table
         if "recurring_patterns" not in tables:
@@ -475,6 +497,52 @@ class Database:
             rows,
         )
         self.conn.commit()
+
+    # -- Sync History --
+
+    def insert_sync(
+        self, sync_id: str, institution: str, profile: str | None, started_at: str
+    ) -> None:
+        self.conn.execute(
+            """INSERT INTO sync_history (id, institution, profile, status, started_at)
+               VALUES (?, ?, ?, 'running', ?)""",
+            (sync_id, institution, profile, started_at),
+        )
+        self.conn.commit()
+
+    def complete_sync(
+        self,
+        sync_id: str,
+        accounts: int,
+        transactions: int,
+        balances: int,
+        holdings: int,
+        finished_at: str,
+    ) -> None:
+        self.conn.execute(
+            """UPDATE sync_history
+               SET status = 'complete', accounts = ?, transactions = ?, balances = ?,
+                   holdings = ?, finished_at = ?
+               WHERE id = ?""",
+            (accounts, transactions, balances, holdings, finished_at, sync_id),
+        )
+        self.conn.commit()
+
+    def fail_sync(self, sync_id: str, error_message: str, finished_at: str) -> None:
+        self.conn.execute(
+            """UPDATE sync_history SET status = 'error', error_message = ?, finished_at = ?
+               WHERE id = ?""",
+            (error_message, finished_at, sync_id),
+        )
+        self.conn.commit()
+
+    def get_sync(self, sync_id: str) -> dict[str, object] | None:
+        row = self.conn.execute(
+            "SELECT * FROM sync_history WHERE id = ?", (sync_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
 
     # -- Net Worth --
 

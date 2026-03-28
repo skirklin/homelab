@@ -5,6 +5,11 @@ export default {
   authPattern: /myaccounts\.capitalone\.com\/(accountSummary|accountDetail)/,
 
   async onPageLoad(ctx) {
-    return await ctx.captureCookies();
+    const cookieResult = await ctx.captureCookies();
+    if (cookieResult.sync_id) {
+      const syncResult = await ctx.pollSyncResult(cookieResult.sync_id);
+      return { type: "sync", ...syncResult };
+    }
+    return cookieResult;
   },
 };

@@ -7,6 +7,7 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (1);
 CREATE TABLE IF NOT EXISTS accounts (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
+    display_name  TEXT,
     institution   TEXT,
     external_id   TEXT,
     profile       TEXT,
@@ -119,3 +120,17 @@ CREATE TABLE IF NOT EXISTS transaction_tags (
     PRIMARY KEY (transaction_id, tag)
 );
 CREATE INDEX IF NOT EXISTS idx_txn_tags_tag ON transaction_tags(tag);
+
+CREATE TABLE IF NOT EXISTS sync_history (
+    id TEXT PRIMARY KEY,
+    institution TEXT NOT NULL,
+    profile TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    accounts INTEGER,
+    transactions INTEGER,
+    balances INTEGER,
+    holdings INTEGER,
+    error_message TEXT
+);

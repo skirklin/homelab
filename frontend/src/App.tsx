@@ -8,6 +8,9 @@ import { Spending } from './pages/Spending'
 import { Transactions } from './pages/Transactions'
 import { Travel } from './pages/Travel'
 import { Accounts } from './pages/Accounts'
+import AccountDetail from './pages/AccountDetail'
+import PersonDetail from './pages/PersonDetail'
+import InstitutionDetail from './pages/InstitutionDetail'
 import './App.css'
 
 const fmtDollar = (v: number) =>
@@ -79,6 +82,9 @@ function App() {
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/travel" element={<Travel />} />
             <Route path="/accounts" element={<Accounts />} />
+            <Route path="/accounts/:id" element={<AccountDetail />} />
+            <Route path="/people/:person" element={<PersonDetail />} />
+            <Route path="/institutions/:institution" element={<InstitutionDetail />} />
           </Routes>
         </main>
       </div>

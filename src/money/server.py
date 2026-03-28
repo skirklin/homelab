@@ -3,12 +3,13 @@
 import json
 import logging
 import threading
+import uuid
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from money.db import Database
-from money.models import AccountType, Balance, IngestionRecord, IngestionStatus
+from money.models import Account, AccountType, Balance, IngestionRecord, IngestionStatus
 from money.storage import RawStore
 
 log = logging.getLogger(__name__)
@@ -55,6 +56,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/accounts":
             self._handle_get_accounts()
             return
+        if self.path.startswith("/api/accounts/") and "/balance" not in self.path:
+            self._handle_get_account_detail()
+            return
         if self.path.startswith("/api/balances"):
             self._handle_get_balances()
             return
@@ -79,6 +83,12 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/sync-status"):
             self._handle_sync_status()
             return
+        if self.path.startswith("/api/sync-history"):
+            self._handle_sync_history()
+            return
+        if self.path.startswith("/api/sync/"):
+            self._handle_get_sync()
+            return
         if self.path.startswith("/api/allocation"):
             self._handle_allocation()
             return
@@ -96,6 +106,18 @@ class IngestHandler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/api/recurring"):
             self._handle_get_recurring()
+            return
+        if self.path == "/api/people":
+            self._handle_list_people()
+            return
+        if self.path.startswith("/api/people/"):
+            self._handle_get_person_detail()
+            return
+        if self.path == "/api/institutions":
+            self._handle_list_institutions()
+            return
+        if self.path.startswith("/api/institutions/"):
+            self._handle_get_institution_detail()
             return
         self._json_response(404, {"error": "not found"})
 
@@ -136,13 +158,19 @@ class IngestHandler(BaseHTTPRequestHandler):
                    WHERE account_id = ? ORDER BY date DESC LIMIT 1""",
                 (acct.id,),
             ).fetchone()
+            # display_name overrides name for UI display
+            display_name = self.db.conn.execute(
+                "SELECT display_name FROM accounts WHERE id = ?", (acct.id,)
+            ).fetchone()
             result.append(
                 {
                     "id": acct.id,
-                    "name": acct.name,
+                    "name": (display_name["display_name"] if display_name and display_name["display_name"] else None) or acct.name,
+                    "raw_name": acct.name,
                     "institution": acct.institution,
                     "account_type": acct.account_type.value,
                     "external_id": acct.external_id,
+                    "profile": acct.profile,
                     "latest_balance": bal.balance if bal else None,
                     "balance_as_of": bal.as_of.isoformat() if bal else None,
                     "total_invested": perf["invested"] if perf else None,
@@ -191,17 +219,23 @@ class IngestHandler(BaseHTTPRequestHandler):
         start = params.get("start", [None])[0]
         end = params.get("end", [None])[0]
 
-        # Get all performance data per account
-        query = """
+        # Identify stock_options accounts
+        equity_accounts: set[str] = set()
+        for row in self.db.conn.execute(
+            "SELECT id FROM accounts WHERE account_type = 'stock_options'"
+        ).fetchall():
+            equity_accounts.add(row["id"])
+
+        # Get performance data per account (investment accounts with daily data)
+        perf_rows = self.db.conn.execute("""
             SELECT p.account_id, p.date, p.balance, p.invested, p.earned
             FROM performance_history p
             ORDER BY p.account_id, p.date ASC
-        """
-        rows = self.db.conn.execute(query).fetchall()
+        """).fetchall()
 
         # Build per-account time series
         account_data: dict[str, list[tuple[str, float, float, float]]] = {}
-        for row in rows:
+        for row in perf_rows:
             aid = row["account_id"]
             if aid not in account_data:
                 account_data[aid] = []
@@ -212,6 +246,24 @@ class IngestHandler(BaseHTTPRequestHandler):
                     row["invested"] or 0.0,
                     row["earned"] or 0.0,
                 )
+            )
+
+        # Add balance-only accounts (manual assets, accounts without performance data)
+        balance_rows = self.db.conn.execute("""
+            SELECT b.account_id, b.as_of as date, b.balance
+            FROM balances b
+            WHERE b.account_id NOT IN (
+                SELECT DISTINCT account_id FROM performance_history
+            )
+            ORDER BY b.account_id, b.as_of ASC
+        """).fetchall()
+
+        for row in balance_rows:
+            aid = row["account_id"]
+            if aid not in account_data:
+                account_data[aid] = []
+            account_data[aid].append(
+                (row["date"], row["balance"], 0.0, 0.0)
             )
 
         # Collect all unique dates and forward-fill each account
@@ -226,7 +278,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         if end:
             sorted_dates = [d for d in sorted_dates if d <= end]
 
-        # For each account, build a lookup and forward-fill
+        # For each account, build a lookup
         account_series: dict[str, dict[str, tuple[float, float, float]]] = {}
         for aid, points in account_data.items():
             lookup: dict[str, tuple[float, float, float]] = {}
@@ -234,24 +286,71 @@ class IngestHandler(BaseHTTPRequestHandler):
                 lookup[d] = (bal, inv, ear)
             account_series[aid] = lookup
 
+        # Compute equity from grant vesting schedules instead of balance snapshots
+        # Load grants and FMV
+        grant_rows = self.db.conn.execute("""
+            SELECT grant_type, total_shares, strike_price, vest_dates
+            FROM option_grants
+        """).fetchall()
+        fmv_row = self.db.conn.execute(
+            "SELECT fmv_per_share FROM private_valuations ORDER BY as_of DESC LIMIT 1"
+        ).fetchone()
+        fmv = float(fmv_row["fmv_per_share"]) if fmv_row else 0.0
+
+        # Parse grants into a list of (vest_date, shares_per_vest, strike, grant_type)
+        import json as _json
+        vest_events: list[tuple[str, float, float, str]] = []
+        for g in grant_rows:
+            vest_dates_raw = g["vest_dates"]
+            if not vest_dates_raw:
+                continue
+            dates: list[str] = _json.loads(vest_dates_raw) if isinstance(vest_dates_raw, str) else vest_dates_raw
+            if not dates:
+                continue
+            shares_per_vest = g["total_shares"] / len(dates)
+            for vd in dates:
+                vest_events.append((vd, shares_per_vest, g["strike_price"], g["grant_type"]))
+        vest_events.sort(key=lambda x: x[0])
+
+        def compute_equity(as_of: str) -> float:
+            """Compute after-tax vested equity value as of a given date."""
+            total = 0.0
+            for vd, shares, strike, gtype in vest_events:
+                if vd > as_of:
+                    continue
+                per_share = fmv - strike
+                if per_share <= 0:
+                    continue
+                value = shares * per_share
+                # After-tax: ~35% for ISO, ~50% for NQ/RSU
+                tax_rate = 0.35 if gtype == "ISO" else 0.50
+                total += value * (1 - tax_rate)
+            return total
+
+        # Forward-fill liquid accounts, compute equity per date
         series: list[dict[str, Any]] = []
         last_known: dict[str, tuple[float, float, float]] = {}
         for d in sorted_dates:
-            total_bal = 0.0
+            liquid = 0.0
             total_inv = 0.0
             total_ear = 0.0
             for aid in account_data:
+                if aid in equity_accounts:
+                    continue  # equity computed from grants, not balances
                 if d in account_series[aid]:
                     last_known[aid] = account_series[aid][d]
                 if aid in last_known:
                     bal, inv, ear = last_known[aid]
-                    total_bal += bal
+                    liquid += bal
                     total_inv += inv
                     total_ear += ear
+            equity = compute_equity(d)
             series.append(
                 {
                     "date": d,
-                    "net_worth": round(total_bal, 2),
+                    "liquid": round(liquid, 2),
+                    "equity": round(equity, 2),
+                    "net_worth": round(liquid + equity, 2),
                     "invested": round(total_inv, 2),
                     "earned": round(total_ear, 2),
                 }
@@ -413,59 +512,93 @@ class IngestHandler(BaseHTTPRequestHandler):
             )
         self._json_response(200, {"transactions": transactions})
 
+    def _handle_sync_history(self) -> None:
+        """Return recent sync history."""
+        from urllib.parse import parse_qs, urlparse
+
+        params = parse_qs(urlparse(self.path).query)
+        limit = int(params.get("limit", ["20"])[0])
+
+        rows = self.db.conn.execute(
+            """SELECT id, institution, profile, status, started_at, finished_at,
+                      accounts, transactions, balances, holdings, error_message
+               FROM sync_history
+               ORDER BY started_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+        self._json_response(200, {"syncs": [dict(r) for r in rows]})
+
+    def _handle_get_sync(self) -> None:
+        """Return a sync_history record by id."""
+        sync_id = self.path.rsplit("/", 1)[-1]
+        row = self.db.get_sync(sync_id)
+        if row is None:
+            self._json_response(404, {"error": "sync not found"})
+            return
+        self._json_response(200, {k: v for k, v in row.items()})
+
     def _handle_sync_status(self) -> None:
         """Return per-login freshness status."""
         from money.config import load_config
 
         config = load_config()
 
-        # Get freshness data per profile (login_id) from DB
-        rows = self.db.conn.execute("""
-            SELECT a.profile,
-                   a.institution,
-                   MAX(b.as_of) as last_balance,
-                   MAX(t.date) as last_transaction,
-                   COUNT(DISTINCT a.id) as account_count
-            FROM accounts a
-            LEFT JOIN balances b ON b.account_id = a.id
-            LEFT JOIN transactions t ON t.account_id = a.id
-            WHERE a.institution IS NOT NULL
-            GROUP BY a.profile, a.institution
+        # Get account counts per profile
+        account_rows = self.db.conn.execute("""
+            SELECT profile, institution, COUNT(DISTINCT id) as account_count
+            FROM accounts
+            WHERE institution IS NOT NULL
+            GROUP BY profile, institution
         """).fetchall()
 
-        # Keyed by (profile, institution) — profile may be None for legacy rows
-        db_data: dict[tuple[str | None, str], dict[str, Any]] = {}
-        for row in rows:
-            key = (row["profile"], row["institution"])
-            db_data[key] = {
-                "last_balance": row["last_balance"],
-                "last_transaction": row["last_transaction"],
-                "account_count": row["account_count"],
-            }
+        account_counts: dict[tuple[str | None, str], int] = {}
+        for row in account_rows:
+            account_counts[(row["profile"], row["institution"])] = row["account_count"]
+
+        # Get last successful sync timestamp per profile from sync_history
+        sync_rows = self.db.conn.execute("""
+            SELECT profile, institution, MAX(finished_at) as last_sync
+            FROM sync_history
+            WHERE status = 'complete'
+            GROUP BY profile, institution
+        """).fetchall()
+
+        last_syncs: dict[tuple[str | None, str], str] = {}
+        for row in sync_rows:
+            last_syncs[(row["profile"], row["institution"])] = row["last_sync"]
 
         statuses: list[dict[str, Any]] = []
         for login_id, login_config in config.logins.items():
             inst_id = login_config.institution
             inst_config = config.institutions.get(inst_id)
 
-            # Match by profile first, fall back to institution-only match
-            data = (
-                db_data.get((login_id, inst_id))
-                or db_data.get((None, inst_id))
-                or {}
+            count = (
+                account_counts.get((login_id, inst_id))
+                or account_counts.get((None, inst_id))
+                or 0
             )
-            last_balance = data.get("last_balance")
-            last_txn = data.get("last_transaction")
-            freshest = max(last_balance or "", last_txn or "")
-            days_stale = (
-                (date.today() - date.fromisoformat(freshest)).days
-                if freshest else None
+            last_sync = (
+                last_syncs.get((login_id, inst_id))
+                or last_syncs.get((None, inst_id))
             )
 
             person_config = config.people.get(login_config.person)
             person_name = person_config.name if person_config else login_config.person
             inst_label = (inst_config.label if inst_config else inst_id) or inst_id
             url = inst_config.url if inst_config else None
+
+            # Compute staleness from sync timestamp
+            if last_sync:
+                sync_dt = datetime.fromisoformat(last_sync)
+                seconds_ago = (datetime.now() - sync_dt).total_seconds()
+                days_stale = seconds_ago / 86400
+                is_stale = days_stale > 3
+            else:
+                seconds_ago = None
+                days_stale = None
+                is_stale = False
 
             statuses.append({
                 "login_id": login_id,
@@ -474,11 +607,11 @@ class IngestHandler(BaseHTTPRequestHandler):
                 "person_name": person_name,
                 "label": f"{inst_label} ({person_name})",
                 "url": url,
-                "account_count": data.get("account_count", 0),
-                "last_balance_date": last_balance,
-                "last_transaction_date": last_txn,
+                "account_count": count,
+                "last_sync": last_sync,
+                "seconds_ago": seconds_ago,
                 "days_stale": days_stale,
-                "is_stale": days_stale is not None and days_stale > 3,
+                "is_stale": is_stale,
             })
 
         self._json_response(200, {"statuses": statuses})
@@ -1096,6 +1229,290 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         self._json_response(200, {"patterns": patterns})
 
+    def _handle_list_people(self) -> None:
+        """Return list of people with account count, total balance, last sync."""
+        from money.config import load_config
+
+        config = load_config()
+
+        people_list: list[dict[str, Any]] = []
+        for person_id, person_cfg in config.people.items():
+            # Get accounts for this person (profile starts with "person_id@")
+            acct_rows = self.db.conn.execute(
+                """SELECT COUNT(*) as cnt FROM accounts
+                   WHERE profile LIKE ?""",
+                (f"{person_id}@%",),
+            ).fetchone()
+            account_count = acct_rows["cnt"] if acct_rows else 0
+
+            # Total balance: latest balance per account
+            bal_row = self.db.conn.execute(
+                """SELECT SUM(b.balance) as total
+                   FROM balances b
+                   JOIN accounts a ON b.account_id = a.id
+                   WHERE a.profile LIKE ?
+                     AND b.as_of = (
+                         SELECT MAX(b2.as_of) FROM balances b2
+                         WHERE b2.account_id = b.account_id
+                     )""",
+                (f"{person_id}@%",),
+            ).fetchone()
+            total_balance = bal_row["total"] if bal_row and bal_row["total"] else 0.0
+
+            # Last sync time
+            sync_row = self.db.conn.execute(
+                """SELECT MAX(sh.finished_at) as last_sync
+                   FROM sync_history sh
+                   WHERE sh.profile LIKE ? AND sh.status = 'complete'""",
+                (f"{person_id}@%",),
+            ).fetchone()
+            last_sync = sync_row["last_sync"] if sync_row else None
+
+            people_list.append({
+                "id": person_id,
+                "name": person_cfg.name,
+                "account_count": account_count,
+                "total_balance": total_balance,
+                "last_sync": last_sync,
+            })
+
+        self._json_response(200, {"people": people_list})
+
+    def _handle_get_person_detail(self) -> None:
+        """Return aggregated data for a single person."""
+        from money.config import load_config
+
+        person_id = self.path.split("/api/people/", 1)[1].split("?")[0]
+        config = load_config()
+
+        person_cfg = config.people.get(person_id)
+        if person_cfg is None:
+            self._json_response(404, {"error": "person not found"})
+            return
+
+        profile_pattern = f"{person_id}@%"
+
+        # Accounts with latest balance
+        acct_rows = self.db.conn.execute(
+            """SELECT a.id, a.name, a.institution, a.account_type, a.profile,
+                      a.display_name
+               FROM accounts a
+               WHERE a.profile LIKE ?
+               ORDER BY a.institution, a.name""",
+            (profile_pattern,),
+        ).fetchall()
+
+        accounts: list[dict[str, Any]] = []
+        total_balance = 0.0
+        institution_totals: dict[str, float] = {}
+
+        for row in acct_rows:
+            bal = self.db.get_latest_balance(row["id"], date.today())
+            balance = bal.balance if bal else None
+            balance_as_of = bal.as_of.isoformat() if bal else None
+            display_name = row["display_name"] if row["display_name"] else None
+
+            accounts.append({
+                "id": row["id"],
+                "name": display_name or row["name"],
+                "raw_name": row["name"],
+                "institution": row["institution"],
+                "account_type": row["account_type"],
+                "profile": row["profile"],
+                "latest_balance": balance,
+                "balance_as_of": balance_as_of,
+            })
+
+            if balance is not None:
+                total_balance += balance
+                inst = row["institution"] or "unknown"
+                institution_totals[inst] = institution_totals.get(inst, 0.0) + balance
+
+        # Net worth breakdown by institution
+        by_institution = [
+            {
+                "institution": inst,
+                "label": config.institutions[inst].label if inst in config.institutions else inst,
+                "balance": bal,
+            }
+            for inst, bal in sorted(institution_totals.items())
+        ]
+
+        # Balance history: aggregate daily balance across all accounts
+        history_rows = self.db.conn.execute(
+            """SELECT b.as_of as date, SUM(b.balance) as balance
+               FROM balances b
+               JOIN accounts a ON b.account_id = a.id
+               WHERE a.profile LIKE ?
+               GROUP BY b.as_of
+               ORDER BY b.as_of""",
+            (profile_pattern,),
+        ).fetchall()
+        balance_history = [
+            {"date": r["date"], "balance": r["balance"]}
+            for r in history_rows
+        ]
+
+        self._json_response(200, {
+            "id": person_id,
+            "name": person_cfg.name,
+            "accounts": accounts,
+            "total_balance": total_balance,
+            "by_institution": by_institution,
+            "balance_history": balance_history,
+        })
+
+    def _handle_list_institutions(self) -> None:
+        """Return list of institutions with account count, total balance, last sync."""
+        from money.config import load_config
+
+        config = load_config()
+
+        institutions_list: list[dict[str, Any]] = []
+        for inst_id, inst_cfg in config.institutions.items():
+            acct_row = self.db.conn.execute(
+                "SELECT COUNT(*) as cnt FROM accounts WHERE institution = ?",
+                (inst_id,),
+            ).fetchone()
+            account_count = acct_row["cnt"] if acct_row else 0
+
+            bal_row = self.db.conn.execute(
+                """SELECT SUM(b.balance) as total
+                   FROM balances b
+                   JOIN accounts a ON b.account_id = a.id
+                   WHERE a.institution = ?
+                     AND b.as_of = (
+                         SELECT MAX(b2.as_of) FROM balances b2
+                         WHERE b2.account_id = b.account_id
+                     )""",
+                (inst_id,),
+            ).fetchone()
+            total_balance = bal_row["total"] if bal_row and bal_row["total"] else 0.0
+
+            sync_row = self.db.conn.execute(
+                """SELECT MAX(sh.finished_at) as last_sync
+                   FROM sync_history sh
+                   WHERE sh.institution = ? AND sh.status = 'complete'""",
+                (inst_id,),
+            ).fetchone()
+            last_sync = sync_row["last_sync"] if sync_row else None
+
+            institutions_list.append({
+                "id": inst_id,
+                "label": inst_cfg.label or inst_id,
+                "url": inst_cfg.url,
+                "account_count": account_count,
+                "total_balance": total_balance,
+                "last_sync": last_sync,
+            })
+
+        self._json_response(200, {"institutions": institutions_list})
+
+    def _handle_get_institution_detail(self) -> None:
+        """Return aggregated data for a single institution."""
+        from money.config import load_config
+
+        inst_id = self.path.split("/api/institutions/", 1)[1].split("?")[0]
+        config = load_config()
+
+        inst_cfg = config.institutions.get(inst_id)
+        if inst_cfg is None:
+            self._json_response(404, {"error": "institution not found"})
+            return
+
+        # Accounts at this institution with latest balance
+        acct_rows = self.db.conn.execute(
+            """SELECT a.id, a.name, a.institution, a.account_type, a.profile,
+                      a.display_name
+               FROM accounts a
+               WHERE a.institution = ?
+               ORDER BY a.profile, a.name""",
+            (inst_id,),
+        ).fetchall()
+
+        accounts: list[dict[str, Any]] = []
+        total_balance = 0.0
+
+        for row in acct_rows:
+            bal = self.db.get_latest_balance(row["id"], date.today())
+            balance = bal.balance if bal else None
+            balance_as_of = bal.as_of.isoformat() if bal else None
+            display_name = row["display_name"] if row["display_name"] else None
+
+            # Extract person from profile (e.g. "scott@ally" -> "scott")
+            profile = row["profile"] or ""
+            person = profile.split("@")[0] if "@" in profile else None
+
+            accounts.append({
+                "id": row["id"],
+                "name": display_name or row["name"],
+                "raw_name": row["name"],
+                "person": person,
+                "account_type": row["account_type"],
+                "profile": row["profile"],
+                "latest_balance": balance,
+                "balance_as_of": balance_as_of,
+            })
+
+            if balance is not None:
+                total_balance += balance
+
+        # Per-account balance history for stacked chart
+        history_rows = self.db.conn.execute(
+            """SELECT a.id as account_id,
+                      COALESCE(a.display_name, a.name) as account_name,
+                      b.as_of as date,
+                      b.balance
+               FROM balances b
+               JOIN accounts a ON b.account_id = a.id
+               WHERE a.institution = ?
+               ORDER BY a.name, b.as_of""",
+            (inst_id,),
+        ).fetchall()
+
+        # Group by account
+        account_history: dict[str, dict[str, Any]] = {}
+        for row in history_rows:
+            aid = row["account_id"]
+            if aid not in account_history:
+                account_history[aid] = {
+                    "account_id": aid,
+                    "account_name": row["account_name"],
+                    "points": [],
+                }
+            account_history[aid]["points"].append({
+                "date": row["date"],
+                "balance": row["balance"],
+            })
+
+        balance_history_by_account = list(account_history.values())
+
+        # Breakdown by person
+        person_totals: dict[str, float] = {}
+        for acct in accounts:
+            person = acct.get("person") or "unknown"
+            if acct["latest_balance"] is not None:
+                person_totals[person] = person_totals.get(person, 0) + acct["latest_balance"]
+
+        by_person = [
+            {
+                "person": p,
+                "name": config.people[p].name if p in config.people else p,
+                "balance": bal,
+            }
+            for p, bal in sorted(person_totals.items())
+        ]
+
+        self._json_response(200, {
+            "id": inst_id,
+            "label": inst_cfg.label or inst_id,
+            "url": inst_cfg.url,
+            "accounts": accounts,
+            "total_balance": total_balance,
+            "by_person": by_person,
+            "balance_history_by_account": balance_history_by_account,
+        })
+
     def _handle_recurring_action(self) -> None:
         from money.recurring import confirm_pattern, dismiss_pattern
 
@@ -1195,6 +1612,43 @@ class IngestHandler(BaseHTTPRequestHandler):
         thread.start()
         self._json_response(202, {"status": "generating"})
 
+    def do_DELETE(self) -> None:
+        try:
+            self._do_DELETE()
+        finally:
+            self._close_db()
+
+    def _do_DELETE(self) -> None:
+        if self.path.startswith("/api/accounts/"):
+            self._handle_delete_account()
+            return
+        self._json_response(404, {"error": "not found"})
+
+    def _handle_delete_account(self) -> None:
+        """Delete a manual account and all its associated data."""
+        account_id = self.path.split("/api/accounts/", 1)[1].split("?")[0]
+
+        # Verify account exists and is manual (no institution)
+        row = self.db.conn.execute(
+            "SELECT institution FROM accounts WHERE id = ?", (account_id,)
+        ).fetchone()
+        if row is None:
+            self._json_response(404, {"error": "account not found"})
+            return
+        if row["institution"] is not None:
+            self._json_response(400, {"error": "can only delete manual accounts"})
+            return
+
+        # Delete associated data, then the account
+        self.db.conn.execute("DELETE FROM balances WHERE account_id = ?", (account_id,))
+        self.db.conn.execute("DELETE FROM transactions WHERE account_id = ?", (account_id,))
+        self.db.conn.execute("DELETE FROM holdings WHERE account_id = ?", (account_id,))
+        self.db.conn.execute("DELETE FROM performance_history WHERE account_id = ?", (account_id,))
+        self.db.conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        self.db.conn.commit()
+
+        self._json_response(200, {"status": "ok", "deleted": account_id})
+
     def do_POST(self) -> None:
         try:
             self._do_POST()
@@ -1211,11 +1665,17 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path == "/network-log":
             self._handle_network_log()
             return
-        if self.path == "/auth-token":
-            self._handle_auth_token()
+        if self.path == "/api/accounts":
+            self._handle_create_account()
             return
-        if self.path == "/trigger-sync":
-            self._handle_trigger_sync()
+        if self.path == "/api/accounts/rename":
+            self._handle_rename_account()
+            return
+        if (
+            self.path.startswith("/api/accounts/")
+            and self.path.endswith("/balance")
+        ):
+            self._handle_update_balance()
             return
         if self.path == "/api/suggestions/generate" or self.path == "/api/suggestions/reclassify":
             self._handle_generate_suggestions()
@@ -1252,15 +1712,19 @@ class IngestHandler(BaseHTTPRequestHandler):
         institution: str,
         login_id: str | None,
         cookies: dict[str, str] | None = None,
-    ) -> None:
-        """Kick off a background sync for an institution."""
+    ) -> str:
+        """Kick off a background sync for an institution. Returns sync_id."""
+        sync_id = str(uuid.uuid4())
+        started_at = datetime.now().isoformat()
+        self.db.insert_sync(sync_id, institution, login_id, started_at)
         thread = threading.Thread(
             target=_run_auto_sync,
             args=(self.db.path, self.store, institution, login_id),
-            kwargs={"cookies": cookies},
+            kwargs={"cookies": cookies, "sync_id": sync_id},
             daemon=True,
         )
         thread.start()
+        return sync_id
 
     def _handle_cookies(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
@@ -1300,12 +1764,13 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         # Convert cookie list to dict and pass directly to sync
         cookies_dict: dict[str, str] = {c["name"]: c["value"] for c in cookies_raw}
-        self._trigger_auto_sync(institution, login_id, cookies=cookies_dict)
+        sync_id = self._trigger_auto_sync(institution, login_id, cookies=cookies_dict)
 
         self._json_response(
             200,
             {
                 "status": "ok",
+                "sync_id": sync_id,
                 "institution": institution,
                 "cookies_stored": len(cookies_raw),
             },
@@ -1358,20 +1823,84 @@ class IngestHandler(BaseHTTPRequestHandler):
                 log.info("  %s", route)
 
         login_id = self._resolve_login_id(institution)
-        self._trigger_auto_sync(institution, login_id)
+        sync_id = self._trigger_auto_sync(institution, login_id)
 
         self._json_response(
             200,
             {
                 "status": "ok",
+                "sync_id": sync_id,
                 "institution": institution,
                 "entries_stored": len(entries),
                 "api_routes_found": len(routes),
             },
         )
 
-    def _handle_trigger_sync(self) -> None:
-        """Handle a sync trigger from the extension (e.g. Ally needs Playwright)."""
+    def _handle_get_account_detail(self) -> None:
+        """Return detailed info for a single account."""
+        # Path: /api/accounts/<id>
+        account_id = self.path.split("/api/accounts/", 1)[1].split("?")[0]
+        account = self.db.get_account(account_id)
+        if account is None:
+            self._json_response(404, {"error": "account not found"})
+            return
+
+        bal = self.db.get_latest_balance(account.id, date.today())
+
+        # Balance history
+        balance_rows = self.db.conn.execute(
+            "SELECT as_of, balance, source FROM balances WHERE account_id = ? ORDER BY as_of ASC",
+            (account.id,),
+        ).fetchall()
+        balance_history = [
+            {"date": r["as_of"], "balance": r["balance"], "source": r["source"]}
+            for r in balance_rows
+        ]
+
+        # Transaction count
+        txn_row = self.db.conn.execute(
+            "SELECT COUNT(*) as cnt FROM transactions WHERE account_id = ?",
+            (account.id,),
+        ).fetchone()
+        transaction_count = txn_row["cnt"] if txn_row else 0
+
+        # Holding count
+        holding_row = self.db.conn.execute(
+            """SELECT COUNT(*) as cnt FROM holdings
+               WHERE account_id = ? AND as_of = (
+                   SELECT MAX(as_of) FROM holdings WHERE account_id = ?
+               )""",
+            (account.id, account.id),
+        ).fetchone()
+        holding_count = holding_row["cnt"] if holding_row else 0
+
+        # display_name override
+        dn_row = self.db.conn.execute(
+            "SELECT display_name FROM accounts WHERE id = ?", (account.id,)
+        ).fetchone()
+        display_name = (
+            dn_row["display_name"]
+            if dn_row and dn_row["display_name"]
+            else None
+        )
+
+        self._json_response(200, {
+            "id": account.id,
+            "name": display_name or account.name,
+            "raw_name": account.name,
+            "institution": account.institution,
+            "account_type": account.account_type.value,
+            "external_id": account.external_id,
+            "profile": account.profile,
+            "latest_balance": bal.balance if bal else None,
+            "balance_as_of": bal.as_of.isoformat() if bal else None,
+            "balance_history": balance_history,
+            "transaction_count": transaction_count,
+            "holding_count": holding_count,
+        })
+
+    def _handle_create_account(self) -> None:
+        """Create a manual account (no institution/external_id)."""
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
             self._json_response(400, {"error": "empty request body"})
@@ -1383,28 +1912,54 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": f"invalid JSON: {e}"})
             return
 
-        institution = data.get("institution")
-        if not institution:
-            self._json_response(400, {"error": "missing 'institution'"})
+        name = data.get("name")
+        account_type_str = data.get("account_type")
+        initial_value = data.get("initial_value")
+
+        if not name or not isinstance(name, str):
+            self._json_response(400, {"error": "missing or invalid 'name'"})
+            return
+        if not account_type_str or account_type_str not in VALID_ACCOUNT_TYPES:
+            self._json_response(400, {
+                "error": f"invalid account_type, must be one of: {sorted(VALID_ACCOUNT_TYPES)}",
+            })
             return
 
-        login_id = self._resolve_login_id(institution)
-        log.info("Sync triggered for %s (login: %s)", institution, login_id)
-
-        self._trigger_playwright_sync(institution, login_id)
-
-        self._json_response(200, {"status": "ok", "institution": institution, "login_id": login_id})
-
-    def _trigger_playwright_sync(self, institution: str, login_id: str | None) -> None:
-        """Run a Playwright-based sync in a background thread."""
-        thread = threading.Thread(
-            target=_run_playwright_sync,
-            args=(self.db.path, self.store, institution, login_id),
-            daemon=True,
+        account = Account(
+            name=name,
+            account_type=AccountType(account_type_str),
         )
-        thread.start()
+        self.db.insert_account(account)
 
-    def _handle_auth_token(self) -> None:
+        if initial_value is not None:
+            try:
+                value_float = float(initial_value)
+            except (ValueError, TypeError):
+                self._json_response(400, {"error": "invalid initial_value"})
+                return
+            self.db.insert_balance(
+                Balance(
+                    account_id=account.id,
+                    as_of=date.today(),
+                    balance=value_float,
+                    source="manual",
+                )
+            )
+
+        self._json_response(201, {
+            "id": account.id,
+            "name": account.name,
+            "account_type": account.account_type.value,
+            "latest_balance": float(initial_value) if initial_value is not None else None,
+        })
+
+    def _handle_update_balance(self) -> None:
+        """Record a new balance for a manual account."""
+        # Path: /api/accounts/<id>/balance
+        path_parts = self.path.split("/")
+        # ['', 'api', 'accounts', '<id>', 'balance']
+        account_id = path_parts[3]
+
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
             self._json_response(400, {"error": "empty request body"})
@@ -1416,27 +1971,68 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(400, {"error": f"invalid JSON: {e}"})
             return
 
-        institution = data.get("institution")
-        if not institution or not isinstance(institution, str):
-            self._json_response(400, {"error": "missing or invalid 'institution' field"})
+        value = data.get("value")
+        if value is None:
+            self._json_response(400, {"error": "missing 'value'"})
             return
 
-        from money.config import DATA_DIR
+        try:
+            value_float = float(value)
+        except (ValueError, TypeError):
+            self._json_response(400, {"error": "invalid 'value'"})
+            return
 
-        token_dir = DATA_DIR / "auth_tokens"
-        token_dir.mkdir(parents=True, exist_ok=True)
+        account = self.db.get_account(account_id)
+        if account is None:
+            self._json_response(404, {"error": "account not found"})
+            return
 
-        path = token_dir / f"{institution}.json"
-        path.write_text(json.dumps(data, indent=2))
-        log.info("Stored auth token for %s (expires in %ss)", institution, data.get("expiresIn"))
+        as_of_str = data.get("as_of")
+        as_of = date.fromisoformat(as_of_str) if as_of_str else date.today()
 
-        self._json_response(
-            200,
-            {
-                "status": "ok",
-                "institution": institution,
-            },
+        self.db.insert_balance(
+            Balance(
+                account_id=account_id,
+                as_of=as_of,
+                balance=value_float,
+                source="manual",
+            )
         )
+
+        self._json_response(200, {
+            "status": "ok",
+            "account_id": account_id,
+            "balance": value_float,
+            "as_of": as_of.isoformat(),
+        })
+
+    def _handle_rename_account(self) -> None:
+        """Set or clear a display_name for an account."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self._json_response(400, {"error": "empty request body"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length))
+        except json.JSONDecodeError as e:
+            self._json_response(400, {"error": f"invalid JSON: {e}"})
+            return
+
+        account_id = data.get("account_id")
+        display_name = data.get("display_name")  # null to clear
+
+        if not account_id:
+            self._json_response(400, {"error": "missing account_id"})
+            return
+
+        self.db.conn.execute(
+            "UPDATE accounts SET display_name = ? WHERE id = ?",
+            (display_name or None, account_id),
+        )
+        self.db.conn.commit()
+
+        self._json_response(200, {"status": "ok", "account_id": account_id, "display_name": display_name})
 
     def _handle_ingest(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
@@ -1603,58 +2199,13 @@ def _process_ingest(
     }
 
 
-def _run_playwright_sync(
-    db_path: str,
-    store: RawStore,
-    institution: str,
-    login_id: str | None,
-) -> None:
-    """Run a Playwright-based sync (e.g. Ally) in the background."""
-    sync_key = login_id or institution
-
-    with _sync_lock:
-        if sync_key in _active_syncs:
-            log.info("Sync already in progress for %s, skipping", sync_key)
-            return
-        _active_syncs.add(sync_key)
-
-    db = Database(db_path, check_same_thread=False)
-    try:
-        db.initialize()
-        log.info("Playwright sync starting for %s (login: %s)", institution, login_id)
-
-        from money.ingest.scrapers.ally import login_ally
-
-        profile = login_id or institution
-        token, cookies_dict = login_ally(profile, headless=True)
-        cookies_dict["Ally-CIAM-Token"] = token
-
-        from money.ingest.ally_api import sync_ally_api
-
-        sync_ally_api(db, store, profile=profile, cookies=cookies_dict)
-
-        from money.benchmarks import enrich_holdings_asset_classes
-        from money.categorize import apply_rules
-
-        enrich_holdings_asset_classes(db)
-        apply_rules(db)
-
-        log.info("Playwright sync complete for %s (login: %s)", institution, login_id)
-
-    except Exception:
-        log.exception("Playwright sync failed for %s (login: %s)", institution, login_id)
-    finally:
-        with _sync_lock:
-            _active_syncs.discard(sync_key)
-        db.close()
-
-
 def _run_auto_sync(
     db_path: str,
     store: RawStore,
     institution: str,
     login_id: str | None = None,
     cookies: dict[str, str] | None = None,
+    sync_id: str | None = None,
 ) -> None:
     """Run a sync for an institution in the background after receiving fresh auth data."""
     sync_key = login_id or institution
@@ -1662,6 +2213,13 @@ def _run_auto_sync(
     with _sync_lock:
         if sync_key in _active_syncs:
             log.info("Sync already in progress for %s, skipping", sync_key)
+            if sync_id:
+                db = Database(db_path, check_same_thread=False)
+                try:
+                    db.initialize()
+                    db.fail_sync(sync_id, "Sync already in progress", datetime.now().isoformat())
+                finally:
+                    db.close()
             return
         _active_syncs.add(sync_key)
 
@@ -1676,11 +2234,30 @@ def _run_auto_sync(
             inst = get_institution(institution)
         except KeyError:
             log.info("No auto-sync configured for %s", institution)
+            if sync_id:
+                db.fail_sync(
+                    sync_id,
+                    f"No auto-sync configured for {institution}",
+                    datetime.now().isoformat(),
+                )
             return
 
-        if inst.playwright_sync:
-            log.info("Skipping auto-sync for %s (requires Playwright)", institution)
-            return
+        # Snapshot counts before sync
+        before = db.conn.execute(
+            """SELECT
+                   (SELECT COUNT(*) FROM accounts WHERE institution = ?) as accounts,
+                   (SELECT COUNT(*) FROM transactions t
+                    JOIN accounts a ON t.account_id = a.id
+                    WHERE a.institution = ?) as transactions,
+                   (SELECT COUNT(*) FROM balances b
+                    JOIN accounts a ON b.account_id = a.id
+                    WHERE a.institution = ?) as balances,
+                   (SELECT COUNT(*) FROM holdings h
+                    JOIN accounts a ON h.account_id = a.id
+                    WHERE a.institution = ?) as holdings""",
+            (institution, institution, institution, institution),
+        ).fetchone()
+        assert before is not None
 
         # Cookie-based institutions get cookies passed through;
         # network-log institutions (chase, morgan_stanley) don't use cookies.
@@ -1695,10 +2272,42 @@ def _run_auto_sync(
         enrich_holdings_asset_classes(db)
         apply_rules(db)
 
+        # Snapshot counts after sync and record deltas
+        after = db.conn.execute(
+            """SELECT
+                   (SELECT COUNT(*) FROM accounts WHERE institution = ?) as accounts,
+                   (SELECT COUNT(*) FROM transactions t
+                    JOIN accounts a ON t.account_id = a.id
+                    WHERE a.institution = ?) as transactions,
+                   (SELECT COUNT(*) FROM balances b
+                    JOIN accounts a ON b.account_id = a.id
+                    WHERE a.institution = ?) as balances,
+                   (SELECT COUNT(*) FROM holdings h
+                    JOIN accounts a ON h.account_id = a.id
+                    WHERE a.institution = ?) as holdings""",
+            (institution, institution, institution, institution),
+        ).fetchone()
+        assert after is not None
+
+        if sync_id:
+            db.complete_sync(
+                sync_id,
+                accounts=int(after["accounts"]),
+                transactions=int(after["transactions"]) - int(before["transactions"]),
+                balances=int(after["balances"]) - int(before["balances"]),
+                holdings=int(after["holdings"]) - int(before["holdings"]),
+                finished_at=datetime.now().isoformat(),
+            )
+
         log.info("Auto-sync complete for %s (login: %s)", institution, login_id)
 
-    except Exception:
+    except Exception as exc:
         log.exception("Auto-sync failed for %s (login: %s)", institution, login_id)
+        if sync_id:
+            try:
+                db.fail_sync(sync_id, str(exc), datetime.now().isoformat())
+            except Exception:
+                log.exception("Failed to record sync failure for %s", sync_id)
     finally:
         with _sync_lock:
             _active_syncs.discard(sync_key)

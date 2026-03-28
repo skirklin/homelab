@@ -15,6 +15,8 @@ class AccountType(Enum):
     FOUR_OH_ONE_K = "401k"
     STOCK_OPTIONS = "stock_options"
     REAL_ESTATE = "real_estate"
+    VEHICLE = "vehicle"
+    OTHER = "other"
 
 
 class IngestionStatus(Enum):
