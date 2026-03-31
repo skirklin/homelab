@@ -165,7 +165,11 @@ class IngestHandler(BaseHTTPRequestHandler):
             result.append(
                 {
                     "id": acct.id,
-                    "name": (display_name["display_name"] if display_name and display_name["display_name"] else None) or acct.name,
+                    "name": (
+                        display_name["display_name"]
+                        if display_name and display_name["display_name"]
+                        else None
+                    ) or acct.name,
                     "raw_name": acct.name,
                     "institution": acct.institution,
                     "account_type": acct.account_type.value,
@@ -304,7 +308,10 @@ class IngestHandler(BaseHTTPRequestHandler):
             vest_dates_raw = g["vest_dates"]
             if not vest_dates_raw:
                 continue
-            dates: list[str] = _json.loads(vest_dates_raw) if isinstance(vest_dates_raw, str) else vest_dates_raw
+            dates: list[str] = (
+                _json.loads(vest_dates_raw) if isinstance(vest_dates_raw, str)
+                else vest_dates_raw
+            )
             if not dates:
                 continue
             shares_per_vest = g["total_shares"] / len(dates)
@@ -2032,7 +2039,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         )
         self.db.conn.commit()
 
-        self._json_response(200, {"status": "ok", "account_id": account_id, "display_name": display_name})
+        self._json_response(200, {
+            "status": "ok", "account_id": account_id, "display_name": display_name,
+        })
 
     def _handle_ingest(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))

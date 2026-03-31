@@ -3,9 +3,10 @@
 import importlib
 import logging
 import pkgutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from money.db import Database
 

@@ -122,7 +122,7 @@ def parse_raw_ally(
     db: Database,
     inst_dir: Path,
     timestamp: str,
-    profile: str,
+    profile: str | None,
 ) -> dict[str, int]:
     """Parse raw Ally API captures for a given timestamp and write to DB.
 
@@ -135,46 +135,35 @@ def parse_raw_ally(
     as_of = ts_to_date(timestamp)
 
     from money.ingest.schemas import AllyAccount
+    from money.ingest.schemas import AllyTransaction as AllyTxnSchema
 
     accounts_data = json.loads((inst_dir / f"{timestamp}_accounts.json").read_text())
 
     # transfer-accounts format uses "accounts" key, old format uses "data"
-    raw_list = accounts_data.get("accounts") or accounts_data.get("data") or []
-    accounts: list[AllyAccount] = list(raw_list)
+    raw_list: list[dict[str, Any]] = (
+        accounts_data.get("accounts") or accounts_data.get("data") or []
+    )
     raw_key = f"ally/{profile}/{timestamp}_accounts.json"
+
+    # Filter out external and non-ACTIVE accounts before pydantic validation
+    def _is_internal_active(raw: dict[str, Any]) -> bool:
+        details = raw.get("domainDetails", {})
+        if details.get("externalAccountIndicator"):
+            return False
+        status = raw.get("accountStatus", "")
+        return not (isinstance(status, str) and status.upper() != "ACTIVE")
+
+    raw_list = [r for r in raw_list if _is_internal_active(r)]
 
     seen_transactions: set[tuple[str, float, str]] = set()
     account_count = 0
     txn_count_total = 0
-    for acct in accounts:
-        details = acct.get("domainDetails", {})
+    for raw_acct_dict in raw_list:
+        acct = AllyAccount.model_validate(raw_acct_dict)
 
-        # Skip external/linked accounts (e.g. Bank of America)
-        if details.get("externalAccountIndicator"):
-            continue
-
-        acct_number = (
-            acct.get("accountNumberPvtEncrypt")
-            or acct.get("accountNumber", "")
-        )
-        acct_name = (
-            acct.get("nickname")
-            or details.get("accountNickname")
-            or acct.get("nickName")
-            or acct.get("name", f"Account {str(acct_number)[-4:]}")
-        )
-        acct_type_str = acct.get("accountType") or acct.get("type", "DDA")
-        status = acct.get("accountStatus") or acct.get("status", "")
-        current_balance = (
-            acct.get("currentBalance")
-            or acct.get("balance", {}).get("current")
-        )
-
-        if status.upper() != "ACTIVE":
-            log.info("Skipping %s account: %s", status, acct_name)
-            continue
-
-        external_id = str(acct_number)[-4:] if acct_number else ""
+        acct_name = acct.nickname
+        external_id = acct.accountNumberPvtEncrypt[-4:]
+        acct_type_str = acct.accountType
         account_type = ACCOUNT_TYPE_MAP.get(acct_type_str, AccountType.CHECKING)
 
         account = db.get_or_create_account(
@@ -187,16 +176,15 @@ def parse_raw_ally(
         account_count += 1
         log.info("Ally: %s ••%s [%s]", acct_name, external_id, account_type.value)
 
-        if current_balance is not None:
-            db.insert_balance(
-                Balance(
-                    account_id=account.id,
-                    as_of=as_of,
-                    balance=float(current_balance),
-                    source="ally_api",
-                    raw_file_ref=raw_key,
-                )
+        db.insert_balance(
+            Balance(
+                account_id=account.id,
+                as_of=as_of,
+                balance=acct.currentBalance,
+                source="ally_api",
+                raw_file_ref=raw_key,
             )
+        )
 
         # Transactions
         txn_path = inst_dir / f"{timestamp}_{external_id}_transactions.json"
@@ -208,12 +196,13 @@ def parse_raw_ally(
 
         txn_key = f"ally/{profile}/{timestamp}_{external_id}_transactions.json"
         txn_count = 0
-        for txn in txns_raw:
-            txn_date_str = txn["transactionPostingDate"]
-            txn_amount = txn["transactionAmountPvtEncrypt"]
-            txn_desc = txn["transactionDescription"]
+        txns = [AllyTxnSchema.model_validate(t) for t in txns_raw]
+        for txn in txns:
+            txn_date_str = txn.transactionPostingDate
+            txn_amount = txn.transactionAmountPvtEncrypt
+            txn_desc = txn.transactionDescription
 
-            if txn_amount is None or not txn_date_str:
+            if not txn_date_str:
                 continue
 
             fingerprint = (txn_date_str[:10], float(txn_amount), txn_desc)
@@ -227,7 +216,7 @@ def parse_raw_ally(
                     date=date.fromisoformat(txn_date_str[:10]),
                     amount=float(txn_amount),
                     description=txn_desc,
-                    category=txn.get("transactionType"),
+                    category=txn.transactionType,
                     raw_file_ref=txn_key,
                 )
             )
@@ -583,7 +572,7 @@ def sync_ally(db: Database, store: RawStore, profile: str) -> None:
         raise
 
 
-from money.ingest.registry import InstitutionInfo
+from money.ingest.registry import InstitutionInfo  # noqa: E402
 
 INSTITUTION = InstitutionInfo(
     name="ally",

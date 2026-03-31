@@ -346,7 +346,7 @@ def sync_morgan_stanley(
         raise
 
 
-from money.ingest.registry import InstitutionInfo
+from money.ingest.registry import InstitutionInfo  # noqa: E402
 
 INSTITUTION = InstitutionInfo(
     name="morgan_stanley",

@@ -300,7 +300,7 @@ def sync_capital_one(
         raise
 
 
-from money.ingest.registry import InstitutionInfo
+from money.ingest.registry import InstitutionInfo  # noqa: E402
 
 INSTITUTION = InstitutionInfo(
     name="capital_one",

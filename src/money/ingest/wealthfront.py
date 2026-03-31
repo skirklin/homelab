@@ -426,7 +426,7 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str,
         raise
 
 
-from money.ingest.registry import InstitutionInfo
+from money.ingest.registry import InstitutionInfo  # noqa: E402
 
 INSTITUTION = InstitutionInfo(
     name="wealthfront",
