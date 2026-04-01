@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import Plot from 'react-plotly.js'
-import type { Account, BalancePoint, Transaction, Holding } from '../api'
-import { fetchAccounts, fetchBalances, fetchTransactions, fetchHoldings, updateManualBalance, renameAccount, deleteAccount } from '../api'
+import type { Account, BalancePoint, PerformancePoint, Transaction, Holding } from '../api'
+import { fetchAccounts, fetchBalances, fetchPerformance, fetchTransactions, fetchHoldings, updateManualBalance, renameAccount, deleteAccount } from '../api'
+import { TimeRangeSelector, type TimeRange, getStartDate } from '../components/TimeRangeSelector'
 
 const fmtDollar = (v: number) => {
   const abs = Math.abs(v)
@@ -18,6 +19,7 @@ export default function AccountDetail() {
   const [account, setAccount] = useState<Account | null>(null)
   const [balances, setBalances] = useState<BalancePoint[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [perfHistory, setPerfHistory] = useState<PerformancePoint[]>([])
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -27,6 +29,9 @@ export default function AccountDetail() {
   const [updateValue, setUpdateValue] = useState('')
   const [updateDate, setUpdateDate] = useState('')
   const [updating, setUpdating] = useState(false)
+
+  // Time range
+  const [range, setRange] = useState<TimeRange>('1Y')
 
   // Rename
   const [editing, setEditing] = useState(false)
@@ -38,13 +43,15 @@ export default function AccountDetail() {
     Promise.all([
       fetchAccounts(),
       fetchBalances(id),
-      fetchTransactions({ accountId: id, limit: 100 }),
+      fetchPerformance({ accountId: id }),
+      fetchTransactions({ accountId: id, limit: 500 }),
       fetchHoldings(id),
     ])
-      .then(([accounts, bals, txns, holds]) => {
+      .then(([accounts, bals, perf, txns, holds]) => {
         const acct = accounts.find((a) => a.id === id) ?? null
         setAccount(acct)
         setBalances(bals)
+        setPerfHistory(perf)
         setTransactions(txns)
         setHoldings(holds)
         setLoading(false)
@@ -246,13 +253,35 @@ export default function AccountDetail() {
         </div>
       )}
 
-      {balances.length > 0 && (
+      {(perfHistory.length > 0 || balances.length > 0) && (() => {
+        const startDate = getStartDate(range)
+        // Prefer performance history (daily data) over balance snapshots
+        const chartData = perfHistory.length > 0
+          ? perfHistory.map((p) => ({ date: p.date, balance: p.balance }))
+          : balances.map((b) => ({ date: b.date, balance: b.balance }))
+        let filtered: typeof chartData
+        if (startDate) {
+          // Include the last point before startDate to anchor the chart
+          const before = chartData.filter((d) => d.date < startDate)
+          const inRange = chartData.filter((d) => d.date >= startDate)
+          const anchor = before.length > 0
+            ? [{ date: startDate, balance: before[before.length - 1].balance }]
+            : []
+          filtered = [...anchor, ...inRange]
+        } else {
+          filtered = chartData
+        }
+        if (filtered.length === 0) return null
+        return (
         <div className="card" style={{ padding: '12px 0', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 16px 8px' }}>
+            <TimeRangeSelector value={range} onChange={setRange} />
+          </div>
           <Plot
             data={[
               {
-                x: balances.map((b) => b.date),
-                y: balances.map((b) => b.balance),
+                x: filtered.map((d) => d.date),
+                y: filtered.map((d) => d.balance),
                 type: 'scatter',
                 mode: 'lines',
                 line: { color: '#818cf8', width: 2 },
@@ -289,7 +318,8 @@ export default function AccountDetail() {
             style={{ width: '100%', height: 350 }}
           />
         </div>
-      )}
+        )
+      })()}
 
       {holdings.length > 0 && (
         <>
@@ -319,10 +349,15 @@ export default function AccountDetail() {
         </>
       )}
 
-      {transactions.length > 0 && (
+      {transactions.length > 0 && (() => {
+        const startDate = getStartDate(range)
+        const filteredTxns = startDate
+          ? transactions.filter((t) => t.date >= startDate)
+          : transactions
+        return filteredTxns.length > 0 && (
         <>
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>
-            Recent Transactions
+            Transactions
           </h3>
           <table className="accounts-table" style={{ fontSize: '0.85rem' }}>
             <thead>
@@ -334,7 +369,7 @@ export default function AccountDetail() {
               </tr>
             </thead>
             <tbody>
-              {transactions.map((t) => (
+              {filteredTxns.map((t) => (
                 <tr key={t.id}>
                   <td className="dim">{t.date}</td>
                   <td>{t.description ?? '—'}</td>
@@ -347,7 +382,8 @@ export default function AccountDetail() {
             </tbody>
           </table>
         </>
-      )}
+        )
+      })()}
 
       {balances.length === 0 && holdings.length === 0 && transactions.length === 0 && (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'rgba(255,255,255,0.4)' }}>

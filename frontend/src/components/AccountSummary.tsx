@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { Account } from '../api'
 
 interface Props {
@@ -43,21 +44,23 @@ export function AccountSummary({ accounts }: Props) {
         return (
           <div key={inst} className="sidebar-group">
             <div className="sidebar-group-header">
-              <span className="sidebar-inst">{inst}</span>
+              <Link to={inst === 'other' ? '/accounts' : `/institutions/${inst}`}
+                className="sidebar-inst" style={{ color: 'inherit', textDecoration: 'none' }}>{inst}</Link>
               <span className="sidebar-total">{fmtDollar(total)}</span>
             </div>
             {accts
               .filter((a) => a.latest_balance != null)
               .sort((a, b) => Math.abs(b.latest_balance ?? 0) - Math.abs(a.latest_balance ?? 0))
               .map((a) => (
-                <div key={a.id} className="sidebar-account">
+                <Link key={a.id} to={`/accounts/${a.id}`} className="sidebar-account"
+                  style={{ color: 'inherit', textDecoration: 'none' }}>
                   <span
                     className="sidebar-dot"
                     style={{ backgroundColor: isStale(a) ? '#f87171' : '#34d399' }}
                   />
                   <span className="sidebar-account-name">{a.name}</span>
                   <span className="sidebar-account-bal">{fmtDollar(a.latest_balance ?? 0)}</span>
-                </div>
+                </Link>
               ))}
           </div>
         )

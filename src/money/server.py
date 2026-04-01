@@ -277,10 +277,8 @@ class IngestHandler(BaseHTTPRequestHandler):
                 all_dates.add(d)
         sorted_dates = sorted(all_dates)
 
-        if start:
-            sorted_dates = [d for d in sorted_dates if d >= start]
-        if end:
-            sorted_dates = [d for d in sorted_dates if d <= end]
+        # Don't filter dates yet — forward-fill needs earlier data points
+        # to carry forward into the requested range. Filter after building series.
 
         # For each account, build a lookup
         account_series: dict[str, dict[str, tuple[float, float, float]]] = {}
@@ -362,6 +360,14 @@ class IngestHandler(BaseHTTPRequestHandler):
                     "earned": round(total_ear, 2),
                 }
             )
+        # Now filter to the requested date range
+        if start or end:
+            series = [
+                s for s in series
+                if (not start or s["date"] >= start)
+                and (not end or s["date"] <= end)
+            ]
+
         self._json_response(200, {"series": series})
 
     def _handle_performance(self) -> None:
