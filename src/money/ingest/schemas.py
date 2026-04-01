@@ -553,3 +553,33 @@ class CHCardRewardsResponse(_Base):
 
     code: str
     cardRewardsSummary: list[CHCardReward]
+
+
+# ── Fidelity NetBenefits ─────────────────────────────────────────────
+# planSummary endpoint returns monthly performance data for the 401k plan.
+
+
+class FidelityMonth(_Base):
+    month: str  # "Jul-2025"
+    fromDate: str  # ISO datetime
+    toDate: str  # ISO datetime
+    returnValue: float  # monthly return percentage
+    fromBalance: float  # balance at start of month
+
+
+class FidelityAccountPerformance(_Base):
+    ytdReturn: float
+    ytdAsOf: str
+    yearlyStart: str
+    yearlyEnd: str
+
+
+class FidelityPerformance(_Base):
+    account: FidelityAccountPerformance
+    months: list[FidelityMonth]
+    hasAccountError: bool
+    hasMonthsError: bool
+
+
+class FidelityPlanSummaryResponse(_Base):
+    performance: FidelityPerformance

@@ -8,6 +8,7 @@ const INSTITUTIONS = [
   { id: "capital_one", name: "Capital One", patterns: ["myaccounts.capitalone.com", "www.capitalone.com"] },
   { id: "bofa", name: "Bank of America", patterns: ["secure.bankofamerica.com", "www.bankofamerica.com"] },
   { id: "chase", name: "Chase", patterns: ["secure.chase.com", "chase.com"] },
+  { id: "fidelity", name: "Fidelity NetBenefits", patterns: ["nb.fidelity.com", "workplaceservices.fidelity.com"] },
 ];
 
 async function init() {

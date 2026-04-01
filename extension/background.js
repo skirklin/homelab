@@ -33,6 +33,7 @@ import ally from "./institutions/ally.js";
 import betterment from "./institutions/betterment.js";
 import capital_one from "./institutions/capital_one.js";
 import chase from "./institutions/chase.js";
+import fidelity from "./institutions/fidelity.js";
 import morgan_stanley from "./institutions/morgan_stanley.js";
 import wealthfront from "./institutions/wealthfront.js";
 
@@ -45,6 +46,7 @@ const HANDLERS = {
   betterment,
   capital_one,
   chase,
+  fidelity,
   morgan_stanley,
   wealthfront,
 };
@@ -283,7 +285,7 @@ const lastCapture = {};
 const COOLDOWN_MS = 30_000;
 const activeHandlers = new Set();
 
-chrome.webNavigation.onCompleted.addListener(async (details) => {
+async function handleNavigation(details) {
   if (details.frameId !== 0) return;
 
   const institution = getInstitutionForUrl(details.url);
@@ -343,7 +345,14 @@ chrome.webNavigation.onCompleted.addListener(async (details) => {
   } finally {
     activeHandlers.delete(institution);
   }
-});
+}
+
+// Full page loads
+chrome.webNavigation.onCompleted.addListener(handleNavigation);
+
+// SPA route changes (History API pushState/replaceState) — needed for sites
+// like Capital One where login redirects to /accountSummary via client-side routing
+chrome.webNavigation.onHistoryStateUpdated.addListener(handleNavigation);
 
 // ── Periodic network flush (for passive recording like Chase) ────────
 
@@ -478,8 +487,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Content script checking if it should auto-start recording
   if (message.type === "CHECK_RECORDING_FOR_TAB") {
     const tabId = sender.tab?.id;
-    const shouldRecord = tabId && tabId in recordingTabs;
-    sendResponse({ shouldRecord: !!shouldRecord });
+    const url = sender.tab?.url || "";
+
+    // Already recording this tab
+    if (tabId && tabId in recordingTabs) {
+      sendResponse({ shouldRecord: true });
+      return true;
+    }
+
+    // Auto-start recording for institutions with autoRecord: true
+    const institution = getInstitutionForUrl(url);
+    if (institution && tabId) {
+      const handler = HANDLERS[institution];
+      if (handler?.autoRecord) {
+        networkBuffer[institution] = networkBuffer[institution] || [];
+        recordingTabs[tabId] = institution;
+        updateRecordingBadge();
+        sendResponse({ shouldRecord: true });
+        return true;
+      }
+    }
+
+    sendResponse({ shouldRecord: false });
     return true;
   }
 });

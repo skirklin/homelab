@@ -13,7 +13,8 @@
     "https://*.solium.com/*",
     "https://*.capitalone.com/*",
     "https://*.bankofamerica.com/*",
-    "https://*.chase.com/*"
+    "https://*.chase.com/*",
+    "https://*.fidelity.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -33,7 +34,8 @@
         "https://*.solium.com/*",
         "https://*.capitalone.com/*",
         "https://*.bankofamerica.com/*",
-        "https://*.chase.com/*"
+        "https://*.chase.com/*",
+        "https://*.fidelity.com/*"
       ],
       "js": ["content/network_recorder.js"],
       "run_at": "document_idle"
@@ -54,7 +56,8 @@
         "https://*.solium.com/*",
         "https://*.capitalone.com/*",
         "https://*.bankofamerica.com/*",
-        "https://*.chase.com/*"
+        "https://*.chase.com/*",
+        "https://*.fidelity.com/*"
       ]
     }
   ],

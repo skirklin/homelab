@@ -45,8 +45,17 @@
       const contentType = response.headers.get('content-type') || '';
 
       let responseBody = null;
+      let responseText = null;
       if (contentType.includes('json')) {
         try { responseBody = await clone.json(); } catch(e) {}
+      }
+      // Fallback: try parsing as JSON anyway for API URLs, or capture raw text
+      if (responseBody === null && url.includes('/api/')) {
+        try {
+          const text = await clone.text();
+          responseText = text.substring(0, 5000);
+          responseBody = JSON.parse(text);
+        } catch(e) {}
       }
 
       // Detect auth tokens in login responses
@@ -69,6 +78,7 @@
         requestBody: reqBody ? reqBody.substring(0, 2000) : null,
         requestHeaders: requestHeaders,
         responseBody: responseBody,
+        responseText: responseBody === null ? responseText : undefined,
         responseSize: responseBody ? JSON.stringify(responseBody).length : null,
         duration: Date.now() - startTime,
         timestamp: new Date().toISOString(),
@@ -127,6 +137,10 @@
       const contentType = this.getResponseHeader('content-type') || '';
       let responseBody = null;
       if (contentType.includes('json')) {
+        try { responseBody = JSON.parse(this.responseText); } catch(e) {}
+      }
+      // Fallback: if content-type wasn't JSON but URL looks like an API, try parsing anyway
+      if (responseBody === null && url.includes('/api/')) {
         try { responseBody = JSON.parse(this.responseText); } catch(e) {}
       }
 
