@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "money-db": {
+      "command": "/home/skirklin/projects/money/.venv/bin/python",
+      "args": ["-m", "money.mcp_server"]
+    }
+  }
+}

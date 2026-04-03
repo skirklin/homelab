@@ -1,5 +1,9 @@
 # Scraping & Sync Playbook
 
+> **Keep this playbook up to date.** When debugging a sync issue, if the solution
+> isn't documented here, add it before closing the issue. If a documented solution
+> is wrong or incomplete, fix it.
+
 ## Architecture Overview
 
 Data collection uses two paths depending on institution:
@@ -206,13 +210,17 @@ money sync ally --login angela
 - `/rest/participant/v2/grants` — grant details with vesting dates
 
 **When it breaks:**
-- **No Bearer token in headers:** The page interceptor captures request headers, but only for headers explicitly set by JavaScript. If the SPA doesn't set `Authorization` explicitly, it won't appear. Check the network log entries for `/rest/participant/v2/` URLs.
-- **Strike price parsing:** Extracted from grant name string (e.g., `"02/05/2024 - ISO - $12.98"`). Logs a warning if no `$` found.
+- **"Could not find Bearer JWT in network log headers":** The periodic flush creates multiple small files. The sync now merges all log files, but if you only captured a tiny flush (1-2 entries), the auth headers won't be there. Solution: make sure you visit the Portfolio or Grants page so the SPA makes authenticated API calls. The extension needs to see requests to `/rest/participant/v2/` with `Authorization: Bearer ...` in the headers.
+- **Pydantic validation error on MSPortfolioSummaryResponse:** The portfolio can contain cash holding items that lack an `instanceName` field. These are skipped during parsing. If a new field is missing, check the raw file at `.data/raw/morgan_stanley/{login_id}/{timestamp}_portfolio_summary.json` and compare against the schema in `src/money/ingest/schemas.py`.
+- **Strike price parsing:** Extracted from grant name string (e.g., `"02/05/2024 - ISO - $12.98"`). Logs a warning if no `$` found (e.g., "SD Legacy Option" grants default to $0).
 - **Vested values mismatch:** Uses `availableQuantity`/`availableValue` from portfolio summary, not estimated from schedule.
+- **Small network log files (periodic flush):** The extension flushes every 30 seconds. If the first flush captures the interesting data but a later flush triggers a new sync with only 1-2 entries, that sync will fail. The code now merges all files, so this should be resolved.
 
 **FMV (409A valuation):** Stored in `private_valuations` table. Used for equity value calculations in net worth chart.
 
-**Which page to visit:** Navigate to the Portfolio or Grants page on Shareworks. The extension will capture the API responses.
+**Which page to visit:** Navigate to the Portfolio or Grants page on Shareworks. The extension will capture the API responses. Wait at least 10 seconds for the SPA to make its API calls before navigating away.
+
+**Network logs cleaned up on success.** After a successful sync, all morgan_stanley network log files are deleted to prevent stale data accumulation.
 
 ---
 

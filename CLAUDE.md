@@ -24,13 +24,27 @@ Local-first personal finance tool. Scrapes financial institutions, stores raw + 
 - **No holdings/positions table yet** — can't break down by ticker, asset class, or market
 - Tables: accounts, balances, transactions, performance_history, option_grants, private_valuations, ingestion_log
 
+## Running Dev Servers
+Both servers should be run in tmux windows (not background processes):
+- **Backend**: `python -m money serve` (binds `0.0.0.0:5555`)
+- **Frontend**: `npm run dev` from `frontend/` (Vite on port 5173, proxies `/api` to backend)
+
+```sh
+tmux new-window -n backend ".venv/bin/python -m money serve; read"
+tmux new-window -n frontend "cd frontend && npm run dev; read"
+```
+
+Note: `python -m money.server` does NOT work — always use the CLI entry point `python -m money serve`.
+
+## Documentation
+- **Scraping playbook**: `docs/scraping-playbook.md` — per-institution sync details, debugging steps, failure modes. **Read this before debugging any scraping issue.** Update it when you find and fix issues not already documented.
+
 ## Tooling
 - `uv` for Python package management
 - `ruff` for lint/format (line-length 100)
 - `pyright` strict mode for type checking
 - `pytest` for tests
 - Dev deps: `uv sync --all-extras`
-- Frontend: `npm run dev` from `frontend/`
 
 ## Code Style
 - No `type: ignore` / `pyright: ignore` unless genuinely untyped third-party lib

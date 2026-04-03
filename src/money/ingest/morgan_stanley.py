@@ -39,10 +39,10 @@ USER_AGENT = (
 )
 
 
-def _load_auth_from_network_log() -> tuple[str, str]:
-    """Extract JWT and session UUID from the most recent Morgan Stanley network log.
+def _load_auth_from_network_log() -> tuple[str, str, list[Path]]:
+    """Extract JWT and session UUID from Morgan Stanley network logs.
 
-    Returns (bearer_token, session_uuid).
+    Returns (bearer_token, session_uuid, log_files).
     """
     log_dir = DATA_DIR / "network_logs"
     if not log_dir.exists():
@@ -54,14 +54,17 @@ def _load_auth_from_network_log() -> tuple[str, str]:
             "No Morgan Stanley network logs found. Record a session in Chrome first."
         )
 
-    latest = logs[-1]
-    log.info("Using network log: %s", latest.name)
-    data = json.loads(latest.read_text())
+    # Merge all log files (periodic flush creates multiple small files)
+    all_entries: list[dict[str, Any]] = []
+    for log_file in logs:
+        data = json.loads(log_file.read_text())
+        all_entries.extend(data.get("entries", []))
+    log.info("Loaded %d entries from %d network log files", len(all_entries), len(logs))
 
     bearer_token: str | None = None
     session_uuid: str | None = None
 
-    for entry in data.get("entries", []):
+    for entry in all_entries:
         headers: dict[str, str] = entry.get("requestHeaders", {})
         auth: str = headers.get("Authorization", headers.get("authorization", ""))
 
@@ -76,7 +79,7 @@ def _load_auth_from_network_log() -> tuple[str, str]:
         log.warning("No session UUID in network log — legacy API calls skipped.")
         session_uuid = ""
 
-    return bearer_token, session_uuid
+    return bearer_token, session_uuid, logs
 
 
 def _api_get_bearer(token: str, path: str) -> Any:
@@ -209,10 +212,11 @@ def parse_raw_morgan_stanley(
     # Build vested quantity lookup from portfolio summary
     vested_by_instance: dict[str, tuple[int, float]] = {}
     for pi in portfolio_items:
-        instance_name = pi.instanceName
+        if pi.instanceName is None:
+            continue  # skip cash holding items with no instance name
         avail_qty = int(pi.availableQuantity)
         avail_val = parse_money(pi.availableValue)
-        vested_by_instance[instance_name] = (avail_qty, avail_val)
+        vested_by_instance[pi.instanceName] = (avail_qty, avail_val)
 
     # Grants
     grant_count = 0
@@ -277,7 +281,7 @@ def sync_morgan_stanley(
     raw_key = f"morgan_stanley/{profile}/{timestamp}_portfolio_summary.json"
 
     try:
-        bearer_token, session_uuid = _load_auth_from_network_log()
+        bearer_token, session_uuid, logs = _load_auth_from_network_log()
         log.info("Loaded auth tokens from network log")
 
         # 1. Fetch portfolio overview (for total value)
@@ -329,7 +333,10 @@ def sync_morgan_stanley(
                 finished_at=datetime.now(),
             )
         )
-        log.info("Morgan Stanley sync complete")
+        # Clean up processed network logs
+        for log_file in logs:
+            log_file.unlink()
+        log.info("Morgan Stanley sync complete (cleaned up %d network log files)", len(logs))
 
     except Exception as e:
         log.error("Morgan Stanley sync failed: %s", e)

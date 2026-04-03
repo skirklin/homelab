@@ -39,7 +39,7 @@ class MSFutureVest(_Base):
 
 class MSPortfolioItem(_Base):
     typeName: str
-    instanceName: str
+    instanceName: str | None = None  # absent on cash holding items
     modellingCategory: str
     availableQuantity: float
     availableValue: str
