@@ -1,14 +1,10 @@
-"""Morgan Stanley Shareworks ingester — uses JWT from network log + REST API."""
+"""Morgan Stanley Shareworks ingester — parses captured network log data."""
 
 import json
 import logging
-import urllib.error
-import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
-
-from money.config import DATA_DIR
 from money.db import Database
 from money.ingest.common import ts_to_date
 from money.models import (
@@ -22,100 +18,6 @@ from money.models import (
 from money.storage import RawStore
 
 log = logging.getLogger(__name__)
-
-BASE_URL = "https://shareworks.solium.com"
-
-# REST v2 endpoints (Bearer JWT auth)
-PORTFOLIO_SUMMARY_PATH = "/rest/participant/v2/portfolio/summary"
-GRANTS_PATH = "/rest/participant/v2/grants"
-
-# Legacy API endpoints (session UUID auth)
-LINKED_PORTFOLIO_PATH = "/sw-ptpapi/v1/linkedAccount/portfolio"
-
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/145.0.0.0 Safari/537.36"
-)
-
-
-def _load_auth_from_network_log() -> tuple[str, str, list[Path]]:
-    """Extract JWT and session UUID from Morgan Stanley network logs.
-
-    Returns (bearer_token, session_uuid, log_files).
-    """
-    log_dir = DATA_DIR / "network_logs"
-    if not log_dir.exists():
-        raise FileNotFoundError("No network logs directory found.")
-
-    logs = sorted(log_dir.glob("morgan_stanley_*.json"))
-    if not logs:
-        raise FileNotFoundError(
-            "No Morgan Stanley network logs found. Record a session in Chrome first."
-        )
-
-    # Merge all log files (periodic flush creates multiple small files)
-    all_entries: list[dict[str, Any]] = []
-    for log_file in logs:
-        data = json.loads(log_file.read_text())
-        all_entries.extend(data.get("entries", []))
-    log.info("Loaded %d entries from %d network log files", len(all_entries), len(logs))
-
-    bearer_token: str | None = None
-    session_uuid: str | None = None
-
-    for entry in all_entries:
-        headers: dict[str, str] = entry.get("requestHeaders", {})
-        auth: str = headers.get("Authorization", headers.get("authorization", ""))
-
-        if auth.startswith("Bearer ") and bearer_token is None:
-            bearer_token = auth[7:]  # strip "Bearer " prefix
-        elif auth and not auth.startswith("Bearer ") and session_uuid is None and len(auth) < 200:
-            session_uuid = auth
-
-    if not bearer_token:
-        raise ValueError("Could not find Bearer JWT in network log headers.")
-    if not session_uuid:
-        log.warning("No session UUID in network log — legacy API calls skipped.")
-        session_uuid = ""
-
-    return bearer_token, session_uuid, logs
-
-
-def _api_get_bearer(token: str, path: str) -> Any:
-    """Make an authenticated GET to Shareworks REST v2 API."""
-    url = f"{BASE_URL}{path}"
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Accept", "application/json")
-    req.add_header("User-Agent", USER_AGENT)
-    req.add_header("Cache-Control", "no-cache")
-
-    try:
-        resp = urllib.request.urlopen(req)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")[:500]
-        log.error("HTTP %d on %s: %s", e.code, path, body)
-        raise
-    return json.loads(resp.read())
-
-
-def _api_get_session(session_uuid: str, path: str) -> Any:
-    """Make an authenticated GET to Shareworks legacy API (sw-ptpapi)."""
-    url = f"{BASE_URL}{path}"
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", session_uuid)
-    req.add_header("Accept", "application/json")
-    req.add_header("User-Agent", USER_AGENT)
-    req.add_header("Cache-Control", "no-cache")
-
-    try:
-        resp = urllib.request.urlopen(req)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")[:500]
-        log.error("HTTP %d on %s: %s", e.code, path, body)
-        raise
-    return json.loads(resp.read())
 
 
 def parse_money(value: str) -> float:
@@ -281,26 +183,49 @@ def sync_morgan_stanley(
     raw_key = f"morgan_stanley/{profile}/{timestamp}_portfolio_summary.json"
 
     try:
-        bearer_token, session_uuid, logs = _load_auth_from_network_log()
-        log.info("Loaded auth tokens from network log")
+        from money.config import DATA_DIR
 
-        # 1. Fetch portfolio overview (for total value)
-        if session_uuid:
-            try:
-                portfolio_data = _api_get_session(session_uuid, LINKED_PORTFOLIO_PATH)
-                store.put(
-                    f"morgan_stanley/{profile}/{timestamp}_portfolio.json",
-                    json.dumps(portfolio_data, indent=2).encode(),
-                )
-            except Exception as e:
-                log.warning("Could not fetch linked portfolio (session may be expired): %s", e)
+        # Load and merge all network log files
+        log_dir = DATA_DIR / "network_logs"
+        logs = sorted(log_dir.glob("morgan_stanley_*.json")) if log_dir.exists() else []
+        if not logs:
+            raise FileNotFoundError(
+                "No Morgan Stanley network logs found. Visit Shareworks in Chrome."
+            )
 
-        # 2. Fetch portfolio summary (per-award breakdown with values)
-        summary_data = _api_get_bearer(bearer_token, PORTFOLIO_SUMMARY_PATH)
+        all_entries: list[dict[str, Any]] = []
+        for log_file in logs:
+            file_data: dict[str, Any] = json.loads(log_file.read_text())
+            all_entries.extend(file_data.get("entries", []))
+        log.info("Loaded %d entries from %d network log files", len(all_entries), len(logs))
+
+        # Extract portfolio summary and grants from captured responses
+        summary_data: dict[str, Any] | None = None
+        grants_data: dict[str, Any] | None = None
+
+        for entry in all_entries:
+            url: str = entry.get("url", "")
+            body = entry.get("responseBody")
+            if not isinstance(body, dict):
+                continue
+            if "portfolio/summary" in url and body.get("data"):
+                summary_data = body
+            elif url.endswith("/grants") and body.get("data"):
+                grants_data = body
+
+        if summary_data is None:
+            raise ValueError(
+                "No portfolio/summary response found in network log. "
+                "Navigate to the Portfolio page on Shareworks."
+            )
+        if grants_data is None:
+            raise ValueError(
+                "No grants response found in network log. "
+                "Navigate to the Grants page on Shareworks."
+            )
+
+        # Store in the format parse_raw_morgan_stanley expects
         store.put(raw_key, json.dumps(summary_data, indent=2).encode())
-
-        # 3. Fetch grants (detailed grant info)
-        grants_data = _api_get_bearer(bearer_token, GRANTS_PATH)
         store.put(
             f"morgan_stanley/{profile}/{timestamp}_grants.json",
             json.dumps(grants_data, indent=2).encode(),
@@ -318,9 +243,8 @@ def sync_morgan_stanley(
             stock_price, fmv_price, price_label,
         )
 
-        # Parse all raw data and write to DB
-        from money.config import DATA_DIR as _DATA_DIR
-        inst_dir = _DATA_DIR / "raw" / "morgan_stanley" / (profile or "default")
+        # Parse and write to DB
+        inst_dir = DATA_DIR / "raw" / "morgan_stanley" / (profile or "default")
         parse_raw_morgan_stanley(db, inst_dir, timestamp, profile)
 
         db.insert_ingestion_record(

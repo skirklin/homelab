@@ -197,20 +197,20 @@ money sync ally --login angela
 
 ### Morgan Stanley (Shareworks)
 
-**Auth:** Network log capture (JWT extraction)
+**Auth:** Network log capture (response extraction — no API replay)
 **Trigger:** Extension detects `shareworks.solium.com` → records network → waits 10s → flushes
 
 **How it works:**
-1. Extension captures network traffic including request headers
-2. Server extracts Bearer JWT and session UUID from captured request headers
-3. Server makes API calls using extracted credentials
+1. Extension captures network traffic (fetch/XHR responses) during SPA browsing
+2. Server extracts portfolio summary and grants data directly from captured responses
+3. No API calls are made — JWTs are session-bound and can't be replayed from Python
 
-**Endpoints (called by server, not just captured):**
-- `/rest/participant/v2/portfolio/summary` — portfolio with per-award vested/unvested values + FMV
-- `/rest/participant/v2/grants` — grant details with vesting dates
+**Responses extracted from network log:**
+- `portfolio/summary` — portfolio with per-award vested/unvested values + FMV
+- `grants` — grant details with vesting dates
 
 **When it breaks:**
-- **"Could not find Bearer JWT in network log headers":** The periodic flush creates multiple small files. The sync now merges all log files, but if you only captured a tiny flush (1-2 entries), the auth headers won't be there. Solution: make sure you visit the Portfolio or Grants page so the SPA makes authenticated API calls. The extension needs to see requests to `/rest/participant/v2/` with `Authorization: Bearer ...` in the headers.
+- **"No portfolio/summary response found in network log":** The SPA didn't fetch portfolio data during your browsing session. Make sure you navigate to the Portfolio page on Shareworks. The extension captures the responses the SPA makes.
 - **Pydantic validation error on MSPortfolioSummaryResponse:** The portfolio can contain cash holding items that lack an `instanceName` field. These are skipped during parsing. If a new field is missing, check the raw file at `.data/raw/morgan_stanley/{login_id}/{timestamp}_portfolio_summary.json` and compare against the schema in `src/money/ingest/schemas.py`.
 - **Strike price parsing:** Extracted from grant name string (e.g., `"02/05/2024 - ISO - $12.98"`). Logs a warning if no `$` found (e.g., "SD Legacy Option" grants default to $0).
 - **Vested values mismatch:** Uses `availableQuantity`/`availableValue` from portfolio summary, not estimated from schedule.
