@@ -1,0 +1,11 @@
+{
+  "name": "@homelab/pb-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Typed PocketBase client (placeholder)",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "echo 'placeholder — no build yet'"
+  }
+}

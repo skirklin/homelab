@@ -1,0 +1,16 @@
+{
+  "name": "homelab",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Personal web apps monorepo — migrating from Firebase to PocketBase + Caddy",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2"
+  },
+  "packageManager": "pnpm@9.15.4"
+}
