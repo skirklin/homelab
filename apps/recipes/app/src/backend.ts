@@ -19,5 +19,9 @@ export const generateRecipe = httpsCallable<{ prompt: string }, { recipeJson: st
 export const enrichRecipeManual = httpsCallable<{ boxId: string, recipeId: string }, { success: boolean, enrichment: unknown }>(functions, 'enrichRecipeManual');
 export const modifyRecipe = httpsCallable<
   { boxId: string, recipeId: string, feedback: string },
-  { success: boolean, modification: unknown }
+  { success: boolean, modificationJson: string }
 >(functions, 'modifyRecipe');
+export const getOwnerInfo = httpsCallable<
+  { ownerIds: string[] },
+  { owners: { uid: string, name: string | null, email: string | null }[] }
+>(functions, 'getOwnerInfo');

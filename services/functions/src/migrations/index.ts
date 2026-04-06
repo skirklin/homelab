@@ -275,3 +275,63 @@ export const migrateUpkeepCompletions = onCall(async (request) => {
     completionsMigrated: totalMigrated,
   };
 });
+
+// ===== Backfill Box Subscribers =====
+
+/**
+ * Scan all user documents, find which boxes each user subscribes to,
+ * and add their UID to the box's subscribers array.
+ */
+export const backfillBoxSubscribers = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be authenticated");
+  }
+
+  console.log("Starting box subscribers backfill");
+
+  // Build a map: boxId -> set of subscriber UIDs
+  const boxSubscribers = new Map<string, Set<string>>();
+
+  const usersSnapshot = await db.collection("users").get();
+  for (const userDoc of usersSnapshot.docs) {
+    const userId = userDoc.id;
+    const data = userDoc.data();
+    const boxes = data.boxes as FirebaseFirestore.DocumentReference[] | undefined;
+
+    if (!boxes || boxes.length === 0) continue;
+
+    for (const boxRef of boxes) {
+      const boxId = boxRef.id;
+      if (!boxSubscribers.has(boxId)) {
+        boxSubscribers.set(boxId, new Set());
+      }
+      boxSubscribers.get(boxId)!.add(userId);
+    }
+  }
+
+  // Write subscribers to each box
+  let totalBoxes = 0;
+  const batchSize = 500;
+  const entries = Array.from(boxSubscribers.entries());
+
+  for (let i = 0; i < entries.length; i += batchSize) {
+    const batch = db.batch();
+    const batchEntries = entries.slice(i, i + batchSize);
+
+    for (const [boxId, subscribers] of batchEntries) {
+      const boxRef = db.doc(`boxes/${boxId}`);
+      batch.update(boxRef, { subscribers: Array.from(subscribers) });
+      totalBoxes++;
+    }
+
+    await batch.commit();
+    console.log(`Updated batch of ${batchEntries.length} boxes`);
+  }
+
+  console.log(`Backfill complete: ${totalBoxes} boxes updated from ${usersSnapshot.size} users`);
+  return {
+    success: true,
+    boxesUpdated: totalBoxes,
+    usersScanned: usersSnapshot.size,
+  };
+});

@@ -41,8 +41,10 @@ export function initializeBackend(authDomain: string) {
     }),
   });
 
-  // Connect to emulators in development
-  if (typeof window !== "undefined" && window.location.hostname === "localhost") {
+  // Connect to emulators in development (skip if VITE_USE_PROD is set)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const useProd = typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_USE_PROD;
+  if (typeof window !== "undefined" && window.location.hostname === "localhost" && !useProd) {
     try {
       connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
       connectFirestoreEmulator(db, "localhost", 8180);

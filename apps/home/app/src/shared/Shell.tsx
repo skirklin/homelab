@@ -6,6 +6,7 @@ import {
   ExperimentOutlined,
   ShoppingCartOutlined,
   CheckSquareOutlined,
+  CompassOutlined,
   LogoutOutlined,
   BookOutlined,
   HistoryOutlined,
@@ -126,7 +127,7 @@ export function Shell() {
 
   // Save current path when navigating to a sub-app
   useEffect(() => {
-    const subApps = ["/life", "/groceries", "/recipes", "/upkeep"];
+    const subApps = ["/life", "/groceries", "/recipes", "/travel", "/upkeep"];
     const isSubApp = subApps.some(app => location.pathname.startsWith(app));
     if (isSubApp) {
       localStorage.setItem(LAST_PATH_KEY, location.pathname);
@@ -165,6 +166,13 @@ export function Shell() {
           >
             <NavIcon $active={isActive("/groceries")}><ShoppingCartOutlined /></NavIcon>
             <span className="nav-label">Groceries</span>
+          </NavButton>
+          <NavButton
+            $active={isActive("/travel")}
+            onClick={() => navigate("/travel")}
+          >
+            <NavIcon $active={isActive("/travel")}><CompassOutlined /></NavIcon>
+            <span className="nav-label">Travel</span>
           </NavButton>
           <NavButton
             $active={isActive("/upkeep")}

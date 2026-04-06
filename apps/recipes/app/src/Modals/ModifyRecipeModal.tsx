@@ -38,7 +38,7 @@ function ModifyRecipeModal(props: ModifyRecipeModalProps) {
 
     try {
       const response = await modifyRecipe({ boxId, recipeId, feedback });
-      setChanges(response.data.modification as PendingChanges);
+      setChanges(JSON.parse(response.data.modificationJson) as PendingChanges);
     } catch (err) {
       console.error('Error generating modifications:', err);
       setError('Failed to generate modifications. Please try again.');

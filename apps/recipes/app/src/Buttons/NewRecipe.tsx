@@ -1,6 +1,7 @@
 import { PlusOutlined } from "@ant-design/icons";
 import { useContext } from "react";
 import { useNavigate } from "react-router-dom";
+import { useBasePath } from "../RecipesRoutes";
 import { Context } from "../context";
 import { useBoxAction } from "../hooks/useBoxAction";
 import { getAppUserFromState } from "../state";
@@ -22,6 +23,7 @@ export default function NewButton(props: NewProps) {
     const { state, dispatch } = useContext(Context)
     const { user: authUser } = useAuth();
     const navigate = useNavigate()
+    const basePath = useBasePath()
     const { executeWithBox, BoxPickerModal } = useBoxAction(boxId);
     const user = getAppUserFromState(state, authUser?.uid)
 
@@ -32,7 +34,7 @@ export default function NewButton(props: NewProps) {
         const recipe = createNewRecipe(user);
         const recipeId = `uniqueId=${getUniqueId(recipe)}`
         dispatch({ type: "ADD_RECIPE", payload: recipe, boxId: targetBoxId, recipeId })
-        navigate(`boxes/${targetBoxId}/recipes/${recipeId}`)
+        navigate(`${basePath}/boxes/${targetBoxId}/recipes/${recipeId}`)
     }
 
     const handleClick = () => {

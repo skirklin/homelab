@@ -3,6 +3,7 @@ import { SaveOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
 import { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useBasePath } from '../RecipesRoutes';
 
 import { Context } from '../context';
 import { addRecipe, saveRecipe } from '../firestore';
@@ -24,6 +25,7 @@ function SaveButton(props: RecipeCardProps) {
   const box = getBoxFromState(state, boxId)
   const user = getAppUserFromState(state, authUser?.uid)
   const navigate = useNavigate()
+  const basePath = useBasePath()
 
   if (recipe === undefined || box === undefined) {
     return null
@@ -44,7 +46,7 @@ function SaveButton(props: RecipeCardProps) {
       docRef = await addRecipe(boxId, newRecipe)
       newRecipe.created = newRecipe.updated
       dispatch({type: "REMOVE_RECIPE", recipeId, boxId}) // removes the local-only version of the recipe
-      navigate(`boxes/${boxId}/recipes/${docRef.id}`)
+      navigate(`${basePath}/boxes/${boxId}/recipes/${docRef.id}`)
     } else {
       docRef = await saveRecipe(boxId, recipeId, newRecipe)
     }

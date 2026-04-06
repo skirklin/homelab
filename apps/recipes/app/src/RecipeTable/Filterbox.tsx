@@ -3,7 +3,7 @@ import { SearchOutlined } from "@ant-design/icons";
 import _ from "lodash";
 import type { Recipe } from "schema-dts";
 import type { RowType } from "./RecipeTable";
-// @ts-expect-error - flexsearch doesn't have type declarations
+// @ts-expect-error - flexsearch doesn't have type declarations for this subpath
 import Document from "flexsearch/dist/module/document";
 import styled from "styled-components";
 
@@ -89,12 +89,13 @@ function Filterbox(props: FilterboxProps) {
       setFilteredRows(data)
     } else {
       const result = index.search(e.target.value)
-      const idxs: number[] = [];
+      const idxs: (string | number)[] = [];
       let rows: RowType[] = [];
-      result.forEach((obj: { result: number[] }) => obj.result.forEach(elt => {
-        if (!idxs.includes(elt)) {
-          idxs.push(elt);
-          rows.push(data[elt])
+      result.forEach((obj: { result: (string | number)[] }) => obj.result.forEach(elt => {
+        const idx = typeof elt === 'string' ? parseInt(elt) : elt;
+        if (!idxs.includes(idx)) {
+          idxs.push(idx);
+          rows.push(data[idx])
         }
       }))
       console.log("found!")

@@ -3,6 +3,7 @@ import { Button, Tooltip } from 'antd';
 import { getAuth, signOut } from 'firebase/auth';
 import { InboxOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useBasePath } from '../RecipesRoutes';
 import { AppHeader } from '@kirkl/shared';
 
 import './Header.css';
@@ -22,6 +23,7 @@ interface HeaderProps {
 
 function Header({ embedded = false }: HeaderProps) {
   const navigate = useNavigate();
+  const basePath = useBasePath();
   const user = getAuth().currentUser;
 
   // When embedded, no dropdown menu - parent Shell handles account actions
@@ -38,7 +40,7 @@ function Header({ embedded = false }: HeaderProps) {
       {!embedded && user && <UserName>{user.displayName}</UserName>}
       <CookingMode />
       <Tooltip title="Manage boxes">
-        <Button type="text" onClick={() => navigate('boxes')} icon={<InboxOutlined />} />
+        <Button type="text" onClick={() => navigate(`${basePath}/boxes`)} icon={<InboxOutlined />} />
       </Tooltip>
     </>
   );
@@ -48,7 +50,7 @@ function Header({ embedded = false }: HeaderProps) {
     <>
       <CookingMode />
       {embedded && (
-        <Button type="text" size="small" onClick={() => navigate('boxes')} icon={<InboxOutlined />} />
+        <Button type="text" size="small" onClick={() => navigate(`${basePath}/boxes`)} icon={<InboxOutlined />} />
       )}
     </>
   );

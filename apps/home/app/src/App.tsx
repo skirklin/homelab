@@ -5,6 +5,7 @@ import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
 import { GroceriesProvider, GroceriesRoutes } from "@kirkl/groceries";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
+import { TravelProvider, TravelRoutes } from "@kirkl/travel";
 import { UpkeepProvider, UpkeepRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
@@ -43,6 +44,7 @@ function AuthenticatedRoutes() {
         <Route path="/life/*" element={<LifeRoutes embedded />} />
         <Route path="/groceries/*" element={<GroceriesRoutes embedded />} />
         <Route path="/recipes/*" element={<RecipesRoutes embedded />} />
+        <Route path="/travel/*" element={<TravelRoutes embedded />} />
         <Route path="/upkeep/*" element={<UpkeepRoutes embedded />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -97,9 +99,11 @@ export function App() {
               <RecipesProvider>
                 <CookingModeProvider>
                   <GroceriesIntegrationProvider>
-                    <UpkeepProvider>
-                      <AppRoutes />
-                    </UpkeepProvider>
+                    <TravelProvider>
+                      <UpkeepProvider>
+                        <AppRoutes />
+                      </UpkeepProvider>
+                    </TravelProvider>
                   </GroceriesIntegrationProvider>
                 </CookingModeProvider>
               </RecipesProvider>

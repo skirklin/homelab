@@ -216,6 +216,7 @@ function ActionMenu(props: RecipeCardProps) {
         {...props}
         handleAddOwner={handleAddOwner}
         handleChange={handleVisiblityChange}
+        owners={recipe.owners}
         value={recipe.visibility} element="menu" />
     </Menu>
   )

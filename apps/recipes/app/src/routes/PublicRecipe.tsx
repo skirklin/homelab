@@ -168,7 +168,7 @@ export function PublicRecipe() {
   const handleSignIn = () => {
     // Navigate to the main app which will show the auth screen
     // After signing in, user will be redirected back
-    navigate(`/boxes/${boxId}/recipes/${recipeId}`);
+    navigate(`/recipes/boxes/${boxId}/recipes/${recipeId}`);
   };
 
   if (loading) {

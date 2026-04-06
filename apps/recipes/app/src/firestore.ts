@@ -65,8 +65,8 @@ export async function subscribeToBox(user: UserEntry | null, boxId: BoxId) {
     return undefined
   }
   const boxRef = doc(db, "boxes", boxId)
-  // No need to verify box exists - updateDoc will fail if user lacks permission
   await updateDoc(doc(db, "users", user.id), { boxes: arrayUnion(boxRef) })
+  await updateDoc(boxRef, { subscribers: arrayUnion(user.id) })
 }
 
 
@@ -76,6 +76,7 @@ export async function unsubscribeFromBox(user: UserEntry | null, boxId: BoxId) {
   }
   const boxRef = doc(db, "boxes", boxId)
   await updateDoc(doc(db, "users", user.id), { boxes: arrayRemove(boxRef) })
+  await updateDoc(boxRef, { subscribers: arrayRemove(user.id) })
 }
 
 export async function uploadRecipes(boxId: BoxId, user: UserEntry) {

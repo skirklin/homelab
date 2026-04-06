@@ -5,6 +5,7 @@ import { useContext, useState } from 'react';
 import { PickBoxModal } from '../Modals/PickBoxModal';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
+import { useBasePath } from '../RecipesRoutes';
 import { addRecipe } from '../firestore';
 import { getAppUserFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
@@ -23,6 +24,7 @@ export default function ForkButton(props: ForkProps) {
   const { state } = useContext(Context)
   const { user: authUser } = useAuth();
   const navigate = useNavigate()
+  const basePath = useBasePath()
   const [isModalVisible, setIsModalVisible] = useState(false)
   const user = getAppUserFromState(state, authUser?.uid)
   const recipe = getRecipeFromState(state, boxId, recipeId)
@@ -32,7 +34,7 @@ export default function ForkButton(props: ForkProps) {
     const clone = _.cloneDeep(recipe);
     clone.owners = [user.id]
     const recipeRef = await addRecipe(boxId, clone)
-    navigate(`boxes/${boxId}/recipes/${recipeRef.id}`)
+    navigate(`${basePath}/boxes/${boxId}/recipes/${recipeRef.id}`)
   }
 
   async function newRecipe(boxId: BoxId) {

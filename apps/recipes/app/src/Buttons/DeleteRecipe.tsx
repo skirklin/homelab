@@ -3,6 +3,7 @@ import { Menu, Popconfirm } from 'antd';
 import { useContext } from 'react';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
+import { useBasePath } from '../RecipesRoutes';
 import { deleteRecipe } from '../firestore';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
@@ -24,6 +25,7 @@ function DeleteButton(props: DeleteProps) {
   const recipe = getRecipeFromState(state, props.boxId, props.recipeId)
 
   const navigate = useNavigate()
+  const basePath = useBasePath()
 
   const { recipeId, boxId, element } = props;
   const user = getAppUserFromState(state, authUser?.uid)
@@ -38,7 +40,7 @@ function DeleteButton(props: DeleteProps) {
 
   async function del() {
     deleteRecipe(state.boxes, boxId, recipeId, dispatch).then(
-      () => navigate(`boxes/${boxId}`)
+      () => navigate(`${basePath}/boxes/${boxId}`)
     )
   }
 

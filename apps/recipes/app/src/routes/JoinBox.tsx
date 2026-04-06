@@ -1,13 +1,12 @@
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useBasePath } from "../RecipesRoutes";
 import { Button, Spin, message } from "antd";
 import styled from "styled-components";
 import { doc, getDoc, updateDoc, arrayUnion } from "firebase/firestore";
 import { useAuth } from "@kirkl/shared";
 import { db } from "../backend";
-import { Context } from "../context";
 import { boxConverter } from "../storage";
-import { getAppUserFromState } from "../state";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -59,9 +58,8 @@ const ButtonGroup = styled.div`
 export default function JoinBox() {
   const { boxId } = useParams<{ boxId: string }>();
   const navigate = useNavigate();
-  const { state } = useContext(Context);
+  const basePath = useBasePath();
   const { user } = useAuth();
-  const appUser = getAppUserFromState(state, user?.uid);
   const [boxName, setBoxName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -89,16 +87,17 @@ export default function JoinBox() {
   }, [boxId]);
 
   const handleJoin = async () => {
-    if (!boxId || !user || !appUser) return;
+    if (!boxId || !user) return;
 
     setSubmitting(true);
     try {
       const boxRef = doc(db, "boxes", boxId);
       const userRef = doc(db, "users", user.uid);
 
-      // Add user as owner of the box
+      // Add user as owner and subscriber of the box
       await updateDoc(boxRef, {
-        owners: arrayUnion(user.uid)
+        owners: arrayUnion(user.uid),
+        subscribers: arrayUnion(user.uid)
       });
 
       // Add box to user's boxes
@@ -107,7 +106,7 @@ export default function JoinBox() {
       });
 
       message.success("Box added to your collection!");
-      navigate(`boxes/${boxId}`);
+      navigate(`${basePath}/boxes/${boxId}`);
     } catch (error) {
       console.error("Failed to join box:", error);
       message.error("Failed to join box. You may not have permission.");

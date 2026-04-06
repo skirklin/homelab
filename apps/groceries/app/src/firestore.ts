@@ -88,7 +88,7 @@ export async function addItem(
     : doc(getItemsRef());
   const itemData: GroceryItemStore = {
     ingredient,
-    note: options?.note,
+    ...(options?.note ? { note: options.note } : {}),
     categoryId,
     checked: false,
     addedBy: userId,
@@ -162,7 +162,7 @@ export async function clearCheckedItems(items: GroceryItem[]) {
     completedAt: Timestamp.now(),
     items: checkedItems.map((item) => ({
       ingredient: item.ingredient,
-      note: item.note,
+      ...(item.note ? { note: item.note } : {}),
       categoryId: item.categoryId,
     })),
   };

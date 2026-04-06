@@ -11,6 +11,7 @@ import { StyledTextArea } from '../StyledComponents';
 import { useAuth } from '@kirkl/shared';
 import { useGroceriesIntegration } from '../GroceriesIntegrationContext';
 import { AddToGroceriesModal } from '../Modals/AddToGroceriesModal';
+import { useCookingMode } from '../CookingModeContext';
 
 const IngredientsSection = styled.div`
   background-color: var(--color-bg-subtle);
@@ -84,6 +85,7 @@ function IngredientList(props: RecipeCardProps) {
   const { state, dispatch } = useContext(Context);
   const { user: authUser } = useAuth();
   const groceriesIntegration = useGroceriesIntegration();
+  const { isCookingMode } = useCookingMode();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
 
@@ -144,7 +146,7 @@ function IngredientList(props: RecipeCardProps) {
           <SectionTitle>Ingredients</SectionTitle>
           {formatIngredientList(ingredients)}
         </IngredientsSection>
-        {hasGroceriesIntegration && (
+        {hasGroceriesIntegration && !isCookingMode && (
           <AddToGroceriesButton
             onClick={handleAddToGroceries}
             title="Add to grocery list"

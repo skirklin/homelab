@@ -3,6 +3,7 @@ import type { ColumnsType } from "antd/es/table";
 import type { Key, TableRowSelection } from "antd/es/table/interface";
 import { useContext, useState } from "react";
 import { useNavigate } from 'react-router-dom';
+import { useBasePath } from '../RecipesRoutes';
 import styled from "styled-components";
 import { ActionButton } from "../StyledComponents";
 import NewBoxButton from '../Buttons/NewBox';
@@ -83,10 +84,11 @@ export function BoxTable(props: BoxTableProps) {
 
   const { rows } = props;
   const navigate = useNavigate();
+  const basePath = useBasePath();
 
   const onRow = (record: RowType, _rowIndex: number | undefined) => {
     return {
-      onClick: () => navigate(`boxes/${record.boxId}`),
+      onClick: () => navigate(`${basePath}/boxes/${record.boxId}`),
     }
   }
 

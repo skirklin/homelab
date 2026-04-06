@@ -16,6 +16,7 @@
     "@kirkl/life": "*",
     "@kirkl/recipes": "*",
     "@kirkl/shared": "*",
+    "@kirkl/travel": "*",
     "@kirkl/upkeep": "*",
     "antd": "^5.29.3",
     "firebase": "^11.0.0",

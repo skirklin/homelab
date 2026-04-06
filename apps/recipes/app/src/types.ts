@@ -14,6 +14,7 @@ export type BoxType = {
 export type BoxStoreType = {
   creator: string,
   owners: string[], // user ids
+  subscribers?: string[], // user ids who have added this box to their collection
   visibility: Visibility,
   created: Timestamp,
   updated: Timestamp,

@@ -79,6 +79,8 @@ export default function BoxView(props: BoxProps) {
             value={box.visibility}
             element="button"
             boxId={boxId}
+            owners={box.owners}
+            subscribers={box.subscribers}
             handleChange={handleVisiblityChange}
             handleAddOwner={handleAddOwner}
             disabled={!(writeable && box.owners.includes(user.uid))}

@@ -291,9 +291,9 @@ describe('state accessor functions', () => {
     return {
       boxes: new Map([["box1", box]]),
       users: new Map([["user1", user]]),
-      authUser: { uid: "user1" } as any,
       writeable: true,
       loading: 0,
+      subscriptionsReady: true,
     };
   };
 
@@ -347,15 +347,14 @@ describe('state accessor functions', () => {
   describe('getAppUserFromState', () => {
     it('returns current auth user from state', () => {
       const state = createTestState();
-      const user = getAppUserFromState(state, state.authUser?.uid);
+      const user = getAppUserFromState(state, "user1");
       expect(user).toBeDefined();
       expect(user?.id).toBe("user1");
     });
 
     it('returns undefined when not authenticated', () => {
       const state = createTestState();
-      state.authUser = null;
-      expect(getAppUserFromState(state, state.authUser?.uid)).toBeUndefined();
+      expect(getAppUserFromState(state, undefined)).toBeUndefined();
     });
   });
 });

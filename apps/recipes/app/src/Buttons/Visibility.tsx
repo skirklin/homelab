@@ -1,10 +1,11 @@
-import { BookOutlined, GlobalOutlined, ShareAltOutlined, LinkOutlined } from "@ant-design/icons";
+import { BookOutlined, GlobalOutlined, ShareAltOutlined, LinkOutlined, TeamOutlined } from "@ant-design/icons";
 import { Dropdown, message } from "antd";
 import { ActionButton } from "../StyledComponents";
 import { Visibility } from "../types";
 import { useState, useContext } from "react";
 import { Context } from "../context";
 import { AddOwnerModal } from "../Modals/AddOwnerModal";
+import { OwnersModal } from "../Modals/OwnersModal";
 import type { MenuProps } from "antd";
 
 interface VisibilityProps {
@@ -13,14 +14,17 @@ interface VisibilityProps {
     value: Visibility
     boxId?: string
     recipeId?: string
+    owners?: string[]
+    subscribers?: string[]
     handleChange: (e: { key: string }) => void
     handleAddOwner: (newOwnerEmail: string) => void
 }
 
 export default function VisibilityControl(props: VisibilityProps) {
-    const { element, value, handleChange, disabled, handleAddOwner, boxId, recipeId } = props;
+    const { element, value, handleChange, disabled, handleAddOwner, boxId, recipeId, owners, subscribers } = props;
     const { state } = useContext(Context);
     const [isAddOwnerVisible, setIsAddOwnerVisible] = useState(false);
+    const [isOwnersVisible, setIsOwnersVisible] = useState(false);
 
     const handleCopyRecipeLink = () => {
         if (boxId && recipeId) {
@@ -95,6 +99,16 @@ export default function VisibilityControl(props: VisibilityProps) {
             label: 'Add owner by email',
             onClick: () => setIsAddOwnerVisible(true),
         });
+        if (owners && owners.length > 0) {
+            const subscriberOnlyCount = (subscribers || []).filter(id => !owners.includes(id)).length;
+            const totalPeople = owners.length + subscriberOnlyCount;
+            menuItems.push({
+                key: 'viewOwners',
+                icon: <TeamOutlined />,
+                label: `View people (${totalPeople})`,
+                onClick: () => setIsOwnersVisible(true),
+            });
+        }
     }
 
     let elt;
@@ -117,6 +131,12 @@ export default function VisibilityControl(props: VisibilityProps) {
                 isVisible={isAddOwnerVisible}
                 setIsVisible={setIsAddOwnerVisible}
                 handleOk={handleAddOwner}
+            />
+            <OwnersModal
+                isVisible={isOwnersVisible}
+                setIsVisible={setIsOwnersVisible}
+                ownerIds={owners || []}
+                subscriberIds={subscribers || []}
             />
         </>
     )

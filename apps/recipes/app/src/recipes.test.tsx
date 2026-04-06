@@ -52,7 +52,7 @@ describe('Real recipe data', () => {
       expect(entry).toBeDefined();
       // @type can be 'Recipe' or ['Recipe'] in valid JSON-LD
       const type = entry.data['@type'];
-      expect(type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'))).toBe(true);
+      expect(type === 'Recipe' || (Array.isArray(type) && (type as string[]).includes('Recipe'))).toBe(true);
       expect(entry.data.name).toBeDefined();
     });
 
@@ -110,7 +110,7 @@ describe('Real recipe data', () => {
       expect(Array.isArray(instructions)).toBe(true);
       expect(instructions.length).toBe(3);
 
-      const str = instructionsToStr(instructions);
+      const str = instructionsToStr(instructions as Recipe["recipeInstructions"]);
       expect(str).toContain('chicken');
       expect(str).toContain('lettuce');
     });
@@ -120,7 +120,7 @@ describe('Real recipe data', () => {
       expect(Array.isArray(instructions)).toBe(true);
       expect(instructions.length).toBe(1);
 
-      const str = instructionsToStr(instructions);
+      const str = instructionsToStr(instructions as Recipe["recipeInstructions"]);
       expect(str).toContain('grind');
     });
 
@@ -193,7 +193,7 @@ describe('Real recipe data', () => {
 
   describe('Edge cases from real data', () => {
     it('handles recipes with nutrition info', () => {
-      const recipe = chickenLettuceWraps as Recipe;
+      const recipe = chickenLettuceWraps as unknown as Recipe;
       expect(recipe.nutrition).toBeDefined();
 
       const entry = new RecipeEntry(
@@ -210,22 +210,22 @@ describe('Real recipe data', () => {
     });
 
     it('handles recipes with aggregate ratings', () => {
-      const recipe = breakfastSausage as Recipe;
+      const recipe = breakfastSausage as unknown as Recipe;
       expect(recipe.aggregateRating).toBeDefined();
     });
 
     it('handles recipes with video content', () => {
-      const recipe = breakfastSausage as Recipe;
+      const recipe = breakfastSausage as unknown as Recipe;
       expect(recipe.video).toBeDefined();
     });
 
     it('handles recipes with multiple images', () => {
-      const recipe = chickenLettuceWraps as Recipe;
+      const recipe = chickenLettuceWraps as unknown as Recipe;
       expect(Array.isArray(recipe.image)).toBe(true);
     });
 
     it('handles recipes with ISO 8601 duration times', () => {
-      const recipe = chickenLettuceWraps as Recipe;
+      const recipe = chickenLettuceWraps as unknown as Recipe;
       expect(recipe.prepTime).toMatch(/^PT/);
       expect(recipe.cookTime).toMatch(/^PT/);
       expect(recipe.totalTime).toMatch(/^PT/);

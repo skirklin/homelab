@@ -6,6 +6,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { Key, TableRowSelection } from 'antd/es/table/interface';
 import { DeleteOutlined, CopyOutlined, RobotOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useBasePath } from '../RecipesRoutes';
 import Filterbox from './Filterbox';
 import NewButton from '../Buttons/NewRecipe';
 import UploadButton from '../Buttons/UploadRecipes';
@@ -115,6 +116,7 @@ export function RecipeTable(props: RecipeTableProps) {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isBatchModalVisible, setIsBatchModalVisible] = useState(false);
   const navigate = useNavigate();
+  const basePath = useBasePath();
 
   const { writeable, recipes, boxId } = props;
   const { state, dispatch } = useContext(Context)
@@ -143,12 +145,12 @@ export function RecipeTable(props: RecipeTableProps) {
 
   const onNameCell = (record: RowType, _rowIndex: number | undefined) => {
     return {
-      onClick: () => navigate(`boxes/${record.box.id}/recipes/${record.recipe.id}`),
+      onClick: () => navigate(`${basePath}/boxes/${record.box.id}/recipes/${record.recipe.id}`),
     }
   }
   const onBoxCell = (record: RowType, _rowIndex: number | undefined) => {
     return {
-      onClick: () => navigate(`boxes/${record.box.id}`),
+      onClick: () => navigate(`${basePath}/boxes/${record.box.id}`),
     }
   }
 
@@ -170,7 +172,7 @@ export function RecipeTable(props: RecipeTableProps) {
         addRecipe(boxId, _.cloneDeep(value.recipe))
       }
     )
-    navigate(`boxes/${boxId}`)
+    navigate(`${basePath}/boxes/${boxId}`)
   }
 
   function handleVisiblityChange(e: { key: string }) {

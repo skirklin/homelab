@@ -166,6 +166,13 @@ export const addRecipeOwner = onCall(corsOptions, async (request) => {
   if (recipe === undefined) {
     throw new HttpsError("not-found", "Specified recipe does not exist");
   }
+  // Verify caller is an owner of the recipe or the containing box
+  const box = (await db.doc(`boxes/${boxId}`).get()).data();
+  const isRecipeOwner = recipe.owners?.includes(request.auth.uid);
+  const isBoxOwner = box?.owners?.includes(request.auth.uid);
+  if (!isRecipeOwner && !isBoxOwner) {
+    throw new HttpsError("permission-denied", "Must be an owner to add other owners");
+  }
   await updateOwners(docRef, newOwnerEmail);
 });
 
@@ -179,7 +186,33 @@ export const addBoxOwner = onCall(corsOptions, async (request) => {
   if (box === undefined) {
     throw new HttpsError("not-found", "Specified box does not exist");
   }
+  // Verify caller is an owner of the box
+  if (!box.owners?.includes(request.auth.uid)) {
+    throw new HttpsError("permission-denied", "Must be an owner to add other owners");
+  }
   await updateOwners(docRef, newOwnerEmail);
+});
+
+export const getOwnerInfo = onCall(corsOptions, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in");
+  }
+  const { ownerIds } = request.data as { ownerIds: string[] };
+  if (!Array.isArray(ownerIds) || ownerIds.length === 0) {
+    return { owners: [] };
+  }
+  const auth = getAuth();
+  const owners = await Promise.all(
+    ownerIds.map(async (uid: string) => {
+      try {
+        const user = await auth.getUser(uid);
+        return { uid, name: user.displayName || null, email: user.email || null };
+      } catch {
+        return { uid, name: null, email: null };
+      }
+    })
+  );
+  return { owners };
 });
 
 // ===== AI Recipe Generation =====
@@ -209,7 +242,7 @@ export const generateRecipe = onCall(
     try {
       const response = await anthropic.messages.create({
         model: CLAUDE_MODEL,
-        max_tokens: 2000,
+        max_tokens: 4000,
         messages: [{ role: "user", content: `Create a recipe for: ${prompt}` }],
         system: GENERATE_RECIPE_SYSTEM_PROMPT,
       });
@@ -445,10 +478,10 @@ export const modifyRecipe = onCall(
 
     return {
       success: true,
-      modification: {
+      modificationJson: JSON.stringify({
         ...pendingChanges,
         generatedAt: now.toDate().toISOString(),
-      },
+      }),
     };
   }
 );

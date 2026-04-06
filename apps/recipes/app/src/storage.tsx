@@ -142,6 +142,7 @@ export class BoxEntry {
     changed?: BoxType;
     id: string;
     owners: string[];
+    subscribers: string[];
     creator: string;
     visibility: Visibility;
     recipes: Map<string, RecipeEntry>
@@ -157,11 +158,13 @@ export class BoxEntry {
         id: string,
         created: Date,
         updated: Date,
-        lastUpdatedBy: string
+        lastUpdatedBy: string,
+        subscribers?: string[]
     ) {
         this.data = data;
         this.id = id;
         this.owners = owners;
+        this.subscribers = subscribers || [];
         this.visibility = visibility;
         this.creator = creator
         this.created = created || DUMMY_FIRST_DATE;
@@ -184,6 +187,7 @@ export class BoxEntry {
             this.created,
             this.updated,
             this.lastUpdatedBy,
+            [...this.subscribers],
         )
 
         newBox.recipes = _.cloneDeep(this.recipes)
@@ -200,6 +204,7 @@ export const boxConverter = {
         return {
             data: box.data,
             owners: box.owners,
+            subscribers: box.subscribers,
             visibility: box.visibility,
             updated: Timestamp.fromDate(box.updated),
             created: Timestamp.fromDate(box.created),
@@ -217,7 +222,8 @@ export const boxConverter = {
             snapshot.id,
             (data.created || DUMMY_FIRST_TIMESTAMP).toDate(),
             (data.updated || DUMMY_FIRST_TIMESTAMP).toDate(),
-            data.lastUpdatedBy
+            data.lastUpdatedBy,
+            data.subscribers,
         );
     }
 };
