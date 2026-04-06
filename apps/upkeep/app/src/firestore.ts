@@ -1,0 +1,303 @@
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  Timestamp,
+  getDoc,
+  updateDoc,
+  addDoc,
+  arrayUnion,
+  arrayRemove,
+} from "firebase/firestore";
+import { db } from "./backend";
+import { type EventStore } from "@kirkl/shared";
+import type { Task, TaskStore, RoomDef, UserProfileStore } from "./types";
+import { taskToStore } from "./types";
+
+// Current list ID - set by the router
+let currentListId = "default";
+
+export function setCurrentListId(listId: string) {
+  currentListId = listId;
+}
+
+export function getCurrentListId() {
+  return currentListId;
+}
+
+export function getListRef(listId?: string) {
+  return doc(db, "taskLists", listId || currentListId);
+}
+
+export function getTasksRef(listId?: string) {
+  return collection(db, "taskLists", listId || currentListId, "tasks");
+}
+
+export function getTaskRef(taskId: string, listId?: string) {
+  return doc(db, "taskLists", listId || currentListId, "tasks", taskId);
+}
+
+export function getEventsRef(listId?: string) {
+  return collection(db, "taskLists", listId || currentListId, "events");
+}
+
+// Alias for backward compatibility
+export function getCompletionsRef(listId?: string) {
+  return getEventsRef(listId);
+}
+
+export function getUserRef(userId: string) {
+  return doc(db, "users", userId);
+}
+
+export async function ensureListExists(userId: string) {
+  const listRef = getListRef();
+  const listSnap = await getDoc(listRef);
+
+  if (listSnap.exists()) {
+    // Add user to owners if not already there
+    const data = listSnap.data();
+    if (!data.owners.includes(userId)) {
+      await updateDoc(listRef, {
+        owners: [...data.owners, userId],
+      });
+    }
+  }
+  // If list doesn't exist, we don't auto-create - user must create explicitly
+}
+
+export async function addTask(
+  task: Omit<Task, "id">,
+): Promise<string> {
+  const taskRef = doc(getTasksRef());
+  const taskData = taskToStore(task);
+  await setDoc(taskRef, taskData);
+  return taskRef.id;
+}
+
+export async function updateTask(taskId: string, updates: Partial<TaskStore>) {
+  const taskRef = getTaskRef(taskId);
+  await updateDoc(taskRef, { ...updates, updatedAt: Timestamp.now() });
+}
+
+export async function snoozeTask(taskId: string, until: Date): Promise<void> {
+  const taskRef = getTaskRef(taskId);
+  await updateDoc(taskRef, {
+    snoozedUntil: Timestamp.fromDate(until),
+    updatedAt: Timestamp.now(),
+  });
+}
+
+export async function unsnoozeTask(taskId: string): Promise<void> {
+  const taskRef = getTaskRef(taskId);
+  await updateDoc(taskRef, {
+    snoozedUntil: null,
+    updatedAt: Timestamp.now(),
+  });
+}
+
+export async function deleteTask(taskId: string) {
+  const taskRef = getTaskRef(taskId);
+  await deleteDoc(taskRef);
+}
+
+export async function completeTask(
+  taskId: string,
+  userId: string,
+  notes: string = "",
+  options?: { completedAt?: Date; currentLastCompleted?: Date }
+): Promise<void> {
+  const completionTime = options?.completedAt ? Timestamp.fromDate(options.completedAt) : Timestamp.now();
+  const now = Timestamp.now();
+
+  // Only update lastCompleted if this completion is more recent than current
+  // Uses local state passed in to avoid network read
+  const shouldUpdateLastCompleted = !options?.currentLastCompleted ||
+    completionTime.toMillis() > options.currentLastCompleted.getTime();
+
+  if (shouldUpdateLastCompleted) {
+    const taskRef = getTaskRef(taskId);
+    await updateDoc(taskRef, {
+      lastCompleted: completionTime,
+      updatedAt: now,
+    });
+  }
+
+  // Create completion event using unified Event format
+  const eventData: EventStore = {
+    subjectId: taskId,
+    timestamp: completionTime,
+    createdAt: now,
+    createdBy: userId,
+    data: { notes },
+  };
+  await addDoc(getEventsRef(), eventData);
+}
+
+export async function updateCompletion(
+  eventId: string,
+  updates: { notes?: string; timestamp?: Date },
+  listId?: string
+): Promise<void> {
+  const eventRef = doc(db, "taskLists", listId || currentListId, "events", eventId);
+  const updateData: { "data.notes"?: string; timestamp?: Timestamp } = {};
+
+  if (updates.notes !== undefined) {
+    updateData["data.notes"] = updates.notes;
+  }
+  if (updates.timestamp !== undefined) {
+    updateData.timestamp = Timestamp.fromDate(updates.timestamp);
+  }
+
+  await updateDoc(eventRef, updateData);
+}
+
+export async function deleteCompletion(eventId: string, listId?: string): Promise<void> {
+  const eventRef = doc(db, "taskLists", listId || currentListId, "events", eventId);
+  await deleteDoc(eventRef);
+}
+
+export async function updateRooms(rooms: RoomDef[]) {
+  const listRef = getListRef();
+  await updateDoc(listRef, { roomDefs: rooms, updated: Timestamp.now() });
+}
+
+// User profile functions
+// Uses 'householdSlugs' field to avoid conflict with groceries app
+export async function getUserSlugs(userId: string): Promise<Record<string, string>> {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+  if (userSnap.exists()) {
+    const data = userSnap.data() as UserProfileStore;
+    return data.householdSlugs || {};
+  }
+  return {};
+}
+
+export async function setUserSlug(userId: string, slug: string, listId: string) {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+
+  if (userSnap.exists()) {
+    const data = userSnap.data() as UserProfileStore;
+    const householdSlugs = { ...data.householdSlugs, [slug]: listId };
+    await updateDoc(userRef, { householdSlugs });
+  } else {
+    await setDoc(userRef, { householdSlugs: { [slug]: listId } });
+  }
+
+  // Add user to list owners if not already there (for joining shared lists)
+  const listRef = getListRef(listId);
+  await updateDoc(listRef, { owners: arrayUnion(userId) });
+}
+
+export async function removeUserSlug(userId: string, slug: string) {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+
+  if (userSnap.exists()) {
+    const data = userSnap.data() as UserProfileStore;
+    const householdSlugs = { ...data.householdSlugs };
+    delete householdSlugs[slug];
+    await updateDoc(userRef, { householdSlugs });
+  }
+}
+
+export async function renameUserSlug(userId: string, oldSlug: string, newSlug: string) {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+
+  if (userSnap.exists()) {
+    const data = userSnap.data() as UserProfileStore;
+    const householdSlugs = { ...data.householdSlugs };
+    if (householdSlugs[oldSlug]) {
+      householdSlugs[newSlug] = householdSlugs[oldSlug];
+      delete householdSlugs[oldSlug];
+      await updateDoc(userRef, { householdSlugs });
+    }
+  }
+}
+
+// Create a new task list with a user slug
+export async function createList(name: string, slug: string, userId: string): Promise<string> {
+  const listsRef = collection(db, "taskLists");
+  const newListRef = doc(listsRef);
+
+  await setDoc(newListRef, {
+    name,
+    owners: [userId],
+    roomDefs: [],
+    created: Timestamp.now(),
+    updated: Timestamp.now(),
+  });
+
+  // Add slug mapping to user's profile
+  await setUserSlug(userId, slug, newListRef.id);
+
+  return newListRef.id;
+}
+
+export async function renameList(listId: string, newName: string) {
+  const listRef = getListRef(listId);
+  await updateDoc(listRef, { name: newName, updated: Timestamp.now() });
+}
+
+export async function deleteList(listId: string) {
+  const listRef = getListRef(listId);
+  await deleteDoc(listRef);
+}
+
+// Get list by ID (for joining shared lists)
+export async function getListById(listId: string): Promise<{ name: string } | null> {
+  const listRef = doc(db, "taskLists", listId);
+  const listSnap = await getDoc(listRef);
+  if (listSnap.exists()) {
+    return { name: listSnap.data().name };
+  }
+  return null;
+}
+
+// Notification functions
+
+export async function toggleTaskNotification(taskId: string, userId: string, enable: boolean) {
+  const taskRef = getTaskRef(taskId);
+  if (enable) {
+    await updateDoc(taskRef, { notifyUsers: arrayUnion(userId) });
+  } else {
+    await updateDoc(taskRef, { notifyUsers: arrayRemove(userId) });
+  }
+}
+
+export async function saveFcmToken(userId: string, token: string) {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+
+  if (userSnap.exists()) {
+    await updateDoc(userRef, { fcmTokens: arrayUnion(token) });
+  } else {
+    await setDoc(userRef, { householdSlugs: {}, fcmTokens: [token] });
+  }
+}
+
+export async function removeFcmToken(userId: string, token: string) {
+  const userRef = getUserRef(userId);
+  await updateDoc(userRef, { fcmTokens: arrayRemove(token) });
+}
+
+import type { NotificationMode } from "./types";
+
+export async function getNotificationMode(userId: string): Promise<NotificationMode> {
+  const userRef = getUserRef(userId);
+  const userSnap = await getDoc(userRef);
+  if (userSnap.exists()) {
+    const data = userSnap.data();
+    return data.upkeepNotificationMode || "subscribed";
+  }
+  return "subscribed";
+}
+
+export async function setNotificationMode(userId: string, mode: NotificationMode) {
+  const userRef = getUserRef(userId);
+  await updateDoc(userRef, { upkeepNotificationMode: mode });
+}
