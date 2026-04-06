@@ -1,0 +1,24 @@
+{
+  "name": "@homelab/scripts",
+  "private": true,
+  "type": "module",
+  "description": "Data migration and admin scripts",
+  "scripts": {
+    "migrate:all": "tsx migrate-all.ts",
+    "migrate:grocery-items": "tsx migrate-grocery-items.ts",
+    "migrate:grocery-history": "tsx migrate-grocery-history.ts",
+    "travel:cli": "tsx travel/cli.ts",
+    "travel:migrate-all": "tsx travel/migrate-all.ts",
+    "travel:migrate-sqlite": "tsx travel/migrate-sqlite.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "better-sqlite3": "^11.0.0",
+    "firebase-admin": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
