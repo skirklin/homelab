@@ -1,0 +1,21 @@
+{
+  "name": "recipe-scripts",
+  "version": "1.0.0",
+  "description": "CLI scripts for recipe management",
+  "type": "module",
+  "scripts": {
+    "enrich": "npx tsx enrich-recipes.ts",
+    "seed": "npx tsx seed-emulator.ts",
+    "lowercase-tags": "npx tsx lowercase-tags.ts",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "firebase-admin": "^13.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.0"
+  }
+}

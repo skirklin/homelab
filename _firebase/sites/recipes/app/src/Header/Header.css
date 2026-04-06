@@ -1,0 +1,45 @@
+.readonly-switch-writeable {
+  background-color: var(--color-accent);
+}
+
+.readonly-switch-readonly {
+  color: var(--color-text-secondary);
+}
+
+.recipes-btn {
+  border: none;
+  box-shadow: none;
+  background-color: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.recipes-btn:hover {
+  background-color: var(--color-bg-muted);
+  color: var(--color-text);
+}
+
+.recipes-breadcrumb {
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+
+.recipes-breadcrumb a {
+  color: var(--color-primary);
+  transition: opacity 0.2s ease;
+}
+
+.recipes-breadcrumb a:hover {
+  color: var(--color-primary-hover);
+}
+
+/* Breadcrumb separator */
+.recipes-breadcrumb .ant-breadcrumb-separator {
+  color: var(--color-text-muted);
+}

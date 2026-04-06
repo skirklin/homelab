@@ -1,0 +1,59 @@
+{
+  "hosting": [
+    {
+      "target": "home",
+      "public": "sites/home/app/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "predeploy": ["npm --prefix sites/home/app run build"]
+    },
+    {
+      "target": "recipes",
+      "public": "sites/recipes/app/build",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "predeploy": ["npm --prefix sites/recipes/app run build"]
+    },
+    {
+      "target": "groceries",
+      "public": "sites/groceries/app/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "predeploy": ["npm --prefix sites/groceries/app run build"]
+    },
+    {
+      "target": "homepage",
+      "public": "sites/homepage",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
+    },
+    {
+      "target": "critic-wiki",
+      "public": "sites/critic/public",
+      "ignore": ["firebase.json", "**/.*"]
+    },
+    {
+      "target": "upkeep",
+      "public": "sites/upkeep/app/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "predeploy": ["npm --prefix sites/upkeep/app run build"]
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": {
+    "source": "functions",
+    "predeploy": [
+      "npm --prefix functions run build"
+    ]
+  },
+  "emulators": {
+    "auth": { "port": 9099 },
+    "firestore": { "port": 8180 },
+    "hosting": { "port": 5000 },
+    "functions": { "port": 5001 },
+    "ui": { "enabled": true }
+  }
+}
