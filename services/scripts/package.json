@@ -9,7 +9,8 @@
     "migrate:grocery-history": "tsx migrate-grocery-history.ts",
     "travel:cli": "tsx travel/cli.ts",
     "travel:migrate-all": "tsx travel/migrate-all.ts",
-    "travel:migrate-sqlite": "tsx travel/migrate-sqlite.ts"
+    "travel:migrate-sqlite": "tsx travel/migrate-sqlite.ts",
+    "export:firestore": "tsx export/export-firestore.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

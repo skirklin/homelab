@@ -14,6 +14,9 @@ __pycache__/
 
 handoff/
 
+# Exported Firestore data (contains real user data)
+services/scripts/export/data/
+
 # Three Man Team working files + skills (embedded git repos)
 .claude/skills/
 ARCHITECT-BRIEF.md
