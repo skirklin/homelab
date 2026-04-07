@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Deploy from local machine to VPS.
-# Builds Docker images locally, pushes them to the VPS via SSH,
-# and applies k8s manifests.
+# Pushes Docker images and k8s manifests, then applies them.
 #
 # Usage: ./infra/deploy.sh [app1 app2 ...]
 #   No args = deploy everything. Pass app names to deploy selectively.
@@ -17,25 +16,27 @@ if [ $# -gt 0 ]; then
     IMAGES=("$@")
 else
     IMAGES=($(docker images --filter "reference=${REGISTRY}/*" --format "{{.Repository}}:{{.Tag}}"))
-    # Also include caddy base image
     docker pull caddy:2-alpine 2>/dev/null || true
     IMAGES+=("caddy:2-alpine")
 fi
 
 echo "=== Pushing images to ${VPS} ==="
 for img in "${IMAGES[@]}"; do
-    # Normalize: allow passing just "recipes" → "homelab/recipes:latest"
-    if [[ "$img" != */* ]]; then
+    if [[ "$img" != */* && "$img" != *:* ]]; then
         img="${REGISTRY}/${img}:latest"
     fi
     echo "Pushing ${img}..."
-    docker save "${img}" | ssh "${VPS}" "sudo k3s ctr images import -"
+    docker save "${img}" | ssh "${VPS}" "sudo k3s ctr images import -" || echo "  WARNING: failed to push ${img}"
 done
 
 echo ""
-echo "=== Syncing manifests and applying ==="
-ssh "${VPS}" "cd ~/homelab && git pull --ff-only"
-ssh "${VPS}" "kubectl apply -k ~/homelab/infra/k8s/"
+echo "=== Syncing manifests ==="
+ssh "${VPS}" "mkdir -p ~/homelab-manifests"
+scp -r infra/k8s/* "${VPS}:~/homelab-manifests/"
+
+echo ""
+echo "=== Applying manifests ==="
+ssh "${VPS}" "kubectl apply -k ~/homelab-manifests/"
 
 echo ""
 echo "=== Restarting deployments ==="

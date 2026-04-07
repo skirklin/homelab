@@ -16,6 +16,7 @@ spec:
       containers:
         - name: ingest
           image: homelab/ingest:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 5555
           resources:

@@ -20,6 +20,7 @@ spec:
       containers:
         - name: home
           image: homelab/home:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           resources:
@@ -58,6 +59,7 @@ spec:
       containers:
         - name: recipes
           image: homelab/recipes:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           resources:
@@ -96,6 +98,7 @@ spec:
       containers:
         - name: groceries
           image: homelab/groceries:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           resources:
@@ -137,6 +140,7 @@ spec:
       containers:
         - name: upkeep
           image: homelab/upkeep:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           resources:
@@ -175,6 +179,7 @@ spec:
       containers:
         - name: travel
           image: homelab/travel:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           resources:
@@ -213,6 +218,7 @@ spec:
       containers:
         - name: money
           image: homelab/money:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           resources:
@@ -251,6 +257,7 @@ spec:
       containers:
         - name: homepage
           image: homelab/homepage:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
           resources:
