@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",
-    "@kirkl/shared": "*",
+    "@kirkl/shared": "workspace:*",
     "ajv": "^8.17.1",
     "ajv-keywords": "^5.1.0",
     "antd": "^5.29.3",
