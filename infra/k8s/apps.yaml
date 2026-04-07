@@ -1,0 +1,305 @@
+# Frontend app deployments — all follow the same pattern:
+# nginx container serving static Vite build output.
+
+# --- home (shell app) ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: home
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: home
+  template:
+    metadata:
+      labels:
+        app: home
+    spec:
+      containers:
+        - name: home
+          image: homelab/home:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: home
+  namespace: homelab
+spec:
+  selector:
+    app: home
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# --- recipes ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recipes
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recipes
+  template:
+    metadata:
+      labels:
+        app: recipes
+    spec:
+      containers:
+        - name: recipes
+          image: homelab/recipes:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recipes
+  namespace: homelab
+spec:
+  selector:
+    app: recipes
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# --- groceries ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: groceries
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: groceries
+  template:
+    metadata:
+      labels:
+        app: groceries
+    spec:
+      containers:
+        - name: groceries
+          image: homelab/groceries:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: groceries
+  namespace: homelab
+spec:
+  selector:
+    app: groceries
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# --- life ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: life
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: life
+  template:
+    metadata:
+      labels:
+        app: life
+    spec:
+      containers:
+        - name: life
+          image: homelab/life:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: life
+  namespace: homelab
+spec:
+  selector:
+    app: life
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# --- upkeep ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: upkeep
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: upkeep
+  template:
+    metadata:
+      labels:
+        app: upkeep
+    spec:
+      containers:
+        - name: upkeep
+          image: homelab/upkeep:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: upkeep
+  namespace: homelab
+spec:
+  selector:
+    app: upkeep
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# --- travel ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: travel
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: travel
+  template:
+    metadata:
+      labels:
+        app: travel
+    spec:
+      containers:
+        - name: travel
+          image: homelab/travel:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: travel
+  namespace: homelab
+spec:
+  selector:
+    app: travel
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# --- money ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: money
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: money
+  template:
+    metadata:
+      labels:
+        app: money
+    spec:
+      containers:
+        - name: money
+          image: homelab/money:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: money
+  namespace: homelab
+spec:
+  selector:
+    app: money
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# --- homepage (static) ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homepage
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homepage
+  template:
+    metadata:
+      labels:
+        app: homepage
+    spec:
+      containers:
+        - name: homepage
+          image: homelab/homepage:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { memory: 16Mi, cpu: 10m }
+            limits: { memory: 32Mi, cpu: 50m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homepage
+  namespace: homelab
+spec:
+  selector:
+    app: homepage
+  ports:
+    - port: 80
+      targetPort: 80

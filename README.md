@@ -1,6 +1,22 @@
 # homelab
 
-Personal web apps monorepo, migrating from Firebase to a self-hosted stack (PocketBase + Caddy on a VPS).
+Personal web apps monorepo, self-hosted on a VPS with k3s, Caddy, and PocketBase.
+
+## Infrastructure
+
+k3s (single-node Kubernetes) on a VPS. Caddy handles TLS (automatic Let's Encrypt) and reverse proxies to app services. PocketBase provides data storage and auth.
+
+| Subdomain | App |
+|---|---|
+| `beta.kirkl.in` | home (shell) |
+| `recipes.beta.kirkl.in` | recipes |
+| `groceries.beta.kirkl.in` | groceries |
+| `life.beta.kirkl.in` | life |
+| `upkeep.beta.kirkl.in` | upkeep |
+| `travel.beta.kirkl.in` | travel |
+| `me.beta.kirkl.in` | homepage (static) |
+| `money.beta.kirkl.in` | money (moving to tailnet-only) |
+| `api.beta.kirkl.in` | PocketBase API |
 
 ## Structure
 
@@ -15,29 +31,48 @@ apps/
   travel/         # Travel trip planner (React + Vite)
   money/          # Personal finance dashboard (React + Vite)
 services/
-  functions/      # Firebase Cloud Functions
+  functions/      # Firebase Cloud Functions (to be migrated)
   scripts/        # Data migration scripts
   ingest/         # Financial data ingest server (Python, managed with uv)
 extension/        # Chrome extension for financial data capture
 packages/
   pb-client/      # Typed PocketBase client (placeholder)
   ui/             # Shared React components (@kirkl/shared)
+infra/
+  docker/         # Dockerfiles for all services
+  k8s/            # Kubernetes manifests (Kustomize)
+  build.sh        # Build all Docker images
+  deploy.sh       # Deploy to k3s
+  setup-k3s.sh    # One-time k3s installation
 ```
 
-## Migration status
+## Deployment
 
-This repo consolidates two previous repos:
+### First-time setup (on the VPS)
 
-- **firebase-apps** — `recipes`, `groceries`, `homepage`, `home`, `life`, `upkeep`, `travel`, shared components, Cloud Functions, and migration scripts
-- **money** — `money` frontend, `ingest` backend, Chrome `extension`
+```bash
+# Install k3s
+./infra/setup-k3s.sh
 
-The apps currently depend on Firebase (Firestore, Auth, Cloud Functions). The plan is to migrate each app to PocketBase for data/auth, with Caddy as the reverse proxy, all self-hosted on a VPS.
+# Build all images and deploy
+./infra/build.sh
+./infra/deploy.sh
+```
 
-## Tooling
+### Updating
 
-- **pnpm workspaces** + **Turborepo** for JS/TS packages
-- **uv** for Python projects (`services/ingest/`)
-- Each React app uses **Vite**
+```bash
+./infra/build.sh       # rebuild images
+./infra/deploy.sh      # import + rollout restart
+```
+
+### Monitoring
+
+```bash
+kubectl get pods -n homelab
+kubectl logs -n homelab deploy/caddy
+kubectl logs -n homelab deploy/recipes
+```
 
 ## Development
 
@@ -46,6 +81,24 @@ pnpm install
 pnpm dev       # starts all apps via Turborepo
 pnpm build     # builds all apps
 ```
+
+## Tooling
+
+- **k3s** — single-node Kubernetes
+- **Caddy** — reverse proxy, automatic HTTPS
+- **PocketBase** — database + auth
+- **pnpm workspaces** + **Turborepo** — JS/TS monorepo
+- **uv** — Python projects (`services/ingest/`)
+- **Vite** — frontend builds
+
+## Migration status
+
+This repo consolidates two previous repos:
+
+- **firebase-apps** — `recipes`, `groceries`, `homepage`, `home`, `life`, `upkeep`, `travel`, shared components, Cloud Functions, and migration scripts
+- **money** — `money` frontend, `ingest` backend, Chrome `extension`
+
+The apps currently depend on Firebase (Firestore, Auth, Cloud Functions). Migrating to PocketBase for data/auth.
 
 ## License
 
