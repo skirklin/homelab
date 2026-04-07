@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { Button, Input, message } from "antd";
 import { GoogleOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { auth } from "../backend";
+import { getBackend } from "@kirkl/shared";
 
 const Container = styled.div`
   display: flex;
@@ -49,24 +48,29 @@ export function Auth() {
   const [loading, setLoading] = useState(false);
 
   const handleGoogleSignIn = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      await getBackend().collection("users").authWithOAuth2({ provider: "google" });
+    } catch (e) {
+      console.error("Google sign-in failed:", e);
+      message.error("Failed to sign in with Google");
+    }
   };
 
   const handleEmailSignIn = async () => {
     if (!email || !password) return;
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error: unknown) {
-      // If user doesn't exist, create them (for emulator testing)
-      if ((error as { code?: string }).code === "auth/user-not-found") {
-        try {
-          await createUserWithEmailAndPassword(auth, email, password);
-        } catch (createError) {
-          message.error("Failed to sign in");
-        }
-      } else {
+      await getBackend().collection("users").authWithPassword(email, password);
+    } catch {
+      // Try creating the account
+      try {
+        await getBackend().collection("users").create({
+          email,
+          password,
+          passwordConfirm: password,
+        });
+        await getBackend().collection("users").authWithPassword(email, password);
+      } catch {
         message.error("Failed to sign in");
       }
     } finally {
@@ -76,7 +80,7 @@ export function Auth() {
 
   return (
     <Container>
-      <Title>Groceries</Title>
+      <Title>Shopping</Title>
       <Subtitle>A shared shopping list for you and your family</Subtitle>
       <Button
         type="primary"
@@ -87,7 +91,6 @@ export function Auth() {
         Sign in with Google
       </Button>
 
-      {/* Dev/test login - only shown in development */}
       {import.meta.env.DEV && (
         <DevLogin>
           <DevLabel>Development Login</DevLabel>

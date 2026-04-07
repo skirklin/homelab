@@ -9,7 +9,7 @@
     "./styles": "./src/styles.css"
   },
   "dependencies": {
-    "firebase": "^11.0.0",
+    "pocketbase": "^0.25.0",
     "react": "^19.2.0"
   },
   "devDependencies": {

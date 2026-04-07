@@ -35,7 +35,7 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
 };
 import { useGroceriesContext } from "../groceries-context";
 import { getItemsByCategoryId } from "../subscription";
-import { updateItemCategory } from "../firestore";
+import { updateItemCategory } from "../pocketbase";
 import { Header } from "./Header";
 import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";

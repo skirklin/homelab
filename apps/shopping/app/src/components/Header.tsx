@@ -3,10 +3,9 @@ import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button } from "antd";
 import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
-import { signOut } from "firebase/auth";
 import { getBackend, AppHeader, ShareModal } from "@kirkl/shared";
 import { useGroceriesContext } from "../groceries-context";
-import { clearCheckedItems } from "../firestore";
+import { clearCheckedItems } from "../pocketbase";
 import { getItemsFromState } from "../subscription";
 import { appStorage, StorageKeys } from "../storage";
 import { SyncIndicator } from "./SyncIndicator";
@@ -52,8 +51,7 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
   };
 
   const handleSignOut = () => {
-    const { auth } = getBackend();
-    signOut(auth);
+    getBackend().authStore.clear();
   };
 
   // When embedded, no dropdown menu - use inline buttons for all actions

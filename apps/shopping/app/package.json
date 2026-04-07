@@ -31,7 +31,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@kirkl/shared": "workspace:*",
     "antd": "^5.29.3",
-    "firebase": "^11.0.0",
+    "pocketbase": "^0.25.0",
     "styled-components": "^6.1.19"
   },
   "devDependencies": {

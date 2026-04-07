@@ -1,12 +1,15 @@
 /**
- * Standalone Groceries App
- * Uses shared auth provider and renders the GroceriesModule
+ * Standalone Shopping App
+ * Uses shared auth provider and renders the ShoppingModule
  */
 
 import { BrowserRouter } from "react-router-dom";
 import { ConfigProvider } from "antd";
 import styled from "styled-components";
-import { AuthProvider, useAuth } from "@kirkl/shared";
+import { initializeBackend, AuthProvider, useAuth } from "@kirkl/shared";
+
+// Initialize PocketBase
+initializeBackend();
 import { GroceriesModule } from "./module";
 import { Auth } from "./components/Auth";
 

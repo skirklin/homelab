@@ -5,7 +5,7 @@ import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpO
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { useGroceriesContext } from "../groceries-context";
-import { renameList, renameUserSlug, removeUserSlug, deleteList, updateCategories } from "../firestore";
+import { renameList, renameUserSlug, removeUserSlug, deleteList, updateCategories } from "../pocketbase";
 import type { CategoryDef } from "../types";
 
 const Container = styled.div`

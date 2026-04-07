@@ -5,7 +5,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { useGroceriesContext } from "../groceries-context";
-import { addItem } from "../firestore";
+import { addItem } from "../pocketbase";
 import { getItemsFromState } from "../subscription";
 
 const Container = styled.div`

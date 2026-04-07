@@ -1,5 +1,5 @@
 // Backend
-export { initializeBackend, getBackend, app, auth, db } from "./backend";
+export { initializeBackend, getBackend } from "./backend";
 
 // Auth
 export { AuthProvider, useAuth, AuthContext } from "./auth";

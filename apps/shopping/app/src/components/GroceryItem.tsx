@@ -5,7 +5,7 @@ import { useDraggable } from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import type { GroceryItem as GroceryItemType } from "../types";
-import { toggleItem, deleteItem, updateItem } from "../firestore";
+import { toggleItem, deleteItem, updateItem } from "../pocketbase";
 
 const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
   display: flex;

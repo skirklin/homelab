@@ -28,7 +28,7 @@ done
 declare -A APP_BUILDS=(
     [home]="apps/home/app:dist"
     [recipes]="apps/recipes/app:build"
-    [groceries]="apps/groceries/app:dist"
+    [shopping]="apps/shopping/app:dist"
     [upkeep]="apps/upkeep/app:dist"
     [travel]="apps/travel/app:dist"
     [money]="apps/money:dist"

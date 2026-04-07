@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { Button } from "antd";
 import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ShoppingTrip, CategoryDef } from "../types";
-import { addItem } from "../firestore";
+import { addItem } from "../pocketbase";
 
 function formatCategoryId(categoryId: string, categories: CategoryDef[]): string {
   // Look up display name from categories, fall back to capitalized ID

@@ -1,7 +1,7 @@
-// Re-export from shared backend
-import { initializeBackend, getBackend } from "@kirkl/shared";
+import { initializeBackend } from "@kirkl/shared";
 
-// Initialize on import (for standalone mode)
-initializeBackend("groceries.kirkl.in");
+// Initialize PocketBase on import
+const pb = initializeBackend();
 
-export const { app, auth, db } = getBackend();
+export { pb };
+export { getBackend } from "@kirkl/shared";

@@ -1,15 +1,12 @@
-import { Timestamp } from "firebase/firestore";
-
 // Category definition with stable ID for renaming
 export interface CategoryDef {
   id: string;
   name: string;
 }
 
-// Category ID used for referencing (stored on items)
 export type CategoryId = string;
 
-export interface GroceryItem {
+export interface ShoppingItem {
   id: string;
   ingredient: string;
   note?: string;
@@ -21,18 +18,7 @@ export interface GroceryItem {
   checkedAt?: Date;
 }
 
-export interface GroceryItemStore {
-  ingredient: string;
-  note?: string;
-  categoryId: CategoryId;
-  checked: boolean;
-  addedBy: string;
-  addedAt: Timestamp;
-  checkedBy?: string;
-  checkedAt?: Timestamp;
-}
-
-export interface GroceryList {
+export interface ShoppingList {
   id: string;
   name: string;
   owners: string[];
@@ -41,81 +27,12 @@ export interface GroceryList {
   updated: Date;
 }
 
-export interface GroceryListStore {
-  name: string;
-  owners: string[];
-  categoryDefs: CategoryDef[];
-  created: Timestamp;
-  updated: Timestamp;
-}
-
-// Legacy store format for backward compatibility
-interface LegacyGroceryItemStore {
-  name?: string;
-}
-
-export function itemFromStore(
-  id: string,
-  data: GroceryItemStore
-): GroceryItem {
-  // Handle legacy items that only have 'name' field
-  const legacy = data as GroceryItemStore & LegacyGroceryItemStore;
-  return {
-    id,
-    ingredient: data.ingredient || legacy.name || "",
-    note: data.note,
-    categoryId: data.categoryId || "uncategorized",
-    checked: data.checked,
-    addedBy: data.addedBy,
-    addedAt: data.addedAt.toDate(),
-    checkedBy: data.checkedBy,
-    checkedAt: data.checkedAt?.toDate(),
-  };
-}
-
-export function itemToStore(item: Omit<GroceryItem, "id">): GroceryItemStore {
-  return {
-    ingredient: item.ingredient,
-    note: item.note,
-    categoryId: item.categoryId,
-    checked: item.checked,
-    addedBy: item.addedBy,
-    addedAt: Timestamp.fromDate(item.addedAt),
-    checkedBy: item.checkedBy,
-    checkedAt: item.checkedAt ? Timestamp.fromDate(item.checkedAt) : undefined,
-  };
-}
-
-export function listFromStore(id: string, data: GroceryListStore): GroceryList {
-  return {
-    id,
-    name: data.name,
-    owners: data.owners,
-    categories: data.categoryDefs || [],
-    created: data.created.toDate(),
-    updated: data.updated.toDate(),
-  };
-}
-
-// Item history for autocomplete (keyed by normalized ingredient)
 export interface ItemHistory {
   ingredient: string;
   categoryId: CategoryId;
   lastAdded: Date;
 }
 
-export interface ItemHistoryStore {
-  ingredient: string;
-  categoryId: CategoryId;
-  lastAdded: Timestamp;
-}
-
-// Legacy history format for backward compatibility
-export interface LegacyItemHistoryStore {
-  name?: string;
-}
-
-// Shopping trip record
 export interface ShoppingTripItem {
   ingredient: string;
   note?: string;
@@ -128,11 +45,43 @@ export interface ShoppingTrip {
   items: ShoppingTripItem[];
 }
 
-export interface ShoppingTripStore {
-  completedAt: Timestamp;
-  items: ShoppingTripItem[];
+export type { UserProfile, UserProfileStore } from "@kirkl/shared";
+
+// Legacy types kept as aliases for compatibility with existing component imports
+export type GroceryItem = ShoppingItem;
+export type GroceryList = ShoppingList;
+export type GroceryItemStore = ShoppingItem;
+export type GroceryListStore = ShoppingList;
+export type ItemHistoryStore = ItemHistory;
+export type LegacyItemHistoryStore = { name?: string };
+export type ShoppingTripStore = ShoppingTrip;
+
+// Converters — PocketBase records come as plain objects with ISO date strings
+export function itemFromRecord(record: Record<string, unknown>): ShoppingItem {
+  return {
+    id: record.id as string,
+    ingredient: record.ingredient as string || "",
+    note: record.note as string | undefined,
+    categoryId: (record.category_id as string) || "uncategorized",
+    checked: record.checked as boolean || false,
+    addedBy: record.added_by as string || "",
+    addedAt: new Date(record.created as string),
+    checkedBy: record.checked_by as string | undefined,
+    checkedAt: record.checked_at ? new Date(record.checked_at as string) : undefined,
+  };
 }
 
-// User profile - re-exported from shared
-// Groceries uses the 'slugs' field for list mapping
-export type { UserProfile, UserProfileStore } from "@kirkl/shared";
+export function listFromRecord(record: Record<string, unknown>): ShoppingList {
+  return {
+    id: record.id as string,
+    name: record.name as string || "",
+    owners: record.owners as string[] || [],
+    categories: (record.category_defs as CategoryDef[]) || [],
+    created: new Date(record.created as string),
+    updated: new Date(record.updated as string),
+  };
+}
+
+// Keep old names as aliases
+export const itemFromStore = itemFromRecord;
+export const listFromStore = listFromRecord;
