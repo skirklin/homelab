@@ -114,43 +114,8 @@ spec:
     - port: 80
       targetPort: 80
 
----
-# --- life ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: life
-  namespace: homelab
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: life
-  template:
-    metadata:
-      labels:
-        app: life
-    spec:
-      containers:
-        - name: life
-          image: homelab/life:latest
-          ports:
-            - containerPort: 80
-          resources:
-            requests: { memory: 32Mi, cpu: 10m }
-            limits: { memory: 64Mi, cpu: 100m }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: life
-  namespace: homelab
-spec:
-  selector:
-    app: life
-  ports:
-    - port: 80
-      targetPort: 80
+
+# life has no standalone build — it's a module consumed by the home app
 
 ---
 # --- upkeep ---

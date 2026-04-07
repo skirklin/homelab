@@ -1,35 +1,46 @@
 #!/usr/bin/env bash
-# Deploy (or update) all services to k3s.
-# Run from the repo root: ./infra/deploy.sh
+# Deploy from local machine to VPS.
+# Builds Docker images locally, pushes them to the VPS via SSH,
+# and applies k8s manifests.
+#
+# Usage: ./infra/deploy.sh [app1 app2 ...]
+#   No args = deploy everything. Pass app names to deploy selectively.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# k3s uses containerd, so import images directly (no registry needed)
-echo "=== Importing images into k3s ==="
-for img in $(docker images --filter "reference=homelab/*" --format "{{.Repository}}:{{.Tag}}"); do
-    echo "Importing ${img}..."
-    docker save "${img}" | sudo k3s ctr images import -
-done
+VPS="${HOMELAB_VPS:-scott@5.78.200.161}"
+REGISTRY="${REGISTRY:-homelab}"
 
-# Also import the caddy image
-echo "Importing caddy:2-alpine..."
-docker pull caddy:2-alpine 2>/dev/null
-docker save caddy:2-alpine | sudo k3s ctr images import -
+# Determine which images to push
+if [ $# -gt 0 ]; then
+    IMAGES=("$@")
+else
+    IMAGES=($(docker images --filter "reference=${REGISTRY}/*" --format "{{.Repository}}:{{.Tag}}"))
+    # Also include caddy base image
+    docker pull caddy:2-alpine 2>/dev/null || true
+    IMAGES+=("caddy:2-alpine")
+fi
 
-echo ""
-echo "=== Applying k8s manifests ==="
-kubectl apply -k infra/k8s/
-
-echo ""
-echo "=== Restarting deployments to pick up new images ==="
-for deploy in $(kubectl get deployments -n homelab -o name 2>/dev/null); do
-    kubectl rollout restart "${deploy}" -n homelab
-done
-for sts in $(kubectl get statefulsets -n homelab -o name 2>/dev/null); do
-    kubectl rollout restart "${sts}" -n homelab
+echo "=== Pushing images to ${VPS} ==="
+for img in "${IMAGES[@]}"; do
+    # Normalize: allow passing just "recipes" → "homelab/recipes:latest"
+    if [[ "$img" != */* ]]; then
+        img="${REGISTRY}/${img}:latest"
+    fi
+    echo "Pushing ${img}..."
+    docker save "${img}" | ssh "${VPS}" "sudo k3s ctr images import -"
 done
 
 echo ""
-echo "=== Status ==="
-kubectl get pods -n homelab
+echo "=== Syncing manifests and applying ==="
+ssh "${VPS}" "cd ~/homelab && git pull --ff-only"
+ssh "${VPS}" "kubectl apply -k ~/homelab/infra/k8s/"
+
+echo ""
+echo "=== Restarting deployments ==="
+ssh "${VPS}" "kubectl rollout restart -n homelab deployments,statefulsets 2>/dev/null || true"
+
+echo ""
+echo "=== Pod status ==="
+ssh "${VPS}" "kubectl get pods -n homelab"

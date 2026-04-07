@@ -179,7 +179,7 @@ export default function InstitutionDetail() {
         </tbody>
       </table>
 
-      {data.accounts.length === 0 && data.balance_history.length === 0 && (
+      {data.accounts.length === 0 && data.balance_history_by_account.length === 0 && (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'rgba(255,255,255,0.4)' }}>
           No data yet for this institution.
         </div>

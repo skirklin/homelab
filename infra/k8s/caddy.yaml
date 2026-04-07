@@ -19,9 +19,7 @@ data:
         reverse_proxy groceries.homelab.svc.cluster.local:80
     }
 
-    life.beta.kirkl.in {
-        reverse_proxy life.homelab.svc.cluster.local:80
-    }
+    # life is a module in home, not a standalone app
 
     upkeep.beta.kirkl.in {
         reverse_proxy upkeep.homelab.svc.cluster.local:80

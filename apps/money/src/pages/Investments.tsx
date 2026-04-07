@@ -76,7 +76,7 @@ export function Investments() {
 
   useEffect(() => {
     Promise.all([fetchAccounts(), fetchGrants()]).then(([accts, grants]) => {
-      const vestedValue = grants.total_vested_value
+      const _vestedValue = grants.total_vested_value
       const withPerf: AccountWithPerf[] = accts
         .filter((a) => a.latest_balance != null
           && !['checking', 'credit_card'].includes(a.account_type))

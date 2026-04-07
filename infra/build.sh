@@ -12,7 +12,7 @@ declare -A APPS=(
     [home]="apps/home/app:dist"
     [recipes]="apps/recipes/app:build"
     [groceries]="apps/groceries/app:dist"
-    [life]="apps/life/app:dist"
+    # life has no index.html — it's a module consumed by home, not standalone
     [upkeep]="apps/upkeep/app:dist"
     [travel]="apps/travel/app:dist"
     [money]="apps/money:dist"

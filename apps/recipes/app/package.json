@@ -33,6 +33,8 @@
     "@types/react-modal": "^3.13.1",
     "@types/react-tabs": "^2.3.3",
     "@types/styled-components": "^5.1.18",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
     "@types/wicg-file-system-access": "^2020.9.4",
     "@vitejs/plugin-react": "^5.1.2",
     "eslint": "^8.6.0",

@@ -87,7 +87,7 @@ export function Spending() {
     setRefreshKey((k) => k + 1)
   }, [])
 
-  const handleReclassifyRequested = useCallback(() => {
+  const _handleReclassifyRequested = useCallback(() => {
     const polls = [5000, 15000, 30000, 60000, 90000]
     polls.forEach((ms) => setTimeout(() => setSuggestionsKey((k) => k + 1), ms))
   }, [])
