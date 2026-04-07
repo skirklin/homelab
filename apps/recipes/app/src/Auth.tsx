@@ -3,12 +3,6 @@ import styled from 'styled-components';
 import { Button, Form, Input, Divider, message } from 'antd';
 import { GoogleOutlined, MailOutlined } from '@ant-design/icons';
 
-import {
-  GoogleAuthProvider,
-  signInWithPopup,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-} from "firebase/auth";
 import { useAuth, getBackend } from '@kirkl/shared';
 
 const SignInCard = styled.div`
@@ -25,8 +19,6 @@ const Title = styled.h1`
   margin-bottom: 24px;
 `
 
-const googleProvider = new GoogleAuthProvider();
-
 function Auth(props: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
@@ -35,8 +27,8 @@ function Auth(props: { children: React.ReactNode }) {
   const handleGoogleSignIn = async () => {
     setSubmitting(true);
     try {
-      const { auth } = getBackend();
-      await signInWithPopup(auth, googleProvider);
+      const pb = getBackend();
+      await pb.collection("users").authWithOAuth2({ provider: "google" });
     } catch (error: any) {
       message.error(error.message || 'Failed to sign in with Google');
     }
@@ -45,12 +37,17 @@ function Auth(props: { children: React.ReactNode }) {
 
   const handleEmailAuth = async (values: { email: string; password: string }) => {
     setSubmitting(true);
-    const { auth } = getBackend();
+    const pb = getBackend();
     try {
       if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, values.email, values.password);
+        await pb.collection("users").create({
+          email: values.email,
+          password: values.password,
+          passwordConfirm: values.password,
+        });
+        await pb.collection("users").authWithPassword(values.email, values.password);
       } else {
-        await signInWithEmailAndPassword(auth, values.email, values.password);
+        await pb.collection("users").authWithPassword(values.email, values.password);
       }
     } catch (error: any) {
       message.error(error.message || 'Authentication failed');

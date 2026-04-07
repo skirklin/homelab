@@ -9,8 +9,8 @@ import { Context } from '../context';
 import type { RecipeCardProps } from './RecipeCard';
 import { StyledTextArea } from '../StyledComponents';
 import { useAuth } from '@kirkl/shared';
-import { useGroceriesIntegration } from '../GroceriesIntegrationContext';
-import { AddToGroceriesModal } from '../Modals/AddToGroceriesModal';
+import { useShoppingIntegration } from '../ShoppingIntegrationContext';
+import { AddToShoppingModal } from '../Modals/AddToShoppingModal';
 import { useCookingMode } from '../CookingModeContext';
 
 const IngredientsSection = styled.div`
@@ -49,7 +49,7 @@ const Placeholder = styled.span`
   font-style: italic;
 `
 
-const AddToGroceriesButton = styled.button`
+const AddToShoppingButton = styled.button`
   position: fixed;
   bottom: 24px;
   right: 24px;
@@ -84,7 +84,7 @@ function IngredientList(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
   const { user: authUser } = useAuth();
-  const groceriesIntegration = useGroceriesIntegration();
+  const shoppingIntegration = useShoppingIntegration();
   const { isCookingMode } = useCookingMode();
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
@@ -93,9 +93,9 @@ function IngredientList(props: RecipeCardProps) {
     return null
   }
 
-  const hasGroceriesIntegration = groceriesIntegration && Object.keys(groceriesIntegration.userSlugs).length > 0;
+  const hasShoppingIntegration = shoppingIntegration && Object.keys(shoppingIntegration.userSlugs).length > 0;
 
-  const handleAddToGroceries = () => {
+  const handleAddToShopping = () => {
     setSelectedIngredient("");
     setShowAddModal(true);
   };
@@ -146,20 +146,20 @@ function IngredientList(props: RecipeCardProps) {
           <SectionTitle>Ingredients</SectionTitle>
           {formatIngredientList(ingredients)}
         </IngredientsSection>
-        {hasGroceriesIntegration && !isCookingMode && (
-          <AddToGroceriesButton
-            onClick={handleAddToGroceries}
-            title="Add to grocery list"
+        {hasShoppingIntegration && !isCookingMode && (
+          <AddToShoppingButton
+            onClick={handleAddToShopping}
+            title="Add to shopping list"
           >
             <ShoppingCartOutlined />
-          </AddToGroceriesButton>
+          </AddToShoppingButton>
         )}
-        {groceriesIntegration && (
-          <AddToGroceriesModal
+        {shoppingIntegration && (
+          <AddToShoppingModal
             isVisible={showAddModal}
             setIsVisible={setShowAddModal}
             ingredient={selectedIngredient}
-            integration={groceriesIntegration}
+            integration={shoppingIntegration}
           />
         )}
       </>

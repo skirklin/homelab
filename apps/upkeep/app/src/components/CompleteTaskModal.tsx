@@ -4,7 +4,7 @@ import { EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined } from "@ant-
 import styled from "styled-components";
 import dayjs from "dayjs";
 import { useAuth } from "@kirkl/shared";
-import { completeTask, updateCompletion, deleteCompletion } from "../firestore";
+import { completeTask, updateCompletion, deleteCompletion } from "../pocketbase";
 import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Completion } from "../types";
 import { formatFrequency, getCompletionNotes } from "../types";

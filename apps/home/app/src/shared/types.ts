@@ -1,6 +1,10 @@
-import type { User } from "firebase/auth";
+import type { User } from "@kirkl/shared";
+
+// Re-export for convenience
+export type { User };
 
 // Auth state
 export interface AuthState {
-  user: User | null | undefined; // undefined = loading
+  user: User | null;
+  loading: boolean;
 }

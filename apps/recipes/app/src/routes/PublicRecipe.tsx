@@ -4,12 +4,11 @@
  */
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
 import styled from "styled-components";
 import { Spin, Button, Alert } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
-import { db } from "../backend";
-import { recipeConverter, boxConverter } from "../storage";
+import { getBackend } from "@kirkl/shared";
+import { boxFromRecord, recipeFromRecord } from "../storage";
 import type { RecipeEntry, BoxEntry } from "../storage";
 import { decodeStr } from "../converters";
 import { PageContainer, AppHeader } from "@kirkl/shared";
@@ -121,30 +120,16 @@ export function PublicRecipe() {
       }
 
       try {
+        const pb = getBackend();
+
         // Fetch box first to check visibility
-        const boxRef = doc(db, "boxes", boxId).withConverter(boxConverter);
-        const boxDoc = await getDoc(boxRef);
-
-        if (!boxDoc.exists()) {
-          setError("Recipe not found");
-          setLoading(false);
-          return;
-        }
-
-        const boxData = boxDoc.data();
+        const boxRecord = await pb.collection("recipe_boxes").getOne(boxId);
+        const boxData = boxFromRecord(boxRecord);
         setBox(boxData);
 
         // Fetch recipe
-        const recipeRef = doc(db, "boxes", boxId, "recipes", recipeId).withConverter(recipeConverter);
-        const recipeDoc = await getDoc(recipeRef);
-
-        if (!recipeDoc.exists()) {
-          setError("Recipe not found");
-          setLoading(false);
-          return;
-        }
-
-        const recipeData = recipeDoc.data();
+        const recipeRecord = await pb.collection("recipes").getOne(recipeId);
+        const recipeData = recipeFromRecord(recipeRecord);
 
         // Check if recipe is accessible (public box or public recipe)
         if (boxData.visibility !== "public" && recipeData.visibility !== "public") {

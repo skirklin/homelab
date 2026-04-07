@@ -3,7 +3,7 @@ import { Modal, Input, InputNumber, Select, Button, message } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import { addTask, updateTask, deleteTask } from "../firestore";
+import { addTask, updateTask, deleteTask } from "../pocketbase";
 import type { Task, Frequency, FrequencyUnit } from "../types";
 
 const Form = styled.div`

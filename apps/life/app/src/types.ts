@@ -1,4 +1,3 @@
-import { Timestamp } from "firebase/firestore";
 import type { Event, EventStore } from "@kirkl/shared";
 export type { Event, EventStore };
 export { eventFromStore, eventToStore } from "@kirkl/shared";
@@ -189,8 +188,8 @@ export interface LifeLogStore {
   owners: string[];
   manifest?: LifeManifest;
   sampleSchedule?: SampleSchedule;
-  created: Timestamp;
-  updated: Timestamp;
+  created: string;
+  updated: string;
 }
 
 // ============================================
@@ -204,8 +203,8 @@ export function logFromStore(id: string, data: LifeLogStore): LifeLog {
     owners: data.owners,
     manifest: data.manifest ?? DEFAULT_MANIFEST,
     sampleSchedule: data.sampleSchedule,
-    created: data.created.toDate(),
-    updated: data.updated.toDate(),
+    created: new Date(data.created),
+    updated: new Date(data.updated),
   };
 }
 

@@ -5,7 +5,7 @@ import { Form, Input, Select, Button, Space } from "antd";
 const { TextArea } = Input;
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { addActivity, updateActivity, deleteActivity, activityUpdates } from "../firestore";
+import { addActivity, updateActivity, deleteActivity, activityUpdates } from "../pocketbase";
 import type { ActivityCategory, Activity } from "../types";
 
 const CATEGORIES: ActivityCategory[] = [

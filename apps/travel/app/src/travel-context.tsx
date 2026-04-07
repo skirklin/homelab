@@ -121,10 +121,12 @@ export function TravelProvider({ children }: { children: ReactNode }) {
 
   // Subscribe to user's travel slugs when authenticated
   useEffect(() => {
+    let cancelled = false;
     if (user) {
-      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch);
+      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch, () => cancelled);
     }
     return () => {
+      cancelled = true;
       if (slugsUnsubRef.current) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
@@ -143,8 +145,18 @@ export function TravelProvider({ children }: { children: ReactNode }) {
       logUnsubsRef.current = [];
       currentLogIdRef.current = logId;
 
-      subscribeToLog(logId, user.uid, dispatch).then((unsubs) => {
+      const cancelled = () => currentLogIdRef.current !== logId;
+      subscribeToLog(logId, user.uid, dispatch, cancelled).then((unsubs) => {
+        if (cancelled()) {
+          unsubs.forEach((unsub) => unsub());
+          return;
+        }
         logUnsubsRef.current = unsubs;
+      }).catch((err) => {
+        console.error("[travel] subscribeToLog failed:", err);
+        if (!cancelled()) {
+          dispatch({ type: "SET_LOADING", loading: false });
+        }
       });
     },
     [user]

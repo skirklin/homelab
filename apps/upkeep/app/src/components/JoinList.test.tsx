@@ -5,11 +5,11 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { AuthContext } from '@kirkl/shared';
 import { JoinList } from './JoinList';
 import { UpkeepProvider } from '../upkeep-context';
-import * as firestore from '../firestore';
+import * as firestore from '../pocketbase';
 import * as subscription from '../subscription';
 
-// Mock the firestore module
-vi.mock('../firestore', () => ({
+// Mock the pocketbase module
+vi.mock('../pocketbase', () => ({
   getListById: vi.fn(),
   setUserSlug: vi.fn(),
 }));

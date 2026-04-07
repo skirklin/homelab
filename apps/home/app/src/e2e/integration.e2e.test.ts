@@ -1,320 +1,141 @@
 /**
- * Integration tests for the combined Home app
+ * Integration tests for the Home app shell — PocketBase backend.
  *
- * These tests verify that users created by one app module can
- * access other app modules without errors (cross-app compatibility).
+ * The home app is a shell that embeds shopping, life, recipes, upkeep, and travel
+ * as modules. These tests verify that:
+ *   1. The shared backend initializes correctly.
+ *   2. User profile fields required by each module exist and work.
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
-  initTestFirebase,
-  createUserWithoutSignIn,
-  signInAsUser,
-  cleanupTestFirebase,
+  initTestPocketBase,
+  cleanupTestPocketBase,
+  createTestUser,
   TestCleanup,
-  // Groceries helpers
-  createTestList,
-  createTestItem,
-  // Upkeep helpers
-  createTestTaskList,
-  createTestTask,
-  // Life tracker helpers
-  createTestLifeLog,
-  createTestEntry,
-  // Recipes helpers
-  createTestBox,
-  createTestRecipe,
-  createTestRecipesUser,
   type TestContext,
-} from "@kirkl/shared";
-import {
-  doc,
-  getDoc,
-  setDoc,
-  Timestamp,
-} from "firebase/firestore";
+} from "@kirkl/shared/test-utils";
 
 let ctx: TestContext;
-let cleanup: TestCleanup;
 
-describe("Home App Integration Tests", () => {
-  beforeAll(async () => {
-    ctx = await initTestFirebase();
-    cleanup = new TestCleanup();
+beforeAll(async () => {
+  ctx = await initTestPocketBase();
+});
+
+afterAll(async () => {
+  await cleanupTestPocketBase(ctx);
+});
+
+describe("Shared backend initialization", () => {
+  it("connects and authenticates to PocketBase", async () => {
+    // If initTestPocketBase succeeded, the connection is working.
+    // Verify by reading any collection without error.
+    const users = await ctx.pb.collection("users").getFullList({ filter: 'email = "nobody@nowhere.invalid"' });
+    expect(Array.isArray(users)).toBe(true);
+  });
+});
+
+describe("User profile fields across modules", () => {
+  it("user record has shopping_slugs field", async () => {
+    const user = await createTestUser(ctx);
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record).toHaveProperty("shopping_slugs");
   });
 
-  afterAll(async () => {
-    await cleanupTestFirebase(ctx);
+  it("user record has household_slugs field", async () => {
+    const user = await createTestUser(ctx);
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record).toHaveProperty("household_slugs");
   });
 
-  afterEach(async () => {
+  it("user record has life_log_id field", async () => {
+    const user = await createTestUser(ctx);
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record).toHaveProperty("life_log_id");
+  });
+
+  it("user record has recipe_boxes field", async () => {
+    const user = await createTestUser(ctx);
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record).toHaveProperty("recipe_boxes");
+  });
+
+  it("user record has travel_slugs field", async () => {
+    const user = await createTestUser(ctx);
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record).toHaveProperty("travel_slugs");
+  });
+
+  it("shopping_slugs can be set and read back", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    await ctx.pb.collection("users").update(user.id, {
+      shopping_slugs: ["my-list", "family-shop"],
+    });
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record.shopping_slugs).toContain("my-list");
+    expect(record.shopping_slugs).toContain("family-shop");
+
     await cleanup.cleanup();
   });
 
-  describe("Cross-App User Document Compatibility", () => {
-    it("should handle groceries user accessing recipes (no boxes field)", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
+  it("life_log_id can be set and read back", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
 
-      // User created via groceries - has slugs but no boxes
-      const userRef = doc(ctx.db, "users", user.localId);
-      cleanup.track(userRef);
-      await setDoc(userRef, {
-        slugs: { groceries: "list-123" },
-        createdAt: Timestamp.now(),
-      });
-
-      // Verify user doc has no boxes field
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.boxes).toBeUndefined();
-      expect(userSnap.data()?.slugs?.groceries).toBe("list-123");
-
-      // User should be able to create a box for recipes
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      expect((await getDoc(boxRef)).exists()).toBe(true);
+    const log = await ctx.pb.collection("life_logs").create({
+      name: "Test Log",
+      owners: [user.id],
+      manifest: { widgets: [] },
     });
+    cleanup.track("life_logs", log.id);
 
-    it("should handle upkeep user accessing recipes (no boxes field)", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
+    await ctx.pb.collection("users").update(user.id, { life_log_id: log.id });
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record.life_log_id).toBe(log.id);
 
-      // User created via upkeep - has householdSlugs but no boxes
-      const userRef = doc(ctx.db, "users", user.localId);
-      cleanup.track(userRef);
-      await setDoc(userRef, {
-        householdSlugs: { home: "tasklist-123" },
-        createdAt: Timestamp.now(),
-      });
-
-      // Verify user doc structure
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.boxes).toBeUndefined();
-      expect(userSnap.data()?.householdSlugs?.home).toBe("tasklist-123");
-
-      // User should be able to use recipes
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      await createTestRecipe(ctx, boxRef.id, cleanup, { name: "My Recipe" });
-
-      expect((await getDoc(boxRef)).exists()).toBe(true);
-    });
-
-    it("should handle life tracker user accessing recipes (no boxes field)", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
-
-      // User created via life tracker - has lifeLogId but no boxes
-      const logRef = await createTestLifeLog(ctx, cleanup, { owners: [user.localId] });
-
-      const userRef = doc(ctx.db, "users", user.localId);
-      cleanup.track(userRef);
-      await setDoc(userRef, {
-        lifeLogId: logRef.id,
-        createdAt: Timestamp.now(),
-      });
-
-      // Verify user doc structure
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.boxes).toBeUndefined();
-      expect(userSnap.data()?.lifeLogId).toBe(logRef.id);
-
-      // User should be able to use recipes
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      expect((await getDoc(boxRef)).exists()).toBe(true);
-    });
-
-    it("should handle recipes user accessing groceries (no slugs field)", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
-
-      // User created via recipes - has boxes but no slugs
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      await createTestRecipesUser(ctx, cleanup, [boxRef.id]);
-
-      // Verify user doc structure
-      const userRef = doc(ctx.db, "users", user.localId);
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.slugs).toBeUndefined();
-      expect(userSnap.data()?.boxes).toHaveLength(1);
-
-      // User should be able to use groceries
-      const listRef = await createTestList(ctx, cleanup, { owners: [user.localId] });
-      await createTestItem(ctx, listRef.id, cleanup, { name: "Milk" });
-
-      expect((await getDoc(listRef)).exists()).toBe(true);
-    });
-
-    it("should handle recipes user accessing upkeep (no householdSlugs field)", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
-
-      // User created via recipes
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      await createTestRecipesUser(ctx, cleanup, [boxRef.id]);
-
-      // User should be able to use upkeep
-      const taskListRef = await createTestTaskList(ctx, cleanup, { owners: [user.localId] });
-      await createTestTask(ctx, taskListRef.id, cleanup, { name: "Clean kitchen" });
-
-      expect((await getDoc(taskListRef)).exists()).toBe(true);
-    });
-
-    it("should handle recipes user accessing life tracker (no lifeLogId field)", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
-
-      // User created via recipes
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      await createTestRecipesUser(ctx, cleanup, [boxRef.id]);
-
-      // User should be able to use life tracker
-      const logRef = await createTestLifeLog(ctx, cleanup, { owners: [user.localId] });
-      await createTestEntry(ctx, logRef.id, cleanup, { type: "sleep" });
-
-      expect((await getDoc(logRef)).exists()).toBe(true);
-    });
+    await cleanup.cleanup();
   });
 
-  describe("User Document Field Merging", () => {
-    it("should allow adding recipes boxes to groceries user", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
+  it("recipe_boxes can be set and read back", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
 
-      // Create groceries user
-      const listRef = await createTestList(ctx, cleanup, { owners: [user.localId] });
-      const userRef = doc(ctx.db, "users", user.localId);
-      cleanup.track(userRef);
-      await setDoc(userRef, {
-        slugs: { groceries: listRef.id },
-        createdAt: Timestamp.now(),
-      });
-
-      // Add recipes box and update user doc
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      await setDoc(userRef, {
-        boxes: [doc(ctx.db, "boxes", boxRef.id)],
-        visibility: "private",
-        name: user.email,
-        lastSeen: Timestamp.now(),
-        newSeen: Timestamp.now(),
-      }, { merge: true });
-
-      // Verify both fields coexist
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.slugs?.groceries).toBe(listRef.id);
-      expect(userSnap.data()?.boxes).toHaveLength(1);
+    const box = await ctx.pb.collection("recipe_boxes").create({
+      name: "Test Box",
+      owners: [user.id],
+      visibility: "private",
     });
+    cleanup.track("recipe_boxes", box.id);
 
-    it("should allow adding life log to recipes user", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
+    await ctx.pb.collection("users").update(user.id, { recipe_boxes: [box.id] });
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record.recipe_boxes).toContain(box.id);
+    expect(typeof record.recipe_boxes[0]).toBe("string");
 
-      // Create recipes user
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      await createTestRecipesUser(ctx, cleanup, [boxRef.id]);
-
-      // Add life log
-      const logRef = await createTestLifeLog(ctx, cleanup, { owners: [user.localId] });
-      const userRef = doc(ctx.db, "users", user.localId);
-      await setDoc(userRef, { lifeLogId: logRef.id }, { merge: true });
-
-      // Verify both fields coexist
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.boxes).toHaveLength(1);
-      expect(userSnap.data()?.lifeLogId).toBe(logRef.id);
-    });
-
-    it("should handle user with all app fields", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
-
-      // Create data for all apps
-      const listRef = await createTestList(ctx, cleanup, { owners: [user.localId] });
-      const taskListRef = await createTestTaskList(ctx, cleanup, { owners: [user.localId] });
-      const logRef = await createTestLifeLog(ctx, cleanup, { owners: [user.localId] });
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-
-      // Create user doc with all fields
-      const userRef = doc(ctx.db, "users", user.localId);
-      cleanup.track(userRef);
-      await setDoc(userRef, {
-        // Groceries
-        slugs: { groceries: listRef.id },
-        // Upkeep
-        householdSlugs: { home: taskListRef.id },
-        // Life tracker
-        lifeLogId: logRef.id,
-        // Recipes
-        boxes: [doc(ctx.db, "boxes", boxRef.id)],
-        visibility: "private",
-        name: user.email,
-        lastSeen: Timestamp.now(),
-        newSeen: Timestamp.now(),
-        cookingModeSeen: false,
-        lastSeenUpdateVersion: 0,
-        createdAt: Timestamp.now(),
-      });
-
-      // Verify all fields
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.slugs?.groceries).toBe(listRef.id);
-      expect(userSnap.data()?.householdSlugs?.home).toBe(taskListRef.id);
-      expect(userSnap.data()?.lifeLogId).toBe(logRef.id);
-      expect(userSnap.data()?.boxes).toHaveLength(1);
-    });
+    await cleanup.cleanup();
   });
 
-  describe("Empty/Missing Field Handling", () => {
-    it("should handle completely empty user document", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
+  it("travel_slugs can be set and read back", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
 
-      // Create minimal user doc
-      const userRef = doc(ctx.db, "users", user.localId);
-      cleanup.track(userRef);
-      await setDoc(userRef, {
-        createdAt: Timestamp.now(),
-      });
-
-      // Verify all app-specific fields are undefined
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.boxes).toBeUndefined();
-      expect(userSnap.data()?.slugs).toBeUndefined();
-      expect(userSnap.data()?.householdSlugs).toBeUndefined();
-      expect(userSnap.data()?.lifeLogId).toBeUndefined();
-
-      // User should still be able to use all apps
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      const listRef = await createTestList(ctx, cleanup, { owners: [user.localId] });
-      const taskListRef = await createTestTaskList(ctx, cleanup, { owners: [user.localId] });
-      const logRef = await createTestLifeLog(ctx, cleanup, { owners: [user.localId] });
-
-      expect((await getDoc(boxRef)).exists()).toBe(true);
-      expect((await getDoc(listRef)).exists()).toBe(true);
-      expect((await getDoc(taskListRef)).exists()).toBe(true);
-      expect((await getDoc(logRef)).exists()).toBe(true);
+    const log = await ctx.pb.collection("travel_logs").create({
+      name: "My Trips",
+      owners: [user.id],
+      checklists: [],
     });
+    cleanup.track("travel_logs", log.id);
 
-    it("should handle null values gracefully", async () => {
-      const user = await createUserWithoutSignIn(ctx);
-      await signInAsUser(ctx, user);
+    await ctx.pb.collection("users").update(user.id, { travel_slugs: { "my-trips": log.id } });
+    const record = await ctx.pb.collection("users").getOne(user.id);
+    expect(record.travel_slugs["my-trips"]).toBe(log.id);
 
-      // Create user doc with null values
-      const userRef = doc(ctx.db, "users", user.localId);
-      cleanup.track(userRef);
-      await setDoc(userRef, {
-        boxes: null,
-        slugs: null,
-        householdSlugs: null,
-        lifeLogId: null,
-        createdAt: Timestamp.now(),
-      });
-
-      // Verify nulls are stored
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.data()?.boxes).toBeNull();
-
-      // User should still be able to create app data
-      const boxRef = await createTestBox(ctx, cleanup, { owners: [user.localId] });
-      expect((await getDoc(boxRef)).exists()).toBe(true);
-    });
+    await cleanup.cleanup();
   });
 });

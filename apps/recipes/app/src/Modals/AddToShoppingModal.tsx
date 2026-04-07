@@ -1,7 +1,7 @@
 import { Input, Modal, Select, message } from "antd";
 import { useState, useEffect } from "react";
 import styled from "styled-components";
-import type { GroceriesIntegration } from "../GroceriesIntegrationContext";
+import type { ShoppingIntegration } from "../ShoppingIntegrationContext";
 
 const FormGroup = styled.div`
   margin-bottom: var(--space-md);
@@ -28,19 +28,19 @@ const NoteInput = styled(Input)`
   flex: 1;
 `;
 
-interface AddToGroceriesModalProps {
+interface AddToShoppingModalProps {
   isVisible: boolean;
   setIsVisible: (visible: boolean) => void;
   ingredient: string;
-  integration: GroceriesIntegration;
+  integration: ShoppingIntegration;
 }
 
-export function AddToGroceriesModal({
+export function AddToShoppingModal({
   isVisible,
   setIsVisible,
   ingredient,
   integration,
-}: AddToGroceriesModalProps) {
+}: AddToShoppingModalProps) {
   const [itemIngredient, setItemIngredient] = useState(ingredient);
   const [itemNote, setItemNote] = useState("");
   const [selectedListId, setSelectedListId] = useState<string>("");
@@ -78,10 +78,10 @@ export function AddToGroceriesModal({
       const trimmedIngredient = itemIngredient.trim();
       const trimmedNote = itemNote.trim() || undefined;
       await integration.addItem(selectedListId, trimmedIngredient, trimmedNote);
-      message.success(`Added "${trimmedIngredient}" to grocery list`);
+      message.success(`Added "${trimmedIngredient}" to shopping list`);
       setIsVisible(false);
     } catch {
-      message.error("Failed to add item to grocery list");
+      message.error("Failed to add item to shopping list");
     } finally {
       setLoading(false);
     }
@@ -96,7 +96,7 @@ export function AddToGroceriesModal({
 
   return (
     <Modal
-      title="Add to Grocery List"
+      title="Add to Shopping List"
       open={isVisible}
       onOk={handleAdd}
       onCancel={handleClose}
@@ -125,7 +125,7 @@ export function AddToGroceriesModal({
         </InputRow>
       </FormGroup>
       <FormGroup>
-        <Label>Grocery list</Label>
+        <Label>Shopping list</Label>
         <Select
           style={{ width: "100%" }}
           value={selectedListId || undefined}

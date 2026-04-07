@@ -1,9 +1,8 @@
 import { createContext, useContext, useReducer, type ReactNode } from "react";
-import type { User } from "firebase/auth";
 import type { Task, TaskList, Completion } from "./types";
 
 export interface AppState {
-  authUser: User | null | undefined; // undefined = still loading
+  authUser: { id: string; uid: string; email: string; name: string } | null | undefined; // undefined = still loading
   userSlugs: Record<string, string>; // { "home": "listId123" }
   list: TaskList | null;
   tasks: Map<string, Task>;
@@ -12,7 +11,7 @@ export interface AppState {
 }
 
 export type Action =
-  | { type: "SET_AUTH_USER"; user: User | null }
+  | { type: "SET_AUTH_USER"; user: { id: string; uid: string; email: string; name: string } | null }
   | { type: "SET_USER_SLUGS"; slugs: Record<string, string> }
   | { type: "SET_LIST"; list: TaskList | null }
   | { type: "SET_TASK"; task: Task }

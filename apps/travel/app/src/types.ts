@@ -1,5 +1,3 @@
-import { Timestamp } from "firebase/firestore";
-
 // Trip status values
 export type TripStatus = "Completed" | "Booked" | "Researching" | "Idea" | "Ongoing";
 
@@ -51,11 +49,12 @@ export interface TravelLog {
 }
 
 export interface TravelLogStore {
+  id: string;
   name: string;
   owners: string[];
   checklists?: ChecklistTemplate[];
-  created: Timestamp;
-  updated: Timestamp;
+  created: string;
+  updated: string;
 }
 
 export const DEFAULT_CHECKLIST: ChecklistTemplate = {
@@ -77,14 +76,14 @@ export const DEFAULT_CHECKLIST: ChecklistTemplate = {
   ],
 };
 
-export function logFromStore(id: string, data: TravelLogStore): TravelLog {
+export function logFromStore(record: TravelLogStore): TravelLog {
   return {
-    id,
-    name: data.name,
-    owners: data.owners,
-    checklists: data.checklists || [DEFAULT_CHECKLIST],
-    created: data.created.toDate(),
-    updated: data.updated.toDate(),
+    id: record.id,
+    name: record.name,
+    owners: record.owners || [],
+    checklists: record.checklists || [DEFAULT_CHECKLIST],
+    created: new Date(record.created),
+    updated: new Date(record.updated),
   };
 }
 
@@ -103,58 +102,59 @@ export interface Trip {
   sourceRefs: string;
   flaggedForReview: boolean;
   reviewComment: string;
-  checklistDone: Record<string, boolean>; // templateItemId → done, per trip
+  checklistDone: Record<string, boolean>; // templateItemId -> done, per trip
   created: Date;
   updated: Date;
 }
 
 export interface TripStore {
+  id: string;
+  log: string;
   destination: string;
   status: TripStatus;
   region: string;
-  startDate: Timestamp | null;
-  endDate: Timestamp | null;
+  start_date: string;
+  end_date: string;
   notes: string;
-  sourceRefs: string;
-  flaggedForReview: boolean;
-  reviewComment: string;
-  checklistDone?: Record<string, boolean>;
-  created: Timestamp;
-  updated: Timestamp;
+  source_refs: string;
+  flagged_for_review: boolean;
+  review_comment: string;
+  checklist_done?: Record<string, boolean>;
+  created: string;
+  updated: string;
 }
 
-export function tripFromStore(id: string, data: TripStore): Trip {
+export function tripFromStore(record: TripStore): Trip {
   return {
-    id,
-    destination: data.destination,
-    status: data.status || "Idea",
-    region: data.region || "",
-    startDate: data.startDate?.toDate() ?? null,
-    endDate: data.endDate?.toDate() ?? null,
-    notes: data.notes || "",
-    sourceRefs: data.sourceRefs || "",
-    flaggedForReview: data.flaggedForReview || false,
-    reviewComment: data.reviewComment || "",
-    checklistDone: data.checklistDone || {},
-    created: data.created.toDate(),
-    updated: data.updated.toDate(),
+    id: record.id,
+    destination: record.destination,
+    status: record.status || "Idea",
+    region: record.region || "",
+    startDate: record.start_date ? new Date(record.start_date) : null,
+    endDate: record.end_date ? new Date(record.end_date) : null,
+    notes: record.notes || "",
+    sourceRefs: record.source_refs || "",
+    flaggedForReview: record.flagged_for_review || false,
+    reviewComment: record.review_comment || "",
+    checklistDone: record.checklist_done || {},
+    created: new Date(record.created),
+    updated: new Date(record.updated),
   };
 }
 
-export function tripToStore(trip: Omit<Trip, "id">): TripStore {
+export function tripToStore(trip: Omit<Trip, "id">, logId: string): Record<string, unknown> {
   return {
+    log: logId,
     destination: trip.destination,
     status: trip.status,
     region: trip.region,
-    startDate: trip.startDate ? Timestamp.fromDate(trip.startDate) : null,
-    endDate: trip.endDate ? Timestamp.fromDate(trip.endDate) : null,
+    start_date: trip.startDate ? trip.startDate.toISOString() : "",
+    end_date: trip.endDate ? trip.endDate.toISOString() : "",
     notes: trip.notes,
-    sourceRefs: trip.sourceRefs,
-    flaggedForReview: trip.flaggedForReview,
-    reviewComment: trip.reviewComment,
-    checklistDone: Object.keys(trip.checklistDone).length > 0 ? trip.checklistDone : undefined,
-    created: Timestamp.fromDate(trip.created),
-    updated: Timestamp.fromDate(trip.updated),
+    source_refs: trip.sourceRefs,
+    flagged_for_review: trip.flaggedForReview,
+    review_comment: trip.reviewComment,
+    checklist_done: Object.keys(trip.checklistDone).length > 0 ? trip.checklistDone : undefined,
   };
 }
 
@@ -186,73 +186,74 @@ export interface Activity {
 }
 
 export interface ActivityStore {
+  id: string;
+  log: string;
   name: string;
   category: string;
   location: string;
-  placeId?: string;
-  lat?: number | null;
-  lng?: number | null;
+  place_id: string;
+  lat: number;
+  lng: number;
   description: string;
-  costNotes: string;
-  durationEstimate: string;
-  confirmationCode?: string;
-  details?: string;
-  setting?: string;
-  bookingReqs?: BookingRequirement[];
-  rating?: number | null;
-  ratingCount?: number | null;
-  photoRef?: string;
-  tripId: string;
-  created: Timestamp;
-  updated: Timestamp;
+  cost_notes: string;
+  duration_estimate: string;
+  confirmation_code: string;
+  details: string;
+  setting: string;
+  booking_reqs?: BookingRequirement[];
+  rating: number;
+  rating_count: number;
+  photo_ref: string;
+  trip_id: string;
+  created: string;
+  updated: string;
 }
 
-export function activityFromStore(id: string, data: ActivityStore): Activity {
+export function activityFromStore(record: ActivityStore): Activity {
   return {
-    id,
-    name: data.name,
-    category: (data.category as ActivityCategory) || "Other",
-    location: data.location || "",
-    placeId: data.placeId || "",
-    lat: data.lat ?? null,
-    lng: data.lng ?? null,
-    description: data.description || "",
-    costNotes: data.costNotes || "",
-    durationEstimate: data.durationEstimate || "",
-    confirmationCode: data.confirmationCode || "",
-    details: data.details || "",
-    setting: (data.setting as Activity["setting"]) || "",
-    bookingReqs: data.bookingReqs || [],
-    rating: data.rating ?? null,
-    ratingCount: data.ratingCount ?? null,
-    photoRef: data.photoRef || "",
-    tripId: data.tripId || "",
-    created: data.created.toDate(),
-    updated: data.updated.toDate(),
+    id: record.id,
+    name: record.name,
+    category: (record.category as ActivityCategory) || "Other",
+    location: record.location || "",
+    placeId: record.place_id || "",
+    lat: record.lat || null,
+    lng: record.lng || null,
+    description: record.description || "",
+    costNotes: record.cost_notes || "",
+    durationEstimate: record.duration_estimate || "",
+    confirmationCode: record.confirmation_code || "",
+    details: record.details || "",
+    setting: (record.setting as Activity["setting"]) || "",
+    bookingReqs: record.booking_reqs || [],
+    rating: record.rating || null,
+    ratingCount: record.rating_count || null,
+    photoRef: record.photo_ref || "",
+    tripId: record.trip_id || "",
+    created: new Date(record.created),
+    updated: new Date(record.updated),
   };
 }
 
-export function activityToStore(activity: Omit<Activity, "id">): ActivityStore {
+export function activityToStore(activity: Omit<Activity, "id">, logId: string): Record<string, unknown> {
   return {
+    log: logId,
     name: activity.name,
     category: activity.category,
     location: activity.location,
-    placeId: activity.placeId || undefined,
+    place_id: activity.placeId || undefined,
     lat: activity.lat,
     lng: activity.lng,
     description: activity.description,
-    costNotes: activity.costNotes,
-    durationEstimate: activity.durationEstimate,
-    confirmationCode: activity.confirmationCode || undefined,
+    cost_notes: activity.costNotes,
+    duration_estimate: activity.durationEstimate,
+    confirmation_code: activity.confirmationCode || undefined,
     details: activity.details || undefined,
     setting: activity.setting || undefined,
-    bookingReqs: activity.bookingReqs.length > 0 ? activity.bookingReqs : undefined,
+    booking_reqs: activity.bookingReqs.length > 0 ? activity.bookingReqs : undefined,
     rating: activity.rating ?? undefined,
-    ratingCount: activity.ratingCount ?? undefined,
-    photoRef: activity.photoRef || undefined,
-    tripId: activity.tripId,
-    created: Timestamp.fromDate(activity.created),
-    updated: Timestamp.fromDate(activity.updated),
+    rating_count: activity.ratingCount ?? undefined,
+    photo_ref: activity.photoRef || undefined,
+    trip_id: activity.tripId,
   };
 }
 
@@ -268,7 +269,7 @@ export interface ItinerarySlot {
 
 export interface ItineraryDay {
   date?: string; // ISO date for completed trips, empty for hypothetical
-  label: string; // "Day 2 — Sun Sep 8: Zion Narrows"
+  label: string; // "Day 2 -- Sun Sep 8: Zion Narrows"
   lodgingActivityId?: string; // The accommodation for this night
   flights?: ItinerarySlot[]; // Flights/major transport for this day
   slots: ItinerarySlot[]; // Activities (excluding lodging and flights)
@@ -285,34 +286,35 @@ export interface Itinerary {
 }
 
 export interface ItineraryStore {
-  tripId: string;
+  id: string;
+  log: string;
+  trip_id: string;
   name: string;
-  isActive: boolean;
+  is_active: boolean;
   days: ItineraryDay[];
-  created: Timestamp;
-  updated: Timestamp;
+  created: string;
+  updated: string;
 }
 
-export function itineraryFromStore(id: string, data: ItineraryStore): Itinerary {
+export function itineraryFromStore(record: ItineraryStore): Itinerary {
   return {
-    id,
-    tripId: data.tripId,
-    name: data.name,
-    isActive: data.isActive ?? true,
-    days: data.days || [],
-    created: data.created.toDate(),
-    updated: data.updated.toDate(),
+    id: record.id,
+    tripId: record.trip_id,
+    name: record.name,
+    isActive: record.is_active ?? true,
+    days: record.days || [],
+    created: new Date(record.created),
+    updated: new Date(record.updated),
   };
 }
 
-export function itineraryToStore(itinerary: Omit<Itinerary, "id">): ItineraryStore {
+export function itineraryToStore(itinerary: Omit<Itinerary, "id">, logId: string): Record<string, unknown> {
   return {
-    tripId: itinerary.tripId,
+    log: logId,
+    trip_id: itinerary.tripId,
     name: itinerary.name,
-    isActive: itinerary.isActive,
+    is_active: itinerary.isActive,
     days: itinerary.days,
-    created: Timestamp.fromDate(itinerary.created),
-    updated: Timestamp.fromDate(itinerary.updated),
   };
 }
 
@@ -366,7 +368,7 @@ export function parseDurationHours(dur: string): number {
   if (d === "full day") return 6;
   if (d === "half day") return 3;
   if (d === "evening") return 3;
-  // "2-3 hours" → average
+  // "2-3 hours" -> average
   const rangeHr = d.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*h/);
   if (rangeHr) return (parseFloat(rangeHr[1]) + parseFloat(rangeHr[2])) / 2;
   // "2h", "2 hours", "2.5h"

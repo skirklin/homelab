@@ -4,7 +4,7 @@ import { List, Tag, Popconfirm, Button, message } from "antd";
 import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
 import type { LogEntry, Widget, LifeManifest } from "../types";
 import { getWidget, getSource, getNotes } from "../types";
-import { deleteEntry } from "../firestore";
+import { deleteEntry } from "../pocketbase";
 import { EditEntryModal } from "./EditEntryModal";
 
 const EntryItem = styled(List.Item)`

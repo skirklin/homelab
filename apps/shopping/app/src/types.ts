@@ -47,11 +47,6 @@ export interface ShoppingTrip {
 
 export type { UserProfile, UserProfileStore } from "@kirkl/shared";
 
-// Legacy types kept as aliases for compatibility with existing component imports
-export type GroceryItem = ShoppingItem;
-export type GroceryList = ShoppingList;
-export type GroceryItemStore = ShoppingItem;
-export type GroceryListStore = ShoppingList;
 export type ItemHistoryStore = ItemHistory;
 export type LegacyItemHistoryStore = { name?: string };
 export type ShoppingTripStore = ShoppingTrip;

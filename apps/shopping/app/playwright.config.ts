@@ -2,10 +2,10 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  fullyParallel: true,
+  fullyParallel: false, // sequential — tests share a PB instance
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {
@@ -19,18 +19,12 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: [
-    {
-      command: "npx firebase emulators:start",
-      url: "http://localhost:9199",
-      reuseExistingServer: !process.env.CI,
-      timeout: 60000,
-      cwd: "..",
+  webServer: {
+    command: "pnpm dev",
+    url: "http://localhost:5173",
+    reuseExistingServer: !process.env.CI,
+    env: {
+      VITE_PB_URL: process.env.PB_TEST_URL || "http://127.0.0.1:8091",
     },
-    {
-      command: "npm run dev",
-      url: "http://localhost:5173",
-      reuseExistingServer: !process.env.CI,
-    },
-  ],
+  },
 });

@@ -14,7 +14,7 @@
     "ajv": "^8.17.1",
     "ajv-keywords": "^5.1.0",
     "antd": "^5.29.3",
-    "firebase": "^11.0.0",
+    "pocketbase": "^0.25.0",
     "flexsearch": "^0.7.43",
     "lodash": "^4.17.21",
     "react-modal": "^3.16.3",

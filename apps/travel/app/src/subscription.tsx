@@ -1,12 +1,9 @@
-import { onSnapshot, type Unsubscribe } from "firebase/firestore";
-import {
-  getLogRef,
-  getTripsRef,
-  getActivitiesRef,
-  getItinerariesRef,
-  setCurrentLogId,
-  getUserRef,
-} from "./firestore";
+/**
+ * PocketBase real-time subscriptions for the travel app.
+ * Replaces Firestore onSnapshot listeners with PocketBase SSE subscriptions.
+ */
+import { getBackend } from "@kirkl/shared";
+import { setCurrentLogId, getUserSlugs } from "./pocketbase";
 import type {
   TripStore,
   TravelLogStore,
@@ -23,122 +20,152 @@ import type { TravelAction } from "./travel-context";
 
 type Dispatch = React.Dispatch<TravelAction>;
 
-export function subscribeToUserSlugs(userId: string, dispatch: Dispatch): Unsubscribe {
-  return onSnapshot(
-    getUserRef(userId),
-    (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data() as Record<string, unknown>;
-        dispatch({
-          type: "SET_USER_SLUGS",
-          slugs: (data.travelSlugs as Record<string, string>) || {},
-        });
-      } else {
-        dispatch({ type: "SET_USER_SLUGS", slugs: {} });
-      }
-    },
-    (error) => {
-      console.error("Travel user slugs subscription error:", error);
-    }
-  );
+function pb() {
+  return getBackend();
+}
+
+export async function loadUserSlugs(userId: string, dispatch: Dispatch, cancelled: () => boolean) {
+  try {
+    const slugs = await getUserSlugs(userId, { $autoCancel: false });
+    if (cancelled()) return;
+    dispatch({ type: "SET_USER_SLUGS", slugs });
+  } catch (err) {
+    console.error("[travel] loadUserSlugs failed:", err);
+  }
+}
+
+export function subscribeToUserSlugs(userId: string, dispatch: Dispatch, cancelled: () => boolean): () => void {
+  // Load initial slugs
+  loadUserSlugs(userId, dispatch, cancelled).catch(console.error);
+
+  // Subscribe to user record changes
+  pb().collection("users").subscribe(userId, (e) => {
+    if (cancelled()) return;
+    dispatch({
+      type: "SET_USER_SLUGS",
+      slugs: (e.record.travel_slugs as Record<string, string>) || {},
+    });
+  });
+
+  return () => {
+    pb().collection("users").unsubscribe(userId);
+  };
 }
 
 export async function subscribeToLog(
   logId: string,
   _userId: string,
-  dispatch: Dispatch
-): Promise<Unsubscribe[]> {
+  dispatch: Dispatch,
+  cancelled: () => boolean
+): Promise<Array<() => void>> {
   setCurrentLogId(logId);
 
   dispatch({ type: "CLEAR_DATA" });
   dispatch({ type: "SET_LOADING", loading: true });
 
-  const unsubscribers: Unsubscribe[] = [];
+  const unsubscribers: Array<() => void> = [];
+  const opts = { $autoCancel: false };
 
-  // Subscribe to log
-  const logUnsub = onSnapshot(
-    getLogRef(),
-    (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data() as TravelLogStore;
-        dispatch({ type: "SET_LOG", log: logFromStore(snapshot.id, data) });
-      } else {
-        dispatch({ type: "SET_LOG", log: null });
-      }
-    },
-    (error) => {
-      console.error("Travel log subscription error:", error);
-    }
-  );
-  unsubscribers.push(logUnsub);
+  // Load initial log data
+  try {
+    const log = await pb().collection("travel_logs").getOne(logId, opts);
+    if (cancelled()) return unsubscribers;
+    dispatch({ type: "SET_LOG", log: logFromStore(log as unknown as TravelLogStore) });
+  } catch {
+    if (cancelled()) return unsubscribers;
+    dispatch({ type: "SET_LOG", log: null });
+  }
 
-  // Subscribe to trips
-  const tripsUnsub = onSnapshot(
-    getTripsRef(),
-    (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added" || change.type === "modified") {
-          const data = change.doc.data() as TripStore;
-          dispatch({
-            type: "SET_TRIP",
-            trip: tripFromStore(change.doc.id, data),
-          });
-        } else if (change.type === "removed") {
-          dispatch({ type: "REMOVE_TRIP", tripId: change.doc.id });
-        }
-      });
-      dispatch({ type: "SET_LOADING", loading: false });
-    },
-    (error) => {
-      console.error("Trips subscription error:", error);
-      dispatch({ type: "SET_LOADING", loading: false });
+  // Subscribe to log changes
+  pb().collection("travel_logs").subscribe(logId, (e) => {
+    if (cancelled()) return;
+    if (e.action === "delete") {
+      dispatch({ type: "SET_LOG", log: null });
+    } else {
+      dispatch({ type: "SET_LOG", log: logFromStore(e.record as unknown as TravelLogStore) });
     }
-  );
-  unsubscribers.push(tripsUnsub);
+  });
+  unsubscribers.push(() => pb().collection("travel_logs").unsubscribe(logId));
 
-  // Subscribe to activities
-  const activitiesUnsub = onSnapshot(
-    getActivitiesRef(),
-    (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added" || change.type === "modified") {
-          const data = change.doc.data() as ActivityStore;
-          dispatch({
-            type: "SET_ACTIVITY",
-            activity: activityFromStore(change.doc.id, data),
-          });
-        } else if (change.type === "removed") {
-          dispatch({ type: "REMOVE_ACTIVITY", activityId: change.doc.id });
-        }
-      });
-    },
-    (error) => {
-      console.error("Activities subscription error:", error);
+  // Load initial trips
+  try {
+    const trips = await pb().collection("travel_trips").getFullList({
+      filter: `log = "${logId}"`,
+      $autoCancel: false,
+    });
+    if (cancelled()) return unsubscribers;
+    for (const trip of trips) {
+      dispatch({ type: "SET_TRIP", trip: tripFromStore(trip as unknown as TripStore) });
     }
-  );
-  unsubscribers.push(activitiesUnsub);
+  } catch (e) {
+    console.error("Failed to load trips:", e);
+  }
+  if (cancelled()) return unsubscribers;
+  dispatch({ type: "SET_LOADING", loading: false });
 
-  // Subscribe to itineraries
-  const itinerariesUnsub = onSnapshot(
-    getItinerariesRef(),
-    (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added" || change.type === "modified") {
-          const data = change.doc.data() as ItineraryStore;
-          dispatch({
-            type: "SET_ITINERARY",
-            itinerary: itineraryFromStore(change.doc.id, data),
-          });
-        } else if (change.type === "removed") {
-          dispatch({ type: "REMOVE_ITINERARY", itineraryId: change.doc.id });
-        }
-      });
-    },
-    (error) => {
-      console.error("Itineraries subscription error:", error);
+  // Subscribe to trip changes
+  pb().collection("travel_trips").subscribe("*", (e) => {
+    if (cancelled()) return;
+    if ((e.record as unknown as TripStore).log !== logId) return;
+    if (e.action === "delete") {
+      dispatch({ type: "REMOVE_TRIP", tripId: e.record.id });
+    } else {
+      dispatch({ type: "SET_TRIP", trip: tripFromStore(e.record as unknown as TripStore) });
     }
-  );
-  unsubscribers.push(itinerariesUnsub);
+  });
+  unsubscribers.push(() => pb().collection("travel_trips").unsubscribe("*"));
+
+  // Load initial activities
+  try {
+    const activities = await pb().collection("travel_activities").getFullList({
+      filter: `log = "${logId}"`,
+      $autoCancel: false,
+    });
+    if (cancelled()) return unsubscribers;
+    for (const activity of activities) {
+      dispatch({ type: "SET_ACTIVITY", activity: activityFromStore(activity as unknown as ActivityStore) });
+    }
+  } catch (e) {
+    console.error("Failed to load activities:", e);
+  }
+
+  // Subscribe to activity changes
+  pb().collection("travel_activities").subscribe("*", (e) => {
+    if (cancelled()) return;
+    if ((e.record as unknown as ActivityStore).log !== logId) return;
+    if (e.action === "delete") {
+      dispatch({ type: "REMOVE_ACTIVITY", activityId: e.record.id });
+    } else {
+      dispatch({ type: "SET_ACTIVITY", activity: activityFromStore(e.record as unknown as ActivityStore) });
+    }
+  });
+  unsubscribers.push(() => pb().collection("travel_activities").unsubscribe("*"));
+
+  // Load initial itineraries
+  try {
+    const itineraries = await pb().collection("travel_itineraries").getFullList({
+      filter: `log = "${logId}"`,
+      $autoCancel: false,
+    });
+    if (cancelled()) return unsubscribers;
+    for (const itinerary of itineraries) {
+      dispatch({ type: "SET_ITINERARY", itinerary: itineraryFromStore(itinerary as unknown as ItineraryStore) });
+    }
+  } catch (e) {
+    console.error("Failed to load itineraries:", e);
+  }
+
+  // Subscribe to itinerary changes
+  pb().collection("travel_itineraries").subscribe("*", (e) => {
+    if (cancelled()) return;
+    if ((e.record as unknown as ItineraryStore).log !== logId) return;
+    if (e.action === "delete") {
+      dispatch({ type: "REMOVE_ITINERARY", itineraryId: e.record.id });
+    } else {
+      dispatch({ type: "SET_ITINERARY", itinerary: itineraryFromStore(e.record as unknown as ItineraryStore) });
+    }
+  });
+  unsubscribers.push(() => pb().collection("travel_itineraries").unsubscribe("*"));
 
   return unsubscribers;
 }

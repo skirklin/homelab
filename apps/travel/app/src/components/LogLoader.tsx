@@ -5,7 +5,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { getOrCreateUserLog } from "../firestore";
+import { getOrCreateUserLog } from "../pocketbase";
 
 const Center = styled(PageContainer)`
   display: flex;

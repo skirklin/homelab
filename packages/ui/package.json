@@ -6,7 +6,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./styles": "./src/styles.css"
+    "./styles": "./src/styles.css",
+    "./test-utils": "./src/test-utils.ts"
   },
   "dependencies": {
     "pocketbase": "^0.25.0",

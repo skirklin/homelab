@@ -1,12 +1,12 @@
-import { doc, Timestamp, type DocumentSnapshot, type SnapshotOptions } from "firebase/firestore";
 import _ from "lodash";
+import type { RecordModel } from "pocketbase";
 import type { Recipe } from "schema-dts";
-import { db } from "./backend";
-import { type BoxType, type BoxStoreType, type RecipeStoreType, Visibility, type UserStoreType, type BoxId, type UserId, type PendingChanges, type CookingLogEntry, EnrichmentStatus, type StepIngredients } from "./types";
+import { type BoxType, type BoxId, type UserId, type PendingChanges, type CookingLogEntry, EnrichmentStatus, type StepIngredients, Visibility } from "./types";
 import { decodeStr } from "./converters";
+import { CURRENT_UPDATE_VERSION } from "./Modals/WhatsNew";
 
 const DUMMY_FIRST_DATE = new Date(2022, 0, 0)
-const DUMMY_FIRST_TIMESTAMP = Timestamp.fromDate(DUMMY_FIRST_DATE)
+
 export class RecipeEntry {
     id: string;
     data: Recipe;
@@ -88,53 +88,28 @@ export class RecipeEntry {
 
 }
 
-export const recipeConverter = {
-    toFirestore: (recipe: RecipeEntry): RecipeStoreType => {
-        const result: RecipeStoreType = {
-            data: recipe.data,
-            owners: recipe.owners,
-            visibility: recipe.visibility,
-            updated: Timestamp.fromDate(recipe.updated),
-            created: Timestamp.fromDate(recipe.created),
-            lastUpdatedBy: recipe.lastUpdatedBy,
-            creator: recipe.creator ? recipe.creator : recipe.owners[0],
-            enrichmentStatus: recipe.enrichmentStatus,
-        };
-        if (recipe.pendingChanges) {
-            result.pendingChanges = recipe.pendingChanges;
-        }
-        if (recipe.cookingLog && recipe.cookingLog.length > 0) {
-            result.cookingLog = recipe.cookingLog.map(entry => ({
-                madeAt: Timestamp.fromDate(entry.madeAt),
-                madeBy: entry.madeBy,
-                note: entry.note,
-            }));
-        }
-        return result;
-    },
-    fromFirestore: (snapshot: DocumentSnapshot, options: SnapshotOptions) => {
-        const rawRecipe = snapshot.data(options) as RecipeStoreType
-        const cookingLog: CookingLogEntry[] = (rawRecipe.cookingLog || []).map(entry => ({
-            madeAt: entry.madeAt.toDate(),
-            madeBy: entry.madeBy,
-            note: entry.note,
-        }));
-        return new RecipeEntry(
-            rawRecipe.data,
-            rawRecipe.owners,
-            rawRecipe.visibility,
-            rawRecipe.creator,
-            snapshot.id,
-            (rawRecipe.created || DUMMY_FIRST_TIMESTAMP).toDate(),
-            (rawRecipe.updated || DUMMY_FIRST_TIMESTAMP).toDate(),
-            rawRecipe.lastUpdatedBy,
-            rawRecipe.pendingChanges,
-            rawRecipe.stepIngredients,
-            cookingLog,
-            rawRecipe.enrichmentStatus,
-        );
-    }
-};
+/** Convert a PocketBase record to a RecipeEntry */
+export function recipeFromRecord(record: RecordModel): RecipeEntry {
+    const cookingLog: CookingLogEntry[] = (record.cooking_log || []).map((entry: { madeAt?: string; madeBy?: string; note?: string }) => ({
+        madeAt: entry.madeAt ? new Date(entry.madeAt) : DUMMY_FIRST_DATE,
+        madeBy: entry.madeBy || "",
+        note: entry.note,
+    }));
+    return new RecipeEntry(
+        record.data as Recipe,
+        record.owners || [],
+        (record.visibility as Visibility) || Visibility.private,
+        record.creator || "",
+        record.id,
+        record.created ? new Date(record.created) : DUMMY_FIRST_DATE,
+        record.updated ? new Date(record.updated) : DUMMY_FIRST_DATE,
+        record.last_updated_by || "",
+        record.pending_changes || undefined,
+        record.step_ingredients || undefined,
+        cookingLog,
+        (record.enrichment_status as EnrichmentStatus) || EnrichmentStatus.needed,
+    );
+}
 
 
 export class BoxEntry {
@@ -199,34 +174,21 @@ export class BoxEntry {
     }
 }
 
-export const boxConverter = {
-    toFirestore: (box: BoxEntry): BoxStoreType => {
-        return {
-            data: box.data,
-            owners: box.owners,
-            subscribers: box.subscribers,
-            visibility: box.visibility,
-            updated: Timestamp.fromDate(box.updated),
-            created: Timestamp.fromDate(box.created),
-            lastUpdatedBy: box.lastUpdatedBy,
-            creator: box.creator ? box.creator : box.owners[0],
-        };
-    },
-    fromFirestore: (snapshot: DocumentSnapshot, options: SnapshotOptions) => {
-        const data = snapshot.data(options) as BoxStoreType
-        return new BoxEntry(
-            data.data,
-            data.owners,
-            data.visibility,
-            data.creator,
-            snapshot.id,
-            (data.created || DUMMY_FIRST_TIMESTAMP).toDate(),
-            (data.updated || DUMMY_FIRST_TIMESTAMP).toDate(),
-            data.lastUpdatedBy,
-            data.subscribers,
-        );
-    }
-};
+/** Convert a PocketBase record to a BoxEntry */
+export function boxFromRecord(record: RecordModel): BoxEntry {
+    return new BoxEntry(
+        { name: record.name || "", description: record.description || undefined },
+        record.owners || [],
+        (record.visibility as Visibility) || Visibility.private,
+        record.creator || "",
+        record.id,
+        record.created ? new Date(record.created) : DUMMY_FIRST_DATE,
+        record.updated ? new Date(record.updated) : DUMMY_FIRST_DATE,
+        record.last_updated_by || "",
+        record.subscribers || [],
+    );
+}
+
 
 export class UserEntry {
     name: string
@@ -250,31 +212,17 @@ export class UserEntry {
     }
 }
 
-
-export const userConverter = {
-    toFirestore: (user: UserEntry) => {
-        return {
-            name: user.name,
-            visibility: user.visibility,
-            lastSeen: user.lastSeen,
-            newSeen: user.newSeen,
-            boxes: user.boxes.map(bid => doc(db, "boxes", bid)),
-            cookingModeSeen: user.cookingModeSeen,
-            lastSeenUpdateVersion: user.lastSeenUpdateVersion,
-        };
-    },
-    fromFirestore: (snapshot: DocumentSnapshot, options: SnapshotOptions) => {
-        const data = snapshot.data(options) as UserStoreType
-        const boxIds = (data.boxes ?? []).map(b => b.id)
-        return new UserEntry(
-            data.name ?? "",
-            data.visibility ?? "private",
-            boxIds,
-            (data.lastSeen  || DUMMY_FIRST_TIMESTAMP).toDate(),
-            (data.newSeen  || DUMMY_FIRST_TIMESTAMP).toDate(),
-            snapshot.id,
-            data.cookingModeSeen ?? false,
-            data.lastSeenUpdateVersion ?? 0
-        )
-    }
-};
+/** Convert a PocketBase user record to a UserEntry */
+export function userFromRecord(record: RecordModel): UserEntry {
+    const boxes: string[] = record.recipe_boxes || [];
+    return new UserEntry(
+        record.name ?? "",
+        Visibility.private,
+        boxes,
+        record.updated ? new Date(record.updated) : DUMMY_FIRST_DATE,
+        record.created ? new Date(record.created) : DUMMY_FIRST_DATE,
+        record.id,
+        record.cooking_mode_seen ?? false,
+        record.last_seen_update_version || CURRENT_UPDATE_VERSION,
+    );
+}

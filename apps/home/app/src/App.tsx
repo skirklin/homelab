@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
 import { useEffect } from "react";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
-import { GroceriesProvider, GroceriesRoutes } from "@kirkl/shopping";
+import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
@@ -11,10 +11,10 @@ import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
 import { Settings } from "./shared/Settings";
-import { GroceriesIntegrationProvider } from "./shared/GroceriesIntegrationProvider";
+import { ShoppingIntegrationProvider } from "./shared/ShoppingIntegrationProvider";
 
 // Initialize shared backend
-initializeBackend("home.kirkl.in");
+initializeBackend();
 
 const LAST_PATH_KEY = "home:lastPath";
 const DEFAULT_APP = "/recipes";
@@ -42,7 +42,7 @@ function AuthenticatedRoutes() {
         <Route path="/timeline" element={<Timeline />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/life/*" element={<LifeRoutes embedded />} />
-        <Route path="/groceries/*" element={<GroceriesRoutes embedded />} />
+        <Route path="/shopping/*" element={<ShoppingRoutes embedded />} />
         <Route path="/recipes/*" element={<RecipesRoutes embedded />} />
         <Route path="/travel/*" element={<TravelRoutes embedded />} />
         <Route path="/upkeep/*" element={<UpkeepRoutes embedded />} />
@@ -94,21 +94,21 @@ export function App() {
     <ConfigProvider theme={antTheme}>
       <BrowserRouter>
         <AuthProvider>
-          <GroceriesProvider>
+          <ShoppingProvider>
             <LifeProvider>
               <RecipesProvider>
                 <CookingModeProvider>
-                  <GroceriesIntegrationProvider>
+                  <ShoppingIntegrationProvider>
                     <TravelProvider>
                       <UpkeepProvider>
                         <AppRoutes />
                       </UpkeepProvider>
                     </TravelProvider>
-                  </GroceriesIntegrationProvider>
+                  </ShoppingIntegrationProvider>
                 </CookingModeProvider>
               </RecipesProvider>
             </LifeProvider>
-          </GroceriesProvider>
+          </ShoppingProvider>
         </AuthProvider>
       </BrowserRouter>
     </ConfigProvider>

@@ -2,7 +2,7 @@
  * Routing tests for embedded modules in the home app
  *
  * These tests verify that navigation within embedded modules works correctly
- * when the modules are mounted at non-root paths (e.g., /groceries/*, /recipes/*).
+ * when the modules are mounted at non-root paths (e.g., /shopping/*, /recipes/*).
  *
  * The key issue: modules using absolute paths like navigate(`/${slug}`) navigate
  * to the root of the app instead of staying within the module's path.
@@ -58,11 +58,11 @@ describe("Embedded Module Routing", () => {
   describe("Absolute Path Navigation (BUG)", () => {
     it("navigates to root instead of module path when using absolute paths", async () => {
       render(
-        <MemoryRouter initialEntries={["/groceries"]}>
+        <MemoryRouter initialEntries={["/shopping"]}>
           <Routes>
             <Route path="/" element={<LocationDisplay />} />
             <Route path="/:slug" element={<LocationDisplay />} />
-            <Route path="/groceries/*" element={<AbsolutePathModule />}>
+            <Route path="/shopping/*" element={<AbsolutePathModule />}>
               <Route index element={<LocationDisplay />} />
               <Route path=":slug" element={<LocationDisplay />} />
             </Route>
@@ -70,27 +70,27 @@ describe("Embedded Module Routing", () => {
         </MemoryRouter>
       );
 
-      // We start at /groceries
-      expect(screen.getByTestId("location")).toHaveTextContent("/groceries");
+      // We start at /shopping
+      expect(screen.getByTestId("location")).toHaveTextContent("/shopping");
 
       // Click "Go to List" which uses navigate("/mylist") - ABSOLUTE path
       fireEvent.click(screen.getByText("Go to List (absolute)"));
 
-      // BUG: This goes to /mylist (root level), not /groceries/mylist
+      // BUG: This goes to /mylist (root level), not /shopping/mylist
       await waitFor(() => {
         expect(screen.getByTestId("location")).toHaveTextContent("/mylist");
       });
 
-      // This is the WRONG location - it should be /groceries/mylist
-      expect(screen.getByTestId("location").textContent).not.toBe("/groceries/mylist");
+      // This is the WRONG location - it should be /shopping/mylist
+      expect(screen.getByTestId("location").textContent).not.toBe("/shopping/mylist");
     });
 
     it("navigates to app root instead of module root when using navigate('/')", async () => {
       render(
-        <MemoryRouter initialEntries={["/groceries/mylist"]}>
+        <MemoryRouter initialEntries={["/shopping/mylist"]}>
           <Routes>
             <Route path="/" element={<LocationDisplay />} />
-            <Route path="/groceries/*" element={<AbsolutePathModule />}>
+            <Route path="/shopping/*" element={<AbsolutePathModule />}>
               <Route index element={<LocationDisplay />} />
               <Route path=":slug" element={<LocationDisplay />} />
             </Route>
@@ -98,29 +98,29 @@ describe("Embedded Module Routing", () => {
         </MemoryRouter>
       );
 
-      // We start at /groceries/mylist
-      expect(screen.getByTestId("location")).toHaveTextContent("/groceries/mylist");
+      // We start at /shopping/mylist
+      expect(screen.getByTestId("location")).toHaveTextContent("/shopping/mylist");
 
       // Click "Go to Root" which uses navigate("/") - goes to APP root
       fireEvent.click(screen.getByText("Go to Root (absolute)"));
 
-      // BUG: This goes to / (app root), not /groceries (module root)
+      // BUG: This goes to / (app root), not /shopping (module root)
       await waitFor(() => {
         expect(screen.getByTestId("location")).toHaveTextContent("/");
       });
 
-      // This is the WRONG location - user expected to go to /groceries
-      expect(screen.getByTestId("location").textContent).not.toBe("/groceries");
+      // This is the WRONG location - user expected to go to /shopping
+      expect(screen.getByTestId("location").textContent).not.toBe("/shopping");
     });
   });
 
   describe("Relative Path Navigation (FIX)", () => {
     it("navigates within module when using relative paths", async () => {
       render(
-        <MemoryRouter initialEntries={["/groceries"]}>
+        <MemoryRouter initialEntries={["/shopping"]}>
           <Routes>
             <Route path="/" element={<LocationDisplay />} />
-            <Route path="/groceries/*" element={<RelativePathModule />}>
+            <Route path="/shopping/*" element={<RelativePathModule />}>
               <Route index element={<LocationDisplay />} />
               <Route path=":slug" element={<LocationDisplay />} />
             </Route>
@@ -128,24 +128,24 @@ describe("Embedded Module Routing", () => {
         </MemoryRouter>
       );
 
-      // We start at /groceries
-      expect(screen.getByTestId("location")).toHaveTextContent("/groceries");
+      // We start at /shopping
+      expect(screen.getByTestId("location")).toHaveTextContent("/shopping");
 
       // Click "Go to List" which uses navigate("mylist") - RELATIVE path
       fireEvent.click(screen.getByText("Go to List (relative)"));
 
-      // CORRECT: This stays within /groceries/*
+      // CORRECT: This stays within /shopping/*
       await waitFor(() => {
-        expect(screen.getByTestId("location")).toHaveTextContent("/groceries/mylist");
+        expect(screen.getByTestId("location")).toHaveTextContent("/shopping/mylist");
       });
     });
 
     it("navigates to module root when using navigate('.')", async () => {
       render(
-        <MemoryRouter initialEntries={["/groceries/mylist"]}>
+        <MemoryRouter initialEntries={["/shopping/mylist"]}>
           <Routes>
             <Route path="/" element={<LocationDisplay />} />
-            <Route path="/groceries/*" element={<RelativePathModule />}>
+            <Route path="/shopping/*" element={<RelativePathModule />}>
               <Route index element={<LocationDisplay />} />
               <Route path=":slug" element={<LocationDisplay />} />
             </Route>
@@ -153,15 +153,15 @@ describe("Embedded Module Routing", () => {
         </MemoryRouter>
       );
 
-      // We start at /groceries/mylist
-      expect(screen.getByTestId("location")).toHaveTextContent("/groceries/mylist");
+      // We start at /shopping/mylist
+      expect(screen.getByTestId("location")).toHaveTextContent("/shopping/mylist");
 
       // Click "Go to Module Root" which uses navigate(".") - goes to module root
       fireEvent.click(screen.getByText("Go to Module Root (relative)"));
 
-      // CORRECT: This goes to /groceries (module root)
+      // CORRECT: This goes to /shopping (module root)
       await waitFor(() => {
-        expect(screen.getByTestId("location")).toHaveTextContent("/groceries");
+        expect(screen.getByTestId("location")).toHaveTextContent("/shopping");
       });
     });
   });

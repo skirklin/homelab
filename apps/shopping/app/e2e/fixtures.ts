@@ -1,28 +1,30 @@
-// Helper to clear emulator data between tests
-export async function clearEmulatorData(): Promise<void> {
-  const firestoreEmulatorUrl = "http://localhost:8180";
-  const projectId = "recipe-box-335721";
+import { test as base, expect, type Page } from "@playwright/test";
 
-  try {
-    await fetch(
-      `${firestoreEmulatorUrl}/emulator/v1/projects/${projectId}/databases/(default)/documents`,
-      { method: "DELETE" }
-    );
-  } catch (error) {
-    console.error("Error clearing Firestore emulator:", error);
-  }
+const TEST_EMAIL = "playwright@test.local";
+const TEST_PASSWORD = "testpassword123";
+
+/**
+ * Sign in via the email/password form on the Auth page.
+ */
+async function signIn(page: Page) {
+  await page.fill('[data-testid="email-input"]', TEST_EMAIL);
+  await page.fill('[data-testid="password-input"]', TEST_PASSWORD);
+  await page.click('[data-testid="email-sign-in"]');
+  // Wait for auth to complete — the auth page should disappear
+  await expect(page.locator('[data-testid="email-sign-in"]')).not.toBeVisible({
+    timeout: 10000,
+  });
 }
 
-export async function clearAuthEmulator(): Promise<void> {
-  const authEmulatorUrl = "http://localhost:9199";
-  const projectId = "recipe-box-335721";
+/**
+ * Extended test fixture that auto-signs in.
+ */
+export const test = base.extend<{ authedPage: Page }>({
+  authedPage: async ({ page }, use) => {
+    await page.goto("/?pick=true");
+    await signIn(page);
+    await use(page);
+  },
+});
 
-  try {
-    await fetch(
-      `${authEmulatorUrl}/emulator/v1/projects/${projectId}/accounts`,
-      { method: "DELETE" }
-    );
-  } catch (error) {
-    console.error("Error clearing Auth emulator:", error);
-  }
-}
+export { expect, signIn };

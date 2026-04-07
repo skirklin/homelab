@@ -8,7 +8,7 @@ import { getRecipes } from '../backend';
 import { Context } from '../context';
 import { RecipeEntry } from '../storage';
 import { type BoxId, Visibility } from '../types';
-import { addRecipe } from '../firestore';
+import { addRecipe } from '../pocketbase';
 import { getAppUserFromState } from '../state';
 import { useAuth } from '@kirkl/shared';
 

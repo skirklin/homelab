@@ -83,10 +83,12 @@ export function UpkeepProvider({ children }: { children: ReactNode }) {
 
   // Subscribe to user's slugs when authenticated
   useEffect(() => {
+    let cancelled = false;
     if (user) {
-      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch);
+      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch, () => cancelled);
     }
     return () => {
+      cancelled = true;
       if (slugsUnsubRef.current) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
@@ -109,8 +111,18 @@ export function UpkeepProvider({ children }: { children: ReactNode }) {
     listUnsubsRef.current = [];
     currentListIdRef.current = listId;
 
-    subscribeToList(listId, user.uid, dispatch).then((unsubs) => {
+    const cancelled = () => currentListIdRef.current !== listId;
+    subscribeToList(listId, user.uid, dispatch, cancelled).then((unsubs) => {
+      if (cancelled()) {
+        unsubs.forEach((unsub) => unsub());
+        return;
+      }
       listUnsubsRef.current = unsubs;
+    }).catch((err) => {
+      console.error("[upkeep] subscribeToList failed:", err);
+      if (!cancelled()) {
+        dispatch({ type: "SET_LOADING", loading: false });
+      }
     });
   }, [user]);
 

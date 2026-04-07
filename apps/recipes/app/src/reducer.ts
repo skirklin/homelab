@@ -67,6 +67,14 @@ export function recipeBoxReducer(prevState: AppState, action: ActionType): AppSt
         subscriptionsReady: prevState.subscriptionsReady || newLoading === 0
       }
     }
+    case "SET_LOADING": {
+      const newLoading = (action as any).loading as number;
+      return {
+        ...prevState,
+        loading: newLoading,
+        subscriptionsReady: prevState.subscriptionsReady || newLoading === 0
+      }
+    }
     case "RESET_STATE": {
       return initState();
     }

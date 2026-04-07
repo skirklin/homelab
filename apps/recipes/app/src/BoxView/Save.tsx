@@ -1,14 +1,12 @@
 import styled from 'styled-components';
 import { SaveOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
-import { doc, setDoc } from 'firebase/firestore';
+import { getBackend } from '@kirkl/shared';
 import { useContext } from 'react';
 
-import { db } from '../backend';
 import { Context } from '../context';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import _ from 'lodash';
-import { boxConverter } from '../storage';
 import type { BoxProps } from './BoxView';
 import { useAuth } from '@kirkl/shared';
 
@@ -34,8 +32,10 @@ function SaveButton(props: BoxProps) {
     const newBox = _.cloneDeep(box)
     newBox.data = box.changed
     newBox.changed = undefined
-    const docRef = doc(db, "boxes", boxId).withConverter(boxConverter)
-    await setDoc(docRef, newBox)
+    await getBackend().collection("recipe_boxes").update(boxId, {
+      name: newBox.data.name,
+      description: newBox.data.description || "",
+    });
   }
 
   let writeable = false;

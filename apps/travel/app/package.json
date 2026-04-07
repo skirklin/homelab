@@ -24,7 +24,7 @@
     "@vis.gl/react-google-maps": "^1.8.1",
     "antd": "^5.29.3",
     "dayjs": "^1.11.0",
-    "firebase": "^11.0.0",
+    "pocketbase": "^0.25.0",
     "styled-components": "^6.1.19"
   },
   "devDependencies": {

@@ -29,9 +29,10 @@ function normalizeIngredient(ingredient: string): string {
 export async function ensureListExists(userId: string) {
   try {
     const list = await pb().collection("shopping_lists").getOne(currentListId);
-    if (!list.owners.includes(userId)) {
+    const owners = Array.isArray(list.owners) ? list.owners : [list.owners];
+    if (!owners.includes(userId)) {
       await pb().collection("shopping_lists").update(currentListId, {
-        "owners+": userId,
+        owners: [...owners, userId],
       });
     }
   } catch {
@@ -40,13 +41,14 @@ export async function ensureListExists(userId: string) {
 }
 
 export async function createList(name: string, slug: string, userId: string): Promise<string> {
+  const opts = { $autoCancel: false };
   const list = await pb().collection("shopping_lists").create({
     name,
     owners: [userId],
     category_defs: [],
-  });
+  }, opts);
 
-  await setUserSlug(userId, slug, list.id);
+  await setUserSlug(userId, slug, list.id, opts);
   return list.id;
 }
 
@@ -80,13 +82,15 @@ export async function addItem(
   userId: string,
   options?: { itemId?: string; categoryId?: string; note?: string }
 ) {
+  const opts = { $autoCancel: false };
   let categoryId: string = options?.categoryId || "uncategorized";
 
   if (!options?.categoryId) {
     // Look up category from history
     try {
       const history = await pb().collection("shopping_history").getFirstListItem(
-        `list = "${currentListId}" && ingredient = "${normalizeIngredient(ingredient)}"`
+        `list = "${currentListId}" && ingredient = "${normalizeIngredient(ingredient)}"`,
+        opts,
       );
       categoryId = history.category_id || "uncategorized";
     } catch {
@@ -101,24 +105,25 @@ export async function addItem(
     category_id: categoryId,
     checked: false,
     added_by: userId,
-  });
+  }, opts);
 
   // Save to history
   try {
     const existing = await pb().collection("shopping_history").getFirstListItem(
-      `list = "${currentListId}" && ingredient = "${normalizeIngredient(ingredient)}"`
+      `list = "${currentListId}" && ingredient = "${normalizeIngredient(ingredient)}"`,
+      opts,
     );
     await pb().collection("shopping_history").update(existing.id, {
       category_id: categoryId,
       last_added: new Date().toISOString(),
-    });
+    }, opts);
   } catch {
     await pb().collection("shopping_history").create({
       list: currentListId,
       ingredient: normalizeIngredient(ingredient),
       category_id: categoryId,
       last_added: new Date().toISOString(),
-    });
+    }, opts);
   }
 }
 
@@ -194,26 +199,27 @@ export async function clearCheckedItems(items: ShoppingItem[]) {
 
 // ===== User slug operations =====
 
-export async function getUserSlugs(userId: string): Promise<Record<string, string>> {
+export async function getUserSlugs(userId: string, opts?: Record<string, unknown>): Promise<Record<string, string>> {
   try {
-    const user = await pb().collection("users").getOne(userId);
+    const user = await pb().collection("users").getOne(userId, opts);
     return user.shopping_slugs || {};
   } catch {
     return {};
   }
 }
 
-export async function setUserSlug(userId: string, slug: string, listId: string) {
-  const user = await pb().collection("users").getOne(userId);
+export async function setUserSlug(userId: string, slug: string, listId: string, opts?: Record<string, unknown>) {
+  const user = await pb().collection("users").getOne(userId, opts);
   const slugs = { ...(user.shopping_slugs || {}), [slug]: listId };
-  await pb().collection("users").update(userId, { shopping_slugs: slugs });
+  await pb().collection("users").update(userId, { shopping_slugs: slugs }, opts);
 
   // Add user to list owners
   try {
     const list = await pb().collection("shopping_lists").getOne(listId);
-    if (!list.owners.includes(userId)) {
+    const owners = Array.isArray(list.owners) ? list.owners : [list.owners];
+    if (!owners.includes(userId)) {
       await pb().collection("shopping_lists").update(listId, {
-        "owners+": userId,
+        owners: [...owners, userId],
       });
     }
   } catch {

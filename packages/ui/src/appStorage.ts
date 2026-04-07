@@ -12,11 +12,11 @@ export interface AppStorage {
 /**
  * Create a namespaced localStorage utility for an app.
  *
- * @param namespace - Unique namespace for the app (e.g., "groceries", "upkeep")
+ * @param namespace - Unique namespace for the app (e.g., "shopping", "upkeep")
  * @returns Storage utility with get, set, and remove methods
  *
  * @example
- * const storage = createAppStorage("groceries");
+ * const storage = createAppStorage("shopping");
  * storage.set("lastList", "weekly");
  * const lastList = storage.get("lastList", null);
  */

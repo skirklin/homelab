@@ -6,7 +6,7 @@ import { PickBoxModal } from '../Modals/PickBoxModal';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
-import { addRecipe } from '../firestore';
+import { addRecipe } from '../pocketbase';
 import { getAppUserFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import type { RecipeCardProps } from '../RecipeCard/RecipeCard';

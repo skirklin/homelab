@@ -1,7 +1,7 @@
 import { UploadOutlined } from "@ant-design/icons";
 import { useContext } from "react";
 import { useBoxAction } from "../hooks/useBoxAction";
-import { uploadRecipes } from "../firestore";
+import { uploadRecipes } from "../pocketbase";
 import { getAppUserFromState } from "../state";
 import { ActionButton } from "../StyledComponents";
 import type { BoxId } from "../types";

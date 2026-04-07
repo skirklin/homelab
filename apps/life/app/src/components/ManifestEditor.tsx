@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { Modal, Button, Alert, message } from "antd";
 import type { LifeManifest } from "../types";
 import { parseAndValidateManifest, formatValidationErrors } from "../manifest-validation";
-import { updateManifest } from "../firestore";
+import { updateManifest } from "../pocketbase";
 
 const EditorContainer = styled.div`
   display: flex;

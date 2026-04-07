@@ -3,7 +3,7 @@ import { Button, Modal, Spin, Space, Typography, Input, Alert } from 'antd';
 import { useContext, useState } from 'react';
 import { modifyRecipe } from '../backend';
 import { Context } from '../context';
-import { applyChanges, rejectChanges } from '../firestore';
+import { applyChanges, rejectChanges } from '../pocketbase';
 import { getRecipeFromState } from '../state';
 import { type BoxId, type PendingChanges, type RecipeId } from '../types';
 import { RecipeDiffView } from './RecipeDiffView';

@@ -33,7 +33,7 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
     y: transform.y + offsetY - draggingNodeRect.height / 2,
   };
 };
-import { useGroceriesContext } from "../groceries-context";
+import { useShoppingContext } from "../shopping-context";
 import { getItemsByCategoryId } from "../subscription";
 import { updateItemCategory } from "../pocketbase";
 import { Header } from "./Header";
@@ -41,7 +41,7 @@ import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";
 import { ShoppingTrips } from "./ShoppingTrips";
 import { ListSettings } from "./ListSettings";
-import type { GroceryItem, CategoryId, CategoryDef } from "../types";
+import type { ShoppingItem, CategoryId, CategoryDef } from "../types";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -118,17 +118,17 @@ const NotFoundText = styled.p`
 
 type View = "list" | "history" | "settings";
 
-interface GroceryListProps {
+interface ShoppingListProps {
   embedded?: boolean;
 }
 
-export function GroceryList({ embedded = false }: GroceryListProps) {
+export function ShoppingList({ embedded = false }: ShoppingListProps) {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { state, setCurrentList } = useGroceriesContext();
+  const { state, setCurrentList } = useShoppingContext();
   const [view, setView] = useState<View>("list");
-  const [draggedItem, setDraggedItem] = useState<GroceryItem | null>(null);
+  const [draggedItem, setDraggedItem] = useState<ShoppingItem | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
 
   // Configure sensors for both mouse and touch with activation delay
@@ -157,7 +157,7 @@ export function GroceryList({ embedded = false }: GroceryListProps) {
   }, [slug, listId, setCurrentList]);
 
   const handleDragStart = (event: DragStartEvent) => {
-    const item = event.active.data.current?.item as GroceryItem;
+    const item = event.active.data.current?.item as ShoppingItem;
     setDraggedItem(item);
   };
 
@@ -167,7 +167,7 @@ export function GroceryList({ embedded = false }: GroceryListProps) {
     const { active, over } = event;
     if (!over) return;
 
-    const item = active.data.current?.item as GroceryItem;
+    const item = active.data.current?.item as ShoppingItem;
     const newCategoryId = over.id as CategoryId;
 
     if (item && newCategoryId && item.categoryId !== newCategoryId) {

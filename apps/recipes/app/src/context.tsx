@@ -1,5 +1,4 @@
 import { createContext, useContext, useReducer, useEffect, useRef, type ReactNode } from 'react';
-import type { Unsubscribe } from 'firebase/auth';
 import { useAuth } from '@kirkl/shared';
 import type { ActionType, AppState, UnsubMap } from './types';
 import { initState, recipeBoxReducer } from './reducer';
@@ -31,20 +30,27 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    let cancelled = false;
     const unsubMap: UnsubMap = {
       userUnsub: undefined,
       boxesUnsub: undefined,
       boxMap: new Map<string, {
-        boxUnsub: Unsubscribe,
-        recipesUnsub: Unsubscribe
+        boxUnsub: (() => void) | undefined,
+        recipesUnsub: (() => void) | undefined,
       }>(),
     };
     unsubMapRef.current = unsubMap;
 
-    subscribeToUser(user, dispatch, unsubMap);
+    subscribeToUser(user, dispatch, unsubMap, () => cancelled).finally(() => {
+      // Guard against StrictMode double-mount: only clear loading if this
+      // effect instance hasn't been cleaned up
+      if (!cancelled) {
+        dispatch({ type: "SET_LOADING", loading: 0 });
+      }
+    });
 
     return () => {
-      console.debug('Unsubscribing from all.');
+      cancelled = true;
       unsubscribe(unsubMap);
       unsubMapRef.current = null;
     };

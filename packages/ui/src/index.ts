@@ -73,5 +73,5 @@ export {
   WidgetGrid,
 } from "./styles";
 
-// Test utilities (for e2e tests with emulators)
-export * from "./test-utils";
+// Test utilities — imported directly from "@kirkl/shared/test-utils" in test files,
+// NOT re-exported here to avoid pulling Node.js globals (process.env) into browser bundles.

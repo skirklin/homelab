@@ -7,8 +7,6 @@ import { useState, useEffect } from "react";
 import { Button, Segmented, message, Spin, Modal } from "antd";
 import { BellOutlined, DeleteOutlined, ExperimentOutlined, CheckSquareOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { arrayRemove } from "firebase/firestore";
 import { useAuth, getBackend, type NotificationMode, PageContainer } from "@kirkl/shared";
 
 const Content = styled.div`
@@ -98,14 +96,12 @@ function isValidNotificationMode(value: unknown): value is NotificationMode {
 function parseUserSettings(data: Record<string, unknown>): UserSettings {
   const settings: UserSettings = {};
 
-  // Validate notification mode
-  if (isValidNotificationMode(data.upkeepNotificationMode)) {
-    settings.upkeepNotificationMode = data.upkeepNotificationMode;
+  if (isValidNotificationMode(data.upkeep_notification_mode)) {
+    settings.upkeepNotificationMode = data.upkeep_notification_mode;
   }
 
-  // Validate fcmTokens array
-  if (Array.isArray(data.fcmTokens) && data.fcmTokens.every(t => typeof t === "string")) {
-    settings.fcmTokens = data.fcmTokens;
+  if (Array.isArray(data.fcm_tokens) && data.fcm_tokens.every((t: unknown) => typeof t === "string")) {
+    settings.fcmTokens = data.fcm_tokens;
   }
 
   return settings;
@@ -113,7 +109,6 @@ function parseUserSettings(data: Record<string, unknown>): UserSettings {
 
 export function Settings() {
   const { user } = useAuth();
-  const { db } = getBackend();
   const [settings, setSettings] = useState<UserSettings>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -125,11 +120,8 @@ export function Settings() {
 
     const loadSettings = async () => {
       try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          setSettings(parseUserSettings(userSnap.data()));
-        }
+        const record = await getBackend().collection("users").getOne(user.uid);
+        setSettings(parseUserSettings(record));
       } catch (err) {
         console.error("Failed to load settings:", err);
         setError("Failed to load settings. Please try again.");
@@ -139,14 +131,15 @@ export function Settings() {
     };
 
     loadSettings();
-  }, [user, db]);
+  }, [user]);
 
   const updateNotificationMode = async (mode: NotificationMode) => {
     if (!user) return;
     setSaving(true);
     try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { upkeepNotificationMode: mode });
+      await getBackend().collection("users").update(user.uid, {
+        upkeep_notification_mode: mode,
+      });
       setSettings(prev => ({ ...prev, upkeepNotificationMode: mode }));
 
       const messages: Record<NotificationMode, string> = {
@@ -174,13 +167,11 @@ export function Settings() {
       onOk: async () => {
         setSaving(true);
         try {
-          const userRef = doc(db, "users", user.uid);
-          const tokens = settings.fcmTokens || [];
-          if (tokens.length > 0) {
-            await updateDoc(userRef, { fcmTokens: arrayRemove(...tokens) });
-            setSettings(prev => ({ ...prev, fcmTokens: [] }));
-            message.success("All notification tokens cleared");
-          }
+          await getBackend().collection("users").update(user.uid, {
+            fcm_tokens: [],
+          });
+          setSettings(prev => ({ ...prev, fcmTokens: [] }));
+          message.success("All notification tokens cleared");
         } catch (error) {
           console.error("Failed to clear tokens:", error);
           message.error("Failed to clear tokens");

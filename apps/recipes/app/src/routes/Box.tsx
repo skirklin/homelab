@@ -4,7 +4,7 @@ import { Spin } from "antd";
 import { useAuth } from "@kirkl/shared";
 import { Context } from "../context";
 
-import { getBox } from "../firestore";
+import { getBox } from "../pocketbase";
 import { getBoxFromState } from "../state";
 import type { BoxId } from "../types";
 import BoxView from '../BoxView/BoxView'

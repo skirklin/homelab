@@ -1,11 +1,8 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { Modal, Select } from 'antd';
-import { DocumentReference } from 'firebase/firestore';
-
 import { useContext, useEffect, useState } from 'react';
 import NewBoxModal from './NewBoxModal';
 import { Context } from '../context';
-import { BoxEntry } from '../storage';
 import type { BoxId } from '../types';
 
 const ADD_NEW_VALUE = '__add_new__';
@@ -80,7 +77,7 @@ export function PickBoxModal(props: PickBoxModalProps) {
   const [boxId, setBoxId] = useState("")
   const [showNewBoxModal, setShowNewBoxModal] = useState(false)
 
-  const afterNewBox = (boxRef: DocumentReference<BoxEntry>) => {
+  const afterNewBox = (boxRef: { id: string }) => {
     setBoxId(boxRef.id)
     setShowNewBoxModal(false)
   }

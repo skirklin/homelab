@@ -2,12 +2,6 @@ import { useState } from "react";
 import styled from "styled-components";
 import { Button, Form, Input, Divider, message } from "antd";
 import { GoogleOutlined, MailOutlined } from "@ant-design/icons";
-import {
-  GoogleAuthProvider,
-  signInWithPopup,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-} from "firebase/auth";
 import { getBackend } from "@kirkl/shared";
 
 const SignInCard = styled.div`
@@ -25,17 +19,14 @@ const Title = styled.h1`
   color: var(--color-primary);
 `;
 
-const googleProvider = new GoogleAuthProvider();
-
 export function Auth() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleGoogleSignIn = async () => {
-    const { auth } = getBackend();
     setLoading(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      await getBackend().collection("users").authWithOAuth2({ provider: "google" });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to sign in";
       message.error(msg);
@@ -44,13 +35,17 @@ export function Auth() {
   };
 
   const handleEmailAuth = async (values: { email: string; password: string }) => {
-    const { auth } = getBackend();
     setLoading(true);
     try {
       if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, values.email, values.password);
+        await getBackend().collection("users").create({
+          email: values.email,
+          password: values.password,
+          passwordConfirm: values.password,
+        });
+        await getBackend().collection("users").authWithPassword(values.email, values.password);
       } else {
-        await signInWithEmailAndPassword(auth, values.email, values.password);
+        await getBackend().collection("users").authWithPassword(values.email, values.password);
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Authentication failed";

@@ -12,7 +12,6 @@ import {
   HistoryOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { signOut } from "firebase/auth";
 import { getBackend } from "@kirkl/shared";
 
 const LAST_PATH_KEY = "home:lastPath";
@@ -127,7 +126,7 @@ export function Shell() {
 
   // Save current path when navigating to a sub-app
   useEffect(() => {
-    const subApps = ["/life", "/groceries", "/recipes", "/travel", "/upkeep"];
+    const subApps = ["/life", "/shopping", "/recipes", "/travel", "/upkeep"];
     const isSubApp = subApps.some(app => location.pathname.startsWith(app));
     if (isSubApp) {
       localStorage.setItem(LAST_PATH_KEY, location.pathname);
@@ -136,9 +135,8 @@ export function Shell() {
 
   const isActive = (path: string) => location.pathname.startsWith(path);
 
-  const handleSignOut = async () => {
-    const { auth } = getBackend();
-    await signOut(auth);
+  const handleSignOut = () => {
+    getBackend().authStore.clear();
     navigate("/");
   };
 
@@ -161,11 +159,11 @@ export function Shell() {
             <span className="nav-label">Recipes</span>
           </NavButton>
           <NavButton
-            $active={isActive("/groceries")}
-            onClick={() => navigate("/groceries")}
+            $active={isActive("/shopping")}
+            onClick={() => navigate("/shopping")}
           >
-            <NavIcon $active={isActive("/groceries")}><ShoppingCartOutlined /></NavIcon>
-            <span className="nav-label">Groceries</span>
+            <NavIcon $active={isActive("/shopping")}><ShoppingCartOutlined /></NavIcon>
+            <span className="nav-label">Shopping</span>
           </NavButton>
           <NavButton
             $active={isActive("/travel")}

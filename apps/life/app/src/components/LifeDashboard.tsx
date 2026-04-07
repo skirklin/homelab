@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, message, Tooltip, DatePicker } from "antd";
 import { SettingOutlined, DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
-import { signOut } from "firebase/auth";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -30,7 +29,7 @@ import {
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
 } from "../messaging";
-import { addSampleResponse, clearSampleSchedule, getCachedLogId } from "../firestore";
+import { addSampleResponse, clearSampleSchedule, getCachedLogId } from "../pocketbase";
 
 // Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {
@@ -371,8 +370,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const samplingEnabled = manifest.randomSamples?.enabled;
 
   const handleSignOut = () => {
-    const { auth } = getBackend();
-    signOut(auth);
+    getBackend().authStore.clear();
   };
 
   // Menu items - always include Insights, Display, and Export for mobile access

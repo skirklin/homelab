@@ -1,6 +1,6 @@
 /**
  * Shared list management components for apps with multi-list support.
- * Used by groceries and upkeep apps.
+ * Used by shopping and upkeep apps.
  */
 
 import { useState, useEffect, type ReactNode } from "react";

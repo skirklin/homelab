@@ -1,7 +1,7 @@
 import { Checkbox, Typography, Progress } from "antd";
 import styled from "styled-components";
 import { useTravelContext } from "../travel-context";
-import { toggleChecklistItem } from "../firestore";
+import { toggleChecklistItem } from "../pocketbase";
 import type { Trip, ChecklistTemplate } from "../types";
 
 const Container = styled.div`

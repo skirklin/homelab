@@ -5,7 +5,7 @@ import type { Recipe } from 'schema-dts';
 import styled from 'styled-components';
 import { generateRecipe } from '../backend';
 import { Context } from '../context';
-import { addRecipe } from '../firestore';
+import { addRecipe } from '../pocketbase';
 import { RecipeEntry } from '../storage';
 import { getAppUserFromState } from '../state';
 import { type BoxId, Visibility } from '../types';

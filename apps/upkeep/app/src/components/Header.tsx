@@ -2,11 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Popover, Segmented, message } from "antd";
 import { ShareAltOutlined, LogoutOutlined, PlusOutlined, BellOutlined, BellFilled } from "@ant-design/icons";
-import { signOut } from "firebase/auth";
-import { AppHeader, ShareModal, useAuth } from "@kirkl/shared";
-import { auth } from "../backend";
+import { AppHeader, ShareModal, useAuth, getBackend } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { getCurrentListId, getNotificationMode, setNotificationMode } from "../firestore";
+import { getCurrentListId, getNotificationMode, setNotificationMode } from "../pocketbase";
 import { appStorage, StorageKeys } from "../storage";
 import { isNotificationSupported, requestNotificationPermission, getFcmToken } from "../messaging";
 import styled from "styled-components";
@@ -50,8 +48,8 @@ export function Header({ onAddTask, embedded = false }: HeaderProps) {
     }
   }, [user]);
 
-  const handleSignOut = async () => {
-    await signOut(auth);
+  const handleSignOut = () => {
+    getBackend().authStore.clear();
     navigate("..");
   };
 

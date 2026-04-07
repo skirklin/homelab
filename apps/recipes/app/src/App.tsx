@@ -6,8 +6,8 @@ import { CookingModeProvider } from './CookingModeContext';
 import Auth from './Auth';
 import { RecipesRoutes } from './RecipesRoutes';
 
-// Initialize backend for standalone mode
-initializeBackend('recipes.kirkl.in');
+// Initialize backend for standalone mode (PocketBase)
+initializeBackend();
 
 function App() {
   return (

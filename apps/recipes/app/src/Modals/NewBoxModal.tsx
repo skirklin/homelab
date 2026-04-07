@@ -1,16 +1,14 @@
 import { Input, Modal } from "antd"
 import { useContext, useState } from "react"
-import { addBox } from '../firestore';
+import { addBox } from '../pocketbase';
 import { getAppUserFromState } from '../state';
 import { Context } from "../context";
-import type { DocumentReference } from "firebase/firestore";
-import type { BoxEntry } from "../storage";
 import { useAuth } from '@kirkl/shared';
 
 interface NewBoxModalProps {
   isVisible: boolean
   setIsVisible: (visible: boolean) => void
-  afterNewBox?: (box: DocumentReference<BoxEntry>) => void
+  afterNewBox?: (box: { id: string }) => void
 }
 
 function NewBoxModal(props: NewBoxModalProps) {

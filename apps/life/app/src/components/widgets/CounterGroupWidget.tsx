@@ -3,7 +3,7 @@ import styled, { css } from "styled-components";
 import { message } from "antd";
 import type { CounterGroupWidget as CounterGroupWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry } from "../../firestore";
+import { addEntry } from "../../pocketbase";
 import { type WidgetSize } from "../../display-settings";
 import { EntriesPopover } from "./EntriesPopover";
 

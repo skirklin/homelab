@@ -31,7 +31,7 @@ migrate(
         name,
         collectionId,
         cascadeDelete: opts.cascade || false,
-        maxSelect: opts.maxSelect === undefined ? null : opts.maxSelect,
+        maxSelect: opts.maxSelect !== undefined ? opts.maxSelect : 100,
         required: opts.required || false,
       };
     }
@@ -49,7 +49,7 @@ migrate(
     }
 
     // ==========================================
-    // Groceries
+    // Shopping
     // ==========================================
 
     const groceryLists = ensure("shopping_lists", {
@@ -335,7 +335,7 @@ migrate(
         rel("trip_id", travelTrips.id, { required: true, cascade: true, maxSelect: 1 }),
         { type: "text", name: "name", required: true },
         { type: "bool", name: "is_active" },
-        { type: "json", name: "days", required: true, maxSize: 500000 },
+        { type: "json", name: "days", maxSize: 500000 },
       ],
     });
 

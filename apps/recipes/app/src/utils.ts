@@ -1,4 +1,4 @@
-import { getAuth, signOut } from 'firebase/auth';
+import { getBackend } from '@kirkl/shared';
 import type { Recipe } from "schema-dts"
 import { BoxEntry, RecipeEntry, UserEntry } from './storage';
 import { Visibility } from './types';
@@ -73,7 +73,7 @@ function makeTextFile(text: string) {
 }
 
 export function userSignOut() {
-  signOut(getAuth());
+  getBackend().authStore.clear();
 }
 
 export function canUpdateRecipe(recipe: RecipeEntry | undefined, box: BoxEntry | undefined, user: UserEntry | undefined) {

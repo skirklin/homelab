@@ -4,7 +4,7 @@ import { DeleteOutlined, HolderOutlined, CheckOutlined, CloseOutlined } from "@a
 import { useDraggable } from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import type { GroceryItem as GroceryItemType } from "../types";
+import type { ShoppingItem } from "../types";
 import { toggleItem, deleteItem, updateItem } from "../pocketbase";
 
 const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
@@ -80,10 +80,10 @@ const EditActions = styled.div`
 `;
 
 interface Props {
-  item: GroceryItemType;
+  item: ShoppingItem;
 }
 
-export function GroceryItemRow({ item }: Props) {
+export function ShoppingItemRow({ item }: Props) {
   const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editIngredient, setEditIngredient] = useState(item.ingredient);

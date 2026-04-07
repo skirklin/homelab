@@ -3,7 +3,7 @@ import { Button, Checkbox, Modal, Tag } from 'antd';
 import { useContext, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
-import { applyChanges, rejectChanges } from '../firestore';
+import { applyChanges, rejectChanges } from '../pocketbase';
 import { RecipeEntry } from '../storage';
 import type { BoxId, RecipeId } from '../types';
 import { Section, SectionLabel, SuggestedDescription, TagsContainer, Reasoning } from './EnrichmentStyles';

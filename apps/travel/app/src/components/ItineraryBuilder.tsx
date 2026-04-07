@@ -29,7 +29,7 @@ import {
 import styled from "styled-components";
 import type { Activity, Itinerary, ItineraryDay, ItinerarySlot } from "../types";
 import { dayTravelDistance } from "../types";
-import { updateItinerary } from "../firestore";
+import { updateItinerary } from "../pocketbase";
 
 // ==========================================
 // Styled components

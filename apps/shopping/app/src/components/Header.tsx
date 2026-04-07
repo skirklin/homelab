@@ -4,7 +4,7 @@ import styled from "styled-components";
 import { Button } from "antd";
 import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { getBackend, AppHeader, ShareModal } from "@kirkl/shared";
-import { useGroceriesContext } from "../groceries-context";
+import { useShoppingContext } from "../shopping-context";
 import { clearCheckedItems } from "../pocketbase";
 import { getItemsFromState } from "../subscription";
 import { appStorage, StorageKeys } from "../storage";
@@ -26,7 +26,7 @@ interface Props {
 
 export function Header({ listId, onShowHistory, onShowSettings, embedded = false }: Props) {
   const navigate = useNavigate();
-  const { state } = useGroceriesContext();
+  const { state } = useShoppingContext();
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const items = getItemsFromState(state);
   const checkedCount = items.filter((item) => item.checked).length;

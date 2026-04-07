@@ -4,7 +4,7 @@ import { Modal, Button, DatePicker, InputNumber, Input, message } from "antd";
 import dayjs from "dayjs";
 import type { LogEntry, LifeManifest } from "../types";
 import { getWidget } from "../types";
-import { updateEntry } from "../firestore";
+import { updateEntry } from "../pocketbase";
 
 const FormRow = styled.div`
   display: flex;

@@ -9,7 +9,7 @@ import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { LifeProvider, useLife } from "./life-context";
 import { DisplaySettingsProvider } from "./display-settings";
-import { getOrCreateUserLog, setCurrentLogId, getCachedLogId } from "./firestore";
+import { getOrCreateUserLog, setCurrentLogId, getCachedLogId } from "./pocketbase";
 import { logFromStore } from "./types";
 import { LifeDashboard } from "./components/LifeDashboard";
 
@@ -37,19 +37,22 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
 
     // Try to use cached log ID for immediate subscription start
     const cachedLogId = getCachedLogId();
-    if (cachedLogId && !state.log) {
-      // Optimistically set the log ID so subscription can start
+    if (cachedLogId) {
       setCurrentLogId(cachedLogId);
     }
 
+    let cancelled = false;
     const loadLog = async () => {
       const { id, data } = await getOrCreateUserLog(user.uid);
+      if (cancelled) return;
       setCurrentLogId(id);
       dispatch({ type: "SET_LOG", log: logFromStore(id, data) });
     };
 
     loadLog();
-  }, [user, dispatch, state.log]);
+
+    return () => { cancelled = true; };
+  }, [user, dispatch]);
 
   if (!state.log) {
     return (

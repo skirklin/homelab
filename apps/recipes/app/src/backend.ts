@@ -1,27 +1,44 @@
-import { initializeBackend, getBackend } from "@kirkl/shared";
-import { getFunctions, connectFunctionsEmulator, httpsCallable } from "firebase/functions";
+/**
+ * Backend initialization and Cloud Functions stubs.
+ * Cloud Functions will be replaced with custom PocketBase endpoints later.
+ */
+import { initializeBackend } from "@kirkl/shared";
 
-// Initialize shared backend with recipes auth domain
-initializeBackend("recipes.kirkl.in");
+// Initialize shared backend (PocketBase)
+initializeBackend();
 
-const { app, db, auth } = getBackend();
-export { app, db, auth };
+// ============================================
+// Cloud Function stubs — not yet migrated
+// ============================================
 
-const functions = getFunctions(app);
-if (import.meta.env.DEV) {
-  connectFunctionsEmulator(functions, "localhost", 5001);
+function notYetMigrated(name: string): never {
+  throw new Error(`${name} is not yet migrated to PocketBase`);
 }
 
-export const getRecipes = httpsCallable(functions, 'getRecipes');
-export const addBoxOwner = httpsCallable(functions, 'addBoxOwner');
-export const addRecipeOwner = httpsCallable(functions, 'addRecipeOwner');
-export const generateRecipe = httpsCallable<{ prompt: string }, { recipeJson: string }>(functions, 'generateRecipe');
-export const enrichRecipeManual = httpsCallable<{ boxId: string, recipeId: string }, { success: boolean, enrichment: unknown }>(functions, 'enrichRecipeManual');
-export const modifyRecipe = httpsCallable<
-  { boxId: string, recipeId: string, feedback: string },
-  { success: boolean, modificationJson: string }
->(functions, 'modifyRecipe');
-export const getOwnerInfo = httpsCallable<
-  { ownerIds: string[] },
-  { owners: { uid: string, name: string | null, email: string | null }[] }
->(functions, 'getOwnerInfo');
+export const getRecipes = async (_args: { url: string | undefined }): Promise<{ data: { error?: string; recipes: string } }> => {
+  notYetMigrated("getRecipes");
+};
+
+export const generateRecipe = async (_args: { prompt: string }): Promise<{ data: { recipeJson: string } }> => {
+  notYetMigrated("generateRecipe");
+};
+
+export const enrichRecipeManual = async (_args: { boxId: string; recipeId: string }): Promise<{ data: { success: boolean; enrichment: unknown } }> => {
+  notYetMigrated("enrichRecipeManual");
+};
+
+export const modifyRecipe = async (_args: { boxId: string; recipeId: string; feedback: string }): Promise<{ data: { success: boolean; modificationJson: string } }> => {
+  notYetMigrated("modifyRecipe");
+};
+
+export const addBoxOwner = async (_args: { boxId: string; newOwnerEmail: string }): Promise<void> => {
+  notYetMigrated("addBoxOwner");
+};
+
+export const addRecipeOwner = async (_args: { boxId: string; recipeId: string; newOwnerEmail: string }): Promise<void> => {
+  notYetMigrated("addRecipeOwner");
+};
+
+export const getOwnerInfo = async (_args: { ownerIds: string[] }): Promise<{ data: { owners: { uid: string; name: string | null; email: string | null }[] } }> => {
+  notYetMigrated("getOwnerInfo");
+};

@@ -3,10 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useBasePath } from "../RecipesRoutes";
 import { Button, Spin, message } from "antd";
 import styled from "styled-components";
-import { doc, getDoc, updateDoc, arrayUnion } from "firebase/firestore";
-import { useAuth } from "@kirkl/shared";
-import { db } from "../backend";
-import { boxConverter } from "../storage";
+import { useAuth, getBackend } from "@kirkl/shared";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -55,6 +52,10 @@ const ButtonGroup = styled.div`
   max-width: 300px;
 `;
 
+function pb() {
+  return getBackend();
+}
+
 export default function JoinBox() {
   const { boxId } = useParams<{ boxId: string }>();
   const navigate = useNavigate();
@@ -69,14 +70,8 @@ export default function JoinBox() {
     async function loadBox() {
       if (!boxId) return;
       try {
-        const boxRef = doc(db, "boxes", boxId).withConverter(boxConverter);
-        const boxDoc = await getDoc(boxRef);
-        if (boxDoc.exists()) {
-          const box = boxDoc.data();
-          setBoxName(box.data.name);
-        } else {
-          setNotFound(true);
-        }
+        const record = await pb().collection("recipe_boxes").getOne(boxId);
+        setBoxName(record.name);
       } catch (error) {
         console.error("Failed to load box:", error);
         setNotFound(true);
@@ -91,19 +86,20 @@ export default function JoinBox() {
 
     setSubmitting(true);
     try {
-      const boxRef = doc(db, "boxes", boxId);
-      const userRef = doc(db, "users", user.uid);
-
       // Add user as owner and subscriber of the box
-      await updateDoc(boxRef, {
-        owners: arrayUnion(user.uid),
-        subscribers: arrayUnion(user.uid)
+      await pb().collection("recipe_boxes").update(boxId, {
+        "owners+": user.uid,
+        "subscribers+": user.uid,
       });
 
-      // Add box to user's boxes
-      await updateDoc(userRef, {
-        boxes: arrayUnion(boxRef)
-      });
+      // Add box to user's recipe_boxes
+      const userRecord = await pb().collection("users").getOne(user.uid);
+      const boxes: string[] = userRecord.recipe_boxes || [];
+      if (!boxes.includes(boxId)) {
+        await pb().collection("users").update(user.uid, {
+          recipe_boxes: [...boxes, boxId],
+        });
+      }
 
       message.success("Box added to your collection!");
       navigate(`${basePath}/boxes/${boxId}`);

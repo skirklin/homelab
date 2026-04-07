@@ -8,23 +8,12 @@ import {
   ExperimentOutlined,
   RightOutlined,
 } from "@ant-design/icons";
-import { useAuth, db } from "@kirkl/shared";
+import { useAuth, getBackend } from "@kirkl/shared";
 import { useRecipesContext } from "@kirkl/recipes";
 import { useUpkeepContext } from "@kirkl/upkeep";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-  doc,
-  getDoc,
-  Timestamp,
-} from "firebase/firestore";
 
 interface UserProfile {
-  householdSlugs?: Record<string, string>;
+  household_slugs?: Record<string, string>;
 }
 
 // Module-level cache to prevent double-fetch from StrictMode
@@ -224,7 +213,6 @@ export function Timeline() {
   // Build recipe name lookup from recipes context (already loaded by RecipesProvider)
   const recipeNames = useMemo(() => {
     const names = new Map<string, string>();
-    // Recipes are nested inside boxes: boxes -> box.recipes
     for (const box of recipesState.boxes.values()) {
       for (const [recipeId, recipe] of box.recipes) {
         const name = recipe.data?.name;
@@ -259,131 +247,83 @@ export function Timeline() {
     if (timelineCache.fetching) return;
     timelineCache.fetching = true;
 
+    const pb = getBackend();
+
     const fetchEvents = async () => {
       setLoading(true);
       const allEvents: TimelineEvent[] = [];
       const startTime = performance.now();
 
       try {
-        // Phase 1: Fetch user profile AND containers in parallel
-        const [userProfileDoc, boxesSnapshot, lifeLogsSnapshot, taskListsSnapshot] = await Promise.all([
-          getDoc(doc(db, "users", user.uid)),
-          getDocs(query(collection(db, "boxes"), where("owners", "array-contains", user.uid), limit(10))),
-          getDocs(query(collection(db, "lifeLogs"), where("owners", "array-contains", user.uid), limit(5))),
-          getDocs(query(collection(db, "taskLists"), where("owners", "array-contains", user.uid), limit(5))),
+        // Phase 1: Fetch user profile and all event types in parallel
+        const [userRecord, recipeEvents, lifeEvents, taskEvents] = await Promise.all([
+          pb.collection("users").getOne(user.uid),
+          pb.collection("recipe_events").getList(1, 50, {
+            filter: `created_by = "${user.uid}"`,
+            sort: "-timestamp",
+          }),
+          pb.collection("life_events").getList(1, 50, {
+            filter: `created_by = "${user.uid}"`,
+            sort: "-timestamp",
+          }),
+          pb.collection("task_events").getList(1, 50, {
+            filter: `created_by = "${user.uid}"`,
+            sort: "-timestamp",
+          }),
         ]);
-        console.log(`Timeline: phase 1 took ${(performance.now() - startTime).toFixed(0)}ms - found ${boxesSnapshot.size} boxes, ${lifeLogsSnapshot.size} lifeLogs, ${taskListsSnapshot.size} taskLists`);
+
+        console.log(`Timeline: phase 1 took ${(performance.now() - startTime).toFixed(0)}ms`);
 
         // Process user profile for slug mappings
-        if (userProfileDoc.exists()) {
-          const profile = userProfileDoc.data() as UserProfile;
-          if (profile.householdSlugs) {
-            const slugMap = new Map<string, string>();
-            for (const [slug, listId] of Object.entries(profile.householdSlugs)) {
-              slugMap.set(listId, slug);
-            }
-            setUpkeepSlugMap(slugMap);
-            timelineCache.slugMap = slugMap;
+        const profile = userRecord as unknown as UserProfile;
+        if (profile.household_slugs) {
+          const slugMap = new Map<string, string>();
+          for (const [slug, listId] of Object.entries(profile.household_slugs)) {
+            slugMap.set(listId, slug);
           }
+          setUpkeepSlugMap(slugMap);
+          timelineCache.slugMap = slugMap;
         }
 
-        // Store widget labels from life logs (already in the container doc)
-        const widgetLabels = new Map<string, string>();
-        for (const logDoc of lifeLogsSnapshot.docs) {
-          const widgets = logDoc.data().manifest?.widgets || [];
-          for (const w of widgets) {
-            widgetLabels.set(w.id, w.label);
-          }
+        // Map recipe events
+        for (const record of recipeEvents.items) {
+          allEvents.push({
+            id: record.id,
+            type: "recipe",
+            subjectId: record.subject_id,
+            timestamp: new Date(record.timestamp),
+            createdBy: record.created_by,
+            data: record.data || {},
+            containerId: record.box || record.container_id || "",
+          });
         }
 
-        // Phase 2: Fetch all events in parallel
-        const phase2Start = performance.now();
-        const eventQueries: Promise<void>[] = [];
-
-        // Recipe events
-        for (const boxDoc of boxesSnapshot.docs) {
-          eventQueries.push(
-            (async () => {
-              const eventsSnapshot = await getDocs(query(
-                collection(db, "boxes", boxDoc.id, "events"),
-                where("createdBy", "==", user.uid),
-                orderBy("timestamp", "desc"),
-                limit(15)
-              ));
-
-              for (const eventDoc of eventsSnapshot.docs) {
-                const data = eventDoc.data();
-                allEvents.push({
-                  id: eventDoc.id,
-                  type: "recipe",
-                  subjectId: data.subjectId,
-                  timestamp: (data.timestamp as Timestamp).toDate(),
-                  createdBy: data.createdBy,
-                  data: data.data || {},
-                  containerId: boxDoc.id,
-                });
-              }
-            })()
-          );
+        // Map life events
+        for (const record of lifeEvents.items) {
+          allEvents.push({
+            id: record.id,
+            type: "life",
+            subjectId: record.subject_id,
+            subjectName: record.subject_name || record.subject_id,
+            timestamp: new Date(record.timestamp),
+            createdBy: record.created_by,
+            data: record.data || {},
+            containerId: record.log || record.container_id || "",
+          });
         }
 
-        // Life tracker events
-        for (const logDoc of lifeLogsSnapshot.docs) {
-          eventQueries.push(
-            (async () => {
-              const eventsSnapshot = await getDocs(query(
-                collection(db, "lifeLogs", logDoc.id, "events"),
-                where("createdBy", "==", user.uid),
-                orderBy("timestamp", "desc"),
-                limit(15)
-              ));
-
-              for (const eventDoc of eventsSnapshot.docs) {
-                const data = eventDoc.data();
-                allEvents.push({
-                  id: eventDoc.id,
-                  type: "life",
-                  subjectId: data.subjectId,
-                  subjectName: widgetLabels.get(data.subjectId) || data.subjectId,
-                  timestamp: (data.timestamp as Timestamp).toDate(),
-                  createdBy: data.createdBy,
-                  data: data.data || {},
-                  containerId: logDoc.id,
-                });
-              }
-            })()
-          );
+        // Map task events
+        for (const record of taskEvents.items) {
+          allEvents.push({
+            id: record.id,
+            type: "upkeep",
+            subjectId: record.subject_id,
+            timestamp: new Date(record.timestamp),
+            createdBy: record.created_by,
+            data: record.data || {},
+            containerId: record.list || record.container_id || "",
+          });
         }
-
-        // Upkeep events
-        for (const listDoc of taskListsSnapshot.docs) {
-          eventQueries.push(
-            (async () => {
-              const eventsSnapshot = await getDocs(query(
-                collection(db, "taskLists", listDoc.id, "events"),
-                where("createdBy", "==", user.uid),
-                orderBy("timestamp", "desc"),
-                limit(15)
-              ));
-
-              for (const eventDoc of eventsSnapshot.docs) {
-                const data = eventDoc.data();
-                allEvents.push({
-                  id: eventDoc.id,
-                  type: "upkeep",
-                  subjectId: data.subjectId,
-                  timestamp: (data.timestamp as Timestamp).toDate(),
-                  createdBy: data.createdBy,
-                  data: data.data || {},
-                  containerId: listDoc.id,
-                });
-              }
-            })()
-          );
-        }
-
-        await Promise.all(eventQueries);
-        console.log(`Timeline: phase 2 took ${(performance.now() - phase2Start).toFixed(0)}ms - fetched ${allEvents.length} events`);
 
         // Sort events
         allEvents.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
@@ -407,49 +347,55 @@ export function Timeline() {
         timelineCache.userId = user.uid;
         timelineCache.events = topEvents;
         timelineCache.fetching = false;
-        console.log(`Timeline: total ${(performance.now() - startTime).toFixed(0)}ms - applied ${recipeNames.size} recipe names, ${taskNames.size} task names from context`);
+        console.log(`Timeline: total ${(performance.now() - startTime).toFixed(0)}ms`);
 
-        // Phase 3: Only fetch names we couldn't find in context
-        const missingRecipes: string[] = [];
-        const missingTasks: Array<[string, string]> = [];
+        // Phase 2: Fetch missing names for recipes and tasks
+        const missingRecipes = new Set<string>();
+        const missingTasks = new Set<string>();
 
         for (const event of topEvents) {
-          if (event.type === "recipe" && !event.subjectName && missingRecipes.length < 5) {
-            const key = `${event.containerId}/${event.subjectId}`;
-            if (!missingRecipes.includes(key)) {
-              missingRecipes.push(key);
-            }
-          } else if (event.type === "upkeep" && !event.subjectName && missingTasks.length < 5) {
-            if (!missingTasks.some(([id]) => id === event.subjectId)) {
-              missingTasks.push([event.subjectId, event.containerId]);
-            }
+          if (event.type === "recipe" && !event.subjectName) {
+            missingRecipes.add(event.subjectId);
+          } else if (event.type === "upkeep" && !event.subjectName) {
+            missingTasks.add(event.subjectId);
           }
         }
 
-        // Only make network requests if we have missing names
-        if (missingRecipes.length > 0 || missingTasks.length > 0) {
+        if (missingRecipes.size > 0 || missingTasks.size > 0) {
           setTimeout(async () => {
             const names = new Map<string, string>();
 
-            const queries = [
-              ...missingRecipes.map(async (key) => {
-                const [boxId, recipeId] = key.split("/");
-                try {
-                  const recipeDoc = await getDoc(doc(db, "boxes", boxId, "recipes", recipeId));
-                  if (recipeDoc.exists()) {
-                    names.set(recipeId, recipeDoc.data().data?.name || "Recipe");
-                  }
-                } catch { /* ignore */ }
-              }),
-              ...missingTasks.map(async ([taskId, listId]) => {
-                try {
-                  const taskDoc = await getDoc(doc(db, "taskLists", listId, "tasks", taskId));
-                  if (taskDoc.exists()) {
-                    names.set(taskId, taskDoc.data().name || "Task");
-                  }
-                } catch { /* ignore */ }
-              }),
-            ];
+            const queries: Promise<void>[] = [];
+
+            // Fetch missing recipe names
+            for (const recipeId of missingRecipes) {
+              queries.push(
+                (async () => {
+                  try {
+                    const recipe = await pb.collection("recipes").getOne(recipeId);
+                    if (recipe.data?.name) {
+                      names.set(recipeId, recipe.data.name);
+                    } else if (recipe.name) {
+                      names.set(recipeId, recipe.name);
+                    }
+                  } catch { /* ignore */ }
+                })()
+              );
+            }
+
+            // Fetch missing task names
+            for (const taskId of missingTasks) {
+              queries.push(
+                (async () => {
+                  try {
+                    const task = await pb.collection("tasks").getOne(taskId);
+                    if (task.name) {
+                      names.set(taskId, task.name);
+                    }
+                  } catch { /* ignore */ }
+                })()
+              );
+            }
 
             await Promise.all(queries);
 

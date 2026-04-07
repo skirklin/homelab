@@ -5,7 +5,7 @@ import { Button, Input, Popconfirm, message, Spin } from 'antd';
 import { Context } from '../context';
 import { getAppUserFromState, getUserFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';
-import { getCookingLogEvents, updateCookingLogEvent, deleteCookingLogEvent } from '../firestore';
+import { getCookingLogEvents, updateCookingLogEvent, deleteCookingLogEvent } from '../pocketbase';
 import { useAuth, type Event } from '@kirkl/shared';
 
 const LogContainer = styled.div`

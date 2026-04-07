@@ -4,7 +4,7 @@
 
 import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { createList, setUserSlug, getListById } from "../firestore";
+import { createList, setUserSlug, getListById } from "../pocketbase";
 import { appStorage, StorageKeys } from "../storage";
 
 const config: ListPickerConfig = {

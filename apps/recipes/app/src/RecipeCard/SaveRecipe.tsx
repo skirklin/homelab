@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
 
 import { Context } from '../context';
-import { addRecipe, saveRecipe } from '../firestore';
+import { addRecipe, saveRecipe } from '../pocketbase';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
 import type { RecipeCardProps } from './RecipeCard';

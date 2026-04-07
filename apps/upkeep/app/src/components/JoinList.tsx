@@ -4,7 +4,7 @@
 
 import { JoinList as SharedJoinList, type JoinListConfig, type ListOperations } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { setUserSlug, getListById } from "../firestore";
+import { setUserSlug, getListById } from "../pocketbase";
 
 const config: JoinListConfig = {
   title: "Join Task List",

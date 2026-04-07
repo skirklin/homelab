@@ -9,12 +9,11 @@ import { Auth } from "./components/Auth";
 import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
-import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "./messaging";
 // Storage is imported to trigger legacy key migration on startup
 import "./storage";
 
 // Initialize backend for standalone mode
-initializeBackend("upkeep.kirkl.in");
+initializeBackend();
 
 const theme = {
   token: {
@@ -52,17 +51,6 @@ function AppContent() {
       }
     };
   }, [user, dispatch]);
-
-  // Request notification permission when authenticated
-  useEffect(() => {
-    if (user && isNotificationSupported()) {
-      requestNotificationPermission().then((permission) => {
-        if (permission === "granted") {
-          getFcmToken(user.uid);
-        }
-      });
-    }
-  }, [user]);
 
   // Still determining auth state
   if (loading) {

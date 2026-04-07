@@ -10,7 +10,7 @@ import { initializeBackend, AuthProvider, useAuth } from "@kirkl/shared";
 
 // Initialize PocketBase
 initializeBackend();
-import { GroceriesModule } from "./module";
+import { ShoppingModule } from "./module";
 import { Auth } from "./components/Auth";
 
 const theme = {
@@ -43,7 +43,7 @@ function AppContent() {
     return <Auth />;
   }
 
-  return <GroceriesModule />;
+  return <ShoppingModule />;
 }
 
 function App() {

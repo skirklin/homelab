@@ -1,12 +1,48 @@
+import PocketBase from "pocketbase";
+
+const PB_URL = process.env.PB_TEST_URL || "http://127.0.0.1:8091";
+const TEST_EMAIL = "playwright@test.local";
+const TEST_PASSWORD = "testpassword123";
+
 async function globalSetup() {
-  // Playwright's webServer config starts the emulators and dev server
-  // This setup just verifies they're accessible
-  console.log("Verifying test environment...");
+  console.log("Setting up Playwright test environment...");
 
-  // Give servers a moment to be fully ready
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Verify PocketBase is running
+  const pb = new PocketBase(PB_URL);
+  try {
+    await pb.health.check();
+  } catch {
+    throw new Error(
+      `PocketBase not running at ${PB_URL}. Start it with: docker compose -f docker-compose.test.yml up -d`
+    );
+  }
 
-  console.log("✓ Test environment ready\n");
+  // Auth as admin
+  await pb.collection("_superusers").authWithPassword(
+    "test-admin@test.local",
+    "testpassword1234"
+  );
+
+  // Create a test user for Playwright (idempotent)
+  try {
+    const existing = await pb.collection("users").getFirstListItem(
+      `email = "${TEST_EMAIL}"`
+    );
+    // Update password in case it changed
+    await pb.collection("users").update(existing.id, {
+      password: TEST_PASSWORD,
+      passwordConfirm: TEST_PASSWORD,
+    });
+  } catch {
+    await pb.collection("users").create({
+      email: TEST_EMAIL,
+      password: TEST_PASSWORD,
+      passwordConfirm: TEST_PASSWORD,
+      name: "Playwright Test User",
+    });
+  }
+
+  console.log("Test environment ready");
 }
 
 export default globalSetup;

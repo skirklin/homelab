@@ -1,0 +1,20 @@
+services:
+  pocketbase:
+    build:
+      context: .
+      dockerfile: infra/docker/pocketbase.Dockerfile
+    ports:
+      - "8091:8090"
+    command:
+      - sh
+      - -c
+      - |
+        pocketbase superuser upsert test-admin@test.local testpassword1234 &&
+        pocketbase serve --http=0.0.0.0:8090
+    tmpfs:
+      - /pb/pb_data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/api/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 10

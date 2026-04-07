@@ -15,7 +15,7 @@ import {
   HomeOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { getBackend } from "@kirkl/shared";
+// Google Maps API key from env
 import type { Activity, Itinerary } from "../types";
 
 const MAP_ID = "travel-map";
@@ -172,9 +172,9 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay }: I
   const selectedDay: number | "all" = focusDay != null ? focusDay : "all";
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
 
-  // Use the Firebase API key (has Maps JS API enabled)
-  const { app: firebaseApp } = getBackend();
-  const apiKey = firebaseApp.options.apiKey || "";
+  // Use Google Maps API key from env
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || "";
 
   // Build day-to-activity mapping with colors
   // For each day, find its lodging (Accommodation category) to bookend routes

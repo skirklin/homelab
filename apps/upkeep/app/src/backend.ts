@@ -1,7 +1,7 @@
-import { initializeBackend, getBackend } from "@kirkl/shared";
+import { initializeBackend } from "@kirkl/shared";
 
-// Initialize shared backend with upkeep auth domain
-initializeBackend("upkeep.kirkl.in");
+// Initialize PocketBase on import
+const pb = initializeBackend();
 
-const { app, db, auth } = getBackend();
-export { app, db, auth };
+export { pb };
+export { getBackend } from "@kirkl/shared";

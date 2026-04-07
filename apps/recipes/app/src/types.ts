@@ -1,4 +1,3 @@
-import type { DocumentReference, Timestamp, Unsubscribe } from 'firebase/firestore';
 import type { Comment, Recipe } from 'schema-dts';
 import type { BoxEntry, RecipeEntry, UserEntry } from './storage';
 
@@ -9,17 +8,6 @@ export type UserId = string
 export type BoxType = {
   name: string,
   description?: string,
-}
-
-export type BoxStoreType = {
-  creator: string,
-  owners: string[], // user ids
-  subscribers?: string[], // user ids who have added this box to their collection
-  visibility: Visibility,
-  created: Timestamp,
-  updated: Timestamp,
-  lastUpdatedBy: string, // user id
-  data: BoxType
 }
 
 export type StepIngredients = Record<string, string[]>;  // { "0": ["1 cup flour"], "1": ["2 eggs"] }
@@ -41,7 +29,7 @@ export type PendingChanges = {
   source: 'enrichment' | 'modification',
   prompt?: string,  // User's request (for modifications)
   reasoning: string,
-  generatedAt: Timestamp,
+  generatedAt: string,  // ISO date string
   model: string,
 }
 
@@ -49,36 +37,6 @@ export type CookingLogEntry = {
   madeAt: Date,
   madeBy: string,  // UserId
   note?: string,
-}
-
-export type CookingLogEntryStore = {
-  madeAt: Timestamp,
-  madeBy: string,
-  note?: string,
-}
-
-export type RecipeStoreType = {
-  creator: string,
-  data: Recipe,
-  visibility: Visibility,
-  created: Timestamp,
-  updated: Timestamp,
-  lastUpdatedBy: string, // user id
-  owners: string[], // user ids
-  pendingChanges?: PendingChanges,
-  stepIngredients?: StepIngredients,  // applied from enrichment
-  cookingLog?: CookingLogEntryStore[],
-  enrichmentStatus?: EnrichmentStatus,
-}
-
-export type UserStoreType = {
-  name: string,
-  visibility: Visibility,
-  lastSeen: Timestamp,
-  newSeen: Timestamp,
-  boxes: DocumentReference<BoxEntry>[],
-  cookingModeSeen?: boolean,
-  lastSeenUpdateVersion?: number,
 }
 
 export type AppState = {
@@ -111,11 +69,11 @@ export type ActionType = {
 }
 
 export type UnsubMap = {
-  userUnsub: Unsubscribe | undefined,
-  boxesUnsub: Unsubscribe | undefined,
+  userUnsub: (() => void) | undefined,
+  boxesUnsub: (() => void) | undefined,
   boxMap: Map<string, {
-    boxUnsub: Unsubscribe | undefined,
-    recipesUnsub: Unsubscribe | undefined,
+    boxUnsub: (() => void) | undefined,
+    recipesUnsub: (() => void) | undefined,
   }>
 }
 

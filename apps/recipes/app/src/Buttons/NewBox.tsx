@@ -2,13 +2,9 @@ import { PlusOutlined } from "@ant-design/icons";
 import { PrimaryButton } from "../StyledComponents";
 import NewBoxModal from "../Modals/NewBoxModal";
 import { useState } from "react";
-import { BoxEntry } from "../storage";
-import { DocumentReference } from "firebase/firestore";
-
-
 interface NewProps {
     disabled: boolean
-    afterNewBox?: (box: DocumentReference<BoxEntry>) => void
+    afterNewBox?: (box: { id: string }) => void
 }
 
 export default function NewButton(props: NewProps) {

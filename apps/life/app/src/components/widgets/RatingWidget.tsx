@@ -4,7 +4,7 @@ import { message } from "antd";
 
 import type { RatingWidget as RatingWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, updateEntry, deleteEntry } from "../../firestore";
+import { addEntry, updateEntry, deleteEntry } from "../../pocketbase";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
 

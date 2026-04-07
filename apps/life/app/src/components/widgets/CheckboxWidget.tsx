@@ -4,7 +4,7 @@ import { message } from "antd";
 import { CheckOutlined } from "@ant-design/icons";
 import type { CheckboxWidget as CheckboxWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, deleteEntry } from "../../firestore";
+import { addEntry, deleteEntry } from "../../pocketbase";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {

@@ -1,190 +1,942 @@
 /**
- * End-to-end tests for Upkeep app using Firebase emulators
+ * End-to-end tests for Upkeep app — tests actual app functions from pocketbase.ts
  *
  * Run with: npm test
- * Requires Firebase emulators running: firebase emulators:start
+ * Requires PocketBase running: docker compose -f docker-compose.test.yml up -d
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
-  initTestFirebase,
+  initTestPocketBase,
   createTestUser,
-  cleanupTestFirebase,
+  createUserWithoutSignIn,
+  signInAsUser,
+  cleanupTestPocketBase,
   TestCleanup,
-  createTestTaskList,
-  createTestTask,
   type TestContext,
-} from "@kirkl/shared";
+} from "@kirkl/shared/test-utils";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  addDoc,
-  Timestamp,
-} from "firebase/firestore";
+  setCurrentListId,
+  createList,
+  renameList,
+  deleteList,
+  getListById,
+  updateRooms,
+  addTask,
+  updateTask,
+  deleteTask,
+  completeTask,
+  updateCompletion,
+  deleteCompletion,
+  snoozeTask,
+  unsnoozeTask,
+  getUserSlugs,
+  setUserSlug,
+  removeUserSlug,
+  renameUserSlug,
+  toggleTaskNotification,
+  ensureListExists,
+} from "../pocketbase";
 
 let ctx: TestContext;
-let cleanup: TestCleanup;
 
-describe("Upkeep E2E Tests", () => {
-  beforeAll(async () => {
-    ctx = await initTestFirebase();
-    await createTestUser(ctx);
-    cleanup = new TestCleanup();
-  });
+beforeAll(async () => {
+  ctx = await initTestPocketBase();
+});
 
-  afterAll(async () => {
-    await cleanupTestFirebase(ctx);
-  });
+afterAll(async () => {
+  await cleanupTestPocketBase(ctx);
+});
 
-  afterEach(async () => {
+// ─── List Management ────────────────────────────────────────────────────────
+
+describe("List Management", () => {
+  it("creates a list and retrieves it", async () => {
+    const user = await createTestUser(ctx);
+
+    const listId = await createList("Home Tasks", "home", user.id);
+    setCurrentListId(listId);
+
+    // Cleanup
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const list = await getListById(listId);
+    expect(list).not.toBeNull();
+    expect(list!.name).toBe("Home Tasks");
+
     await cleanup.cleanup();
   });
 
-  describe("Task List Management", () => {
-    it("should create a task list with room definitions", async () => {
-      const listRef = await createTestTaskList(ctx, cleanup, {
-        name: "Home Tasks",
-        roomDefs: [
-          { id: "kitchen", name: "Kitchen", color: "#ef4444" },
-          { id: "bathroom", name: "Bathroom", color: "#3b82f6" },
-          { id: "bedroom", name: "Bedroom", color: "#22c55e" },
-        ],
-      });
+  it("createList stores the user's slug pointing to the list", async () => {
+    const user = await createTestUser(ctx);
 
-      const listSnap = await getDoc(listRef);
-      expect(listSnap.exists()).toBe(true);
-      expect(listSnap.data()?.name).toBe("Home Tasks");
-      expect(listSnap.data()?.roomDefs).toHaveLength(3);
-    });
+    const listId = await createList("Work Tasks", "work", user.id);
+    setCurrentListId(listId);
 
-    it("should create a recurring task", async () => {
-      const listRef = await createTestTaskList(ctx, cleanup, {
-        roomDefs: [{ id: "kitchen", name: "Kitchen", color: "#ef4444" }],
-      });
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
 
-      const taskRef = await createTestTask(ctx, listRef.id, cleanup, {
-        name: "Clean counters",
-        roomId: "kitchen",
-        frequency: { value: 1, unit: "days" },
-      });
+    const slugs = await getUserSlugs(user.id);
+    expect(slugs["work"]).toBe(listId);
 
-      const taskSnap = await getDoc(taskRef);
-      expect(taskSnap.exists()).toBe(true);
-      expect(taskSnap.data()?.name).toBe("Clean counters");
-      expect(taskSnap.data()?.frequency.value).toBe(1);
-      expect(taskSnap.data()?.frequency.unit).toBe("days");
-    });
+    await cleanup.cleanup();
   });
 
-  describe("Task Completion Workflow", () => {
-    it("should complete a task and record completion", async () => {
-      const listRef = await createTestTaskList(ctx, cleanup, {
-        name: "Completion Test",
-        roomDefs: [{ id: "bathroom", name: "Bathroom", color: "#3b82f6" }],
-      });
+  it("renames a list", async () => {
+    const user = await createTestUser(ctx);
 
-      // Create a task with lastCompleted 2 days ago (past due for daily task)
-      const twoDaysAgo = new Date();
-      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const listId = await createList("Old Name", "slug", user.id);
+    setCurrentListId(listId);
 
-      const taskRef = await createTestTask(ctx, listRef.id, cleanup, {
-        name: "Clean toilet",
-        roomId: "bathroom",
-        frequency: { value: 1, unit: "days" },
-        lastCompleted: Timestamp.fromDate(twoDaysAgo),
-      });
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
 
-      // Complete the task
-      const now = Timestamp.now();
-      await updateDoc(taskRef, {
-        lastCompleted: now,
-        updatedAt: now,
-      });
+    await renameList(listId, "New Name");
 
-      // Record completion
-      const completionsRef = collection(ctx.db, "taskLists", listRef.id, "completions");
-      const completionRef = await addDoc(completionsRef, {
-        taskId: taskRef.id,
-        completedBy: ctx.testUser!.uid,
-        completedAt: now,
-        notes: "Done!",
-      });
-      cleanup.track(completionRef);
+    const list = await getListById(listId);
+    expect(list!.name).toBe("New Name");
 
-      // Verify task is updated
-      const taskSnap = await getDoc(taskRef);
-      expect(taskSnap.data()?.lastCompleted).toBeDefined();
-
-      // Verify completion was recorded
-      const completionSnap = await getDoc(completionRef);
-      expect(completionSnap.exists()).toBe(true);
-      expect(completionSnap.data()?.taskId).toBe(taskRef.id);
-      expect(completionSnap.data()?.notes).toBe("Done!");
-    });
+    await cleanup.cleanup();
   });
 
-  describe("Task Urgency Calculation", () => {
-    it("should correctly identify today, this week, and later tasks", async () => {
-      const listRef = await createTestTaskList(ctx, cleanup, {
-        name: "Urgency Test",
-      });
+  it("deletes a list", async () => {
+    const user = await createTestUser(ctx);
 
-      // Past due task (last completed 3 days ago, due daily) - shows in "today" column
-      const threeDaysAgo = new Date();
-      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    const listId = await createList("Temp List", "temp", user.id);
+    setCurrentListId(listId);
 
-      await createTestTask(ctx, listRef.id, cleanup, {
-        name: "Past Due Task",
-        frequency: { value: 1, unit: "days" },
-        lastCompleted: Timestamp.fromDate(threeDaysAgo),
-      });
+    await deleteList(listId);
 
-      // Due today task (last completed 7 days ago, due weekly)
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-      await createTestTask(ctx, listRef.id, cleanup, {
-        name: "Due Today Task",
-        frequency: { value: 1, unit: "weeks" },
-        lastCompleted: Timestamp.fromDate(sevenDaysAgo),
-      });
-
-      // Later task (just completed, due monthly)
-      await createTestTask(ctx, listRef.id, cleanup, {
-        name: "Later Task",
-        frequency: { value: 1, unit: "months" },
-        lastCompleted: Timestamp.now(),
-      });
-
-      // Verify tasks exist
-      const tasks = await getDocs(collection(ctx.db, "taskLists", listRef.id, "tasks"));
-      expect(tasks.size).toBe(3);
-    });
+    const list = await getListById(listId);
+    expect(list).toBeNull();
   });
 
-  describe("User Slugs for Upkeep", () => {
-    it("should save and retrieve household slugs", async () => {
-      const userRef = doc(ctx.db, "users", ctx.testUser!.uid);
-      cleanup.track(userRef);
+  it("returns null for a non-existent list", async () => {
+    const list = await getListById("nonexistent-id-12345");
+    expect(list).toBeNull();
+  });
 
-      await setDoc(
-        userRef,
-        {
-          householdSlugs: {
-            home: "tasklist-123",
-            work: "tasklist-456",
-          },
-        },
-        { merge: true }
-      );
+  it("updates room definitions via updateRooms", async () => {
+    const user = await createTestUser(ctx);
 
-      const userSnap = await getDoc(userRef);
-      expect(userSnap.exists()).toBe(true);
-      expect(userSnap.data()?.householdSlugs?.home).toBe("tasklist-123");
-      expect(userSnap.data()?.householdSlugs?.work).toBe("tasklist-456");
+    const listId = await createList("Rooms Test", "rooms", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const rooms = [
+      { id: "kitchen", name: "Kitchen", color: "#ef4444" },
+      { id: "bathroom", name: "Bathroom", color: "#3b82f6" },
+      { id: "bedroom", name: "Bedroom", color: "#22c55e" },
+    ];
+    await updateRooms(rooms);
+
+    const record = await ctx.pb.collection("task_lists").getOne(listId);
+    expect(record.room_defs).toHaveLength(3);
+    expect(record.room_defs[0].id).toBe("kitchen");
+
+    await cleanup.cleanup();
+  });
+
+  it("ensureListExists does not throw when user is already an owner", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Ensure Test", "ensure", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    // User is already an owner — ensureListExists should be a no-op
+    await ensureListExists(user.id);
+
+    const record = await ctx.pb.collection("task_lists").getOne(listId);
+    expect(record.owners).toContain(user.id);
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Task Operations ─────────────────────────────────────────────────────────
+
+describe("Task Operations", () => {
+  it("adds a task and verifies it in the database", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Task Ops", "taskops", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Clean counters",
+      description: "Wipe down kitchen counters",
+      roomId: "kitchen",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
+    cleanup.track("tasks", taskId);
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.name).toBe("Clean counters");
+    expect(record.description).toBe("Wipe down kitchen counters");
+    expect(record.room_id).toBe("kitchen");
+    expect(record.frequency).toEqual({ value: 1, unit: "days" });
+    expect(record.list).toBe(listId);
+
+    await cleanup.cleanup();
+  });
+
+  it("updates a task", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Update Test", "update", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Original Name",
+      description: "",
+      roomId: "general",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    await updateTask(taskId, {
+      name: "Updated Name",
+      frequency: { value: 14, unit: "days" },
+    });
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.name).toBe("Updated Name");
+    expect(record.frequency).toEqual({ value: 14, unit: "days" });
+
+    await cleanup.cleanup();
+  });
+
+  it("deletes a task", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Delete Test", "deltest", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "To be deleted",
+      description: "",
+      roomId: "general",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await deleteTask(taskId);
+
+    await expect(ctx.pb.collection("tasks").getOne(taskId)).rejects.toThrow();
+
+    await cleanup.cleanup();
+  });
+
+  it("rejects a task with an empty name", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Validation Test", "valtest", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    await expect(
+      addTask({
+        name: "",
+        description: "",
+        roomId: "general",
+        frequency: { value: 1, unit: "days" },
+        lastCompleted: null,
+        snoozedUntil: null,
+        notifyUsers: [],
+        createdBy: user.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    ).rejects.toThrow();
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Task Completion ──────────────────────────────────────────────────────────
+
+describe("Task Completion", () => {
+  it("completes a task and records a completion event", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Completion Test", "completion", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+    const taskId = await addTask({
+      name: "Clean toilet",
+      description: "",
+      roomId: "bathroom",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: twoDaysAgo,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    await completeTask(taskId, user.id, "Looks great!");
+
+    const taskRecord = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(taskRecord.last_completed).toBeTruthy();
+    expect(new Date(taskRecord.last_completed).getTime()).toBeGreaterThan(twoDaysAgo.getTime());
+
+    const events = await ctx.pb.collection("task_events").getFullList({
+      filter: `subject_id = "${taskId}"`,
+    });
+    expect(events.length).toBe(1);
+    expect(events[0].data.notes).toBe("Looks great!");
+    expect(events[0].created_by).toBe(user.id);
+    cleanup.track("task_events", events[0].id);
+
+    await cleanup.cleanup();
+  });
+
+  it("does not update last_completed when completion is older than current", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Completion Order Test", "completionorder", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const taskId = await addTask({
+      name: "Already completed recently",
+      description: "",
+      roomId: "general",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: yesterday,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    // Complete with a time before yesterday
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    await completeTask(taskId, user.id, "", {
+      completedAt: twoDaysAgo,
+      currentLastCompleted: yesterday,
+    });
+
+    // last_completed should still be yesterday (more recent)
+    const taskRecord = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(new Date(taskRecord.last_completed).getTime()).toBeCloseTo(yesterday.getTime(), -3);
+
+    const events = await ctx.pb.collection("task_events").getFullList({
+      filter: `subject_id = "${taskId}"`,
+    });
+    cleanup.track("task_events", events[0].id);
+
+    await cleanup.cleanup();
+  });
+
+  it("updates an existing completion event", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Update Completion", "updatecomp", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Mop floor",
+      description: "",
+      roomId: "kitchen",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    await completeTask(taskId, user.id, "Initial notes");
+
+    const events = await ctx.pb.collection("task_events").getFullList({
+      filter: `subject_id = "${taskId}"`,
+    });
+    const eventId = events[0].id;
+    cleanup.track("task_events", eventId);
+
+    await updateCompletion(eventId, { notes: "Updated notes" });
+
+    const updated = await ctx.pb.collection("task_events").getOne(eventId);
+    expect(updated.data.notes).toBe("Updated notes");
+
+    await cleanup.cleanup();
+  });
+
+  it("deletes a completion event", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Delete Completion", "deletecomp", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Vacuum",
+      description: "",
+      roomId: "bedroom",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    await completeTask(taskId, user.id);
+
+    const events = await ctx.pb.collection("task_events").getFullList({
+      filter: `subject_id = "${taskId}"`,
+    });
+    const eventId = events[0].id;
+
+    await deleteCompletion(eventId);
+
+    await expect(ctx.pb.collection("task_events").getOne(eventId)).rejects.toThrow();
+
+    await cleanup.cleanup();
+  });
+
+  it("handles completing a task with a future completedAt date", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Future Completion", "futurecomp", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Time traveler task",
+      description: "",
+      roomId: "general",
+      frequency: { value: 30, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    await completeTask(taskId, user.id, "", { completedAt: nextWeek });
+
+    const taskRecord = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(new Date(taskRecord.last_completed).getTime()).toBeGreaterThan(Date.now());
+
+    const events = await ctx.pb.collection("task_events").getFullList({
+      filter: `subject_id = "${taskId}"`,
+    });
+    cleanup.track("task_events", events[0].id);
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Snooze Operations ────────────────────────────────────────────────────────
+
+describe("Snooze Operations", () => {
+  it("snoozess and unsnoozess a task", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Snooze Test", "snooze", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Snoozeable task",
+      description: "",
+      roomId: "general",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    const snoozeUntil = new Date();
+    snoozeUntil.setDate(snoozeUntil.getDate() + 3);
+    await snoozeTask(taskId, snoozeUntil);
+
+    const snoozed = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(snoozed.snoozed_until).toBeTruthy();
+    expect(new Date(snoozed.snoozed_until).getTime()).toBeGreaterThan(Date.now());
+
+    await unsnoozeTask(taskId);
+
+    const unsnoozed = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(unsnoozed.snoozed_until).toBeFalsy();
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── User Slug Operations ─────────────────────────────────────────────────────
+
+describe("User Slug Operations", () => {
+  it("getUserSlugs returns empty object for new user", async () => {
+    const user = await createTestUser(ctx);
+
+    const slugs = await getUserSlugs(user.id);
+    // New user has no slugs initially (createList adds "home" for the user above — use fresh user)
+    expect(typeof slugs).toBe("object");
+  });
+
+  it("setUserSlug stores a mapping and adds user to list owners", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Slug Test List", "slugtest", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    // createList already called setUserSlug internally — verify it's there
+    const slugs = await getUserSlugs(user.id);
+    expect(slugs["slugtest"]).toBe(listId);
+
+    // Set another slug
+    await setUserSlug(user.id, "secondary", listId);
+    const updated = await getUserSlugs(user.id);
+    expect(updated["secondary"]).toBe(listId);
+
+    await cleanup.cleanup();
+  });
+
+  it("removeUserSlug removes a slug", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Remove Slug Test", "removeme", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    await removeUserSlug(user.id, "removeme");
+
+    const slugs = await getUserSlugs(user.id);
+    expect(slugs["removeme"]).toBeUndefined();
+
+    await cleanup.cleanup();
+  });
+
+  it("renameUserSlug changes a slug key", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Rename Slug Test", "oldslug", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    await renameUserSlug(user.id, "oldslug", "newslug");
+
+    const slugs = await getUserSlugs(user.id);
+    expect(slugs["oldslug"]).toBeUndefined();
+    expect(slugs["newslug"]).toBe(listId);
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Notification Operations ──────────────────────────────────────────────────
+
+describe("Notification Operations", () => {
+  it("toggleTaskNotification enables and disables notifications", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Notify Test", "notify", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Notify me task",
+      description: "",
+      roomId: "general",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    // Enable notification
+    await toggleTaskNotification(taskId, user.id, true);
+
+    const enabled = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(enabled.notify_users).toContain(user.id);
+
+    // Disable notification
+    await toggleTaskNotification(taskId, user.id, false);
+
+    const disabled = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(disabled.notify_users).not.toContain(user.id);
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Room Edge Cases ──────────────────────────────────────────────────────────
+
+describe("Room Edge Cases", () => {
+  it("tasks with orphaned roomId still exist after room deletion", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Room Edge Cases", "roomedge", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    await updateRooms([
+      { id: "kitchen", name: "Kitchen", color: "#ef4444" },
+      { id: "bathroom", name: "Bathroom", color: "#3b82f6" },
+    ]);
+
+    const task1Id = await addTask({
+      name: "Clean counters",
+      description: "",
+      roomId: "kitchen",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", task1Id);
+
+    const task2Id = await addTask({
+      name: "Wash dishes",
+      description: "",
+      roomId: "kitchen",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", task2Id);
+
+    // Remove kitchen room
+    await updateRooms([{ id: "bathroom", name: "Bathroom", color: "#3b82f6" }]);
+
+    // Tasks still exist with orphaned roomId
+    const tasks = await ctx.pb.collection("tasks").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    expect(tasks.length).toBe(2);
+    expect(tasks.every((t) => t.room_id === "kitchen")).toBe(true);
+
+    await cleanup.cleanup();
+  });
+
+  it("tasks can be created with a non-existent roomId", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Ghost Room Test", "ghostroom", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Ghost Room Task",
+      description: "",
+      roomId: "nonexistent-room",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.room_id).toBe("nonexistent-room");
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Multi-user Scenarios ─────────────────────────────────────────────────────
+
+describe("Multi-user Scenarios", () => {
+  it("two users both complete the same task — both events are recorded", async () => {
+    const userA = await createTestUser(ctx);
+    const listId = await createList("Shared Household", "shared", userA.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const userB = await createUserWithoutSignIn(ctx);
+    // Add userB to owners via admin
+    await ctx.pb.collection("task_lists").update(listId, {
+      owners: [userA.id, userB.id],
+    });
+
+    // UserA adds a task
+    const taskId = await addTask({
+      name: "Race condition task",
+      description: "",
+      roomId: "general",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: userA.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    // UserA completes it
+    setCurrentListId(listId);
+    await completeTask(taskId, userA.id, "User A completed");
+
+    // UserB signs in and completes it too
+    await signInAsUser(ctx, userB);
+    setCurrentListId(listId);
+    await completeTask(taskId, userB.id, "User B completed");
+
+    const events = await ctx.pb.collection("task_events").getFullList({
+      filter: `subject_id = "${taskId}"`,
+    });
+    expect(events.length).toBe(2);
+
+    const notes = events.map((e) => e.data.notes);
+    expect(notes).toContain("User A completed");
+    expect(notes).toContain("User B completed");
+
+    for (const event of events) {
+      cleanup.track("task_events", event.id);
+    }
+
+    // Sign back in as userA for cleanup
+    await signInAsUser(ctx, userA);
+    await cleanup.cleanup();
+  });
+
+  it("removed user cannot update tasks via userPb", async () => {
+    const userA = await createTestUser(ctx);
+    const listId = await createList("Access Control Test", "acl", userA.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const userB = await createUserWithoutSignIn(ctx);
+    await ctx.pb.collection("task_lists").update(listId, {
+      owners: [userA.id, userB.id],
+    });
+
+    const taskId = await addTask({
+      name: "Shared task",
+      description: "",
+      roomId: "general",
+      frequency: { value: 7, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: userA.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    // UserA removes UserB
+    await ctx.pb.collection("task_lists").update(listId, {
+      owners: [userA.id],
+    });
+
+    // UserB tries to complete via userPb (respects API rules — should fail)
+    await signInAsUser(ctx, userB);
+    await expect(
+      ctx.userPb.collection("tasks").update(taskId, {
+        last_completed: new Date().toISOString(),
+      })
+    ).rejects.toThrow();
+
+    // Sign back in as userA for cleanup
+    await signInAsUser(ctx, userA);
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Frequency Edge Cases ─────────────────────────────────────────────────────
+
+describe("Frequency Edge Cases", () => {
+  it("handles zero frequency value", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Zero Freq Test", "zerofreq", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Zero interval",
+      description: "",
+      roomId: "general",
+      frequency: { value: 0, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.frequency).toEqual({ value: 0, unit: "days" });
+
+    await cleanup.cleanup();
+  });
+
+  it("handles very large frequency value", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Large Freq Test", "largefreq", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await addTask({
+      name: "Millennium task",
+      description: "",
+      roomId: "general",
+      frequency: { value: 999999, unit: "days" },
+      lastCompleted: null,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.frequency).toEqual({ value: 999999, unit: "days" });
+
+    await cleanup.cleanup();
+  });
+
+  it("can update frequency of an overdue task to make it no longer overdue", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await createList("Freq Update Test", "frequpdate", user.id);
+    setCurrentListId(listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const fiveDaysAgo = new Date();
+    fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+
+    const taskId = await addTask({
+      name: "Past due task",
+      description: "",
+      roomId: "general",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: fiveDaysAgo,
+      snoozedUntil: null,
+      notifyUsers: [],
+      createdBy: user.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    cleanup.track("tasks", taskId);
+
+    await updateTask(taskId, { frequency: { value: 30, unit: "days" } });
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.frequency).toEqual({ value: 30, unit: "days" });
+
+    await cleanup.cleanup();
   });
 });

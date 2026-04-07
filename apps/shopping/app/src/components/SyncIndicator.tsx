@@ -1,6 +1,6 @@
 import styled, { keyframes } from "styled-components";
 import { Tooltip } from "antd";
-import type { SyncStatus } from "../groceries-context";
+import type { SyncStatus } from "../shopping-context";
 
 const pulse = keyframes`
   0%, 100% { opacity: 1; }

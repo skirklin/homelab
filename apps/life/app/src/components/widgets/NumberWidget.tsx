@@ -4,7 +4,7 @@ import { InputNumber, message, Spin } from "antd";
 import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
 import type { NumberWidget as NumberWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, updateEntry } from "../../firestore";
+import { addEntry, updateEntry } from "../../pocketbase";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {

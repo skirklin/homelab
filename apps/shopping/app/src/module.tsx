@@ -1,5 +1,5 @@
 /**
- * GroceriesModule - Embeddable groceries app component
+ * ShoppingModule - Embeddable shopping app component
  *
  * This module can be used standalone or embedded in another app.
  * It expects the parent to provide authentication via @kirkl/shared AuthProvider.
@@ -7,19 +7,19 @@
 
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "@kirkl/shared";
-import { GroceriesProvider } from "./groceries-context";
-import { GroceryList } from "./components/GroceryList";
+import { ShoppingProvider } from "./shopping-context";
+import { ShoppingList } from "./components/ShoppingList";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
 // Storage is imported to trigger legacy key migration on startup
 import "./storage";
 
-interface GroceriesRoutesProps {
+interface ShoppingRoutesProps {
   /** When true, hides sign-out and other account actions (handled by parent shell) */
   embedded?: boolean;
 }
 
-export function GroceriesRoutes({ embedded = false }: GroceriesRoutesProps) {
+export function ShoppingRoutes({ embedded = false }: ShoppingRoutesProps) {
   const { user } = useAuth();
 
   if (!user) {
@@ -30,19 +30,19 @@ export function GroceriesRoutes({ embedded = false }: GroceriesRoutesProps) {
     <Routes>
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
-      <Route path="/:slug" element={<GroceryList embedded={embedded} />} />
+      <Route path="/:slug" element={<ShoppingList embedded={embedded} />} />
     </Routes>
   );
 }
 
-export function GroceriesModule() {
+export function ShoppingModule() {
   return (
-    <GroceriesProvider>
-      <GroceriesRoutes />
-    </GroceriesProvider>
+    <ShoppingProvider>
+      <ShoppingRoutes />
+    </ShoppingProvider>
   );
 }
 
 // Re-export provider for standalone use
-export { GroceriesProvider, useGroceriesContext } from "./groceries-context";
-export { addItem as addGroceryItem, setCurrentListId } from "./pocketbase";
+export { ShoppingProvider, useShoppingContext } from "./shopping-context";
+export { addItem as addShoppingItem, setCurrentListId } from "./pocketbase";

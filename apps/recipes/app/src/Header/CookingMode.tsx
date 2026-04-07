@@ -4,7 +4,7 @@ import { Button, Popover, Tooltip } from 'antd';
 import { FireOutlined, FireFilled } from '@ant-design/icons';
 import { Context } from '../context';
 import { getAppUserFromState } from '../state';
-import { setCookingModeSeen } from '../firestore';
+import { setCookingModeSeen } from '../pocketbase';
 import { useCookingMode } from '../CookingModeContext';
 import { useAuth } from '@kirkl/shared';
 

@@ -3,7 +3,7 @@ import { Button, Tag } from 'antd';
 import { useContext } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
-import { applyChanges, rejectChanges } from '../firestore';
+import { applyChanges, rejectChanges } from '../pocketbase';
 import { getRecipeFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';
 import { RecipeDiffView } from '../Modals/RecipeDiffView';

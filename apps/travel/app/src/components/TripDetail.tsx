@@ -30,14 +30,14 @@ import {
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { WideContainer, getBackend } from "@kirkl/shared";
+import { WideContainer } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { getActivitiesForTrip, getItinerariesForTrip } from "../subscription";
 import {
   deleteTrip, flagTrip,
   addItinerary, updateItinerary as updateItineraryDoc, deleteItinerary as deleteItineraryDoc,
   deleteActivity,
-} from "../firestore";
+} from "../pocketbase";
 import {
   STATUS_COLORS,
   formatDateRange,
@@ -785,8 +785,8 @@ function ItineraryTimeline({
   onEditActivity: (activityId: string) => void;
   onDeleteActivity: (activityId: string) => void;
 }) {
-  const { app: firebaseApp } = getBackend();
-  const apiKey = firebaseApp.options.apiKey || "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || "";
 
   if (itinerary.days.length === 0) {
     return <Empty description="No days planned" image={Empty.PRESENTED_IMAGE_SIMPLE} />;

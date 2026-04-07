@@ -4,7 +4,7 @@ import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useDisplaySettings, type WidgetSize } from "../display-settings";
 import type { LifeLog } from "../types";
-import { getFcmTokens, clearAllFcmTokens } from "../firestore";
+import { getFcmTokens, clearAllFcmTokens } from "../pocketbase";
 
 const SettingRow = styled.div`
   display: flex;

@@ -4,7 +4,7 @@ import { useContext } from 'react';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
-import { deleteRecipe } from '../firestore';
+import { deleteRecipe } from '../pocketbase';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import type { BoxId, RecipeId } from '../types';

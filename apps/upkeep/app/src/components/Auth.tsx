@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { Button, Input, message } from "antd";
 import { GoogleOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -48,27 +47,31 @@ export function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const { auth } = getBackend();
 
   const handleGoogleSignIn = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      await getBackend().collection("users").authWithOAuth2({ provider: "google" });
+    } catch (e) {
+      console.error("Google sign-in failed:", e);
+      message.error("Failed to sign in with Google");
+    }
   };
 
   const handleEmailSignIn = async () => {
     if (!email || !password) return;
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error: unknown) {
-      // If user doesn't exist, create them (for emulator testing)
-      if ((error as { code?: string }).code === "auth/user-not-found") {
-        try {
-          await createUserWithEmailAndPassword(auth, email, password);
-        } catch {
-          message.error("Failed to sign in");
-        }
-      } else {
+      await getBackend().collection("users").authWithPassword(email, password);
+    } catch {
+      // Try creating the account
+      try {
+        await getBackend().collection("users").create({
+          email,
+          password,
+          passwordConfirm: password,
+        });
+        await getBackend().collection("users").authWithPassword(email, password);
+      } catch {
         message.error("Failed to sign in");
       }
     } finally {

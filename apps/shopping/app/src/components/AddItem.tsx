@@ -4,7 +4,7 @@ import type { BaseSelectRef } from "rc-select";
 import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import { useGroceriesContext } from "../groceries-context";
+import { useShoppingContext } from "../shopping-context";
 import { addItem } from "../pocketbase";
 import { getItemsFromState } from "../subscription";
 
@@ -29,7 +29,7 @@ const NoteWrapper = styled.div`
 
 export function AddItem() {
   const { user } = useAuth();
-  const { state } = useGroceriesContext();
+  const { state } = useShoppingContext();
   const [ingredient, setIngredient] = useState("");
   const [note, setNote] = useState("");
   const inputRef = useRef<BaseSelectRef>(null);

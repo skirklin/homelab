@@ -12,7 +12,7 @@ import NewButton from '../Buttons/NewRecipe';
 import UploadButton from '../Buttons/UploadRecipes';
 import ImportButton from '../Buttons/ImportRecipes';
 import GenerateButton from '../Buttons/GenerateRecipe';
-import { addRecipe, deleteRecipe, setRecipeVisibility } from '../firestore';
+import { addRecipe, deleteRecipe, setRecipeVisibility } from '../pocketbase';
 import { Context } from '../context';
 import { PickBoxModal } from '../Modals/PickBoxModal';
 import BatchEnrichmentModal from '../Modals/BatchEnrichmentModal';

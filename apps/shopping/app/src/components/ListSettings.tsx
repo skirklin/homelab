@@ -4,7 +4,7 @@ import { Button, Input, Modal, message } from "antd";
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import { useGroceriesContext } from "../groceries-context";
+import { useShoppingContext } from "../shopping-context";
 import { renameList, renameUserSlug, removeUserSlug, deleteList, updateCategories } from "../pocketbase";
 import type { CategoryDef } from "../types";
 
@@ -119,7 +119,7 @@ interface Props {
 export function ListSettings({ slug, listId, onBack }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { state } = useGroceriesContext();
+  const { state } = useShoppingContext();
 
   // Handle Escape key to go back
   useEffect(() => {
@@ -431,7 +431,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
         <Input
           value={newSlug}
           onChange={(e) => setNewSlug(e.target.value)}
-          placeholder="groceries"
+          placeholder="shopping"
           addonBefore="/"
           onPressEnter={handleChangeSlug}
         />

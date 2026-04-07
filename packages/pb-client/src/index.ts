@@ -25,7 +25,7 @@ export function getPb(): PocketBase {
 // ============================================================
 
 export const Collections = {
-  // Groceries
+  // Shopping
   ShoppingLists: "shopping_lists",
   ShoppingItems: "shopping_items",
   ShoppingHistory: "shopping_history",
@@ -82,7 +82,7 @@ export interface UserRecord extends BaseRecord {
   last_seen_update_version: number;
 }
 
-// --- Groceries ---
+// --- Shopping ---
 export interface ShoppingListRecord extends BaseRecord {
   name: string;
   owners: string[];

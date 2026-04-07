@@ -10,7 +10,7 @@ import NewBoxButton from '../Buttons/NewBox';
 
 import './BoxTable.css';
 import { Context } from "../context";
-import { deleteBox, setBoxVisibility } from "../firestore";
+import { deleteBox, setBoxVisibility } from "../pocketbase";
 import { DeleteOutlined } from "@ant-design/icons";
 import { type BoxId, Visibility } from "../types";
 import type { UserEntry } from "../storage";

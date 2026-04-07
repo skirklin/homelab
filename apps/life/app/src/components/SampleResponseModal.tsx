@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import styled from "styled-components";
 import { Modal, Button, InputNumber, Input, message } from "antd";
 import type { SampleQuestion, RandomSamplesConfig } from "../types";
-import { addSampleResponse } from "../firestore";
+import { addSampleResponse } from "../pocketbase";
 
 const QuestionContainer = styled.div`
   display: flex;

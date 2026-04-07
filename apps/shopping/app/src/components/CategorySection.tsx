@@ -1,8 +1,8 @@
 import { useDroppable } from "@dnd-kit/core";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import type { GroceryItem, CategoryDef } from "../types";
-import { GroceryItemRow } from "./GroceryItem";
+import type { ShoppingItem, CategoryDef } from "../types";
+import { ShoppingItemRow } from "./ShoppingItem";
 
 const Section = styled.div`
   margin-bottom: var(--space-xs);
@@ -48,7 +48,7 @@ const ItemsContainer = styled.div<{ $isOver: boolean; $collapsed: boolean; $forc
 
 interface Props {
   category: CategoryDef;
-  items: GroceryItem[];
+  items: ShoppingItem[];
   collapsed: boolean;
   onToggleCollapse: () => void;
   forceCollapse?: boolean; // During drag, collapse all
@@ -80,7 +80,7 @@ export function CategorySection({ category, items, collapsed, onToggleCollapse, 
       </CategoryHeader>
       <ItemsContainer $isOver={isOver} $collapsed={isCollapsed} $forceCollapse={!!forceCollapse}>
         {sortedItems.map((item) => (
-          <GroceryItemRow key={item.id} item={item} />
+          <ShoppingItemRow key={item.id} item={item} />
         ))}
       </ItemsContainer>
     </Section>

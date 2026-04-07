@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: "http://localhost:5174",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -19,4 +19,12 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
+  webServer: {
+    command: "pnpm dev --port 5174",
+    url: "http://localhost:5174",
+    reuseExistingServer: !process.env.CI,
+    env: {
+      VITE_PB_URL: process.env.PB_TEST_URL || "http://127.0.0.1:8091",
+    },
+  },
 });

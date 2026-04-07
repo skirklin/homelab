@@ -4,7 +4,7 @@ import { InputNumber, Input, message, Spin } from "antd";
 import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
 import type { ComboWidget as ComboWidgetType, ComboField, LogEntry, EntryMigration } from "../../types";
 import { getEntriesForCombo } from "../../types";
-import { addEntry, updateEntry, deleteEntry } from "../../firestore";
+import { addEntry, updateEntry, deleteEntry } from "../../pocketbase";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
 
