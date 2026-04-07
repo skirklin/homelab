@@ -52,9 +52,9 @@ migrate(
     // Groceries
     // ==========================================
 
-    const groceryLists = ensure("grocery_lists", {
+    const groceryLists = ensure("shopping_lists", {
       type: "base",
-      name: "grocery_lists",
+      name: "shopping_lists",
       listRule: '@request.auth.id != ""',
       viewRule: '@request.auth.id != ""',
       createRule: '@request.auth.id != ""',
@@ -67,9 +67,9 @@ migrate(
       ],
     });
 
-    ensure("grocery_items", {
+    ensure("shopping_items", {
       type: "base",
-      name: "grocery_items",
+      name: "shopping_items",
       ...childRules("list"),
       fields: [
         rel("list", groceryLists.id, { required: true, cascade: true, maxSelect: 1 }),
@@ -83,9 +83,9 @@ migrate(
       ],
     });
 
-    ensure("grocery_history", {
+    ensure("shopping_history", {
       type: "base",
-      name: "grocery_history",
+      name: "shopping_history",
       ...childRules("list"),
       fields: [
         rel("list", groceryLists.id, { required: true, cascade: true, maxSelect: 1 }),
@@ -95,9 +95,9 @@ migrate(
       ],
     });
 
-    ensure("grocery_trips", {
+    ensure("shopping_trips", {
       type: "base",
-      name: "grocery_trips",
+      name: "shopping_trips",
       ...childRules("list"),
       fields: [
         rel("list", groceryLists.id, { required: true, cascade: true, maxSelect: 1 }),
@@ -345,7 +345,7 @@ migrate(
 
     console.log("  users: adding profile fields");
     const profileFields = [
-      new Field({ type: "json", name: "grocery_slugs", maxSize: 10000 }),
+      new Field({ type: "json", name: "shopping_slugs", maxSize: 10000 }),
       new Field({ type: "json", name: "household_slugs", maxSize: 10000 }),
       new Field({ type: "json", name: "travel_slugs", maxSize: 10000 }),
       new Field({ type: "text", name: "life_log_id" }),
@@ -369,7 +369,7 @@ migrate(
       "task_events", "tasks", "task_lists",
       "life_events", "life_logs",
       "recipe_events", "recipes", "recipe_boxes",
-      "grocery_trips", "grocery_history", "grocery_items", "grocery_lists",
+      "shopping_trips", "shopping_history", "shopping_items", "shopping_lists",
     ];
     for (const name of names) {
       try {

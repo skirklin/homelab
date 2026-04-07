@@ -26,10 +26,10 @@ export function getPb(): PocketBase {
 
 export const Collections = {
   // Groceries
-  GroceryLists: "grocery_lists",
-  GroceryItems: "grocery_items",
-  GroceryHistory: "grocery_history",
-  GroceryTrips: "grocery_trips",
+  ShoppingLists: "shopping_lists",
+  ShoppingItems: "shopping_items",
+  ShoppingHistory: "shopping_history",
+  ShoppingTrips: "shopping_trips",
 
   // Recipes
   RecipeBoxes: "recipe_boxes",
@@ -70,7 +70,7 @@ export interface UserRecord extends BaseRecord {
   email: string;
   name: string;
   avatar: string;
-  grocery_slugs: Record<string, string> | null;
+  shopping_slugs: Record<string, string> | null;
   household_slugs: Record<string, string> | null;
   travel_slugs: Record<string, string> | null;
   life_log_id: string;
@@ -83,13 +83,13 @@ export interface UserRecord extends BaseRecord {
 }
 
 // --- Groceries ---
-export interface GroceryListRecord extends BaseRecord {
+export interface ShoppingListRecord extends BaseRecord {
   name: string;
   owners: string[];
   category_defs: Array<{ id: string; name: string }> | null;
 }
 
-export interface GroceryItemRecord extends BaseRecord {
+export interface ShoppingItemRecord extends BaseRecord {
   list: string;
   ingredient: string;
   note: string;
@@ -100,14 +100,14 @@ export interface GroceryItemRecord extends BaseRecord {
   checked_at: string;
 }
 
-export interface GroceryHistoryRecord extends BaseRecord {
+export interface ShoppingHistoryRecord extends BaseRecord {
   list: string;
   ingredient: string;
   category_id: string;
   last_added: string;
 }
 
-export interface GroceryTripRecord extends BaseRecord {
+export interface ShoppingTripRecord extends BaseRecord {
   list: string;
   completed_at: string;
   items: Array<{ ingredient: string; note?: string; categoryId: string }> | null;
