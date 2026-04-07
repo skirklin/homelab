@@ -11,7 +11,7 @@ REGISTRY="${REGISTRY:-homelab}"
 declare -A APPS=(
     [home]="apps/home/app:dist"
     [recipes]="apps/recipes/app:build"
-    [groceries]="apps/groceries/app:dist"
+    [shopping]="apps/shopping/app:dist"
     # life has no index.html — it's a module consumed by home, not standalone
     [upkeep]="apps/upkeep/app:dist"
     [travel]="apps/travel/app:dist"

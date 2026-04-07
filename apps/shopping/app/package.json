@@ -1,5 +1,5 @@
 {
-  "name": "@kirkl/groceries",
+  "name": "@kirkl/shopping",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/module.tsx",

@@ -3,7 +3,7 @@
  * This allows recipes to add items to grocery lists when embedded in the home app.
  */
 import type { ReactNode } from "react";
-import { useGroceriesContext, addGroceryItem, setCurrentListId } from "@kirkl/groceries";
+import { useGroceriesContext, addGroceryItem, setCurrentListId } from "@kirkl/shopping";
 import { GroceriesIntegrationContext } from "@kirkl/recipes";
 import { useAuth } from "@kirkl/shared";
 

@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",
-    "@kirkl/groceries": "workspace:*",
+    "@kirkl/shopping": "workspace:*",
     "@kirkl/life": "workspace:*",
     "@kirkl/recipes": "workspace:*",
     "@kirkl/shared": "workspace:*",

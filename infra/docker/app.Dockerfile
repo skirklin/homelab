@@ -14,7 +14,7 @@ COPY packages/ui/package.json packages/ui/package.json
 COPY apps/home/app/package.json apps/home/app/package.json
 COPY apps/recipes/app/package.json apps/recipes/app/package.json
 COPY apps/recipes/package.json apps/recipes/package.json
-COPY apps/groceries/app/package.json apps/groceries/app/package.json
+COPY apps/shopping/app/package.json apps/shopping/app/package.json
 COPY apps/life/app/package.json apps/life/app/package.json
 COPY apps/upkeep/app/package.json apps/upkeep/app/package.json
 COPY apps/travel/app/package.json apps/travel/app/package.json

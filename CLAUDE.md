@@ -6,31 +6,25 @@ Personal web apps monorepo, migrating from Firebase (Firestore, Auth, Cloud Func
 
 ## Current state (2026-04-06)
 
-Monorepo consolidation is complete. Infra manifests are written. Next step is building Docker images and deploying to k3s.
+Infra is deployed and serving. PocketBase schema is in place. Now migrating app backends from Firebase to PocketBase.
 
 ### Done
-- Imported firebase-apps and money repos with git history preserved (subtree merge)
 - Monorepo structure finalized with pnpm workspaces + Turborepo
-- k3s installed on VPS (Traefik disabled, using Caddy instead)
-- Docker installed on VPS
-- pnpm install done, lockfile generated
-- DNS: `beta.kirkl.in` + `*.beta.kirkl.in` → VPS
-- Dockerfiles written (infra/docker/)
-- k8s manifests written (infra/k8s/) with Kustomize
-- build.sh and deploy.sh scripts ready
+- k3s + Docker on VPS, Caddy with auto Let's Encrypt
+- All frontend apps built and deployed as nginx containers
+- PocketBase deployed with schema migration (16 collections, API rules)
+- DNS: `beta.kirkl.in` + `*.beta.kirkl.in` → VPS, HTTPS working
+- PocketBase admin: scott.kirklin@gmail.com at https://api.beta.kirkl.in/_/
+- Typed PocketBase client package at packages/pb-client
+
+### In progress
+- Migrating shopping (formerly groceries) app from Firebase to PocketBase
 
 ### Not done yet
-- No images have been built — expect build errors from Firebase SDK references, missing env vars
-- PocketBase not set up — no schemas, no data migration
-- Apps still use Firebase for everything — actual backend migration hasn't started
-- money app should eventually move to tailnet-only (Tailscale not set up on VPS yet)
-- TLS certs (*.pem) are gitignored
-
-### Immediate next steps
-1. Run `./infra/build.sh` — fix build errors as they surface
-2. Run `./infra/deploy.sh` to get pods running
-3. Set up PocketBase schemas
-4. Start migrating app backends from Firebase to PocketBase
+- Apps still use Firebase for everything — backend migration in progress
+- Cloud Functions need replacing with PocketBase hooks or custom endpoints
+- money app should eventually move to tailnet-only (Tailscale not set up)
+- Data migration from Firestore (if needed)
 
 ## Architecture
 
@@ -40,30 +34,35 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 |---|---|
 | `beta.kirkl.in` | home |
 | `recipes.beta.kirkl.in` | recipes |
-| `groceries.beta.kirkl.in` | groceries |
-| `life.beta.kirkl.in` | life |
+| `shopping.beta.kirkl.in` | shopping |
 | `upkeep.beta.kirkl.in` | upkeep |
 | `travel.beta.kirkl.in` | travel |
 | `me.beta.kirkl.in` | homepage |
 | `money.beta.kirkl.in` | money |
 | `api.beta.kirkl.in` | pocketbase |
 
+Note: life is a module embedded in the home app, not a standalone deployment.
+
 ## Repo layout
 
-- `apps/{home,recipes,groceries,life,upkeep,travel,money,homepage}` — frontend apps
-- `home` is the shell app that embeds groceries, recipes, life, upkeep, travel as modules
+- `apps/{home,recipes,shopping,life,upkeep,travel,money,homepage}` — frontend apps
+- `home` is the shell app that embeds shopping, recipes, life, upkeep, travel as modules
 - Most apps have their code under `app/` subdirectory; money and homepage are at root level
 - `recipes` builds to `build/` not `dist/`
 - `packages/ui` is `@kirkl/shared` — consumed as raw TS source, no build step
-- `services/functions` — Firebase Cloud Functions (to be replaced by PocketBase)
+- `packages/pb-client` is `@homelab/pb-client` — typed PocketBase SDK wrapper
+- `services/functions` — Firebase Cloud Functions (to be replaced)
 - `services/scripts` — migration scripts (TypeScript, run via tsx)
 - `services/ingest` — Python backend, `src/money/` layout, managed with uv
 - `extension/` — Chrome extension for financial data capture
 - `infra/` — Dockerfiles, k8s manifests, build/deploy scripts
+- `infra/pocketbase/pb_migrations/` — PocketBase schema (baked into Docker image)
 
 ## Conventions
 
 - Workspace deps use `workspace:*` protocol in package.json
 - Prefer userspace installs (fnm, uv) over system-level (apt, sudo npm -g)
-- Don't touch app internals during structural work — one thing at a time
+- PocketBase collections use snake_case (shopping_lists, shopping_items, etc.)
 - Python module is still named `money` internally (renaming is a separate task)
+- Deploy: `./infra/deploy.sh` builds locally, pushes images via SSH, applies k8s manifests
+- VPS has KUBECONFIG set in /etc/environment — no need for explicit export in SSH commands

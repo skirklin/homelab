@@ -79,25 +79,25 @@ spec:
       targetPort: 80
 
 ---
-# --- groceries ---
+# --- shopping ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: groceries
+  name: shopping
   namespace: homelab
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: groceries
+      app: shopping
   template:
     metadata:
       labels:
-        app: groceries
+        app: shopping
     spec:
       containers:
-        - name: groceries
-          image: homelab/groceries:latest
+        - name: shopping
+          image: homelab/shopping:latest
           imagePullPolicy: Never
           ports:
             - containerPort: 80
@@ -108,11 +108,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: groceries
+  name: shopping
   namespace: homelab
 spec:
   selector:
-    app: groceries
+    app: shopping
   ports:
     - port: 80
       targetPort: 80

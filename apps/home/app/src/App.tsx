@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
 import { useEffect } from "react";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
-import { GroceriesProvider, GroceriesRoutes } from "@kirkl/groceries";
+import { GroceriesProvider, GroceriesRoutes } from "@kirkl/shopping";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";

@@ -10,7 +10,7 @@ k3s (single-node Kubernetes) on a VPS. Caddy handles TLS (automatic Let's Encryp
 |---|---|
 | `beta.kirkl.in` | home (shell) |
 | `recipes.beta.kirkl.in` | recipes |
-| `groceries.beta.kirkl.in` | groceries |
+| `shopping.beta.kirkl.in` | shopping |
 | `life.beta.kirkl.in` | life |
 | `upkeep.beta.kirkl.in` | upkeep |
 | `travel.beta.kirkl.in` | travel |
@@ -23,9 +23,9 @@ k3s (single-node Kubernetes) on a VPS. Caddy handles TLS (automatic Let's Encryp
 ```
 apps/
   recipes/        # Recipe management app (React + Vite)
-  groceries/      # Grocery list app (React + Vite)
+  shopping/      # Grocery list app (React + Vite)
   homepage/       # Personal homepage (static)
-  home/           # Shell app that hosts groceries, recipes, life, upkeep, travel
+  home/           # Shell app that hosts shopping, recipes, life, upkeep, travel
   life/           # Life tracker app (React + Vite)
   upkeep/         # Household task tracker (React + Vite)
   travel/         # Travel trip planner (React + Vite)
@@ -95,7 +95,7 @@ pnpm build     # builds all apps
 
 This repo consolidates two previous repos:
 
-- **firebase-apps** — `recipes`, `groceries`, `homepage`, `home`, `life`, `upkeep`, `travel`, shared components, Cloud Functions, and migration scripts
+- **firebase-apps** — `recipes`, `shopping`, `homepage`, `home`, `life`, `upkeep`, `travel`, shared components, Cloud Functions, and migration scripts
 - **money** — `money` frontend, `ingest` backend, Chrome `extension`
 
 The apps currently depend on Firebase (Firestore, Auth, Cloud Functions). Migrating to PocketBase for data/auth.
