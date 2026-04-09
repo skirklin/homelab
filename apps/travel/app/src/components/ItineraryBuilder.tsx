@@ -29,7 +29,7 @@ import {
 import styled from "styled-components";
 import type { Activity, Itinerary, ItineraryDay, ItinerarySlot } from "../types";
 import { dayTravelDistance } from "../types";
-import { useTravelBackend } from "../backend-provider";
+import { useTravelBackend } from "@kirkl/shared";
 import { daysToBackend } from "../adapters";
 
 // ==========================================

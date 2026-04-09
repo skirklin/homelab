@@ -32,7 +32,7 @@ export function OwnersModal({ isVisible, setIsVisible, ownerIds, subscriberIds =
     setLoading(true);
     getOwnerInfo({ ownerIds: allIds })
       .then(result => {
-        const infoMap = new Map(result.data.owners.map(o => [o.uid, o]));
+        const infoMap = new Map(result.owners.map(o => [o.uid, o]));
         setOwners(ownerIds.map(uid => infoMap.get(uid) || { uid, name: null, email: null }));
         setSubscribers(subscriberOnlyIds.map(uid => infoMap.get(uid) || { uid, name: null, email: null }));
       })

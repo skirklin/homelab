@@ -55,19 +55,10 @@ export interface Activity {
   costNotes: string;
   durationEstimate: string;
   confirmationCode: string;
-  // PocketBase snake_case aliases (set when writing, read when loading)
-  cost_notes?: string;
-  duration_estimate?: string;
-  confirmation_code?: string;
-  trip_id?: string;
-  // Extra fields used by the travel app
   details?: string;
   setting?: string;
-  booking_reqs?: string[];
-  bookingReqs?: string[];
-  rating_count?: number;
+  bookingReqs?: unknown[];
   ratingCount?: number;
-  photo_ref?: string;
   photoRef?: string;
   created?: string;
   updated?: string;

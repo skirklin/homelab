@@ -14,6 +14,7 @@ const INSTITUTIONS = [
 async function init() {
   await loadSettings();
   await checkServer();
+  await checkForUpdate();
   await renderInstitutions();
   await renderActivityLog();
 }
@@ -48,15 +49,20 @@ function timeAgo(date) {
 }
 
 async function loadSettings() {
-  const result = await chrome.storage.local.get(["serverPort"]);
-  document.getElementById("portInput").value = result.serverPort || 5555;
+  const result = await chrome.storage.local.get(["serverUrl", "profile"]);
+  document.getElementById("serverUrlInput").value = result.serverUrl || "https://homelab-0.tail56ca88.ts.net:8443";
+  document.getElementById("profileSelect").value = result.profile || "scott";
 
-  document.getElementById("portInput").addEventListener("change", async (e) => {
-    const newPort = parseInt(e.target.value, 10);
-    if (newPort >= 1 && newPort <= 65535) {
-      await chrome.storage.local.set({ serverPort: newPort });
+  document.getElementById("serverUrlInput").addEventListener("change", async (e) => {
+    const url = e.target.value.trim();
+    if (url) {
+      await chrome.storage.local.set({ serverUrl: url });
       await checkServer();
     }
+  });
+
+  document.getElementById("profileSelect").addEventListener("change", async (e) => {
+    await chrome.storage.local.set({ profile: e.target.value });
   });
 }
 
@@ -71,6 +77,27 @@ async function checkServer() {
   } else {
     dot.className = "status-dot disconnected";
     label.textContent = "Server not running (money serve)";
+  }
+}
+
+async function checkForUpdate() {
+  const banner = document.getElementById("updateBanner");
+  try {
+    const result = await chrome.storage.local.get("serverUrl");
+    const baseUrl = (result.serverUrl || "https://homelab-0.tail56ca88.ts.net:8443").replace(/\/+$/, "");
+    const resp = await fetch(`${baseUrl}/extension/version`, { signal: AbortSignal.timeout(3000) });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const manifest = chrome.runtime.getManifest();
+    if (data.version && data.version !== manifest.version && data.available) {
+      banner.style.display = "block";
+      banner.textContent = `Update available: v${data.version} (you have v${manifest.version}). Click to download.`;
+      banner.onclick = () => {
+        chrome.tabs.create({ url: `${baseUrl}/extension/download` });
+      };
+    }
+  } catch {
+    // Server not available or no extension hosted — that's fine
   }
 }
 

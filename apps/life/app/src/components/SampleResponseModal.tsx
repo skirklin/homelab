@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { Modal, Button, InputNumber, Input } from "antd";
 import { useFeedback } from "@kirkl/shared";
 import type { SampleQuestion, RandomSamplesConfig } from "../types";
-import { useLifeBackend } from "../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 
 const QuestionContainer = styled.div`
   display: flex;

@@ -4,7 +4,7 @@ import { Button, Popover, Tooltip } from 'antd';
 import { FireOutlined, FireFilled } from '@ant-design/icons';
 import { Context } from '../context';
 import { getAppUserFromState } from '../state';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { useCookingMode } from '../CookingModeContext';
 import { useAuth } from '@kirkl/shared';
 

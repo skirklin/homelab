@@ -4,7 +4,7 @@
 
 import { JoinList as SharedJoinList, type JoinListConfig, type ListOperations } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { useUpkeepBackend, useUserBackend } from "../backend-provider";
+import { useUpkeepBackend, useUserBackend } from "@kirkl/shared";
 
 const config: JoinListConfig = {
   title: "Join Task List",

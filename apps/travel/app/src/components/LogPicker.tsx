@@ -6,7 +6,7 @@ import styled from "styled-components";
 import { PageContainer } from "@kirkl/shared";
 import { useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { useTravelBackend } from "../backend-provider";
+import { useTravelBackend } from "@kirkl/shared";
 
 const Container = styled(PageContainer)`
   display: flex;

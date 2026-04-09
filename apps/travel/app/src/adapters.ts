@@ -53,19 +53,19 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     placeId: ba.placeId || "",
     lat: ba.lat ?? null,
     lng: ba.lng ?? null,
-    description: (ba.notes as string) || "",
-    costNotes: ba.costNotes || (ba.cost_notes as string) || "",
-    durationEstimate: ba.durationEstimate || (ba.duration_estimate as string) || "",
-    confirmationCode: ba.confirmationCode || (ba.confirmation_code as string) || "",
-    details: (ba.details as string) || "",
-    setting: ((ba.setting as Activity["setting"]) || ""),
-    bookingReqs: (ba.booking_reqs as Activity["bookingReqs"]) || (ba.bookingReqs as Activity["bookingReqs"]) || [],
-    rating: (ba.rating as number) ?? null,
-    ratingCount: (ba.rating_count as number) ?? (ba.ratingCount as number) ?? null,
-    photoRef: (ba.photo_ref as string) || (ba.photoRef as string) || "",
-    tripId: (ba.trip as string) || (ba.trip_id as string) || "",
-    created: new Date((ba.created as string) || Date.now()),
-    updated: new Date((ba.updated as string) || Date.now()),
+    description: ba.notes || "",
+    costNotes: ba.costNotes || "",
+    durationEstimate: ba.durationEstimate || "",
+    confirmationCode: ba.confirmationCode || "",
+    details: ba.details || "",
+    setting: (ba.setting as Activity["setting"]) || "",
+    bookingReqs: (ba.bookingReqs as Activity["bookingReqs"]) || [],
+    rating: ba.rating ?? null,
+    ratingCount: ba.ratingCount ?? null,
+    photoRef: ba.photoRef || "",
+    tripId: ba.trip || "",
+    created: new Date(ba.created || Date.now()),
+    updated: new Date(ba.updated || Date.now()),
   };
 }
 
@@ -168,15 +168,11 @@ export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendA
     costNotes: activity.costNotes,
     durationEstimate: activity.durationEstimate,
     confirmationCode: activity.confirmationCode || "",
-    // Snake_case aliases for PocketBase column mapping
-    cost_notes: activity.costNotes,
-    duration_estimate: activity.durationEstimate,
-    confirmation_code: activity.confirmationCode || undefined,
     details: activity.details || undefined,
     setting: activity.setting || undefined,
-    booking_reqs: activity.bookingReqs?.length ? activity.bookingReqs : undefined,
-    rating_count: activity.ratingCount ?? undefined,
-    photo_ref: activity.photoRef || undefined,
+    bookingReqs: activity.bookingReqs?.length ? activity.bookingReqs : undefined,
+    ratingCount: activity.ratingCount ?? undefined,
+    photoRef: activity.photoRef || undefined,
   };
 }
 
@@ -203,9 +199,9 @@ export function activityUpdatesToBackend(fields: {
   if (fields.lat !== undefined) updates.lat = fields.lat;
   if (fields.lng !== undefined) updates.lng = fields.lng;
   if (fields.description !== undefined) updates.notes = fields.description;
-  if (fields.costNotes !== undefined) updates.cost_notes = fields.costNotes;
-  if (fields.durationEstimate !== undefined) updates.duration_estimate = fields.durationEstimate;
-  if (fields.confirmationCode !== undefined) updates.confirmation_code = fields.confirmationCode;
+  if (fields.costNotes !== undefined) updates.costNotes = fields.costNotes;
+  if (fields.durationEstimate !== undefined) updates.durationEstimate = fields.durationEstimate;
+  if (fields.confirmationCode !== undefined) updates.confirmationCode = fields.confirmationCode;
   if (fields.details !== undefined) updates.details = fields.details;
   if (fields.setting !== undefined) updates.setting = fields.setting;
   if (fields.tripId !== undefined) updates.trip = fields.tripId;

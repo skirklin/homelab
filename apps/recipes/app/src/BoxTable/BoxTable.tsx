@@ -10,7 +10,7 @@ import NewBoxButton from '../Buttons/NewBox';
 
 import './BoxTable.css';
 import { Context } from "../context";
-import { useRecipesBackend } from "../backend-provider";
+import { useRecipesBackend } from "@kirkl/shared";
 import { DeleteOutlined } from "@ant-design/icons";
 import { type BoxId, Visibility } from "../types";
 import type { UserEntry } from "../storage";

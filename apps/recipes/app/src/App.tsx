@@ -1,7 +1,6 @@
 import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { AuthProvider, initializeBackend } from '@kirkl/shared';
-import { RecipesBackendProvider } from './backend-provider';
+import { AuthProvider, initializeBackend, BackendProvider } from '@kirkl/shared';
 import { RecipesProvider } from './context';
 import { CookingModeProvider } from './CookingModeContext';
 import Auth from './Auth';
@@ -13,7 +12,7 @@ initializeBackend();
 function App() {
   return (
     <AuthProvider>
-      <RecipesBackendProvider>
+      <BackendProvider>
         <RecipesProvider>
           <CookingModeProvider>
             <Auth>
@@ -23,7 +22,7 @@ function App() {
             </Auth>
           </CookingModeProvider>
         </RecipesProvider>
-      </RecipesBackendProvider>
+      </BackendProvider>
     </AuthProvider>
   );
 }

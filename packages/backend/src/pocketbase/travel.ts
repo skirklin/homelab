@@ -33,6 +33,9 @@ function activityFromRecord(r: RecordModel): Activity {
     notes: r.notes || "", rating: r.rating, tags: r.tags || [],
     category: r.category || "", costNotes: r.cost_notes || "",
     durationEstimate: r.duration_estimate || "", confirmationCode: r.confirmation_code || "",
+    details: r.details, setting: r.setting,
+    bookingReqs: r.booking_reqs, ratingCount: r.rating_count,
+    photoRef: r.photo_ref, created: r.created, updated: r.updated,
   };
 }
 
@@ -200,11 +203,15 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (a.notes !== undefined) d.notes = a.notes;
     if (a.rating !== undefined) d.rating = a.rating;
     if (a.tags !== undefined) d.tags = a.tags;
-    // Pass through extra fields (category, cost_notes, duration_estimate, etc.)
-    const mapped = new Set(["id", "log", "trip", "name", "location", "lat", "lng", "placeId", "notes", "rating", "tags"]);
-    for (const [k, v] of Object.entries(a)) {
-      if (!mapped.has(k) && v !== undefined && !(k in d)) d[k] = v;
-    }
+    if (a.category !== undefined) d.category = a.category;
+    if (a.costNotes !== undefined) d.cost_notes = a.costNotes;
+    if (a.durationEstimate !== undefined) d.duration_estimate = a.durationEstimate;
+    if (a.confirmationCode !== undefined) d.confirmation_code = a.confirmationCode;
+    if (a.details !== undefined) d.details = a.details;
+    if (a.setting !== undefined) d.setting = a.setting;
+    if (a.bookingReqs !== undefined) d.booking_reqs = a.bookingReqs;
+    if (a.ratingCount !== undefined) d.rating_count = a.ratingCount;
+    if (a.photoRef !== undefined) d.photo_ref = a.photoRef;
     return d;
   }
 

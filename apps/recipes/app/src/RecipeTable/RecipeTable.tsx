@@ -12,7 +12,7 @@ import NewButton from '../Buttons/NewRecipe';
 import UploadButton from '../Buttons/UploadRecipes';
 import ImportButton from '../Buttons/ImportRecipes';
 import GenerateButton from '../Buttons/GenerateRecipe';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { recipeDataToBackend } from '../adapters';
 import { Context } from '../context';
 import { PickBoxModal } from '../Modals/PickBoxModal';

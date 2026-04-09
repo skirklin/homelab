@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { Button } from "antd";
 import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ShoppingTrip, CategoryDef } from "../types";
-import { useShoppingBackend } from "../backend-provider";
+import { useShoppingBackend } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 
 function formatCategoryId(categoryId: string, categories: CategoryDef[]): string {

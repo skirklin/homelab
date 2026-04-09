@@ -4,7 +4,7 @@ import { useFeedback } from "@kirkl/shared";
 
 import type { RatingWidget as RatingWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { useLifeBackend } from "../../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
 

@@ -4,8 +4,7 @@
 
 import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
-import { useShoppingBackend, useUserBackend } from "./backend-provider";
-import { setCurrentListId } from "./current-list-id";
+import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 import type { ShoppingItem, ShoppingList, ItemHistory, ShoppingTrip } from "./types";
 import type { ShoppingBackend } from "@homelab/backend";
 
@@ -113,8 +112,6 @@ function subscribeToListViaBackend(
   listId: string,
   dispatch: React.Dispatch<ShoppingAction>,
 ): () => void {
-  setCurrentListId(listId);
-
   dispatch({ type: "CLEAR_ITEMS" });
   dispatch({ type: "SET_LIST", list: null });
   dispatch({ type: "SET_LOADING", loading: true });

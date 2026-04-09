@@ -5,7 +5,7 @@ import { Form, Input, Select, Button, Space } from "antd";
 const { TextArea } = Input;
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { useTravelBackend } from "../backend-provider";
+import { useTravelBackend } from "@kirkl/shared";
 import { activityToBackend, activityUpdatesToBackend } from "../adapters";
 import type { ActivityCategory, Activity } from "../types";
 

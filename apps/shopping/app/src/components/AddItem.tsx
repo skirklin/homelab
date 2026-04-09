@@ -5,7 +5,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { useShoppingBackend } from "../backend-provider";
+import { useShoppingBackend } from "@kirkl/shared";
 import { getItemsFromState } from "../selectors";
 
 const Container = styled.div`

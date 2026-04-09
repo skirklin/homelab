@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { App as AntApp, ConfigProvider } from "antd";
 import styled from "styled-components";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
-import { BackendProvider } from "./backend-provider";
+import { BackendProvider } from "@kirkl/shared";
 import { UpkeepProvider } from "./upkeep-context";
 import { Auth } from "./components/Auth";
 import { TaskBoard } from "./components/TaskBoard";

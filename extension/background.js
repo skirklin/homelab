@@ -37,7 +37,7 @@ import fidelity from "./institutions/fidelity.js";
 import morgan_stanley from "./institutions/morgan_stanley.js";
 import wealthfront from "./institutions/wealthfront.js";
 
-const DEFAULT_PORT = 5555;
+const DEFAULT_SERVER_URL = "https://homelab-0.tail56ca88.ts.net:8443";
 
 // ── Institution registry ─────────────────────────────────────────────
 
@@ -64,9 +64,13 @@ function getInstitutionForUrl(url) {
 // ── Server communication ─────────────────────────────────────────────
 
 async function getServerUrl() {
-  const result = await chrome.storage.local.get("serverPort");
-  const port = result.serverPort || DEFAULT_PORT;
-  return `http://localhost:${port}`;
+  const result = await chrome.storage.local.get("serverUrl");
+  return (result.serverUrl || DEFAULT_SERVER_URL).replace(/\/+$/, "");
+}
+
+async function getProfile() {
+  const result = await chrome.storage.local.get("profile");
+  return result.profile || null;
 }
 
 async function sendToServer(endpoint, data) {
@@ -135,9 +139,11 @@ async function getAllCookiesForDomains(domains) {
 
 async function sendCookiesToServer(institution, cookies) {
   if (cookies.length === 0) return { success: false, error: "No cookies" };
+  const profile = await getProfile();
   const result = await sendToServer("/cookies", {
     institution,
     cookies,
+    profile,
     captured_at: new Date().toISOString(),
   });
   // Propagate sync_id from server response
@@ -165,8 +171,9 @@ function updateRecordingBadge() {
 async function flushInstitution(institution) {
   const entries = networkBuffer[institution] || [];
   if (entries.length === 0) return null;
+  const profile = await getProfile();
   const result = await sendToServer("/network-log", {
-    institution, entries, captured_at: new Date().toISOString(),
+    institution, entries, profile, captured_at: new Date().toISOString(),
   });
   delete networkBuffer[institution];
   return result;
@@ -247,9 +254,11 @@ function makeContext(institution, tabId) {
       }
       const toSend = [...entries];
       networkBuffer[institution] = [];
+      const profile = await getProfile();
       const result = await sendToServer("/network-log", {
         institution,
         entries: toSend,
+        profile,
         captured_at: new Date().toISOString(),
       });
       if (result.success) {
@@ -370,9 +379,11 @@ setInterval(async () => {
     const toSend = [...entries];
     networkBuffer[institution] = [];
 
+    const profile = await getProfile();
     const result = await sendToServer("/network-log", {
       institution,
       entries: toSend,
+      profile,
       captured_at: new Date().toISOString(),
     });
     if (result.success) {
@@ -462,21 +473,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "STOP_NETWORK_RECORDING") {
     const { tabId, institution } = message;
     delete recordingTabs[tabId];
-    chrome.tabs.sendMessage(tabId, { type: "STOP_RECORDING" }).then(async () => {
+    const flushAndRespond = async () => {
       const entries = networkBuffer[institution] || [];
+      const profile = await getProfile();
       const result = await sendToServer("/network-log", {
-        institution, entries, captured_at: new Date().toISOString(),
+        institution, entries, profile, captured_at: new Date().toISOString(),
       });
       delete networkBuffer[institution];
       sendResponse({ ...result, count: entries.length });
-    }).catch(async () => {
-      const entries = networkBuffer[institution] || [];
-      const result = await sendToServer("/network-log", {
-        institution, entries, captured_at: new Date().toISOString(),
-      });
-      delete networkBuffer[institution];
-      sendResponse({ ...result, count: entries.length });
-    });
+    };
+    chrome.tabs.sendMessage(tabId, { type: "STOP_RECORDING" })
+      .then(flushAndRespond)
+      .catch(flushAndRespond);
     return true;
   }
 

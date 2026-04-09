@@ -4,7 +4,7 @@ import { EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined } from "@ant-
 import styled from "styled-components";
 import dayjs from "dayjs";
 import { useAuth, useFeedback } from "@kirkl/shared";
-import { useUpkeepBackend } from "../backend-provider";
+import { useUpkeepBackend } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Completion } from "../types";
 import { formatFrequency, getCompletionNotes } from "../types";

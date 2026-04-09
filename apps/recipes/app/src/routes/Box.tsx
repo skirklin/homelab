@@ -4,7 +4,7 @@ import { Spin } from "antd";
 import { useAuth } from "@kirkl/shared";
 import { Context } from "../context";
 
-import { useRecipesBackend } from "../backend-provider";
+import { useRecipesBackend } from "@kirkl/shared";
 import { boxFromBackend, recipeFromBackend } from "../adapters";
 import { getBoxFromState } from "../state";
 import type { BoxId } from "../types";

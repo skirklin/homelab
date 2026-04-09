@@ -1,6 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "@kirkl/shared";
-import { BackendProvider } from "./backend-provider";
+import { BackendProvider } from "@kirkl/shared";
 import { TravelProvider } from "./travel-context";
 import { TripList } from "./components/TripList";
 import { TripDetail } from "./components/TripDetail";

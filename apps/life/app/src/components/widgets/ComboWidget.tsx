@@ -5,7 +5,7 @@ import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
 import { useFeedback } from "@kirkl/shared";
 import type { ComboWidget as ComboWidgetType, ComboField, LogEntry, EntryMigration } from "../../types";
 import { getEntriesForCombo } from "../../types";
-import { useLifeBackend } from "../../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
 

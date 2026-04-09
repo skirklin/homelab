@@ -30,7 +30,7 @@ import {
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
 } from "../messaging";
-import { useLifeBackend } from "../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 
 // Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {

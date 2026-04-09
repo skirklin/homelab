@@ -3,7 +3,7 @@ import { Button, Tag } from 'antd';
 import { useContext } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { pendingChangesToBackend } from '../adapters';
 import { getRecipeFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';

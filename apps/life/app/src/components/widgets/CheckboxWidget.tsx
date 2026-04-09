@@ -4,7 +4,7 @@ import { useFeedback } from "@kirkl/shared";
 import { CheckOutlined } from "@ant-design/icons";
 import type { CheckboxWidget as CheckboxWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { useLifeBackend } from "../../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {

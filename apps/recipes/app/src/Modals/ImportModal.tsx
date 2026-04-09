@@ -8,7 +8,7 @@ import { getRecipes } from '../backend';
 import { Context } from '../context';
 import { RecipeEntry } from '../storage';
 import { type BoxId, Visibility } from '../types';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { getAppUserFromState } from '../state';
 import { useAuth } from '@kirkl/shared';
 
@@ -53,13 +53,12 @@ function ImportModal(props: ImportProps) {
     if (user === undefined) {
       return
     }
-    const response = (await getRecipes({ url: value })) as { data: { error?: string, recipes: string } }
-    const data = response.data
+    const result = await getRecipes({ url: value });
 
-    if (data.error) {
-      alert(data.error)
+    if (result.error) {
+      alert(result.error)
     }
-    const recipes = JSON.parse(data.recipes)
+    const recipes = JSON.parse(result.recipes)
     const now = new Date()
     const fullRecipes = recipes.map(
       (recipe: Recipe) => {

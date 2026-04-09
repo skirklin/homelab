@@ -5,7 +5,7 @@ import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpO
 import styled from "styled-components";
 import { useAuth, useFeedback } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { useShoppingBackend, useUserBackend } from "../backend-provider";
+import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 import type { CategoryDef } from "../types";
 
 const Container = styled.div`

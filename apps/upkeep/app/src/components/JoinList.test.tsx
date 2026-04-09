@@ -41,19 +41,15 @@ const mockUserBackend = {
   getProfile: vi.fn().mockResolvedValue({}),
 };
 
-vi.mock('../backend-provider', () => ({
-  useUpkeepBackend: () => mockUpkeepBackend,
-  useUserBackend: () => mockUserBackend,
-  BackendProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-// Mock pocketbase module (still imported by upkeep-context for setCurrentListId)
-vi.mock('../pocketbase', () => ({
-  setCurrentListId: vi.fn(),
-  getCurrentListId: vi.fn(() => 'default'),
-  getListById: vi.fn(),
-  setUserSlug: vi.fn(),
-}));
+vi.mock('@kirkl/shared', async () => {
+  const actual = await vi.importActual('@kirkl/shared');
+  return {
+    ...actual,
+    useUpkeepBackend: () => mockUpkeepBackend,
+    useUserBackend: () => mockUserBackend,
+    BackendProvider: ({ children }: { children: React.ReactNode }) => children,
+  };
+});
 
 // Mock antd message
 vi.mock('antd', async () => {

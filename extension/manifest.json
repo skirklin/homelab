@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Money Data Collector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Collects financial data from supported institution websites",
   "permissions": ["activeTab", "storage", "cookies", "scripting", "webNavigation", "tabs"],
   "host_permissions": [
     "http://localhost:5555/*",
+    "https://*.tail56ca88.ts.net/*",
     "https://*.ally.com/*",
     "https://*.wealthfront.com/*",
     "https://*.betterment.com/*",

@@ -4,7 +4,7 @@
 
 import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { useUpkeepBackend, useUserBackend } from "../backend-provider";
+import { useUpkeepBackend, useUserBackend } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
 
 const config: ListPickerConfig = {

@@ -4,8 +4,7 @@
 
 import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
-import { useUpkeepBackend, useUserBackend } from "./backend-provider";
-import { setCurrentListId } from "./current-list-id";
+import { useUpkeepBackend, useUserBackend } from "@kirkl/shared";
 import { taskFromBackend, listFromBackend, completionFromBackend } from "./adapters";
 import type { Task, TaskList, Completion } from "./types";
 import type { UpkeepBackend } from "@homelab/backend";
@@ -91,9 +90,6 @@ function subscribeToListViaBackend(
   listId: string,
   dispatch: React.Dispatch<UpkeepAction>,
 ): () => void {
-  // Keep pocketbase.ts currentListId in sync for any remaining direct callers
-  setCurrentListId(listId);
-
   dispatch({ type: "CLEAR_TASKS" });
   dispatch({ type: "SET_LIST", list: null });
   dispatch({ type: "SET_LOADING", loading: true });

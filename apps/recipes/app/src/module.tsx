@@ -2,25 +2,25 @@
  * Recipes module for embedding in the home app.
  * Provides routes that can be mounted at /recipes/*
  */
-import { RecipesBackendProvider } from "./backend-provider";
+import { BackendProvider } from "@kirkl/shared";
 import { RecipesProvider } from "./context";
 import { CookingModeProvider } from "./CookingModeContext";
 import { RecipesRoutes } from "./RecipesRoutes";
 
 export function RecipesModule() {
   return (
-    <RecipesBackendProvider>
+    <BackendProvider>
       <RecipesProvider>
         <CookingModeProvider>
           <RecipesRoutes />
         </CookingModeProvider>
       </RecipesProvider>
-    </RecipesBackendProvider>
+    </BackendProvider>
   );
 }
 
 // Export providers and routes separately for home app integration
-export { RecipesBackendProvider } from "./backend-provider";
+export { BackendProvider as RecipesBackendProvider } from "@kirkl/shared";
 export { RecipesProvider, useRecipesContext } from "./context";
 export { CookingModeProvider } from "./CookingModeContext";
 export { RecipesRoutes } from "./RecipesRoutes";

@@ -3,7 +3,7 @@ import { Modal } from 'antd';
 import styled from 'styled-components';
 import { Context } from '../context';
 import { getAppUserFromState } from '../state';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { useAuth } from '@kirkl/shared';
 
 // Increment this when adding new updates

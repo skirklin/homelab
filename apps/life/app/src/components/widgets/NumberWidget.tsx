@@ -5,7 +5,7 @@ import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
 import { useFeedback } from "@kirkl/shared";
 import type { NumberWidget as NumberWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { useLifeBackend } from "../../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {

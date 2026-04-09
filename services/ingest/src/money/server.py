@@ -119,6 +119,12 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/institutions/"):
             self._handle_get_institution_detail()
             return
+        if self.path == "/extension/version":
+            self._handle_extension_version()
+            return
+        if self.path == "/extension/download":
+            self._handle_extension_download()
+            return
         self._json_response(404, {"error": "not found"})
 
     def _handle_last_sync(self) -> None:
@@ -1745,12 +1751,21 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._set_cors_headers()
         self.end_headers()
 
-    def _resolve_login_id(self, institution: str) -> str | None:
-        """Look up the login_id for an institution from config."""
+    def _resolve_login_id(self, institution: str, profile: str | None = None) -> str | None:
+        """Look up the login_id for an institution from config.
+
+        If profile is given (e.g. "scott"), resolves to "{profile}@{institution}".
+        Otherwise falls back to the first matching login for the institution.
+        """
         from money.config import load_config
 
         try:
             config = load_config()
+            if profile:
+                login_id = f"{profile}@{institution}"
+                if login_id in config.logins:
+                    return login_id
+                log.warning("Login %s not found in config, falling back", login_id)
             for lid, lc in config.logins.items():
                 if lc.institution == institution:
                     return lid
@@ -1801,7 +1816,8 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         from money.config import DATA_DIR
 
-        login_id = self._resolve_login_id(institution)
+        profile = data.get("profile")
+        login_id = self._resolve_login_id(institution, profile)
 
         # Persist cookies for CLI use
         cookies_dir = DATA_DIR / "cookies"
@@ -1810,7 +1826,8 @@ class IngestHandler(BaseHTTPRequestHandler):
         persist_path = cookies_dir / f"{persist_key}.json"
         persist_path.write_text(json.dumps(data, indent=2))
         log.info(
-            "Stored %d cookies for %s at %s", len(cookies_raw), institution, persist_path,
+            "Stored %d cookies for %s (profile=%s) at %s",
+            len(cookies_raw), institution, profile, persist_path,
         )
 
         # Convert cookie list to dict and pass directly to sync
@@ -1873,7 +1890,8 @@ class IngestHandler(BaseHTTPRequestHandler):
             for route in sorted(routes):
                 log.info("  %s", route)
 
-        login_id = self._resolve_login_id(institution)
+        profile = data.get("profile")
+        login_id = self._resolve_login_id(institution, profile)
         sync_id = self._trigger_auto_sync(institution, login_id)
 
         self._json_response(
@@ -2139,6 +2157,42 @@ class IngestHandler(BaseHTTPRequestHandler):
                 )
             )
             self._json_response(500, {"error": str(e)})
+
+    def _handle_extension_version(self) -> None:
+        """Return the latest extension version and download URL."""
+        from money.config import DATA_DIR
+
+        ext_dir = DATA_DIR / "extension"
+        zip_path = ext_dir / "money-collector.zip"
+        # Read version from the bundled manifest.json inside the zip, or
+        # from a version file written by the build script.
+        version_file = ext_dir / "version.txt"
+        version = "0.0.0"
+        if version_file.exists():
+            version = version_file.read_text().strip()
+        self._json_response(200, {
+            "version": version,
+            "download_url": "/extension/download",
+            "available": zip_path.exists(),
+        })
+
+    def _handle_extension_download(self) -> None:
+        """Serve the extension zip file."""
+        from money.config import DATA_DIR
+
+        zip_path = DATA_DIR / "extension" / "money-collector.zip"
+        if not zip_path.exists():
+            self._json_response(404, {"error": "Extension not built yet. Run infra/build-extension.sh on the server."})
+            return
+
+        data = zip_path.read_bytes()
+        self.send_response(200)
+        self._set_cors_headers()
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", "attachment; filename=money-collector.zip")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _json_response(self, status: int, body: dict[str, Any]) -> None:
         response = json.dumps(body).encode()

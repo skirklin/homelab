@@ -5,7 +5,7 @@ import type { Recipe } from 'schema-dts';
 import styled from 'styled-components';
 import { generateRecipe } from '../backend';
 import { Context } from '../context';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { getAppUserFromState } from '../state';
 import type { BoxId } from '../types';
 import { useAuth } from '@kirkl/shared';
@@ -75,8 +75,8 @@ function GenerateRecipeModal(props: GenerateRecipeModalProps) {
     setGeneratedRecipe(null);
 
     try {
-      const response = await generateRecipe({ prompt });
-      const recipe = JSON.parse(response.data.recipeJson) as Recipe;
+      const result = await generateRecipe({ prompt });
+      const recipe = JSON.parse(result.recipeJson) as Recipe;
       setGeneratedRecipe(recipe);
     } catch (err) {
       console.error('Error generating recipe:', err);

@@ -2,7 +2,7 @@ import { createContext, useContext, useReducer, useEffect, type ReactNode } from
 import { useAuth } from '@kirkl/shared';
 import type { ActionType, AppState } from './types';
 import { initState, recipeBoxReducer } from './reducer';
-import { useRecipesBackend } from './backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { boxFromBackend, recipeFromBackend, userFromBackend } from './adapters';
 
 export type ContextType = {

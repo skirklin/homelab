@@ -1,6 +1,17 @@
 // Backend
 export { initializeBackend, getBackend } from "./backend";
 
+// Backend Provider & Hooks
+export {
+  BackendProvider,
+  useShoppingBackend,
+  useRecipesBackend,
+  useUpkeepBackend,
+  useTravelBackend,
+  useLifeBackend,
+  useUserBackend,
+} from "./backend-provider";
+
 // Auth
 export { AuthProvider, useAuth, AuthContext } from "./auth";
 export type { User } from "./auth";

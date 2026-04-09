@@ -7,7 +7,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Spin, Button, Alert } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
-import { useRecipesBackend } from "../backend-provider";
+import { useRecipesBackend } from "@kirkl/shared";
 import { boxFromBackend, recipeFromBackend } from "../adapters";
 import type { RecipeEntry, BoxEntry } from "../storage";
 import { decodeStr } from "../converters";

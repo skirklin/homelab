@@ -5,7 +5,8 @@ import { ConfigProvider } from "antd";
 import { AuthProvider } from "@kirkl/shared";
 import { TravelModule } from "./module";
 
-import "./backend";
+import { initializeBackend } from "@kirkl/shared";
+initializeBackend();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

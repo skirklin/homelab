@@ -49,7 +49,7 @@ export default function VisibilityControl(props: VisibilityProps) {
             if (!targetId) return;
 
             const result = await createShareInvite({ targetType, targetId });
-            await navigator.clipboard.writeText(result.data.url);
+            await navigator.clipboard.writeText(result.url);
             message.success("Invite link copied to clipboard!");
         } catch (err) {
             message.error("Failed to create invite link");

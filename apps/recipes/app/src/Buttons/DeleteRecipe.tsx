@@ -4,7 +4,7 @@ import { useContext } from 'react';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import type { BoxId, RecipeId } from '../types';

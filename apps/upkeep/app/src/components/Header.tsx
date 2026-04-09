@@ -4,7 +4,7 @@ import { Button, Popover, Segmented } from "antd";
 import { ShareAltOutlined, LogoutOutlined, PlusOutlined, BellOutlined, BellFilled } from "@ant-design/icons";
 import { AppHeader, ShareModal, useAuth, getBackend, useFeedback } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { useUserBackend } from "../backend-provider";
+import { useUserBackend } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
 import { isNotificationSupported, requestNotificationPermission, getFcmToken } from "../messaging";
 import styled from "styled-components";

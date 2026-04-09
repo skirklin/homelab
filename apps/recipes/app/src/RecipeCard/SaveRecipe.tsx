@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
 
 import { Context } from '../context';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { recipeDataToBackend } from '../adapters';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';

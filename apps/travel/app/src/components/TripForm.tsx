@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Form, Input, Select, DatePicker, Button, Space } from "antd";
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { useTravelBackend } from "../backend-provider";
+import { useTravelBackend } from "@kirkl/shared";
 import { tripToBackend, tripUpdatesToBackend } from "../adapters";
 import { STATUS_ORDER, type TripStatus } from "../types";
 import dayjs from "dayjs";

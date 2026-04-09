@@ -3,7 +3,7 @@ import { Button, Modal, Spin, Space, Typography, Input, Alert } from 'antd';
 import { useContext, useState } from 'react';
 import { modifyRecipe } from '../backend';
 import { Context } from '../context';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { pendingChangesToBackend } from '../adapters';
 import { getRecipeFromState } from '../state';
 import { type BoxId, type PendingChanges, type RecipeId } from '../types';
@@ -39,8 +39,8 @@ function ModifyRecipeModal(props: ModifyRecipeModalProps) {
     setChanges(null);
 
     try {
-      const response = await modifyRecipe({ boxId, recipeId, feedback });
-      setChanges(JSON.parse(response.data.modificationJson) as PendingChanges);
+      const result = await modifyRecipe({ boxId, recipeId, feedback });
+      setChanges(JSON.parse(result.modificationJson) as PendingChanges);
     } catch (err) {
       console.error('Error generating modifications:', err);
       setError('Failed to generate modifications. Please try again.');

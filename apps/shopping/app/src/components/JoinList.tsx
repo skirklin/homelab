@@ -4,7 +4,7 @@
 
 import { JoinList as SharedJoinList, type JoinListConfig, type ListOperations } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { useShoppingBackend, useUserBackend } from "../backend-provider";
+import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 
 const config: JoinListConfig = {
   title: "Join List",

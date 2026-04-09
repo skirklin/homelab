@@ -6,7 +6,7 @@ import styled from "styled-components";
 import type { Task } from "../types";
 import { formatDueDate, isTaskSnoozed, formatSnoozeRemaining } from "../types";
 import { useAuth, useFeedback } from "@kirkl/shared";
-import { useUpkeepBackend } from "../backend-provider";
+import { useUpkeepBackend } from "@kirkl/shared";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "../messaging";
 
 const CardWrapper = styled.div<{ $snoozed?: boolean }>`

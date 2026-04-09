@@ -1,6 +1,6 @@
 import { Input, Modal } from "antd"
 import { useContext, useState } from "react"
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { getAppUserFromState } from '../state';
 import { Context } from "../context";
 import { useAuth } from '@kirkl/shared';

@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { Context } from "../context";
 
-import { useRecipesBackend } from "../backend-provider";
+import { useRecipesBackend } from "@kirkl/shared";
 import { getBoxFromState } from "../state";
 import { RecipeTable, type RowType } from "../RecipeTable/RecipeTable"
 import { Divider, RecipeActionGroup } from "../StyledComponents";

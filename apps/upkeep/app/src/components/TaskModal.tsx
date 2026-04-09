@@ -3,7 +3,7 @@ import { Modal, Input, InputNumber, Select, Button } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth, useFeedback } from "@kirkl/shared";
-import { useUpkeepBackend } from "../backend-provider";
+import { useUpkeepBackend } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Frequency, FrequencyUnit } from "../types";
 

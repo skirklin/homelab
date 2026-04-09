@@ -5,7 +5,7 @@
 import { useEffect } from "react";
 import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "./life-context";
-import { useLifeBackend } from "./backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 import type { LogEntry } from "./types";
 
 /** Convert backend LifeEntry to app LogEntry (Event). */

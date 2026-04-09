@@ -7,7 +7,7 @@
 
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "@kirkl/shared";
-import { BackendProvider } from "./backend-provider";
+import { BackendProvider } from "@kirkl/shared";
 import { ShoppingProvider } from "./shopping-context";
 import { ShoppingList } from "./components/ShoppingList";
 import { ListPicker } from "./components/ListPicker";
@@ -48,5 +48,4 @@ export function ShoppingModule() {
 
 // Re-export provider for standalone use
 export { ShoppingProvider, useShoppingContext } from "./shopping-context";
-export { useShoppingBackend } from "./backend-provider";
-export { setCurrentListId } from "./current-list-id";
+export { useShoppingBackend } from "@kirkl/shared";

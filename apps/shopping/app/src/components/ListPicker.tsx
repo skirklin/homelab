@@ -4,7 +4,7 @@
 
 import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { useShoppingBackend, useUserBackend } from "../backend-provider";
+import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
 
 const config: ListPickerConfig = {

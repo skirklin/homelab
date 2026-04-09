@@ -8,7 +8,7 @@ import { Spin } from "antd";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { LifeProvider, useLifeContext } from "./life-context";
-import { BackendProvider, useLifeBackend } from "./backend-provider";
+import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { DisplaySettingsProvider } from "./display-settings";
 import type { LifeLog } from "./types";
 import { DEFAULT_MANIFEST } from "./types";

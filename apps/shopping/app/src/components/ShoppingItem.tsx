@@ -5,7 +5,7 @@ import { useDraggable } from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import type { ShoppingItem } from "../types";
-import { useShoppingBackend } from "../backend-provider";
+import { useShoppingBackend } from "@kirkl/shared";
 
 const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
   display: flex;

@@ -1,7 +1,7 @@
 import { UploadOutlined } from "@ant-design/icons";
 import { useContext } from "react";
 import { useBoxAction } from "../hooks/useBoxAction";
-import { useRecipesBackend } from "../backend-provider";
+import { useRecipesBackend } from "@kirkl/shared";
 import { recipeDataToBackend } from "../adapters";
 import { getAppUserFromState } from "../state";
 import { ActionButton } from "../StyledComponents";

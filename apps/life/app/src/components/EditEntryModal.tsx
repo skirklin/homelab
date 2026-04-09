@@ -5,7 +5,7 @@ import dayjs from "dayjs";
 import { useFeedback } from "@kirkl/shared";
 import type { LogEntry, LifeManifest } from "../types";
 import { getWidget } from "../types";
-import { useLifeBackend } from "../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 
 const FormRow = styled.div`
   display: flex;

@@ -4,7 +4,7 @@ import { Modal, Button, Alert } from "antd";
 import { useFeedback } from "@kirkl/shared";
 import type { LifeManifest } from "../types";
 import { parseAndValidateManifest, formatValidationErrors } from "../manifest-validation";
-import { useLifeBackend } from "../backend-provider";
+import { useLifeBackend } from "@kirkl/shared";
 
 const EditorContainer = styled.div`
   display: flex;

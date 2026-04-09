@@ -1,7 +1,7 @@
 import { Checkbox, Typography, Progress } from "antd";
 import styled from "styled-components";
 import { useTravelContext } from "../travel-context";
-import { useTravelBackend } from "../backend-provider";
+import { useTravelBackend } from "@kirkl/shared";
 import type { Trip, ChecklistTemplate } from "../types";
 
 const Container = styled.div`

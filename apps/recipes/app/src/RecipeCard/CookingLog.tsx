@@ -5,7 +5,7 @@ import { Button, Input, Popconfirm, Spin } from 'antd';
 import { Context } from '../context';
 import { getAppUserFromState, getUserFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { useAuth, useFeedback, type Event } from '@kirkl/shared';
 import type { Event as BackendEvent } from '@homelab/backend';
 

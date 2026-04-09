@@ -5,7 +5,7 @@ import { Button } from "antd";
 import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { getBackend, AppHeader, ShareModal } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { useShoppingBackend } from "../backend-provider";
+import { useShoppingBackend } from "@kirkl/shared";
 import { getItemsFromState } from "../selectors";
 import { appStorage, StorageKeys } from "../storage";
 import { SyncIndicator } from "./SyncIndicator";

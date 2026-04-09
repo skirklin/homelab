@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@kirkl/shared";
-import { useTravelBackend, useUserBackend } from "./backend-provider";
+import { useTravelBackend, useUserBackend } from "@kirkl/shared";
 import { tripFromBackend, activityFromBackend, itineraryFromBackend, logFromBackend } from "./adapters";
 import type { Trip, TravelLog, Activity, Itinerary } from "./types";
 

@@ -3,7 +3,7 @@ import { Button, Checkbox, Modal, Tag } from 'antd';
 import { useContext, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { pendingChangesToBackend } from '../adapters';
 import { RecipeEntry } from '../storage';
 import type { BoxId, RecipeId } from '../types';

@@ -4,7 +4,7 @@
  */
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "@kirkl/shared";
-import { BackendProvider } from "./backend-provider";
+import { BackendProvider } from "@kirkl/shared";
 import { UpkeepProvider } from "./upkeep-context";
 import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
@@ -42,5 +42,5 @@ export function UpkeepModule() {
 }
 
 export { UpkeepProvider, useUpkeepContext } from "./upkeep-context";
-export { BackendProvider as UpkeepBackendProvider } from "./backend-provider";
+export { BackendProvider as UpkeepBackendProvider } from "@kirkl/shared";
 export { isNotificationSupported, requestNotificationPermission, getFcmToken } from "./messaging";

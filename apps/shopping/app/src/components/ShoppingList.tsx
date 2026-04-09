@@ -35,7 +35,7 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
 };
 import { useShoppingContext } from "../shopping-context";
 import { getItemsByCategoryId } from "../selectors";
-import { useShoppingBackend } from "../backend-provider";
+import { useShoppingBackend } from "@kirkl/shared";
 import { Header } from "./Header";
 import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";

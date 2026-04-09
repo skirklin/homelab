@@ -6,7 +6,7 @@ import { PickBoxModal } from '../Modals/PickBoxModal';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
-import { useRecipesBackend } from '../backend-provider';
+import { useRecipesBackend } from '@kirkl/shared';
 import { recipeDataToBackend } from '../adapters';
 import { getAppUserFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
