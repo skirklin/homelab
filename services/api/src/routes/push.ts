@@ -48,7 +48,7 @@ pushRoutes.post("/subscribe", async (c) => {
   try {
     // Check if this endpoint already exists for this user
     const existing = await pb.collection("push_subscriptions").getList(1, 1, {
-      filter: `user = "${userId}" && endpoint = "${endpoint}"`,
+      filter: pb.filter("user = {:userId} && endpoint = {:endpoint}", { userId, endpoint }),
       $autoCancel: false,
     });
 
@@ -91,7 +91,7 @@ pushRoutes.post("/unsubscribe", async (c) => {
 
   try {
     const existing = await pb.collection("push_subscriptions").getList(1, 1, {
-      filter: `user = "${userId}" && endpoint = "${endpoint}"`,
+      filter: pb.filter("user = {:userId} && endpoint = {:endpoint}", { userId, endpoint }),
       $autoCancel: false,
     });
 
@@ -116,6 +116,11 @@ pushRoutes.post("/unsubscribe", async (c) => {
  * or scheduled tasks, not directly by frontends.
  */
 pushRoutes.post("/send", async (c) => {
+  // Only allow API key auth — this is an internal endpoint for PocketBase hooks/tasks
+  if (!c.get("isApiKey")) {
+    return c.json({ error: "This endpoint requires API key authentication" }, 403);
+  }
+
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
     return c.json({ error: "VAPID keys not configured" }, 503);
   }
@@ -138,7 +143,7 @@ pushRoutes.post("/send", async (c) => {
   try {
     // Get all subscriptions for the target user
     const subs = await pb.collection("push_subscriptions").getFullList({
-      filter: `user = "${userId}"`,
+      filter: pb.filter("user = {:userId}", { userId }),
       $autoCancel: false,
     });
 

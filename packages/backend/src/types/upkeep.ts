@@ -15,13 +15,18 @@ export interface RoomDef {
   icon?: string;
 }
 
+export interface Frequency {
+  value: number;
+  unit: "days" | "weeks" | "months";
+}
+
 export interface Task {
   id: string;
   list: string;
   name: string;
   description: string;
   roomId: string;
-  frequency: number;
+  frequency: Frequency;
   lastCompleted: Date | null;
   snoozedUntil: Date | null;
   notifyUsers: string[];

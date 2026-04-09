@@ -14,7 +14,7 @@ dataRoutes.get("/boxes", async (c) => {
   const userId = c.get("userId") as string;
   try {
     const boxes = await pb.collection("recipe_boxes").getFullList({
-      filter: `owners.id ?= "${userId}"`,
+      filter: pb.filter("owners.id ?= {:userId}", { userId }),
     });
     return c.json(boxes.map((b) => ({
       id: b.id,
@@ -35,7 +35,7 @@ dataRoutes.get("/recipes", async (c) => {
   if (!boxId) return c.json({ error: "boxId query param required" }, 400);
 
   try {
-    const recipes = await pb.collection("recipes").getFullList({ filter: `box = "${boxId}"` });
+    const recipes = await pb.collection("recipes").getFullList({ filter: pb.filter("box = {:boxId}", { boxId }) });
     return c.json(recipes.map((r) => ({
       id: r.id,
       box: r.box,
@@ -99,7 +99,7 @@ dataRoutes.get("/shopping/items", async (c) => {
   if (!listId) return c.json({ error: "list query param required" }, 400);
 
   try {
-    const items = await pb.collection("shopping_items").getFullList({ filter: `list = "${listId}"` });
+    const items = await pb.collection("shopping_items").getFullList({ filter: pb.filter("list = {:listId}", { listId }) });
     return c.json(items.map((i) => ({
       id: i.id,
       ingredient: i.ingredient,
@@ -149,7 +149,7 @@ dataRoutes.get("/tasks", async (c) => {
   if (!listId) return c.json({ error: "list query param required" }, 400);
 
   try {
-    const tasks = await pb.collection("tasks").getFullList({ filter: `list = "${listId}"` });
+    const tasks = await pb.collection("tasks").getFullList({ filter: pb.filter("list = {:listId}", { listId }) });
     return c.json(tasks.map((t) => ({
       id: t.id,
       name: t.name,

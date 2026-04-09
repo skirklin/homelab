@@ -23,7 +23,7 @@ migrate(
       name: "sharing_invites",
       // Any authenticated user can list/view their own invites
       listRule: '@request.auth.id != "" && created_by = @request.auth.id',
-      viewRule: '@request.auth.id != ""',
+      viewRule: '@request.auth.id != "" && (created_by = @request.auth.id || redeemed_by = @request.auth.id)',
       // Only owners of the target can create invites
       // For boxes: check if auth user is in the target box's owners
       // For recipes: check if auth user is in the target recipe's owners

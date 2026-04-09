@@ -5,7 +5,7 @@
 import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
 import { useShoppingBackend, useUserBackend } from "./backend-provider";
-import { setCurrentListId } from "./pocketbase";
+import { setCurrentListId } from "./current-list-id";
 import type { ShoppingItem, ShoppingList, ItemHistory, ShoppingTrip } from "./types";
 import type { ShoppingBackend } from "@homelab/backend";
 

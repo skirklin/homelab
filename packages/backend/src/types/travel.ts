@@ -5,6 +5,8 @@ export interface TravelLog {
   name: string;
   owners: string[];
   checklists: ChecklistTemplate[];
+  created?: string;
+  updated?: string;
 }
 
 export interface ChecklistTemplate {
@@ -16,6 +18,7 @@ export interface ChecklistTemplate {
 export interface ChecklistItem {
   id: string;
   text: string;
+  category?: string;
 }
 
 export interface Trip {
@@ -29,6 +32,9 @@ export interface Trip {
   flagged: boolean;
   flagComment: string;
   checklistDone: Record<string, boolean>;
+  status: string;
+  region: string;
+  source_refs: string;
   [key: string]: unknown;
 }
 
@@ -44,6 +50,10 @@ export interface Activity {
   notes: string;
   rating?: number;
   tags: string[];
+  category: string;
+  costNotes: string;
+  durationEstimate: string;
+  confirmationCode: string;
   [key: string]: unknown;
 }
 
@@ -52,16 +62,24 @@ export interface Itinerary {
   log: string;
   trip: string;
   name: string;
+  isActive?: boolean;
   days: ItineraryDay[];
+  created?: string;
+  updated?: string;
 }
+
+export interface ActivitySlot {
+  activityId: string;
+  startTime?: string;
+  notes?: string;
+}
+
+export type FlightSlot = ActivitySlot;
 
 export interface ItineraryDay {
-  date: string;
-  items: ItineraryItem[];
-}
-
-export interface ItineraryItem {
-  time?: string;
-  activityId?: string;
-  description: string;
+  date?: string;
+  label: string;
+  lodgingActivityId?: string;
+  flights?: FlightSlot[];
+  slots: ActivitySlot[];
 }

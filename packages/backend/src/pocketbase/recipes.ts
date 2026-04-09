@@ -309,8 +309,7 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
           const box = boxFromRecord(e.record);
           handlers.onBox(box, []); // recipes unchanged
         }
-      });
-      unsubs.push(() => this.pb().collection("recipe_boxes").unsubscribe(boxId));
+      }).then((unsub) => unsubs.push(unsub));
 
       // Recipes realtime for this box
       const subKey = `box_${boxId}`;
@@ -321,11 +320,12 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
         } else {
           handlers.onRecipeChanged(boxId, recipeFromRecord(e.record));
         }
-      });
-      unsubs.push(() => this.pb().collection("recipes").unsubscribe(subKey));
+      }).then((unsub) => unsubs.push(unsub));
     };
 
     // Subscribe to user record for box list changes
+    let userUnsub: (() => void) | undefined;
+
     const initUser = async () => {
       try {
         const userRecord = await this.pb().collection("users").getOne(userId, { $autoCancel: false });
@@ -344,17 +344,27 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
         if (cancelled) return;
         const user = userFromRecord(e.record);
         handlers.onUser(user);
+
+        // Tear down subscriptions for boxes no longer in the user's list
+        const currentBoxes = new Set(user.boxes);
+        for (const [boxId, unsubs] of boxUnsubs) {
+          if (!currentBoxes.has(boxId)) {
+            unsubs.forEach((u) => u());
+            boxUnsubs.delete(boxId);
+          }
+        }
+
         for (const boxId of user.boxes) {
           setupBox(boxId);
         }
-      });
+      }).then((fn) => { userUnsub = fn; });
     };
 
     initUser();
 
     return () => {
       cancelled = true;
-      this.pb().collection("users").unsubscribe(userId);
+      userUnsub?.();
       for (const unsubs of boxUnsubs.values()) {
         unsubs.forEach((u) => u());
       }

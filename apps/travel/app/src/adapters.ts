@@ -30,70 +30,64 @@ export function tripFromBackend(bt: BackendTrip): Trip {
   return {
     id: bt.id,
     destination: bt.destination || bt.name || "",
-    status: ((bt as Record<string, unknown>).status as TripStatus) || "Idea",
-    region: ((bt as Record<string, unknown>).region as string) || "",
+    status: (bt.status as TripStatus) || "Idea",
+    region: bt.region || "",
     startDate: bt.startDate ? new Date(bt.startDate) : null,
     endDate: bt.endDate ? new Date(bt.endDate) : null,
     notes: bt.notes || "",
-    sourceRefs: ((bt as Record<string, unknown>).source_refs as string) || ((bt as Record<string, unknown>).sourceRefs as string) || "",
+    sourceRefs: bt.source_refs || "",
     flaggedForReview: bt.flagged || false,
     reviewComment: bt.flagComment || "",
     checklistDone: bt.checklistDone || {},
-    created: new Date(((bt as Record<string, unknown>).created as string) || Date.now()),
-    updated: new Date(((bt as Record<string, unknown>).updated as string) || Date.now()),
+    created: new Date((bt.created as string) || Date.now()),
+    updated: new Date((bt.updated as string) || Date.now()),
   };
 }
 
 export function activityFromBackend(ba: BackendActivity): Activity {
-  const raw = ba as Record<string, unknown>;
   return {
     id: ba.id,
     name: ba.name || "",
-    category: ((raw.category as ActivityCategory) || "Other"),
+    category: (ba.category as ActivityCategory) || "Other",
     location: ba.location || "",
     placeId: ba.placeId || "",
     lat: ba.lat ?? null,
     lng: ba.lng ?? null,
-    description: (raw.description as string) || "",
-    costNotes: (raw.cost_notes as string) || (raw.costNotes as string) || "",
-    durationEstimate: (raw.duration_estimate as string) || (raw.durationEstimate as string) || "",
-    confirmationCode: (raw.confirmation_code as string) || (raw.confirmationCode as string) || "",
-    details: (raw.details as string) || "",
-    setting: ((raw.setting as Activity["setting"]) || ""),
-    bookingReqs: (raw.booking_reqs as Activity["bookingReqs"]) || (raw.bookingReqs as Activity["bookingReqs"]) || [],
+    description: (ba.notes as string) || "",
+    costNotes: ba.costNotes || (ba.cost_notes as string) || "",
+    durationEstimate: ba.durationEstimate || (ba.duration_estimate as string) || "",
+    confirmationCode: ba.confirmationCode || (ba.confirmation_code as string) || "",
+    details: (ba.details as string) || "",
+    setting: ((ba.setting as Activity["setting"]) || ""),
+    bookingReqs: (ba.booking_reqs as Activity["bookingReqs"]) || (ba.bookingReqs as Activity["bookingReqs"]) || [],
     rating: (ba.rating as number) ?? null,
-    ratingCount: (raw.rating_count as number) ?? (raw.ratingCount as number) ?? null,
-    photoRef: (raw.photo_ref as string) || (raw.photoRef as string) || "",
-    tripId: (ba.trip as string) || (raw.trip_id as string) || "",
-    created: new Date((raw.created as string) || Date.now()),
-    updated: new Date((raw.updated as string) || Date.now()),
+    ratingCount: (ba.rating_count as number) ?? (ba.ratingCount as number) ?? null,
+    photoRef: (ba.photo_ref as string) || (ba.photoRef as string) || "",
+    tripId: (ba.trip as string) || (ba.trip_id as string) || "",
+    created: new Date((ba.created as string) || Date.now()),
+    updated: new Date((ba.updated as string) || Date.now()),
   };
 }
 
 export function itineraryFromBackend(bi: BackendItinerary): Itinerary {
-  const raw = bi as unknown as Record<string, unknown>;
   return {
     id: bi.id,
-    tripId: bi.trip || (raw.trip_id as string) || "",
+    tripId: bi.trip || "",
     name: bi.name || "",
-    isActive: (raw.is_active as boolean) ?? (raw.isActive as boolean) ?? true,
-    days: (bi.days || []).map((d) => {
-      const dr = d as unknown as Record<string, unknown>;
-      return {
-        date: d.date || undefined,
-        label: (dr.label as string) || "",
-        lodgingActivityId: dr.lodgingActivityId as string | undefined,
-        flights: dr.flights as Itinerary["days"][0]["flights"],
-        slots: (dr.slots as Itinerary["days"][0]["slots"]) || [],
-      };
-    }),
-    created: new Date((raw.created as string) || Date.now()),
-    updated: new Date((raw.updated as string) || Date.now()),
+    isActive: bi.isActive ?? true,
+    days: (bi.days || []).map((d) => ({
+      date: d.date || undefined,
+      label: d.label || "",
+      lodgingActivityId: d.lodgingActivityId,
+      flights: d.flights,
+      slots: d.slots || [],
+    })),
+    created: new Date((bi.created as string) || Date.now()),
+    updated: new Date((bi.updated as string) || Date.now()),
   };
 }
 
 export function logFromBackend(bl: BackendTravelLog): TravelLog {
-  const raw = bl as unknown as Record<string, unknown>;
   return {
     id: bl.id,
     name: bl.name || "",
@@ -101,17 +95,14 @@ export function logFromBackend(bl: BackendTravelLog): TravelLog {
     checklists: bl.checklists?.length ? bl.checklists.map((c) => ({
       id: c.id,
       name: c.name,
-      items: c.items.map((i) => {
-        const ir = i as unknown as Record<string, unknown>;
-        return {
-          id: i.id,
-          text: i.text,
-          category: (ir.category as string) || "",
-        };
-      }),
+      items: c.items.map((i) => ({
+        id: i.id,
+        text: i.text,
+        category: i.category || "",
+      })),
     })) : [DEFAULT_CHECKLIST],
-    created: new Date((raw.created as string) || Date.now()),
-    updated: new Date((raw.updated as string) || Date.now()),
+    created: new Date((bl.created as string) || Date.now()),
+    updated: new Date((bl.updated as string) || Date.now()),
   };
 }
 
@@ -132,7 +123,7 @@ export function tripToBackend(trip: Omit<Trip, "id">): Omit<BackendTrip, "id" | 
     status: trip.status,
     region: trip.region,
     source_refs: trip.sourceRefs,
-  } as Omit<BackendTrip, "id" | "log">;
+  };
 }
 
 export function tripUpdatesToBackend(fields: {
@@ -174,6 +165,10 @@ export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendA
     tags: [],
     trip: activity.tripId,
     category: activity.category,
+    costNotes: activity.costNotes,
+    durationEstimate: activity.durationEstimate,
+    confirmationCode: activity.confirmationCode || "",
+    // Snake_case aliases for PocketBase column mapping
     cost_notes: activity.costNotes,
     duration_estimate: activity.durationEstimate,
     confirmation_code: activity.confirmationCode || undefined,
@@ -182,7 +177,7 @@ export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendA
     booking_reqs: activity.bookingReqs?.length ? activity.bookingReqs : undefined,
     rating_count: activity.ratingCount ?? undefined,
     photo_ref: activity.photoRef || undefined,
-  } as Omit<BackendActivity, "id" | "log">;
+  };
 }
 
 export function activityUpdatesToBackend(fields: {
@@ -219,10 +214,14 @@ export function activityUpdatesToBackend(fields: {
 
 /**
  * Convert app ItineraryDay[] to backend ItineraryDay[].
- * The app stores extra fields (label, slots, flights, lodgingActivityId) which
- * pass through via the backend's JSON column. We cast through unknown since
- * the backend type is narrower than what PocketBase actually stores.
+ * Now that the backend type matches the actual data shape, this is a direct mapping.
  */
 export function daysToBackend(days: import("./types").ItineraryDay[]): BackendItineraryDay[] {
-  return days as unknown as BackendItineraryDay[];
+  return days.map((d) => ({
+    date: d.date,
+    label: d.label,
+    lodgingActivityId: d.lodgingActivityId,
+    flights: d.flights,
+    slots: d.slots,
+  }));
 }

@@ -7,8 +7,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Spin, Button, Alert } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
-import { getBackend } from "@kirkl/shared";
-import { boxFromRecord, recipeFromRecord } from "../storage";
+import { useRecipesBackend } from "../backend-provider";
+import { boxFromBackend, recipeFromBackend } from "../adapters";
 import type { RecipeEntry, BoxEntry } from "../storage";
 import { decodeStr } from "../converters";
 import { PageContainer, AppHeader } from "@kirkl/shared";
@@ -106,6 +106,7 @@ const Tag = styled.span`
 export function PublicRecipe() {
   const { boxId, recipeId } = useParams<{ boxId: string; recipeId: string }>();
   const navigate = useNavigate();
+  const recipesBackend = useRecipesBackend();
   const [recipe, setRecipe] = useState<RecipeEntry | null>(null);
   const [box, setBox] = useState<BoxEntry | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,16 +121,26 @@ export function PublicRecipe() {
       }
 
       try {
-        const pb = getBackend();
+        // Fetch box with recipes (null userId = unauthenticated / public access)
+        const result = await recipesBackend.getBox(boxId, null);
+        if (!result) {
+          setError("Unable to load recipe. It may be private or no longer exist.");
+          setLoading(false);
+          return;
+        }
 
-        // Fetch box first to check visibility
-        const boxRecord = await pb.collection("recipe_boxes").getOne(boxId);
-        const boxData = boxFromRecord(boxRecord);
+        const boxData = boxFromBackend(result.box);
         setBox(boxData);
 
-        // Fetch recipe
-        const recipeRecord = await pb.collection("recipes").getOne(recipeId);
-        const recipeData = recipeFromRecord(recipeRecord);
+        // Find the specific recipe in the box
+        const backendRecipe = result.recipes.find((r) => r.id === recipeId);
+        if (!backendRecipe) {
+          setError("Unable to load recipe. It may be private or no longer exist.");
+          setLoading(false);
+          return;
+        }
+
+        const recipeData = recipeFromBackend(backendRecipe);
 
         // Check if recipe is accessible (public box or public recipe)
         if (boxData.visibility !== "public" && recipeData.visibility !== "public") {
@@ -148,7 +159,7 @@ export function PublicRecipe() {
     }
 
     fetchRecipe();
-  }, [boxId, recipeId]);
+  }, [boxId, recipeId, recipesBackend]);
 
   const handleSignIn = () => {
     // Navigate to the main app which will show the auth screen

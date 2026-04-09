@@ -18,8 +18,7 @@ export function taskFromBackend(t: BackendTask): Task {
     name: t.name,
     description: t.description,
     roomId: t.roomId,
-    // Backend stores frequency as opaque JSON; it's actually a Frequency object
-    frequency: t.frequency as unknown as Task["frequency"],
+    frequency: t.frequency,
     lastCompleted: t.lastCompleted,
     snoozedUntil: t.snoozedUntil,
     notifyUsers: t.notifyUsers,

@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import { timingSafeEqual } from "node:crypto";
 import PocketBase from "pocketbase";
 
 const PB_URL = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
@@ -21,10 +22,13 @@ export async function authMiddleware(c: Context, next: Next) {
 
   // Check API key first (for MCP/curl)
   const apiKey = c.req.header("X-API-Key");
-  if (apiKey && API_KEY && apiKey === API_KEY) {
+  if (apiKey && API_KEY && apiKey.length === API_KEY.length &&
+      timingSafeEqual(Buffer.from(apiKey), Buffer.from(API_KEY))) {
     // API key auth — use a default admin identity
     c.set("userId", process.env.API_KEY_USER_ID || "");
     c.set("userEmail", process.env.API_KEY_USER_EMAIL || "");
+    c.set("userToken", process.env.API_KEY_USER_TOKEN || "");
+    c.set("isApiKey", true);
     return next();
   }
 

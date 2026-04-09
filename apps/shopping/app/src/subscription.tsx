@@ -2,7 +2,7 @@
  * PocketBase real-time subscriptions for the shopping app.
  */
 import { subscribeToRecord, subscribeToCollection, subscribeToCollectionReload } from "@kirkl/shared";
-import { setCurrentListId } from "./pocketbase";
+import { setCurrentListId } from "./current-list-id";
 import { itemFromRecord, listFromRecord } from "./types";
 import type { ShoppingState, ShoppingAction } from "./shopping-context";
 

@@ -48,4 +48,5 @@ export function ShoppingModule() {
 
 // Re-export provider for standalone use
 export { ShoppingProvider, useShoppingContext } from "./shopping-context";
-export { addItem as addShoppingItem, setCurrentListId } from "./pocketbase";
+export { useShoppingBackend } from "./backend-provider";
+export { setCurrentListId } from "./current-list-id";

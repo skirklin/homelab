@@ -124,6 +124,7 @@ export class PocketBaseLifeBackend implements LifeBackend {
     }).catch(() => emit());
 
     // Realtime
+    let unsub: (() => void) | undefined;
     this.pb().collection("life_events").subscribe("*", (e) => {
       if (cancelled || e.record.log !== logId) return;
       if (e.action === "delete") {
@@ -132,11 +133,11 @@ export class PocketBaseLifeBackend implements LifeBackend {
         entriesMap.set(e.record.id, entryFromRecord(e.record));
       }
       emit();
-    });
+    }).then((fn) => { unsub = fn; });
 
     return () => {
       cancelled = true;
-      this.pb().collection("life_events").unsubscribe("*");
+      unsub?.();
     };
   }
 }

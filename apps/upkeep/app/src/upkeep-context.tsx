@@ -5,7 +5,7 @@
 import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
 import { useUpkeepBackend, useUserBackend } from "./backend-provider";
-import { setCurrentListId } from "./pocketbase";
+import { setCurrentListId } from "./current-list-id";
 import { taskFromBackend, listFromBackend, completionFromBackend } from "./adapters";
 import type { Task, TaskList, Completion } from "./types";
 import type { UpkeepBackend } from "@homelab/backend";

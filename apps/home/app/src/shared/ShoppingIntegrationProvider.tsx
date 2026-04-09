@@ -3,7 +3,7 @@
  * This allows recipes to add items to shopping lists when embedded in the home app.
  */
 import type { ReactNode } from "react";
-import { useShoppingContext, addShoppingItem, setCurrentListId } from "@kirkl/shopping";
+import { useShoppingContext, useShoppingBackend } from "@kirkl/shopping";
 import { ShoppingIntegrationContext } from "@kirkl/recipes";
 import { useAuth } from "@kirkl/shared";
 
@@ -14,14 +14,13 @@ interface ShoppingIntegrationProviderProps {
 export function ShoppingIntegrationProvider({ children }: ShoppingIntegrationProviderProps) {
   const { state } = useShoppingContext();
   const { user } = useAuth();
+  const shopping = useShoppingBackend();
 
   const addItem = async (listId: string, ingredient: string, note?: string) => {
     if (!user) {
       throw new Error("User must be authenticated to add items");
     }
-    // Set the current list ID for the PocketBase functions
-    setCurrentListId(listId);
-    await addShoppingItem(ingredient, user.uid, { note });
+    await shopping.addItem(listId, ingredient, user.uid, { note });
   };
 
   const integration = {

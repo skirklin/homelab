@@ -311,9 +311,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       }
     });
 
-    return () => {
-      this.pb().collection(collection).unsubscribe(id);
-    };
+    return unsub;
   }
 
   private async subscribeToCollection(
@@ -338,14 +336,12 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     }
 
     // Subscribe to changes
-    await this.pb().collection(collection).subscribe("*", (e) => {
+    const unsub = await this.pb().collection(collection).subscribe("*", (e) => {
       if (cancelled() || !options.belongsTo(e.record)) return;
       options.onChange(e.action as "create" | "update" | "delete", e.record);
     });
 
-    return () => {
-      this.pb().collection(collection).unsubscribe("*");
-    };
+    return unsub;
   }
 
   private async subscribeToCollectionReload(
@@ -376,13 +372,11 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     await reload();
 
     // Reload on any change
-    await this.pb().collection(collection).subscribe("*", (e) => {
+    const unsub = await this.pb().collection(collection).subscribe("*", (e) => {
       if (cancelled() || !options.belongsTo(e.record)) return;
       reload();
     });
 
-    return () => {
-      this.pb().collection(collection).unsubscribe("*");
-    };
+    return unsub;
   }
 }

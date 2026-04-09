@@ -206,8 +206,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     this.pb().collection(col).subscribe(id, (e) => {
       if (cancelled()) return;
       if (e.action === "delete") cb.onDelete?.(); else cb.onData(e.record);
-    });
-    unsubs.push(() => this.pb().collection(col).unsubscribe(id));
+    }).then((unsub) => unsubs.push(unsub));
   }
 
   private initSubscribeToCollection(
@@ -220,8 +219,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     this.pb().collection(col).subscribe("*", (e) => {
       if (cancelled() || !opts.belongsTo(e.record)) return;
       opts.onChange(e.action, e.record);
-    });
-    unsubs.push(() => this.pb().collection(col).unsubscribe("*"));
+    }).then((unsub) => unsubs.push(unsub));
   }
 
   private initSubscribeToReload(
@@ -237,7 +235,6 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     this.pb().collection(col).subscribe("*", (e) => {
       if (cancelled() || !opts.belongsTo(e.record)) return;
       reload();
-    });
-    unsubs.push(() => this.pb().collection(col).unsubscribe("*"));
+    }).then((unsub) => unsubs.push(unsub));
   }
 }

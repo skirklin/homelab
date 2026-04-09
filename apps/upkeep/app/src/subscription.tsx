@@ -9,7 +9,7 @@ import {
   subscribeToCollectionReload,
 } from "@kirkl/shared";
 import type { RecordModel } from "pocketbase";
-import { setCurrentListId, ensureListExists } from "./pocketbase";
+import { setCurrentListId } from "./current-list-id";
 import { taskFromRecord, listFromRecord } from "./types";
 import type { Completion } from "./types";
 import type { UpkeepState, UpkeepAction } from "./upkeep-context";
@@ -41,7 +41,7 @@ export function subscribeToUserSlugs(userId: string, dispatch: Dispatch, cancell
 
 export async function subscribeToList(
   listId: string,
-  userId: string,
+  _userId: string,
   dispatch: Dispatch,
   cancelled: () => boolean
 ): Promise<Array<() => void>> {
@@ -52,7 +52,6 @@ export async function subscribeToList(
   dispatch({ type: "SET_LIST", list: null });
   dispatch({ type: "SET_LOADING", loading: true });
 
-  await ensureListExists(userId);
   if (cancelled()) return [];
 
   const unsubscribers: Array<() => void> = [];

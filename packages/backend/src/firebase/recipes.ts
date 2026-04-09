@@ -214,14 +214,14 @@ export class FirebaseRecipesBackend implements RecipesBackend {
     });
   }
 
-  async addCookingLogEvent(boxId: string, recipeId: string, userId: string, notes?: string): Promise<string> {
-    const now = Timestamp.now();
+  async addCookingLogEvent(boxId: string, recipeId: string, userId: string, options?: { notes?: string; timestamp?: Date }): Promise<string> {
+    const ts = options?.timestamp ? Timestamp.fromDate(options.timestamp) : Timestamp.now();
     const ref = await addDoc(collection(this.db, "boxes", boxId, "events"), {
       subjectId: recipeId,
-      timestamp: now,
-      createdAt: now,
+      timestamp: ts,
+      createdAt: Timestamp.now(),
       createdBy: userId,
-      data: notes ? { notes } : {},
+      data: options?.notes ? { notes: options.notes } : {},
     });
     return ref.id;
   }

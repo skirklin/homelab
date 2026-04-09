@@ -91,7 +91,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
         await upkeep.updateTask(task.id, {
           name: name.trim(),
           description: description.trim(),
-          frequency: frequency as unknown as number,
+          frequency,
         });
         message.success("Task updated");
       } else {
@@ -100,7 +100,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
           name: name.trim(),
           description: description.trim(),
           roomId: "general",
-          frequency: frequency as unknown as number,
+          frequency,
           lastCompleted: null,
           snoozedUntil: null,
           notifyUsers: [],

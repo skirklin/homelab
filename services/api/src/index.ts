@@ -8,6 +8,7 @@ export type AppEnv = {
     userId: string;
     userEmail: string;
     userToken: string;
+    isApiKey: boolean;
   };
 };
 import { authMiddleware } from "./middleware/auth";

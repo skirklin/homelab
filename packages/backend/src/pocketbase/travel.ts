@@ -31,12 +31,16 @@ function activityFromRecord(r: RecordModel): Activity {
     id: r.id, log: r.log, trip: r.trip_id || undefined, name: r.name || "",
     location: r.location || "", lat: r.lat, lng: r.lng, placeId: r.place_id,
     notes: r.notes || "", rating: r.rating, tags: r.tags || [],
+    category: r.category || "", costNotes: r.cost_notes || "",
+    durationEstimate: r.duration_estimate || "", confirmationCode: r.confirmation_code || "",
   };
 }
 
 function itineraryFromRecord(r: RecordModel): Itinerary {
   return {
-    id: r.id, log: r.log, trip: r.trip_id, name: r.name || "", days: r.days || [],
+    id: r.id, log: r.log, trip: r.trip_id, name: r.name || "",
+    isActive: r.is_active ?? true, days: r.days || [],
+    created: r.created, updated: r.updated,
   };
 }
 
@@ -205,13 +209,11 @@ export class PocketBaseTravelBackend implements TravelBackend {
 
   private sub(col: string, id: string, cancelled: () => boolean, unsubs: Array<() => void>, cb: { onData: (r: RecordModel) => void; onDelete?: () => void }) {
     this.pb().collection(col).getOne(id, { $autoCancel: false }).then((r) => { if (!cancelled()) cb.onData(r); }).catch(() => {});
-    this.pb().collection(col).subscribe(id, (e) => { if (cancelled()) return; if (e.action === "delete") cb.onDelete?.(); else cb.onData(e.record); });
-    unsubs.push(() => this.pb().collection(col).unsubscribe(id));
+    this.pb().collection(col).subscribe(id, (e) => { if (cancelled()) return; if (e.action === "delete") cb.onDelete?.(); else cb.onData(e.record); }).then((unsub) => unsubs.push(unsub));
   }
 
   private subCol(col: string, cancelled: () => boolean, unsubs: Array<() => void>, opts: { filter: string; belongsTo: (r: RecordModel) => boolean; onInitial: (rs: RecordModel[]) => void; onChange: (a: string, r: RecordModel) => void }) {
     this.pb().collection(col).getFullList({ filter: opts.filter, $autoCancel: false }).then((rs) => { if (!cancelled()) opts.onInitial(rs); }).catch(() => { if (!cancelled()) opts.onInitial([]); });
-    this.pb().collection(col).subscribe("*", (e) => { if (cancelled() || !opts.belongsTo(e.record)) return; opts.onChange(e.action, e.record); });
-    unsubs.push(() => this.pb().collection(col).unsubscribe("*"));
+    this.pb().collection(col).subscribe("*", (e) => { if (cancelled() || !opts.belongsTo(e.record)) return; opts.onChange(e.action, e.record); }).then((unsub) => unsubs.push(unsub));
   }
 }
