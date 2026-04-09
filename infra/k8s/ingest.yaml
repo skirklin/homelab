@@ -5,6 +5,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: ingest
@@ -19,6 +24,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 5555
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5555
+            initialDelaySeconds: 3
+            periodSeconds: 5
           volumeMounts:
             - name: data
               mountPath: /app/.data

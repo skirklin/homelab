@@ -53,6 +53,7 @@ const StickyTop = styled.div`
   position: sticky;
   top: 0;
   z-index: 100;
+  background: var(--color-bg);
   max-width: 600px;
   margin: 0 auto;
   width: 100%;

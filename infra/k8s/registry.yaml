@@ -6,6 +6,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: registry
@@ -19,6 +24,12 @@ spec:
           image: registry:2
           ports:
             - containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 2
+            periodSeconds: 5
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry

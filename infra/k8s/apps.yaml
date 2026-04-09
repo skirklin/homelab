@@ -9,6 +9,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: home
@@ -23,6 +28,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests: { memory: 32Mi, cpu: 10m }
             limits: { memory: 64Mi, cpu: 100m }
@@ -48,6 +59,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: recipes
@@ -62,6 +78,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests: { memory: 32Mi, cpu: 10m }
             limits: { memory: 64Mi, cpu: 100m }
@@ -87,6 +109,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: shopping
@@ -101,6 +128,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests: { memory: 32Mi, cpu: 10m }
             limits: { memory: 64Mi, cpu: 100m }
@@ -129,6 +162,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: upkeep
@@ -143,6 +181,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests: { memory: 32Mi, cpu: 10m }
             limits: { memory: 64Mi, cpu: 100m }
@@ -168,6 +212,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: travel
@@ -182,6 +231,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests: { memory: 32Mi, cpu: 10m }
             limits: { memory: 64Mi, cpu: 100m }
@@ -207,6 +262,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: money
@@ -221,6 +281,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests: { memory: 32Mi, cpu: 10m }
             limits: { memory: 64Mi, cpu: 100m }
@@ -246,6 +312,11 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: homepage
@@ -260,6 +331,12 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests: { memory: 16Mi, cpu: 10m }
             limits: { memory: 32Mi, cpu: 50m }
