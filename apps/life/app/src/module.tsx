@@ -7,7 +7,7 @@ import { Routes, Route } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import { LifeProvider, useLife } from "./life-context";
+import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "./backend-provider";
 import { DisplaySettingsProvider } from "./display-settings";
 import type { LifeLog } from "./types";
@@ -31,7 +31,7 @@ interface LifeRoutesProps {
 
 function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   const { user } = useAuth();
-  const { state, dispatch } = useLife();
+  const { state, dispatch } = useLifeContext();
   const life = useLifeBackend();
 
   useEffect(() => {
@@ -100,5 +100,5 @@ export function LifeModule() {
   );
 }
 
-export { LifeProvider, useLife, useLifeContext } from "./life-context";
+export { LifeProvider, useLifeContext } from "./life-context";
 export type { LogEntry, LifeLog, Widget, LifeManifest } from "./types";

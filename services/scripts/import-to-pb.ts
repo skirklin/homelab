@@ -555,7 +555,7 @@ async function importTravel() {
             checklistDone: trip.checklistDone || {},
             status: trip.status,
             region: trip.region,
-            source_refs: trip.sourceRefs,
+            sourceRefs: trip.sourceRefs,
           } as any);
           tripIdMap.set(trip._id, pbTripId);
           tripStats.created++;

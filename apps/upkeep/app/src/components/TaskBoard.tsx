@@ -5,7 +5,7 @@ import { ClockCircleOutlined, DownOutlined, UpOutlined } from "@ant-design/icons
 import styled from "styled-components";
 import { useUpkeepContext } from "../upkeep-context";
 import { useAuth } from "@kirkl/shared";
-import { getTasksByUrgency } from "../subscription";
+import { getTasksByUrgency } from "../selectors";
 import { Header } from "./Header";
 import { KanbanColumn } from "./KanbanColumn";
 import { TaskModal } from "./TaskModal";

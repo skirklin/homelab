@@ -6,7 +6,7 @@ import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, ShareA
 import { getBackend, AppHeader, ShareModal } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend } from "../backend-provider";
-import { getItemsFromState } from "../subscription";
+import { getItemsFromState } from "../selectors";
 import { appStorage, StorageKeys } from "../storage";
 import { SyncIndicator } from "./SyncIndicator";
 

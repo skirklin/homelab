@@ -34,7 +34,7 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
   };
 };
 import { useShoppingContext } from "../shopping-context";
-import { getItemsByCategoryId } from "../subscription";
+import { getItemsByCategoryId } from "../selectors";
 import { useShoppingBackend } from "../backend-provider";
 import { Header } from "./Header";
 import { AddItem } from "./AddItem";

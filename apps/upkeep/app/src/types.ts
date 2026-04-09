@@ -1,6 +1,5 @@
 import type { Event, EventStore, NotificationMode } from "@kirkl/shared";
 export type { Event, EventStore, NotificationMode };
-export { eventFromStore, eventToStore } from "@kirkl/shared";
 
 // Room/area definition for organizing tasks
 export interface RoomDef {
@@ -66,38 +65,6 @@ export type { UserProfile, UserProfileStore } from "@kirkl/shared";
 // Urgency levels for Kanban columns
 export type UrgencyLevel = "today" | "thisWeek" | "later";
 
-// PocketBase record converters — records come as plain objects with ISO date strings
-
-export function taskFromRecord(record: Record<string, unknown>): Task {
-  return {
-    id: record.id as string,
-    name: (record.name as string) || "",
-    description: (record.description as string) || "",
-    roomId: (record.room_id as string) || "general",
-    frequency: (record.frequency as Frequency) || { value: 1, unit: "weeks" },
-    lastCompleted: record.last_completed ? new Date(record.last_completed as string) : null,
-    snoozedUntil: record.snoozed_until ? new Date(record.snoozed_until as string) : null,
-    notifyUsers: (record.notify_users as string[]) || [],
-    createdBy: (record.created_by as string) || "",
-    createdAt: new Date(record.created as string),
-    updatedAt: new Date(record.updated as string),
-  };
-}
-
-export function listFromRecord(record: Record<string, unknown>): TaskList {
-  return {
-    id: record.id as string,
-    name: (record.name as string) || "",
-    owners: (record.owners as string[]) || [],
-    rooms: (record.room_defs as RoomDef[]) || [],
-    created: new Date(record.created as string),
-    updated: new Date(record.updated as string),
-  };
-}
-
-// Keep old names as aliases for backward compat
-export const taskFromStore = taskFromRecord;
-export const listFromStore = listFromRecord;
 
 // Utility: calculate next due date
 export function calculateDueDate(task: Task): Date | null {

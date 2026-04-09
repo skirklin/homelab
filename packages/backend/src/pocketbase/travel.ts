@@ -22,7 +22,7 @@ function tripFromRecord(r: RecordModel): Trip {
     startDate: r.start_date || "", endDate: r.end_date || "", notes: r.notes || "",
     flagged: !!r.flagged_for_review, flagComment: r.review_comment || "",
     checklistDone: r.checklist_done || {},
-    status: r.status, region: r.region, source_refs: r.source_refs,
+    status: r.status, region: r.region, sourceRefs: r.source_refs,
   };
 }
 
@@ -180,8 +180,9 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (t.flagged !== undefined) d.flagged_for_review = t.flagged;
     if (t.flagComment !== undefined) d.review_comment = t.flagComment;
     if (t.checklistDone !== undefined) d.checklist_done = t.checklistDone;
-    // Pass through extra fields (status, region, source_refs, etc.)
-    const mapped = new Set(["id", "log", "name", "destination", "startDate", "endDate", "notes", "flagged", "flagComment", "checklistDone"]);
+    if (t.sourceRefs !== undefined) d.source_refs = t.sourceRefs;
+    // Pass through extra fields (status, region, etc.)
+    const mapped = new Set(["id", "log", "name", "destination", "startDate", "endDate", "notes", "flagged", "flagComment", "checklistDone", "sourceRefs", "created", "updated"]);
     for (const [k, v] of Object.entries(t)) {
       if (!mapped.has(k) && v !== undefined) d[k] = v;
     }
@@ -207,13 +208,48 @@ export class PocketBaseTravelBackend implements TravelBackend {
     return d;
   }
 
-  private sub(col: string, id: string, cancelled: () => boolean, unsubs: Array<() => void>, cb: { onData: (r: RecordModel) => void; onDelete?: () => void }) {
-    this.pb().collection(col).getOne(id, { $autoCancel: false }).then((r) => { if (!cancelled()) cb.onData(r); }).catch(() => {});
-    this.pb().collection(col).subscribe(id, (e) => { if (cancelled()) return; if (e.action === "delete") cb.onDelete?.(); else cb.onData(e.record); }).then((unsub) => unsubs.push(unsub));
+  private sub(
+    col: string,
+    id: string,
+    cancelled: () => boolean,
+    unsubs: Array<() => void>,
+    cb: { onData: (r: RecordModel) => void; onDelete?: () => void },
+  ) {
+    this.pb().collection(col)
+      .getOne(id, { $autoCancel: false })
+      .then((r) => { if (!cancelled()) cb.onData(r); })
+      .catch(() => {});
+
+    this.pb().collection(col)
+      .subscribe(id, (e) => {
+        if (cancelled()) return;
+        if (e.action === "delete") cb.onDelete?.();
+        else cb.onData(e.record);
+      })
+      .then((unsub) => unsubs.push(unsub));
   }
 
-  private subCol(col: string, cancelled: () => boolean, unsubs: Array<() => void>, opts: { filter: string; belongsTo: (r: RecordModel) => boolean; onInitial: (rs: RecordModel[]) => void; onChange: (a: string, r: RecordModel) => void }) {
-    this.pb().collection(col).getFullList({ filter: opts.filter, $autoCancel: false }).then((rs) => { if (!cancelled()) opts.onInitial(rs); }).catch(() => { if (!cancelled()) opts.onInitial([]); });
-    this.pb().collection(col).subscribe("*", (e) => { if (cancelled() || !opts.belongsTo(e.record)) return; opts.onChange(e.action, e.record); }).then((unsub) => unsubs.push(unsub));
+  private subCol(
+    col: string,
+    cancelled: () => boolean,
+    unsubs: Array<() => void>,
+    opts: {
+      filter: string;
+      belongsTo: (r: RecordModel) => boolean;
+      onInitial: (rs: RecordModel[]) => void;
+      onChange: (a: string, r: RecordModel) => void;
+    },
+  ) {
+    this.pb().collection(col)
+      .getFullList({ filter: opts.filter, $autoCancel: false })
+      .then((rs) => { if (!cancelled()) opts.onInitial(rs); })
+      .catch(() => { if (!cancelled()) opts.onInitial([]); });
+
+    this.pb().collection(col)
+      .subscribe("*", (e) => {
+        if (cancelled() || !opts.belongsTo(e.record)) return;
+        opts.onChange(e.action, e.record);
+      })
+      .then((unsub) => unsubs.push(unsub));
   }
 }

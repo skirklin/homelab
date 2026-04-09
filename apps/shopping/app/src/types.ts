@@ -51,32 +51,3 @@ export type ItemHistoryStore = ItemHistory;
 export type LegacyItemHistoryStore = { name?: string };
 export type ShoppingTripStore = ShoppingTrip;
 
-// Converters — PocketBase records come as plain objects with ISO date strings
-export function itemFromRecord(record: Record<string, unknown>): ShoppingItem {
-  return {
-    id: record.id as string,
-    ingredient: record.ingredient as string || "",
-    note: record.note as string | undefined,
-    categoryId: (record.category_id as string) || "uncategorized",
-    checked: record.checked as boolean || false,
-    addedBy: record.added_by as string || "",
-    addedAt: new Date(record.created as string),
-    checkedBy: record.checked_by as string | undefined,
-    checkedAt: record.checked_at ? new Date(record.checked_at as string) : undefined,
-  };
-}
-
-export function listFromRecord(record: Record<string, unknown>): ShoppingList {
-  return {
-    id: record.id as string,
-    name: record.name as string || "",
-    owners: record.owners as string[] || [],
-    categories: (record.category_defs as CategoryDef[]) || [],
-    created: new Date(record.created as string),
-    updated: new Date(record.updated as string),
-  };
-}
-
-// Keep old names as aliases
-export const itemFromStore = itemFromRecord;
-export const listFromStore = listFromRecord;

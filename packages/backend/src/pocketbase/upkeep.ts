@@ -7,6 +7,10 @@ import type { UpkeepBackend } from "../interfaces/upkeep";
 import type { TaskList, Task, RoomDef, TaskCompletion } from "../types/upkeep";
 import type { Unsubscribe } from "../types/common";
 
+// --- Pagination limits ---
+
+const COMPLETIONS_PAGE_SIZE = 100;
+
 function listFromRecord(r: RecordModel): TaskList {
   return {
     id: r.id,
@@ -186,7 +190,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     this.initSubscribeToReload("task_events", isCancelled, unsubs, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-timestamp",
-      perPage: 100,
+      perPage: COMPLETIONS_PAGE_SIZE,
       belongsTo: (r) => r.list === listId,
       onData: (records) => handlers.onCompletions(records.map(completionFromRecord)),
     });

@@ -14,7 +14,7 @@ import {
   AppHeader,
   useFeedback,
 } from "@kirkl/shared";
-import { useLife } from "../life-context";
+import { useLifeContext } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
 import { WidgetRenderer } from "./widgets";
 import { ManifestEditor } from "./ManifestEditor";
@@ -106,7 +106,7 @@ interface LifeDashboardProps {
 export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const { message } = useFeedback();
   const { user } = useAuth();
-  const { state, dispatch } = useLife();
+  const { state, dispatch } = useLifeContext();
   const navigate = useNavigate();
   const life = useLifeBackend();
   const [showManifestEditor, setShowManifestEditor] = useState(false);

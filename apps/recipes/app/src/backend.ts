@@ -36,7 +36,7 @@ import { initializeBackend } from "@kirkl/shared";
 initializeBackend();
 
 // ============================================
-// API client functions — match old Firebase callable signatures
+// API client functions
 // ============================================
 
 export const getRecipes = async (args: { url: string | undefined }): Promise<{ data: { error?: string; recipes: string } }> => {

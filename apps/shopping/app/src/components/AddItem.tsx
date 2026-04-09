@@ -6,7 +6,7 @@ import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend } from "../backend-provider";
-import { getItemsFromState } from "../subscription";
+import { getItemsFromState } from "../selectors";
 
 const Container = styled.div`
   padding: var(--space-md);

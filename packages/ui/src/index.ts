@@ -74,9 +74,6 @@ export {
   WidgetGrid,
 } from "./styles";
 
-// PocketBase subscription helpers
-export { subscribeToRecord, subscribeToCollection, subscribeToCollectionReload } from "./subscribe";
-
 // Ant Design feedback hook
 export { useFeedback } from "./useFeedback";
 

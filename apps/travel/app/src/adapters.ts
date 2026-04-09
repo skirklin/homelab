@@ -1,7 +1,7 @@
 /**
  * Adapters between @homelab/backend types and the travel app's local types.
  *
- * The backend uses simpler flat types (string dates, [key: string]: unknown)
+ * The backend uses simpler flat types (string dates, optional fields)
  * while the app uses richer types (Date objects, typed enums, etc.).
  */
 
@@ -35,7 +35,7 @@ export function tripFromBackend(bt: BackendTrip): Trip {
     startDate: bt.startDate ? new Date(bt.startDate) : null,
     endDate: bt.endDate ? new Date(bt.endDate) : null,
     notes: bt.notes || "",
-    sourceRefs: bt.source_refs || "",
+    sourceRefs: bt.sourceRefs || "",
     flaggedForReview: bt.flagged || false,
     reviewComment: bt.flagComment || "",
     checklistDone: bt.checklistDone || {},
@@ -122,7 +122,7 @@ export function tripToBackend(trip: Omit<Trip, "id">): Omit<BackendTrip, "id" | 
     checklistDone: trip.checklistDone || {},
     status: trip.status,
     region: trip.region,
-    source_refs: trip.sourceRefs,
+    sourceRefs: trip.sourceRefs,
   };
 }
 
@@ -147,7 +147,7 @@ export function tripUpdatesToBackend(fields: {
   if (fields.startDate !== undefined) updates.startDate = fields.startDate ? fields.startDate.toISOString() : "";
   if (fields.endDate !== undefined) updates.endDate = fields.endDate ? fields.endDate.toISOString() : "";
   if (fields.notes !== undefined) updates.notes = fields.notes;
-  if (fields.sourceRefs !== undefined) updates.source_refs = fields.sourceRefs;
+  if (fields.sourceRefs !== undefined) updates.sourceRefs = fields.sourceRefs;
   if (fields.flaggedForReview !== undefined) updates.flagged = fields.flaggedForReview;
   if (fields.reviewComment !== undefined) updates.flagComment = fields.reviewComment;
   return updates as Partial<Omit<BackendTrip, "id" | "log">>;

@@ -4,7 +4,7 @@
  */
 import { useEffect } from "react";
 import type { LifeEntry } from "@homelab/backend";
-import { useLife } from "./life-context";
+import { useLifeContext } from "./life-context";
 import { useLifeBackend } from "./backend-provider";
 import type { LogEntry } from "./types";
 
@@ -25,7 +25,7 @@ function toLogEntry(entry: LifeEntry): LogEntry {
 }
 
 export function useEntriesSubscription(logId: string | null) {
-  const { dispatch } = useLife();
+  const { dispatch } = useLifeContext();
   const life = useLifeBackend();
 
   useEffect(() => {

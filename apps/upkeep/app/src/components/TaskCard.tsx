@@ -181,7 +181,7 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
           return;
         }
 
-        // Get FCM token (also saves it to Firestore)
+        // Get FCM token (registers the push subscription)
         await getFcmToken(userId);
       }
 

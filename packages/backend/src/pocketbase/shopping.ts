@@ -7,6 +7,11 @@ import type { ShoppingBackend } from "../interfaces/shopping";
 import type { ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTrip } from "../types/shopping";
 import type { Unsubscribe } from "../types/common";
 
+// --- Pagination limits ---
+
+const HISTORY_PAGE_SIZE = 500;
+const TRIPS_PAGE_SIZE = 50;
+
 // --- Record → domain type mappers ---
 
 function listFromRecord(r: RecordModel): ShoppingList {
@@ -265,7 +270,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     this.subscribeToCollectionReload("shopping_history", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-last_added",
-      perPage: 500,
+      perPage: HISTORY_PAGE_SIZE,
       belongsTo: (r) => r.list === listId,
       onData: (records) => handlers.onHistory(records.map(historyFromRecord)),
     }).then((u) => unsubs.push(u));
@@ -274,7 +279,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     this.subscribeToCollectionReload("shopping_trips", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-completed_at",
-      perPage: 50,
+      perPage: TRIPS_PAGE_SIZE,
       belongsTo: (r) => r.list === listId,
       onData: (records) => handlers.onTrips(records.map(tripFromRecord)),
     }).then((u) => unsubs.push(u));

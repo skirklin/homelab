@@ -83,8 +83,3 @@ export function useLifeContext() {
   return useContext(LifeContext);
 }
 
-/**
- * @deprecated Use useLifeContext() instead for consistency with other apps.
- * This alias will be removed in a future version.
- */
-export const useLife = useLifeContext;

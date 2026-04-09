@@ -14,7 +14,7 @@ import {
   AreaChart,
   Area,
 } from "recharts";
-import { useLife } from "../life-context";
+import { useLifeContext } from "../life-context";
 import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType, ComboWidget as ComboWidgetType, SampleQuestion } from "../types";
 
 // Helper to extract numeric values from an entry based on widget type
@@ -628,7 +628,7 @@ function buildVisualizableItems(widgets: Widget[], sampleQuestions: SampleQuesti
 }
 
 export function Visualizations() {
-  const { state } = useLife();
+  const { state } = useLifeContext();
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
