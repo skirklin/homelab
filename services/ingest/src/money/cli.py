@@ -463,51 +463,9 @@ def login_google_cmd() -> None:
     click.echo("Google Calendar auth complete.")
 
 
-@login.command("ally")
-@click.option(
-    "--login", "--profile", "login_id",
-    required=True,
-    help="Login ID (e.g. 'scott@ally') or bare person name (e.g. 'scott').",
-)
-@click.option("--headless", is_flag=True, help="Run headless (no visible browser window).")
-def login_ally_cmd(login_id: str, headless: bool) -> None:
-    """Log into Ally Bank to capture auth token."""
-    from money.config import resolve_login_id
-    from money.ingest.scrapers.ally import login_ally
-
-    profile = resolve_login_id("ally", login_id)
-    login_ally(profile, headless=headless)
-    click.echo("Ally login complete — auth token saved.")
-
-
 @main.group()
 def sync() -> None:
     """Sync data from financial institutions."""
-
-
-@sync.command()
-@click.option(
-    "--login", "--profile", "login_id",
-    required=True,
-    help="Login ID (e.g. 'scott@ally') or bare person name (e.g. 'scott').",
-)
-@click.pass_context
-def ally(ctx: click.Context, login_id: str) -> None:
-    """Sync Ally Bank accounts. Logs in via Playwright to get fresh auth."""
-    from money.config import resolve_login_id
-    from money.ingest.ally_api import sync_ally_api
-    from money.ingest.scrapers.ally import login_ally
-
-    resolved = resolve_login_id("ally", login_id)
-
-    click.echo("Logging in via browser...")
-    token, cookies_dict = login_ally(resolved, headless=True)
-    cookies_dict["Ally-CIAM-Token"] = token
-
-    with sync_context(ctx) as (db, store):
-        sync_ally_api(db, store, profile=resolved, cookies=cookies_dict)
-        click.echo("Ally sync complete.")
-
 
 
 def _load_cookies_for_sync(login_id: str, institution: str) -> dict[str, str]:

@@ -11,7 +11,8 @@
       "Bash(ls /home/skirklin/projects/homelab/infra/k8s/ingest*)",
       "Bash(ls /home/skirklin/projects/homelab/infra/k8s/caddy*)",
       "Bash(chmod +x /home/skirklin/projects/homelab/infra/build-extension.sh)",
-      "Bash(bash infra/build-extension.sh)"
+      "Bash(bash infra/build-extension.sh)",
+      "Bash(grep -r \"browser\" /home/skirklin/projects/homelab/services/ingest/src/money/ingest/*.py)"
     ]
   }
 }
