@@ -173,7 +173,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
 
     // Tasks
     this.initSubscribeToCollection("tasks", isCancelled, unsubs, {
-      filter: `list = "${listId}"`,
+      filter: this.pb().filter("list = {:listId}", { listId }),
       belongsTo: (r) => r.list === listId,
       onInitial: (records) => { for (const r of records) tasksMap.set(r.id, taskFromRecord(r)); emitTasks(); },
       onChange: (action, r) => {
@@ -184,7 +184,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
 
     // Completions — reload on any change
     this.initSubscribeToReload("task_events", isCancelled, unsubs, {
-      filter: `list = "${listId}"`,
+      filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-timestamp",
       perPage: 100,
       belongsTo: (r) => r.list === listId,

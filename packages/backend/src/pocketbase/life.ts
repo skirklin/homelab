@@ -115,7 +115,7 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
     // Initial fetch
     this.pb().collection("life_events").getFullList({
-      filter: `log = "${logId}"`,
+      filter: this.pb().filter("log = {:logId}", { logId }),
       $autoCancel: false,
     }).then((records) => {
       if (cancelled) return;

@@ -26,6 +26,7 @@ export function subscribeToRecord(
   },
 ): Cleanup {
   const pb = getBackend();
+  let unsub: (() => void) | undefined;
 
   // Load initial data
   pb.collection(collection)
@@ -45,10 +46,10 @@ export function subscribeToRecord(
     } else {
       callbacks.onData(e.record);
     }
-  });
+  }).then((fn) => { unsub = fn; });
 
   return () => {
-    pb.collection(collection).unsubscribe(id);
+    unsub?.();
   };
 }
 
@@ -95,6 +96,7 @@ export function subscribeToCollection(
 ): Cleanup {
   const pb = getBackend();
   const { filter, sort, onInitial, onChange, belongsTo, onError } = options;
+  let unsub: (() => void) | undefined;
 
   // Load initial data
   pb.collection(collection)
@@ -111,10 +113,10 @@ export function subscribeToCollection(
     if (cancelled()) return;
     if (belongsTo && !belongsTo(e.record)) return;
     onChange(e.action as "create" | "update" | "delete", e.record);
-  });
+  }).then((fn) => { unsub = fn; });
 
   return () => {
-    pb.collection(collection).unsubscribe("*");
+    unsub?.();
   };
 }
 
@@ -130,6 +132,7 @@ export function subscribeToCollectionReload(
 ): Cleanup {
   const pb = getBackend();
   const { filter, sort, page, perPage, onInitial, onAnyChange, belongsTo, onError } = options;
+  let unsub: (() => void) | undefined;
 
   const fetchOpts = { filter, sort, $autoCancel: false };
 
@@ -155,9 +158,9 @@ export function subscribeToCollectionReload(
       .catch((err) => {
         if (!cancelled()) onError?.(err);
       });
-  });
+  }).then((fn) => { unsub = fn; });
 
   return () => {
-    pb.collection(collection).unsubscribe("*");
+    unsub?.();
   };
 }

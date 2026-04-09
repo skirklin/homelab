@@ -148,21 +148,21 @@ export class PocketBaseTravelBackend implements TravelBackend {
 
     // Trips
     this.subCol("travel_trips", () => cancelled, unsubs, {
-      filter: `log = "${logId}"`, belongsTo: (r) => r.log === logId,
+      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
       onInitial: (rs) => { for (const r of rs) tripsMap.set(r.id, tripFromRecord(r)); handlers.onTrips(Array.from(tripsMap.values())); },
       onChange: (a, r) => { if (a === "delete") tripsMap.delete(r.id); else tripsMap.set(r.id, tripFromRecord(r)); handlers.onTrips(Array.from(tripsMap.values())); },
     });
 
     // Activities
     this.subCol("travel_activities", () => cancelled, unsubs, {
-      filter: `log = "${logId}"`, belongsTo: (r) => r.log === logId,
+      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
       onInitial: (rs) => { for (const r of rs) activitiesMap.set(r.id, activityFromRecord(r)); handlers.onActivities(Array.from(activitiesMap.values())); },
       onChange: (a, r) => { if (a === "delete") activitiesMap.delete(r.id); else activitiesMap.set(r.id, activityFromRecord(r)); handlers.onActivities(Array.from(activitiesMap.values())); },
     });
 
     // Itineraries
     this.subCol("travel_itineraries", () => cancelled, unsubs, {
-      filter: `log = "${logId}"`, belongsTo: (r) => r.log === logId,
+      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
       onInitial: (rs) => { for (const r of rs) itinerariesMap.set(r.id, itineraryFromRecord(r)); handlers.onItineraries(Array.from(itinerariesMap.values())); },
       onChange: (a, r) => { if (a === "delete") itinerariesMap.delete(r.id); else itinerariesMap.set(r.id, itineraryFromRecord(r)); handlers.onItineraries(Array.from(itinerariesMap.values())); },
     });

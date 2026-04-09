@@ -105,7 +105,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     if (!options?.categoryId) {
       try {
         const history = await this.pb().collection("shopping_history").getFirstListItem(
-          `list = "${listId}" && ingredient = "${normalizeIngredient(ingredient)}"`,
+          this.pb().filter("list = {:listId} && ingredient = {:ingredient}", { listId, ingredient: normalizeIngredient(ingredient) }),
           opts,
         );
         categoryId = history.category_id || "uncategorized";
@@ -126,7 +126,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     // Save to history
     try {
       const existing = await this.pb().collection("shopping_history").getFirstListItem(
-        `list = "${listId}" && ingredient = "${normalizeIngredient(ingredient)}"`,
+        this.pb().filter("list = {:listId} && ingredient = {:ingredient}", { listId, ingredient: normalizeIngredient(ingredient) }),
         opts,
       );
       await this.pb().collection("shopping_history").update(existing.id, {
@@ -161,7 +161,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     const listId = item.list;
     try {
       const existing = await this.pb().collection("shopping_history").getFirstListItem(
-        `list = "${listId}" && ingredient = "${normalizeIngredient(ingredient)}"`,
+        this.pb().filter("list = {:listId} && ingredient = {:ingredient}", { listId, ingredient: normalizeIngredient(ingredient) }),
       );
       await this.pb().collection("shopping_history").update(existing.id, {
         category_id: categoryId,
@@ -245,7 +245,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
     // Items — track in map, emit full state
     this.subscribeToCollection("shopping_items", isCancelled, {
-      filter: `list = "${listId}"`,
+      filter: this.pb().filter("list = {:listId}", { listId }),
       belongsTo: (r) => r.list === listId,
       onInitial: (records) => {
         for (const r of records) itemsMap.set(r.id, itemFromRecord(r));
@@ -263,7 +263,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
     // History — full reload on any change
     this.subscribeToCollectionReload("shopping_history", isCancelled, {
-      filter: `list = "${listId}"`,
+      filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-last_added",
       perPage: 500,
       belongsTo: (r) => r.list === listId,
@@ -272,7 +272,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
     // Trips — full reload on any change
     this.subscribeToCollectionReload("shopping_trips", isCancelled, {
-      filter: `list = "${listId}"`,
+      filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-completed_at",
       perPage: 50,
       belongsTo: (r) => r.list === listId,

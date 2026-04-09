@@ -138,7 +138,7 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
       const recipes: Recipe[] = [];
       if (userId) {
         const records = await this.pb().collection("recipes").getFullList({
-          filter: `box = "${boxId}"`,
+          filter: this.pb().filter("box = {:boxId}", { boxId }),
         });
         for (const r of records) recipes.push(recipeFromRecord(r));
       }
@@ -224,7 +224,7 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
   async getCookingLogEvents(boxId: string, recipeId: string): Promise<CookingLogEvent[]> {
     try {
       const records = await this.pb().collection("recipe_events").getFullList({
-        filter: `box = "${boxId}" && subject_id = "${recipeId}"`,
+        filter: this.pb().filter("box = {:boxId} && subject_id = {:recipeId}", { boxId, recipeId }),
         sort: "-timestamp",
       });
       return records.map(eventFromRecord);
@@ -289,7 +289,7 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
 
         // Fetch recipes for this box
         const recipeRecords = await this.pb().collection("recipes").getFullList({
-          filter: `box = "${boxId}"`,
+          filter: this.pb().filter("box = {:boxId}", { boxId }),
           $autoCancel: false,
         });
         if (cancelled) return;

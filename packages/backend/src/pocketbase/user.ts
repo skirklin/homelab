@@ -66,16 +66,17 @@ export class PocketBaseUserBackend implements UserBackend {
     });
 
     // Subscribe to changes
+    let unsub: (() => void) | undefined;
     this.pb().collection("users").subscribe(userId, (e) => {
       if (cancelled) return;
       if (e.action === "update") {
         onSlugs(e.record[field] || {});
       }
-    });
+    }).then((fn) => { unsub = fn; });
 
     return () => {
       cancelled = true;
-      this.pb().collection("users").unsubscribe(userId);
+      unsub?.();
     };
   }
 
