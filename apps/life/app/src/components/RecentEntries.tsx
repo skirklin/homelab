@@ -1,10 +1,11 @@
 import { useState } from "react";
 import styled from "styled-components";
-import { List, Tag, Popconfirm, Button, message } from "antd";
+import { List, Tag, Popconfirm, Button } from "antd";
 import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
+import { useFeedback } from "@kirkl/shared";
 import type { LogEntry, Widget, LifeManifest } from "../types";
 import { getWidget, getSource, getNotes } from "../types";
-import { deleteEntry } from "../pocketbase";
+import { useLifeBackend } from "../backend-provider";
 import { EditEntryModal } from "./EditEntryModal";
 
 const EntryItem = styled(List.Item)`
@@ -60,6 +61,8 @@ interface RecentEntriesProps {
 }
 
 export function RecentEntries({ entries, manifest, logId }: RecentEntriesProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [editingEntry, setEditingEntry] = useState<LogEntry | null>(null);
 
   const formatTime = (date: Date): string => {
@@ -123,7 +126,7 @@ export function RecentEntries({ entries, manifest, logId }: RecentEntriesProps) 
   const handleDelete = async (entry: LogEntry) => {
     if (!logId) return;
     try {
-      await deleteEntry(entry.id, logId);
+      await life.deleteEntry(entry.id);
       message.success("Entry deleted");
     } catch (error) {
       console.error("Failed to delete:", error);

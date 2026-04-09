@@ -3,7 +3,7 @@ import { Modal } from 'antd';
 import styled from 'styled-components';
 import { Context } from '../context';
 import { getAppUserFromState } from '../state';
-import { setLastSeenUpdateVersion } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
 import { useAuth } from '@kirkl/shared';
 
 // Increment this when adding new updates
@@ -32,6 +32,7 @@ function WhatsNew() {
   const [isOpen, setIsOpen] = useState(false);
   const { state } = useContext(Context);
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const user = getAppUserFromState(state, authUser?.uid);
 
   useEffect(() => {
@@ -43,7 +44,7 @@ function WhatsNew() {
 
   const handleClose = () => {
     if (user) {
-      setLastSeenUpdateVersion(user.id, CURRENT_UPDATE_VERSION);
+      recipesBackend.setLastSeenUpdateVersion(user.id, CURRENT_UPDATE_VERSION);
     }
     setIsOpen(false);
   };

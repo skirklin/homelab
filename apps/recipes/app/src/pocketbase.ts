@@ -177,7 +177,7 @@ export async function deleteRecipe(boxes: Map<string, BoxEntry>, boxId: BoxId, r
   }
 }
 
-export async function saveRecipe(boxId: BoxId, recipeId: RecipeId, recipe: RecipeEntry) {
+export async function saveRecipe(recipeId: RecipeId, recipe: RecipeEntry) {
   // Reset enrichment status so the recipe gets re-enriched after user edits
   recipe.enrichmentStatus = EnrichmentStatus.needed;
   recipe.pendingChanges = undefined;
@@ -201,7 +201,7 @@ export async function setBoxVisibility(boxId: BoxId, visibility: Visibility) {
   await pb().collection("recipe_boxes").update(boxId, { visibility });
 }
 
-export async function setRecipeVisibility(boxId: BoxId, recipeId: RecipeId, visibility: Visibility) {
+export async function setRecipeVisibility(recipeId: RecipeId, visibility: Visibility) {
   await pb().collection("recipes").update(recipeId, { visibility });
 }
 
@@ -220,7 +220,6 @@ export async function setLastSeenUpdateVersion(userId: UserId, version: number) 
 import type { PendingChanges } from './types';
 
 export async function applyChanges(
-  boxId: BoxId,
   recipeId: RecipeId,
   changes: PendingChanges,
   currentRecipe?: { description?: string; tags?: string[] }
@@ -277,7 +276,7 @@ export async function applyChanges(
   await pb().collection("recipes").update(recipeId, updates);
 }
 
-export async function rejectChanges(boxId: BoxId, recipeId: RecipeId, source?: string) {
+export async function rejectChanges(recipeId: RecipeId, source?: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updates: Record<string, any> = {
     pending_changes: null,
@@ -340,7 +339,6 @@ export async function addCookingLogEvent(
  * Update a cooking log event's notes
  */
 export async function updateCookingLogEvent(
-  boxId: BoxId,
   eventId: string,
   notes: string
 ): Promise<void> {
@@ -359,7 +357,6 @@ export async function updateCookingLogEvent(
  * Delete a cooking log event
  */
 export async function deleteCookingLogEvent(
-  boxId: BoxId,
   eventId: string
 ): Promise<void> {
   await pb().collection("recipe_events").delete(eventId);

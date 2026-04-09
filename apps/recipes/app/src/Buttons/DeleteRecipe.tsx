@@ -4,7 +4,7 @@ import { useContext } from 'react';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
-import { deleteRecipe } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import type { BoxId, RecipeId } from '../types';
@@ -20,6 +20,7 @@ interface DeleteProps {
 function DeleteButton(props: DeleteProps) {
   const { state, dispatch } = useContext(Context)
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const { writeable } = state;
   const box = getBoxFromState(state, props.boxId)
   const recipe = getRecipeFromState(state, props.boxId, props.recipeId)
@@ -39,9 +40,9 @@ function DeleteButton(props: DeleteProps) {
 
 
   async function del() {
-    deleteRecipe(state.boxes, boxId, recipeId, dispatch).then(
-      () => navigate(`${basePath}/boxes/${boxId}`)
-    )
+    dispatch({ type: "REMOVE_RECIPE", boxId, recipeId });
+    await recipesBackend.deleteRecipe(recipeId);
+    navigate(`${basePath}/boxes/${boxId}`);
   }
 
   let elt;

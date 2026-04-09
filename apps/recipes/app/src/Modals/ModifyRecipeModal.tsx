@@ -3,7 +3,8 @@ import { Button, Modal, Spin, Space, Typography, Input, Alert } from 'antd';
 import { useContext, useState } from 'react';
 import { modifyRecipe } from '../backend';
 import { Context } from '../context';
-import { applyChanges, rejectChanges } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
+import { pendingChangesToBackend } from '../adapters';
 import { getRecipeFromState } from '../state';
 import { type BoxId, type PendingChanges, type RecipeId } from '../types';
 import { RecipeDiffView } from './RecipeDiffView';
@@ -25,6 +26,7 @@ function ModifyRecipeModal(props: ModifyRecipeModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [changes, setChanges] = useState<PendingChanges | null>(null);
   const { state } = useContext(Context);
+  const recipesBackend = useRecipesBackend();
 
   const recipe = getRecipeFromState(state, boxId, recipeId);
   const recipeData = recipe?.getData();
@@ -51,7 +53,7 @@ function ModifyRecipeModal(props: ModifyRecipeModalProps) {
     if (!changes) return;
 
     try {
-      await applyChanges(boxId, recipeId, changes);
+      await recipesBackend.applyChanges(recipeId, pendingChangesToBackend(changes));
       handleClose();
     } catch (err) {
       console.error('Error applying modifications:', err);
@@ -61,7 +63,7 @@ function ModifyRecipeModal(props: ModifyRecipeModalProps) {
 
   async function handleReject() {
     try {
-      await rejectChanges(boxId, recipeId, 'modification');
+      await recipesBackend.rejectChanges(recipeId, 'modification');
       setChanges(null);
     } catch (err) {
       console.error('Error rejecting modifications:', err);

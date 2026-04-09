@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Popover, Segmented, message } from "antd";
+import { Button, Popover, Segmented } from "antd";
 import { ShareAltOutlined, LogoutOutlined, PlusOutlined, BellOutlined, BellFilled } from "@ant-design/icons";
-import { AppHeader, ShareModal, useAuth, getBackend } from "@kirkl/shared";
+import { AppHeader, ShareModal, useAuth, getBackend, useFeedback } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { getCurrentListId, getNotificationMode, setNotificationMode } from "../pocketbase";
+import { useUserBackend } from "../backend-provider";
 import { appStorage, StorageKeys } from "../storage";
 import { isNotificationSupported, requestNotificationPermission, getFcmToken } from "../messaging";
 import styled from "styled-components";
@@ -27,26 +27,28 @@ interface HeaderProps {
 }
 
 export function Header({ onAddTask, embedded = false }: HeaderProps) {
+  const { message } = useFeedback();
   const { state } = useUpkeepContext();
   const { user } = useAuth();
+  const userBackend = useUserBackend();
   const navigate = useNavigate();
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [notificationMode, setNotificationModeState] = useState<NotificationMode>("subscribed");
   const [loadingSettings, setLoadingSettings] = useState(true);
 
-  const listId = getCurrentListId();
+  const listId = state.list?.id || "";
   const shareUrl = `${window.location.origin}/join/${listId}`;
   const listName = state.list?.name || "Tasks";
 
   // Load notification settings
   useEffect(() => {
     if (user) {
-      getNotificationMode(user.uid).then((mode) => {
+      userBackend.getNotificationMode(user.uid).then((mode) => {
         setNotificationModeState(mode);
         setLoadingSettings(false);
       });
     }
-  }, [user]);
+  }, [user, userBackend]);
 
   const handleSignOut = () => {
     getBackend().authStore.clear();
@@ -71,7 +73,7 @@ export function Header({ onAddTask, embedded = false }: HeaderProps) {
     }
 
     setNotificationModeState(mode);
-    await setNotificationMode(user.uid, mode);
+    await userBackend.setNotificationMode(user.uid, mode);
 
     const messages: Record<NotificationMode, string> = {
       all: "You'll be notified for all tasks",

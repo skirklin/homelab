@@ -1,6 +1,7 @@
-import { Input, Modal, Select, message } from "antd";
+import { Input, Modal, Select } from "antd";
 import { useState, useEffect } from "react";
 import styled from "styled-components";
+import { useFeedback } from "@kirkl/shared";
 import type { ShoppingIntegration } from "../ShoppingIntegrationContext";
 
 const FormGroup = styled.div`
@@ -41,6 +42,7 @@ export function AddToShoppingModal({
   ingredient,
   integration,
 }: AddToShoppingModalProps) {
+  const { message } = useFeedback();
   const [itemIngredient, setItemIngredient] = useState(ingredient);
   const [itemNote, setItemNote] = useState("");
   const [selectedListId, setSelectedListId] = useState<string>("");

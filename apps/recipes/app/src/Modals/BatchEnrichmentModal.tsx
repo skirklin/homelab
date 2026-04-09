@@ -3,7 +3,8 @@ import { Button, Checkbox, Modal, Tag } from 'antd';
 import { useContext, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
-import { applyChanges, rejectChanges } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
+import { pendingChangesToBackend } from '../adapters';
 import { RecipeEntry } from '../storage';
 import type { BoxId, RecipeId } from '../types';
 import { Section, SectionLabel, SuggestedDescription, TagsContainer, Reasoning } from './EnrichmentStyles';
@@ -75,6 +76,7 @@ interface BatchEnrichmentModalProps {
 
 function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
   const { state } = useContext(Context);
+  const recipesBackend = useRecipesBackend();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState(false);
 
@@ -120,7 +122,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
           const recipeData = recipe.getData();
           const currentTags = recipeData.recipeCategory;
           const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
-          await applyChanges(boxId, recipeId, recipe.pendingChanges, {
+          await recipesBackend.applyChanges(recipeId, pendingChangesToBackend(recipe.pendingChanges), {
             description: typeof recipeData.description === 'string' ? recipeData.description : undefined,
             tags: tags as string[],
           });
@@ -137,7 +139,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
         if (selectedIds.has(getKey(boxId, recipeId))) {
-          await rejectChanges(boxId, recipeId, recipe.pendingChanges?.source);
+          await recipesBackend.rejectChanges(recipeId, recipe.pendingChanges?.source);
         }
       }
       setSelectedIds(new Set());
@@ -154,7 +156,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
           const recipeData = recipe.getData();
           const currentTags = recipeData.recipeCategory;
           const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
-          await applyChanges(boxId, recipeId, recipe.pendingChanges, {
+          await recipesBackend.applyChanges(recipeId, pendingChangesToBackend(recipe.pendingChanges), {
             description: typeof recipeData.description === 'string' ? recipeData.description : undefined,
             tags: tags as string[],
           });
@@ -169,7 +171,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     setProcessing(true);
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
-        await rejectChanges(boxId, recipeId, recipe.pendingChanges?.source);
+        await recipesBackend.rejectChanges(recipeId, recipe.pendingChanges?.source);
       }
     } finally {
       setProcessing(false);

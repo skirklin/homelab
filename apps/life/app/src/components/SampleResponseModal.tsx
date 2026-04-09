@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import styled from "styled-components";
-import { Modal, Button, InputNumber, Input, message } from "antd";
+import { Modal, Button, InputNumber, Input } from "antd";
+import { useFeedback } from "@kirkl/shared";
 import type { SampleQuestion, RandomSamplesConfig } from "../types";
-import { addSampleResponse } from "../pocketbase";
+import { useLifeBackend } from "../backend-provider";
 
 const QuestionContainer = styled.div`
   display: flex;
@@ -59,6 +60,8 @@ export function SampleResponseModal({
   userId,
   logId,
 }: SampleResponseModalProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [responses, setResponses] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
 
@@ -92,7 +95,7 @@ export function SampleResponseModal({
 
     setSaving(true);
     try {
-      await addSampleResponse(responses, userId, logId);
+      await life.addSampleResponse(logId, responses, userId);
       message.success("Response saved");
       onClose();
     } catch (error) {

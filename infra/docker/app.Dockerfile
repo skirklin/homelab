@@ -9,7 +9,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /workspace
 
 # Install deps first (cache layer)
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig.base.json ./
 COPY packages/ui/package.json packages/ui/package.json
 COPY apps/home/app/package.json apps/home/app/package.json
 COPY apps/recipes/app/package.json apps/recipes/app/package.json
@@ -28,9 +28,12 @@ COPY apps/ apps/
 ARG APP
 ARG APP_DIR
 
+# Vite env vars (baked into the JS bundle at build time)
+ARG VITE_GOOGLE_MAPS_API_KEY=""
+
 # Build the target app
 # APP_DIR is the directory containing the vite project (e.g. apps/recipes/app or apps/money)
-RUN cd ${APP_DIR} && pnpm run build
+RUN cd ${APP_DIR} && VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY} pnpm run build
 
 # Serve with nginx
 FROM nginx:alpine
@@ -38,7 +41,9 @@ ARG APP
 ARG APP_DIR
 ARG DIST_DIR=dist
 
+ARG NGINX_CONF=infra/docker/nginx-spa.conf
+
 COPY --from=build /workspace/${APP_DIR}/${DIST_DIR} /usr/share/nginx/html
-COPY infra/docker/nginx-spa.conf /etc/nginx/conf.d/default.conf
+COPY ${NGINX_CONF} /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

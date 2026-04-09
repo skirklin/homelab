@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { Popover, Button } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import type { LogEntry } from "../../types";
-import { deleteEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 
 const EntryList = styled.div`
   display: flex;
@@ -51,6 +51,7 @@ interface EntriesPopoverProps {
 }
 
 export function EntriesPopover({ entries, logId, children }: EntriesPopoverProps) {
+  const life = useLifeBackend();
   const [open, setOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -59,7 +60,7 @@ export function EntriesPopover({ entries, logId, children }: EntriesPopoverProps
 
     setDeletingId(entryId);
     try {
-      await deleteEntry(entryId, logId);
+      await life.deleteEntry(entryId);
       // If that was the last entry, close the popover
       if (entries.length === 1) {
         setOpen(false);

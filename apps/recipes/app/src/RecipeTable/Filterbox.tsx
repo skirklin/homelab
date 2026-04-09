@@ -3,7 +3,6 @@ import { SearchOutlined } from "@ant-design/icons";
 import _ from "lodash";
 import type { Recipe } from "schema-dts";
 import type { RowType } from "./RecipeTable";
-// @ts-expect-error - flexsearch doesn't have type declarations for this subpath
 import Document from "flexsearch/dist/module/document";
 import styled from "styled-components";
 

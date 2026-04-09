@@ -10,12 +10,11 @@ import NewBoxButton from '../Buttons/NewBox';
 
 import './BoxTable.css';
 import { Context } from "../context";
-import { deleteBox, setBoxVisibility } from "../pocketbase";
+import { useRecipesBackend } from "../backend-provider";
 import { DeleteOutlined } from "@ant-design/icons";
 import { type BoxId, Visibility } from "../types";
 import type { UserEntry } from "../storage";
 import VisibilityControl from "../Buttons/Visibility";
-import { addBoxOwner } from "../backend";
 
 const TableContainer = styled.div`
   background: var(--color-bg);
@@ -80,6 +79,7 @@ interface BoxTableProps {
 
 export function BoxTable(props: BoxTableProps) {
   const { state, dispatch } = useContext(Context)
+  const recipesBackend = useRecipesBackend();
   const { writeable } = state;
 
   const { rows } = props;
@@ -106,11 +106,10 @@ export function BoxTable(props: BoxTableProps) {
   };
 
   async function del() {
-    selectedRows.forEach(
-      (value: RowType) => {
-        deleteBox(value.boxId, dispatch)
-      }
-    )
+    for (const value of selectedRows) {
+      dispatch({ type: "REMOVE_BOX", boxId: value.boxId });
+      await recipesBackend.deleteBox(value.boxId);
+    }
     setSelectedRowKeys([]);
     setSelectedRows([]);
   }
@@ -119,19 +118,10 @@ export function BoxTable(props: BoxTableProps) {
   function handleVisiblityChange(e: { key: string }) {
     selectedRows.forEach(
       (value: RowType) => {
-        setBoxVisibility(value.boxId, e.key as Visibility)
+        recipesBackend.setBoxVisibility(value.boxId, e.key as Visibility)
       }
     )
   }
-
-  function handleAddOwner(newOwnerEmail: string) {
-    selectedRows.forEach(
-      (value: RowType) => {
-        addBoxOwner({ boxId: value.boxId, newOwnerEmail })
-      }
-    )
-  }
-
 
   return (
     <TableContainer>
@@ -140,7 +130,6 @@ export function BoxTable(props: BoxTableProps) {
         <VisibilityControl
           disabled={!writeable || !hasSelected}
           handleChange={handleVisiblityChange}
-          handleAddOwner={handleAddOwner}
           value={Visibility.public}
           element="button"
         />

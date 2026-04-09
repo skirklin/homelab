@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "@kirkl/shared";
+import { BackendProvider } from "./backend-provider";
 import { TravelProvider } from "./travel-context";
 import { TripList } from "./components/TripList";
 import { TripDetail } from "./components/TripDetail";
@@ -32,9 +33,11 @@ export function TravelRoutes({ embedded = false }: TravelRoutesProps) {
 
 export function TravelModule() {
   return (
-    <TravelProvider>
-      <TravelRoutes />
-    </TravelProvider>
+    <BackendProvider>
+      <TravelProvider>
+        <TravelRoutes />
+      </TravelProvider>
+    </BackendProvider>
   );
 }
 

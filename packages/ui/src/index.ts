@@ -3,6 +3,7 @@ export { initializeBackend, getBackend } from "./backend";
 
 // Auth
 export { AuthProvider, useAuth, AuthContext } from "./auth";
+export type { User } from "./auth";
 
 // Storage
 export { createAppStorage, migrateStorageKey } from "./appStorage";
@@ -72,6 +73,12 @@ export {
   ResponsiveGrid,
   WidgetGrid,
 } from "./styles";
+
+// PocketBase subscription helpers
+export { subscribeToRecord, subscribeToCollection, subscribeToCollectionReload } from "./subscribe";
+
+// Ant Design feedback hook
+export { useFeedback } from "./useFeedback";
 
 // Test utilities — imported directly from "@kirkl/shared/test-utils" in test files,
 // NOT re-exported here to avoid pulling Node.js globals (process.env) into browser bundles.

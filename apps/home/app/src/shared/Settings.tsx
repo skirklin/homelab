@@ -4,10 +4,10 @@
  */
 
 import { useState, useEffect } from "react";
-import { Button, Segmented, message, Spin, Modal } from "antd";
+import { Button, Segmented, Spin } from "antd";
 import { BellOutlined, DeleteOutlined, ExperimentOutlined, CheckSquareOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth, getBackend, type NotificationMode, PageContainer } from "@kirkl/shared";
+import { useAuth, getBackend, type NotificationMode, PageContainer, useFeedback } from "@kirkl/shared";
 
 const Content = styled.div`
   padding: var(--space-lg);
@@ -108,6 +108,7 @@ function parseUserSettings(data: Record<string, unknown>): UserSettings {
 }
 
 export function Settings() {
+  const { message, modal } = useFeedback();
   const { user } = useAuth();
   const [settings, setSettings] = useState<UserSettings>({});
   const [loading, setLoading] = useState(true);
@@ -159,7 +160,7 @@ export function Settings() {
   const clearAllTokens = async () => {
     if (!user) return;
 
-    Modal.confirm({
+    modal.confirm({
       title: "Clear all notification tokens?",
       content: "This will remove all registered devices. You'll need to re-enable notifications on each device.",
       okText: "Clear",

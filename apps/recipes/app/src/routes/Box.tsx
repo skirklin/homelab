@@ -4,7 +4,8 @@ import { Spin } from "antd";
 import { useAuth } from "@kirkl/shared";
 import { Context } from "../context";
 
-import { getBox } from "../pocketbase";
+import { useRecipesBackend } from "../backend-provider";
+import { boxFromBackend, recipeFromBackend } from "../adapters";
 import { getBoxFromState } from "../state";
 import type { BoxId } from "../types";
 import BoxView from '../BoxView/BoxView'
@@ -17,6 +18,7 @@ function Box(props: BoxProps) {
   const { boxId } = props;
   const { state, dispatch } = useContext(Context)
   const { user } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const [loading, setLoading] = useState(true);
   const [fetchAttempted, setFetchAttempted] = useState(false);
 
@@ -28,9 +30,13 @@ function Box(props: BoxProps) {
     (async () => {
       if (box === undefined && !fetchAttempted) {
         setLoading(true);
-        const fetchedBox = await getBox(boxId, user?.uid ?? null)
+        const result = await recipesBackend.getBox(boxId, user?.uid ?? null);
         if (!cancelled) {
-          if (fetchedBox !== undefined) {
+          if (result !== null) {
+            const fetchedBox = boxFromBackend(result.box);
+            for (const r of result.recipes) {
+              fetchedBox.recipes.set(r.id, recipeFromBackend(r));
+            }
             dispatch({ type: "ADD_BOX", payload: fetchedBox, boxId })
           }
           setFetchAttempted(true);
@@ -42,7 +48,7 @@ function Box(props: BoxProps) {
     })()
 
     return () => { cancelled = true; }
-  }, [boxId, dispatch, box, fetchAttempted, user?.uid])
+  }, [boxId, dispatch, box, fetchAttempted, user?.uid, recipesBackend])
 
   if (loading && box === undefined) {
     return <Spin tip="Loading box..."><div style={{ minHeight: 200 }} /></Spin>

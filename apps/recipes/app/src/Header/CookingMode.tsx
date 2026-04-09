@@ -4,7 +4,7 @@ import { Button, Popover, Tooltip } from 'antd';
 import { FireOutlined, FireFilled } from '@ant-design/icons';
 import { Context } from '../context';
 import { getAppUserFromState } from '../state';
-import { setCookingModeSeen } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
 import { useCookingMode } from '../CookingModeContext';
 import { useAuth } from '@kirkl/shared';
 
@@ -55,6 +55,7 @@ function CookingMode() {
   const [showPopover, setShowPopover] = useState(false);
   const { state } = useContext(Context);
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const user = getAppUserFromState(state, authUser?.uid);
   const { isCookingMode: isActive, enableCookingMode: enableCookingModeContext, disableCookingMode: disableCookingModeContext } = useCookingMode();
 
@@ -73,10 +74,10 @@ function CookingMode() {
 
   const markAsSeen = useCallback(() => {
     if (user && !user.cookingModeSeen) {
-      setCookingModeSeen(user.id);
+      recipesBackend.setCookingModeSeen(user.id);
     }
     setShowPopover(false);
-  }, [user]);
+  }, [user, recipesBackend]);
 
   const enableCookingMode = useCallback(async () => {
     markAsSeen();

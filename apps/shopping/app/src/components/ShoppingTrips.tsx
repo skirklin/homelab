@@ -3,7 +3,8 @@ import styled from "styled-components";
 import { Button } from "antd";
 import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ShoppingTrip, CategoryDef } from "../types";
-import { addItem } from "../pocketbase";
+import { useShoppingBackend } from "../backend-provider";
+import { useShoppingContext } from "../shopping-context";
 
 function formatCategoryId(categoryId: string, categories: CategoryDef[]): string {
   // Look up display name from categories, fall back to capitalized ID
@@ -127,6 +128,9 @@ function formatDate(date: Date): string {
 }
 
 export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
+  const shopping = useShoppingBackend();
+  const { state } = useShoppingContext();
+
   // Handle Escape key to go back
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -139,7 +143,9 @@ export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
   }, [onBack]);
 
   const handleAddItem = (ingredient: string, note?: string) => {
-    addItem(ingredient, userId, { note }).catch((error) => {
+    const listId = state.list?.id;
+    if (!listId) return;
+    shopping.addItem(listId, ingredient, userId, { note }).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };

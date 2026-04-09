@@ -1,4 +1,8 @@
 /**
+ * @deprecated Being replaced by @homelab/backend. Use the backend provider
+ * (useShoppingBackend / useUserBackend) for new code. This file is kept
+ * temporarily for edge cases that still reference it.
+ *
  * PocketBase data operations for the shopping app.
  * Replaces the old firestore.ts.
  */

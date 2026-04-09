@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import styled, { css } from "styled-components";
-import { message } from "antd";
+import { useFeedback } from "@kirkl/shared";
 
 import type { RatingWidget as RatingWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, updateEntry, deleteEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
 
@@ -70,6 +70,8 @@ interface RatingWidgetProps {
 }
 
 export function RatingWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: RatingWidgetProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [saving, setSaving] = useState(false);
   const [currentRating, setCurrentRating] = useState<number | null>(null);
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
@@ -101,16 +103,16 @@ export function RatingWidget({ widget, entries, userId, logId, timestamp, size =
     try {
       if (value === null && currentEntryId) {
         // Clear/delete
-        await deleteEntry(currentEntryId, logId);
+        await life.deleteEntry(currentEntryId);
         setCurrentRating(null);
         setCurrentEntryId(null);
       } else if (value !== null && currentEntryId) {
         // Update existing
-        await updateEntry(currentEntryId, { data: { rating: value } }, logId);
+        await life.updateEntry(currentEntryId, { data: { rating: value } });
         setCurrentRating(value);
       } else if (value !== null) {
         // Create new
-        await addEntry(widget.id, { rating: value }, userId, { logId, timestamp });
+        await life.addEntry(logId!, widget.id, { rating: value }, userId, { timestamp });
         setCurrentRating(value);
       }
     } catch (error) {

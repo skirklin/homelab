@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import styled, { css } from "styled-components";
-import { InputNumber, Input, message, Spin } from "antd";
+import { InputNumber, Input, Spin } from "antd";
 import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
+import { useFeedback } from "@kirkl/shared";
 import type { ComboWidget as ComboWidgetType, ComboField, LogEntry, EntryMigration } from "../../types";
 import { getEntriesForCombo } from "../../types";
-import { addEntry, updateEntry, deleteEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 import { type WidgetSize } from "../../display-settings";
 import { RatingInput } from "./inputs";
 
@@ -115,6 +116,8 @@ interface ComboWidgetProps {
 type FieldValue = number | string | null;
 
 export function ComboWidget({ widget, entries, userId, logId, timestamp, size = "normal", migrations }: ComboWidgetProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [values, setValues] = useState<Record<string, FieldValue>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -155,14 +158,14 @@ export function ComboWidget({ widget, entries, userId, logId, timestamp, size = 
     try {
       if (!hasValue && entryId) {
         // All fields cleared - delete the entry
-        await deleteEntry(entryId, logId);
+        await life.deleteEntry(entryId);
         setCurrentEntryId(null);
       } else if (entryId) {
         // Update existing entry
-        await updateEntry(entryId, { data }, logId);
+        await life.updateEntry(entryId, { data });
       } else {
         // Create new entry
-        await addEntry(widget.id, data, userId, { logId, timestamp });
+        await life.addEntry(logId!, widget.id, data, userId, { timestamp });
       }
       setSaved(true);
       // Hide saved indicator after 2 seconds
@@ -173,7 +176,7 @@ export function ComboWidget({ widget, entries, userId, logId, timestamp, size = 
     } finally {
       setSaving(false);
     }
-  }, [logId, userId, widget.id, timestamp]);
+  }, [logId, userId, widget.id, timestamp, life]);
 
   const updateValue = (fieldId: string, value: FieldValue) => {
     const newValues = { ...values, [fieldId]: value };

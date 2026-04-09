@@ -4,7 +4,7 @@
 
 import { JoinList as SharedJoinList, type JoinListConfig, type ListOperations } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { setUserSlug, getListById } from "../pocketbase";
+import { useShoppingBackend, useUserBackend } from "../backend-provider";
 
 const config: JoinListConfig = {
   title: "Join List",
@@ -14,12 +14,19 @@ const config: JoinListConfig = {
 
 export function JoinList() {
   const { state } = useShoppingContext();
+  const shopping = useShoppingBackend();
+  const userBackend = useUserBackend();
 
   const operations: ListOperations = {
     getUserSlugs: () => state.userSlugs,
     createList: async () => { throw new Error("Not implemented"); }, // Not used in JoinList
-    setUserSlug,
-    getListById,
+    setUserSlug: async (userId: string, slug: string, listId: string) => {
+      await userBackend.setSlug(userId, "shopping", slug, listId);
+    },
+    getListById: async (listId: string) => {
+      const list = await shopping.getList(listId);
+      return list ? { name: list.name } : null;
+    },
   };
 
   return (

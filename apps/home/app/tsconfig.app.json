@@ -1,23 +1,26 @@
 {
+  "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-    "target": "ES2020",
+    "noEmit": true,
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-    "moduleResolution": "bundler",
+    "types": ["vite/client"],
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": false,
-    "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/e2e", "**/*.test.*"],
+  "references": [
+    { "path": "../../../packages/ui" },
+    { "path": "../../shopping/app/tsconfig.app.json" },
+    { "path": "../../recipes/app/tsconfig.app.json" },
+    { "path": "../../life/app/tsconfig.app.json" },
+    { "path": "../../upkeep/app/tsconfig.app.json" },
+    { "path": "../../travel/app/tsconfig.app.json" }
+  ]
 }

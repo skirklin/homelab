@@ -5,7 +5,7 @@ import { useDraggable } from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import type { ShoppingItem } from "../types";
-import { toggleItem, deleteItem, updateItem } from "../pocketbase";
+import { useShoppingBackend } from "../backend-provider";
 
 const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
   display: flex;
@@ -85,6 +85,7 @@ interface Props {
 
 export function ShoppingItemRow({ item }: Props) {
   const { user } = useAuth();
+  const shopping = useShoppingBackend();
   const [isEditing, setIsEditing] = useState(false);
   const [editIngredient, setEditIngredient] = useState(item.ingredient);
   const [editNote, setEditNote] = useState(item.note || "");
@@ -96,13 +97,13 @@ export function ShoppingItemRow({ item }: Props) {
 
   const handleToggle = () => {
     if (user) {
-      toggleItem(item, user.uid);
+      shopping.toggleItem(item.id, !item.checked, user.uid);
     }
   };
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    deleteItem(item.id);
+    shopping.deleteItem(item.id);
   };
 
   const handleStartEdit = () => {
@@ -128,7 +129,7 @@ export function ShoppingItemRow({ item }: Props) {
 
     // Only update if something changed
     if (trimmedIngredient !== item.ingredient || trimmedNote !== (item.note || "")) {
-      updateItem(item.id, {
+      shopping.updateItem(item.id, {
         ingredient: trimmedIngredient,
         note: trimmedNote,
       }).catch((error) => {

@@ -75,7 +75,7 @@ export class RecipeEntry {
         return `Recipe: ${this.data.name}`;
     }
 
-    getData() {
+    getData(): Recipe {
         return this.changed ? this.changed : this.data
     }
 

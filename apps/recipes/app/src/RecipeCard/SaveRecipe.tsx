@@ -6,7 +6,8 @@ import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
 
 import { Context } from '../context';
-import { addRecipe, saveRecipe } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
+import { recipeDataToBackend } from '../adapters';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
 import type { RecipeCardProps } from './RecipeCard';
@@ -20,6 +21,7 @@ const StyledButton = styled(Button)`
 function SaveButton(props: RecipeCardProps) {
   const { state, dispatch } = useContext(Context);
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const { recipeId, boxId } = props;
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
@@ -32,7 +34,6 @@ function SaveButton(props: RecipeCardProps) {
   }
 
   const save = async () => {
-    let docRef;
     if (recipe.changed === undefined || user === undefined ) {
       return
     }
@@ -42,13 +43,14 @@ function SaveButton(props: RecipeCardProps) {
     newRecipe.editing = false
     newRecipe.lastUpdatedBy = user.id
     newRecipe.updated = new Date()
+    const data = recipeDataToBackend(newRecipe);
     if (recipeId.startsWith("uniqueId=")) {
-      docRef = await addRecipe(boxId, newRecipe)
+      const newId = await recipesBackend.addRecipe(boxId, data, user.id);
       newRecipe.created = newRecipe.updated
       dispatch({type: "REMOVE_RECIPE", recipeId, boxId}) // removes the local-only version of the recipe
-      navigate(`${basePath}/boxes/${boxId}/recipes/${docRef.id}`)
+      navigate(`${basePath}/boxes/${boxId}/recipes/${newId}`)
     } else {
-      docRef = await saveRecipe(boxId, recipeId, newRecipe)
+      await recipesBackend.saveRecipe(recipeId, data, user.id);
     }
   }
 

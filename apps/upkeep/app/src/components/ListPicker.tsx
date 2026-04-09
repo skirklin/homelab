@@ -4,7 +4,7 @@
 
 import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { createList, setUserSlug, getListById } from "../pocketbase";
+import { useUpkeepBackend, useUserBackend } from "../backend-provider";
 import { appStorage, StorageKeys } from "../storage";
 
 const config: ListPickerConfig = {
@@ -18,12 +18,23 @@ const config: ListPickerConfig = {
 
 export function ListPicker() {
   const { state } = useUpkeepContext();
+  const upkeep = useUpkeepBackend();
+  const userBackend = useUserBackend();
 
   const operations: ListOperations = {
     getUserSlugs: () => state.userSlugs,
-    createList,
-    setUserSlug,
-    getListById,
+    createList: async (name: string, slug: string, userId: string) => {
+      const listId = await upkeep.createList(name, userId);
+      await userBackend.setSlug(userId, "household", slug, listId);
+      return listId;
+    },
+    setUserSlug: async (userId: string, slug: string, listId: string) => {
+      await userBackend.setSlug(userId, "household", slug, listId);
+    },
+    getListById: async (listId: string) => {
+      const list = await upkeep.getList(listId);
+      return list ? { name: list.name } : null;
+    },
   };
 
   return (

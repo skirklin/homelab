@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import { Context } from '../context';
-import { subscribeToBox, unsubscribeFromBox } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import type { BoxId } from '../types';
@@ -13,6 +13,7 @@ interface DeleteProps {
 function SubscribeButton(props: DeleteProps) {
   const { state } = useContext(Context)
   const { user: authUser } = useAuth();
+  const recipes = useRecipesBackend();
   const { writeable } = state;
 
   const { boxId } = props;
@@ -26,12 +27,12 @@ function SubscribeButton(props: DeleteProps) {
 
   if (!user.boxes.includes(boxId)) {
     return <ActionButton
-      onClick={() => subscribeToBox(user, boxId)}
+      onClick={() => recipes.subscribeToBox(user.id, boxId)}
       disabled={!writeable}
     >Add to collection</ActionButton>
   } else {
     return <ActionButton
-      onClick={() => unsubscribeFromBox(user, boxId)}
+      onClick={() => recipes.unsubscribeFromBox(user.id, boxId)}
       disabled={!writeable}
     >Remove from collection</ActionButton>
   }

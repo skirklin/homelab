@@ -32,12 +32,8 @@ import {
 import styled from "styled-components";
 import { WideContainer } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { getActivitiesForTrip, getItinerariesForTrip } from "../subscription";
-import {
-  deleteTrip, flagTrip,
-  addItinerary, updateItinerary as updateItineraryDoc, deleteItinerary as deleteItineraryDoc,
-  deleteActivity,
-} from "../pocketbase";
+import { useTravelBackend } from "../backend-provider";
+import { daysToBackend } from "../adapters";
 import {
   STATUS_COLORS,
   formatDateRange,
@@ -51,6 +47,22 @@ import { ItineraryCompare } from "./ItineraryCompare";
 import { ItineraryMap } from "./ItineraryMap";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
+
+// Helper: get activities for a specific trip
+function getActivitiesForTrip(
+  activities: Map<string, Activity>,
+  tripId: string
+) {
+  return Array.from(activities.values()).filter((a) => a.tripId === tripId);
+}
+
+// Helper: get itineraries for a specific trip
+function getItinerariesForTrip(
+  itineraries: Map<string, Itinerary>,
+  tripId: string
+) {
+  return Array.from(itineraries.values()).filter((i) => i.tripId === tripId);
+}
 
 // Link helpers
 function mapsUrl(activity: Activity): string | null {
@@ -239,6 +251,7 @@ export function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
   const navigate = useNavigate();
   const { state } = useTravelContext();
+  const travel = useTravelBackend();
 
   const trip = tripId ? state.trips.get(tripId) : undefined;
 
@@ -284,12 +297,12 @@ export function TripDetail() {
     : [];
 
   const handleDelete = async () => {
-    await deleteTrip(trip.id);
+    await travel.deleteTrip(trip.id);
     navigate(-1);
   };
 
   const handleToggleFlag = () => {
-    flagTrip(trip.id, !trip.flaggedForReview, trip.reviewComment);
+    travel.flagTrip(trip.id, !trip.flaggedForReview, trip.reviewComment);
   };
 
   const hasMapData = activities.some((a) => a.lat != null && a.lng != null);
@@ -453,6 +466,8 @@ function ItinerarySection({
   onDayNav: (dayIndex: number) => void;
   navigate: (path: string) => void;
 }) {
+  const travel = useTravelBackend();
+  const { state } = useTravelContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("view") || "timeline";
   const selectedItin = searchParams.get("itin") || itineraries.find((i) => i.isActive)?.id || itineraries[0]?.id;
@@ -482,7 +497,7 @@ function ItinerarySection({
       children: currentItin ? (
         <ItineraryTimeline itinerary={currentItin} activityMap={activityMap} focusDay={focusDay} onDayClick={onDayClick} onDayNav={onDayNav}
           onEditActivity={(id) => navigate(`activities/${id}/edit`)}
-          onDeleteActivity={(id) => deleteActivity(id)} />
+          onDeleteActivity={(id) => travel.deleteActivity(id)} />
       ) : null,
     },
     {
@@ -514,37 +529,33 @@ function ItinerarySection({
 
   const handleCreateItinerary = async () => {
     const tripId = currentItin?.tripId;
-    if (!tripId) return;
+    const logId = state.log?.id;
+    if (!tripId || !logId) return;
     const name = window.prompt("Itinerary name:", "Option " + String.fromCharCode(65 + itineraries.length));
     if (!name) return;
-    await addItinerary({
-      tripId, name, isActive: false, days: [],
-      created: new Date(), updated: new Date(),
-    });
+    await travel.addItinerary(logId, tripId, { name, days: [] });
   };
 
   const handleRenameItinerary = async () => {
     if (!currentItin) return;
     const name = window.prompt("Rename itinerary:", currentItin.name);
     if (!name || name === currentItin.name) return;
-    await updateItineraryDoc(currentItin.id, { name });
+    await travel.updateItinerary(currentItin.id, { name });
   };
 
   const handleDeleteItinerary = async () => {
     if (!currentItin || itineraries.length <= 1) return;
     if (!window.confirm(`Delete itinerary "${currentItin.name}"?`)) return;
-    await deleteItineraryDoc(currentItin.id);
+    await travel.deleteItinerary(currentItin.id);
   };
 
   const handleDuplicateItinerary = async () => {
     if (!currentItin) return;
+    const logId = state.log?.id;
+    if (!logId) return;
     const name = window.prompt("Name for copy:", `${currentItin.name} (copy)`);
     if (!name) return;
-    await addItinerary({
-      tripId: currentItin.tripId, name, isActive: false,
-      days: currentItin.days,
-      created: new Date(), updated: new Date(),
-    });
+    await travel.addItinerary(logId, currentItin.tripId, { name, days: daysToBackend(currentItin.days) });
   };
 
   return (

@@ -8,7 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@kirkl/shared";
-import { subscribeToUserSlugs, subscribeToLog } from "./subscription";
+import { useTravelBackend, useUserBackend } from "./backend-provider";
+import { tripFromBackend, activityFromBackend, itineraryFromBackend, logFromBackend } from "./adapters";
 import type { Trip, TravelLog, Activity, Itinerary } from "./types";
 
 export interface TravelState {
@@ -24,12 +25,9 @@ export interface TravelState {
 export type TravelAction =
   | { type: "SET_USER_SLUGS"; slugs: Record<string, string>; }
   | { type: "SET_LOG"; log: TravelLog | null }
-  | { type: "SET_TRIP"; trip: Trip }
-  | { type: "REMOVE_TRIP"; tripId: string }
-  | { type: "SET_ACTIVITY"; activity: Activity }
-  | { type: "REMOVE_ACTIVITY"; activityId: string }
-  | { type: "SET_ITINERARY"; itinerary: Itinerary }
-  | { type: "REMOVE_ITINERARY"; itineraryId: string }
+  | { type: "SET_TRIPS"; trips: Trip[] }
+  | { type: "SET_ACTIVITIES"; activities: Activity[] }
+  | { type: "SET_ITINERARIES"; itineraries: Itinerary[] }
   | { type: "CLEAR_DATA" }
   | { type: "SET_LOADING"; loading: boolean };
 
@@ -41,39 +39,21 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
     case "SET_LOG":
       return { ...state, log: action.log };
 
-    case "SET_TRIP": {
-      const newTrips = new Map(state.trips);
-      newTrips.set(action.trip.id, action.trip);
-      return { ...state, trips: newTrips };
+    case "SET_TRIPS": {
+      const newTrips = new Map<string, Trip>();
+      for (const trip of action.trips) newTrips.set(trip.id, trip);
+      return { ...state, trips: newTrips, loading: false };
     }
 
-    case "REMOVE_TRIP": {
-      const newTrips = new Map(state.trips);
-      newTrips.delete(action.tripId);
-      return { ...state, trips: newTrips };
-    }
-
-    case "SET_ACTIVITY": {
-      const newActivities = new Map(state.activities);
-      newActivities.set(action.activity.id, action.activity);
+    case "SET_ACTIVITIES": {
+      const newActivities = new Map<string, Activity>();
+      for (const activity of action.activities) newActivities.set(activity.id, activity);
       return { ...state, activities: newActivities };
     }
 
-    case "REMOVE_ACTIVITY": {
-      const newActivities = new Map(state.activities);
-      newActivities.delete(action.activityId);
-      return { ...state, activities: newActivities };
-    }
-
-    case "SET_ITINERARY": {
-      const newItineraries = new Map(state.itineraries);
-      newItineraries.set(action.itinerary.id, action.itinerary);
-      return { ...state, itineraries: newItineraries };
-    }
-
-    case "REMOVE_ITINERARY": {
-      const newItineraries = new Map(state.itineraries);
-      newItineraries.delete(action.itineraryId);
+    case "SET_ITINERARIES": {
+      const newItineraries = new Map<string, Itinerary>();
+      for (const itinerary of action.itineraries) newItineraries.set(itinerary.id, itinerary);
       return { ...state, itineraries: newItineraries };
     }
 
@@ -115,51 +95,71 @@ const TravelContext = createContext<ContextType | null>(null);
 export function TravelProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { user } = useAuth();
+  const travel = useTravelBackend();
+  const userBackend = useUserBackend();
   const slugsUnsubRef = useRef<(() => void) | null>(null);
-  const logUnsubsRef = useRef<(() => void)[]>([]);
+  const logUnsubRef = useRef<(() => void) | null>(null);
   const currentLogIdRef = useRef<string | null>(null);
 
   // Subscribe to user's travel slugs when authenticated
   useEffect(() => {
-    let cancelled = false;
     if (user) {
-      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch, () => cancelled);
+      slugsUnsubRef.current = userBackend.subscribeSlugs(user.uid, "travel", (slugs) => {
+        dispatch({ type: "SET_USER_SLUGS", slugs });
+      });
     }
     return () => {
-      cancelled = true;
       if (slugsUnsubRef.current) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
       }
-      logUnsubsRef.current.forEach((unsub) => unsub());
-      logUnsubsRef.current = [];
+      if (logUnsubRef.current) {
+        logUnsubRef.current();
+        logUnsubRef.current = null;
+      }
     };
-  }, [user]);
+  }, [user, userBackend]);
 
   const setCurrentLog = useCallback(
     (logId: string) => {
       if (!user) return;
       if (currentLogIdRef.current === logId) return;
 
-      logUnsubsRef.current.forEach((unsub) => unsub());
-      logUnsubsRef.current = [];
+      if (logUnsubRef.current) {
+        logUnsubRef.current();
+        logUnsubRef.current = null;
+      }
       currentLogIdRef.current = logId;
 
-      const cancelled = () => currentLogIdRef.current !== logId;
-      subscribeToLog(logId, user.uid, dispatch, cancelled).then((unsubs) => {
-        if (cancelled()) {
-          unsubs.forEach((unsub) => unsub());
-          return;
-        }
-        logUnsubsRef.current = unsubs;
-      }).catch((err) => {
-        console.error("[travel] subscribeToLog failed:", err);
-        if (!cancelled()) {
-          dispatch({ type: "SET_LOADING", loading: false });
-        }
+      dispatch({ type: "CLEAR_DATA" });
+      dispatch({ type: "SET_LOADING", loading: true });
+
+      const unsub = travel.subscribeToLog(logId, {
+        onLog: (log) => {
+          if (currentLogIdRef.current !== logId) return;
+          dispatch({ type: "SET_LOG", log: logFromBackend(log) });
+        },
+        onTrips: (trips) => {
+          if (currentLogIdRef.current !== logId) return;
+          dispatch({ type: "SET_TRIPS", trips: trips.map(tripFromBackend) });
+        },
+        onActivities: (activities) => {
+          if (currentLogIdRef.current !== logId) return;
+          dispatch({ type: "SET_ACTIVITIES", activities: activities.map(activityFromBackend) });
+        },
+        onItineraries: (itineraries) => {
+          if (currentLogIdRef.current !== logId) return;
+          dispatch({ type: "SET_ITINERARIES", itineraries: itineraries.map(itineraryFromBackend) });
+        },
+        onDeleted: () => {
+          if (currentLogIdRef.current !== logId) return;
+          dispatch({ type: "SET_LOG", log: null });
+        },
       });
+
+      logUnsubRef.current = unsub;
     },
-    [user]
+    [user, travel]
   );
 
   return (

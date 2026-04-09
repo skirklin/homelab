@@ -11,8 +11,9 @@ RUN apk add --no-cache ca-certificates wget unzip \
 WORKDIR /pb
 VOLUME /pb/pb_data
 
-# Include schema migrations — applied automatically on startup
+# Include schema migrations and hooks — applied automatically on startup
 COPY infra/pocketbase/pb_migrations /pb/pb_migrations
+COPY infra/pocketbase/pb_hooks /pb/pb_hooks
 
 EXPOSE 8090
 CMD ["pocketbase", "serve", "--http=0.0.0.0:8090"]

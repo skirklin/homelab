@@ -8,7 +8,7 @@ import { getRecipes } from '../backend';
 import { Context } from '../context';
 import { RecipeEntry } from '../storage';
 import { type BoxId, Visibility } from '../types';
-import { addRecipe } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
 import { getAppUserFromState } from '../state';
 import { useAuth } from '@kirkl/shared';
 
@@ -42,6 +42,7 @@ function ImportModal(props: ImportProps) {
   const [discovered, setDiscovered] = useState<RecipeEntry[]>([])
   const { state } = useContext(Context)
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
 
   const user = getAppUserFromState(state, authUser?.uid)
   async function import_() {
@@ -80,8 +81,10 @@ function ImportModal(props: ImportProps) {
   }
 
   function addRecipes(boxId: string) {
-
-    discovered.forEach(recipe => addRecipe(boxId, recipe))
+    if (!user) return;
+    discovered.forEach(recipe => {
+      recipesBackend.addRecipe(boxId, recipe.data as unknown as import("@homelab/backend").RecipeData, user.id);
+    });
     setDiscovered([]);
     setValue("");
     setIsVisible(false);

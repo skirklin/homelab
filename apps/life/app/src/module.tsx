@@ -8,9 +8,10 @@ import { Spin } from "antd";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { LifeProvider, useLife } from "./life-context";
+import { BackendProvider, useLifeBackend } from "./backend-provider";
 import { DisplaySettingsProvider } from "./display-settings";
-import { getOrCreateUserLog, setCurrentLogId, getCachedLogId } from "./pocketbase";
-import { logFromStore } from "./types";
+import type { LifeLog } from "./types";
+import { DEFAULT_MANIFEST } from "./types";
 import { LifeDashboard } from "./components/LifeDashboard";
 
 // Lazy load heavy visualization component
@@ -31,28 +32,32 @@ interface LifeRoutesProps {
 function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   const { user } = useAuth();
   const { state, dispatch } = useLife();
+  const life = useLifeBackend();
 
   useEffect(() => {
     if (!user) return;
 
-    // Try to use cached log ID for immediate subscription start
-    const cachedLogId = getCachedLogId();
-    if (cachedLogId) {
-      setCurrentLogId(cachedLogId);
-    }
-
     let cancelled = false;
     const loadLog = async () => {
-      const { id, data } = await getOrCreateUserLog(user.uid);
+      const backendLog = await life.getOrCreateLog(user.uid);
       if (cancelled) return;
-      setCurrentLogId(id);
-      dispatch({ type: "SET_LOG", log: logFromStore(id, data) });
+      // Convert backend LifeLog to app LifeLog
+      const log: LifeLog = {
+        id: backendLog.id,
+        name: "",
+        owners: [],
+        manifest: (backendLog.manifest as unknown as LifeLog["manifest"]) ?? DEFAULT_MANIFEST,
+        sampleSchedule: backendLog.sampleSchedule as LifeLog["sampleSchedule"],
+        created: new Date(),
+        updated: new Date(),
+      };
+      dispatch({ type: "SET_LOG", log });
     };
 
     loadLog();
 
     return () => { cancelled = true; };
-  }, [user, dispatch]);
+  }, [user, dispatch, life]);
 
   if (!state.log) {
     return (
@@ -87,9 +92,11 @@ export function LifeRoutes({ embedded = false }: LifeRoutesProps) {
 
 export function LifeModule() {
   return (
-    <LifeProvider>
-      <LifeRoutes />
-    </LifeProvider>
+    <BackendProvider>
+      <LifeProvider>
+        <LifeRoutes />
+      </LifeProvider>
+    </BackendProvider>
   );
 }
 

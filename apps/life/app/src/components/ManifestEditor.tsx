@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import styled from "styled-components";
-import { Modal, Button, Alert, message } from "antd";
+import { Modal, Button, Alert } from "antd";
+import { useFeedback } from "@kirkl/shared";
 import type { LifeManifest } from "../types";
 import { parseAndValidateManifest, formatValidationErrors } from "../manifest-validation";
-import { updateManifest } from "../pocketbase";
+import { useLifeBackend } from "../backend-provider";
 
 const EditorContainer = styled.div`
   display: flex;
@@ -47,6 +48,8 @@ export function ManifestEditor({
   logId,
   onManifestUpdated,
 }: ManifestEditorProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [jsonText, setJsonText] = useState("");
   const [errors, setErrors] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -98,7 +101,7 @@ export function ManifestEditor({
 
     setSaving(true);
     try {
-      await updateManifest(result.manifest, logId);
+      await life.updateManifest(logId, result.manifest as unknown as import("@homelab/backend").LifeManifest);
       onManifestUpdated(result.manifest);
       message.success("Configuration saved");
       onClose();

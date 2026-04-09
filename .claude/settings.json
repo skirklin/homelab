@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/skirklin/projects/firebase/**)",
+      "Bash(python3 -c ':*)",
+      "WebSearch",
+      "Bash(/home/skirklin/projects/homelab/services/scripts/wipe-and-import.sh /home/skirklin/projects/homelab/.data/2026-04-09)",
+      "Bash(./infra/deploy.sh travel:*)",
+      "Bash(git status:*)",
+      "Bash(grep -E \"^\\\\.env$|^\\\\.data\" .gitignore)"
+    ]
+  }
+}

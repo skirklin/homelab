@@ -12,6 +12,7 @@ import Settings from './routes/Settings';
 import RoutedRecipe from './routes/Recipe';
 import MissingPage from './routes/MissingPage';
 import JoinBox from './routes/JoinBox';
+import InviteRedeem from './routes/InviteRedeem';
 
 /**
  * Provides the base path for the recipes app so navigate calls work
@@ -38,6 +39,7 @@ export function RecipesRoutes({ embedded = false, basePath }: RecipesRoutesProps
     <BasePathContext.Provider value={resolvedBase}>
       <Routes>
         <Route path="/join/:boxId" element={<JoinBox />} />
+        <Route path="/invite/:code" element={<InviteRedeem />} />
         <Route path="/" element={<Main embedded={embedded} />}>
           <Route index element={<Contents />} />
           <Route path="settings" element={<Settings />} />

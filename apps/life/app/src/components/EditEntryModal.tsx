@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import styled from "styled-components";
-import { Modal, Button, DatePicker, InputNumber, Input, message } from "antd";
+import { Modal, Button, DatePicker, InputNumber, Input } from "antd";
 import dayjs from "dayjs";
+import { useFeedback } from "@kirkl/shared";
 import type { LogEntry, LifeManifest } from "../types";
 import { getWidget } from "../types";
-import { updateEntry } from "../pocketbase";
+import { useLifeBackend } from "../backend-provider";
 
 const FormRow = styled.div`
   display: flex;
@@ -45,6 +46,8 @@ interface EditEntryModalProps {
 }
 
 export function EditEntryModal({ open, onClose, entry, manifest, logId }: EditEntryModalProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [timestamp, setTimestamp] = useState<dayjs.Dayjs | null>(null);
   const [data, setData] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
@@ -65,10 +68,10 @@ export function EditEntryModal({ open, onClose, entry, manifest, logId }: EditEn
 
     setSaving(true);
     try {
-      await updateEntry(entry.id, {
+      await life.updateEntry(entry.id, {
         timestamp: timestamp.toDate(),
         data,
-      }, logId);
+      });
       message.success("Entry updated");
       onClose();
     } catch (error) {

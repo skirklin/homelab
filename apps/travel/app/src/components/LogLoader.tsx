@@ -5,7 +5,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { getOrCreateUserLog } from "../pocketbase";
+import { useTravelBackend } from "../backend-provider";
 
 const Center = styled(PageContainer)`
   display: flex;
@@ -23,6 +23,7 @@ const Center = styled(PageContainer)`
 export function LogLoader() {
   const { state, setCurrentLog } = useTravelContext();
   const { user } = useAuth();
+  const travel = useTravelBackend();
 
   // Auto-load first slug
   useEffect(() => {
@@ -40,7 +41,7 @@ export function LogLoader() {
   // No travel log exists — offer to create one
   if (Object.keys(state.userSlugs).length === 0) {
     const handleCreate = async () => {
-      if (user) await getOrCreateUserLog(user.uid);
+      if (user) await travel.getOrCreateLog(user.uid);
     };
     return (
       <Center>

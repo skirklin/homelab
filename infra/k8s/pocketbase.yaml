@@ -27,8 +27,8 @@ spec:
     spec:
       containers:
         - name: pocketbase
-          image: homelab/pocketbase:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/pocketbase:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8090
           volumeMounts:

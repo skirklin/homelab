@@ -376,18 +376,6 @@ export async function createTestRecipe(
   return { id: record.id };
 }
 
-export async function createTestRecipesUser(
-  ctx: TestContext,
-  cleanup: TestCleanup,
-  userId?: string
-): Promise<void> {
-  // Update user record with recipe_boxes field
-  const uid = userId || ctx.testUser!.id;
-  await ctx.pb.collection("users").update(uid, {
-    recipe_boxes: [],
-  });
-}
-
 export async function addBoxToUser(
   ctx: TestContext,
   userId: string,

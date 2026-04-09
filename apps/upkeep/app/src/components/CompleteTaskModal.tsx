@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { Modal, Input, message, Tabs, List, Empty, DatePicker, Switch, Button, Popconfirm } from "antd";
+import { Modal, Input, Tabs, List, Empty, DatePicker, Switch, Button, Popconfirm } from "antd";
 import { EditOutlined, DeleteOutlined, SaveOutlined, CloseOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import dayjs from "dayjs";
-import { useAuth } from "@kirkl/shared";
-import { completeTask, updateCompletion, deleteCompletion } from "../pocketbase";
+import { useAuth, useFeedback } from "@kirkl/shared";
+import { useUpkeepBackend } from "../backend-provider";
 import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Completion } from "../types";
 import { formatFrequency, getCompletionNotes } from "../types";
@@ -132,7 +132,9 @@ function formatDate(date: Date): string {
 }
 
 export function CompleteTaskModal({ open, task, onClose, initialTab = "complete" }: CompleteTaskModalProps) {
+  const { message } = useFeedback();
   const { user } = useAuth();
+  const upkeep = useUpkeepBackend();
   const { state, dispatch } = useUpkeepContext();
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -174,7 +176,7 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
 
     setSaving(true);
     try {
-      await updateCompletion(editingId, {
+      await upkeep.updateCompletion(editingId, {
         notes: editNotes.trim(),
         timestamp: editDate.toDate(),
       });
@@ -199,7 +201,7 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
 
   const handleDelete = async (completionId: string) => {
     try {
-      await deleteCompletion(completionId);
+      await upkeep.deleteCompletion(completionId);
       // Update local state
       dispatch({
         type: "SET_COMPLETIONS",
@@ -217,13 +219,11 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
 
     setSubmitting(true);
     try {
-      const completedAt = useCustomDate && customDate ? customDate.toDate() : undefined;
-      await completeTask(task.id, user.uid, notes.trim(), {
-        completedAt,
-        currentLastCompleted: task.lastCompleted ?? undefined,
+      await upkeep.completeTask(task.id, user.uid, {
+        notes: notes.trim() || undefined,
+        completedAt: useCustomDate && customDate ? customDate.toDate() : undefined,
       });
-      const dateMsg = completedAt ? ` (${formatDate(completedAt)})` : "";
-      message.success(`"${task.name}" marked as done${dateMsg}!`);
+      message.success(`"${task.name}" marked as done!`);
       onClose();
     } catch (error) {
       console.error("Failed to complete task:", error);

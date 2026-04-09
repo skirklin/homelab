@@ -68,7 +68,7 @@ export function recipeBoxReducer(prevState: AppState, action: ActionType): AppSt
       }
     }
     case "SET_LOADING": {
-      const newLoading = (action as any).loading as number;
+      const newLoading = action.loading ?? 0;
       return {
         ...prevState,
         loading: newLoading,

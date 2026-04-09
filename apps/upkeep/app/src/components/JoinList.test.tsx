@@ -5,22 +5,54 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { AuthContext } from '@kirkl/shared';
 import { JoinList } from './JoinList';
 import { UpkeepProvider } from '../upkeep-context';
-import * as firestore from '../pocketbase';
-import * as subscription from '../subscription';
 
-// Mock the pocketbase module
-vi.mock('../pocketbase', () => ({
-  getListById: vi.fn(),
-  setUserSlug: vi.fn(),
+// Mock backend-provider to return stubs that don't need a real PocketBase
+const mockUpkeepBackend = {
+  createList: vi.fn(),
+  renameList: vi.fn(),
+  deleteList: vi.fn(),
+  getList: vi.fn(),
+  updateRooms: vi.fn(),
+  addTask: vi.fn(),
+  updateTask: vi.fn(),
+  deleteTask: vi.fn(),
+  snoozeTask: vi.fn(),
+  unsnoozeTask: vi.fn(),
+  completeTask: vi.fn(),
+  toggleTaskNotification: vi.fn(),
+  updateCompletion: vi.fn(),
+  deleteCompletion: vi.fn(),
+  subscribeToList: vi.fn(() => () => {}),
+};
+
+const mockUserBackend = {
+  getSlugs: vi.fn().mockResolvedValue({}),
+  setSlug: vi.fn(),
+  removeSlug: vi.fn(),
+  renameSlug: vi.fn(),
+  subscribeSlugs: vi.fn((_uid: string, _ns: string, _cb: (slugs: Record<string, string>) => void) => () => {}),
+  saveFcmToken: vi.fn(),
+  removeFcmToken: vi.fn(),
+  getFcmTokens: vi.fn().mockResolvedValue([]),
+  clearAllFcmTokens: vi.fn(),
+  getNotificationMode: vi.fn().mockResolvedValue('subscribed'),
+  setNotificationMode: vi.fn(),
+  updateProfile: vi.fn(),
+  getProfile: vi.fn().mockResolvedValue({}),
+};
+
+vi.mock('../backend-provider', () => ({
+  useUpkeepBackend: () => mockUpkeepBackend,
+  useUserBackend: () => mockUserBackend,
+  BackendProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-// Mock the subscription module (used by UpkeepProvider)
-vi.mock('../subscription', () => ({
-  subscribeToUserSlugs: vi.fn(() => () => {}),
-  subscribeToList: vi.fn(() => Promise.resolve([])),
-  getTasksFromState: vi.fn(() => []),
-  getTasksByUrgency: vi.fn(() => ({ today: [], thisWeek: [], later: [] })),
-  getTasksByRoom: vi.fn(() => new Map()),
+// Mock pocketbase module (still imported by upkeep-context for setCurrentListId)
+vi.mock('../pocketbase', () => ({
+  setCurrentListId: vi.fn(),
+  getCurrentListId: vi.fn(() => 'default'),
+  getListById: vi.fn(),
+  setUserSlug: vi.fn(),
 }));
 
 // Mock antd message
@@ -70,12 +102,12 @@ function renderJoinList(listId: string, user: any = { uid: 'user123' }) {
 describe('JoinList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset to default mock that returns empty slugs
-    vi.mocked(subscription.subscribeToUserSlugs).mockImplementation(() => () => {});
+    // Reset subscribeSlugs to default no-op
+    mockUserBackend.subscribeSlugs.mockImplementation(() => () => {});
   });
 
   it('shows loading spinner while fetching list', () => {
-    vi.mocked(firestore.getListById).mockImplementation(
+    mockUpkeepBackend.getList.mockImplementation(
       () => new Promise(() => {}) // Never resolves
     );
 
@@ -86,7 +118,7 @@ describe('JoinList', () => {
   });
 
   it('shows list name and join form when list exists', async () => {
-    vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Family Tasks' });
+    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -98,7 +130,7 @@ describe('JoinList', () => {
   });
 
   it('shows error message when list does not exist', async () => {
-    vi.mocked(firestore.getListById).mockResolvedValue(null);
+    mockUpkeepBackend.getList.mockResolvedValue(null);
 
     renderJoinList('nonexistent');
 
@@ -109,7 +141,7 @@ describe('JoinList', () => {
   });
 
   it('shows error message when loading fails with permission error', async () => {
-    vi.mocked(firestore.getListById).mockRejectedValue(new Error('Missing or insufficient permissions'));
+    mockUpkeepBackend.getList.mockRejectedValue(new Error('Missing or insufficient permissions'));
 
     renderJoinList('list123');
 
@@ -120,7 +152,7 @@ describe('JoinList', () => {
   });
 
   it('suggests slug based on list name', async () => {
-    vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Family Tasks' });
+    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -132,10 +164,10 @@ describe('JoinList', () => {
     expect(input).toHaveValue('family-tasks');
   });
 
-  it('calls setUserSlug and navigates on successful join', async () => {
+  it('calls setSlug and navigates on successful join', async () => {
     const user = userEvent.setup();
-    vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
-    vi.mocked(firestore.setUserSlug).mockResolvedValue(undefined);
+    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
+    mockUserBackend.setSlug.mockResolvedValue(undefined);
 
     renderJoinList('list123');
 
@@ -147,7 +179,7 @@ describe('JoinList', () => {
     await user.click(joinButton);
 
     await waitFor(() => {
-      expect(firestore.setUserSlug).toHaveBeenCalledWith('user123', 'home', 'list123');
+      expect(mockUserBackend.setSlug).toHaveBeenCalledWith('user123', 'household', 'home', 'list123');
     });
     expect(mockNavigate).toHaveBeenCalledWith('home');
   });
@@ -157,15 +189,14 @@ describe('JoinList', () => {
     const { message } = await import('antd');
 
     // Mock the subscription to return existing slugs
-    vi.mocked(subscription.subscribeToUserSlugs).mockImplementation((_uid, dispatch) => {
-      // Simulate the subscription immediately dispatching existing slugs
+    mockUserBackend.subscribeSlugs.mockImplementation((_uid: string, _ns: string, cb: (slugs: Record<string, string>) => void) => {
       setTimeout(() => {
-        dispatch({ type: 'SET_USER_SLUGS', slugs: { home: 'existing-list' } });
+        cb({ home: 'existing-list' });
       }, 0);
       return () => {};
     });
 
-    vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
+    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -179,13 +210,13 @@ describe('JoinList', () => {
     await waitFor(() => {
       expect(message.error).toHaveBeenCalledWith('You already have a list at "/home"');
     });
-    expect(firestore.setUserSlug).not.toHaveBeenCalled();
+    expect(mockUserBackend.setSlug).not.toHaveBeenCalled();
   });
 
   it('allows custom slug input', async () => {
     const user = userEvent.setup();
-    vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Family Tasks' });
-    vi.mocked(firestore.setUserSlug).mockResolvedValue(undefined);
+    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
+    mockUserBackend.setSlug.mockResolvedValue(undefined);
 
     renderJoinList('list123');
 
@@ -201,13 +232,13 @@ describe('JoinList', () => {
     await user.click(joinButton);
 
     await waitFor(() => {
-      expect(firestore.setUserSlug).toHaveBeenCalledWith('user123', 'my-family', 'list123');
+      expect(mockUserBackend.setSlug).toHaveBeenCalledWith('user123', 'household', 'my-family', 'list123');
     });
   });
 
   it('navigates to parent route on cancel', async () => {
     const user = userEvent.setup();
-    vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
+    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -226,7 +257,7 @@ describe('JoinList', () => {
 
   describe('auth check fix', () => {
     it('shows error when user is not authenticated (null user)', async () => {
-      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
+      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
       renderJoinList('list123', null); // Pass null user (not authenticated)
 
@@ -237,7 +268,7 @@ describe('JoinList', () => {
     });
 
     it('waits while auth is loading (undefined user)', () => {
-      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Home' });
+      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
       // Render with undefined user (auth still loading)
       render(
@@ -262,7 +293,7 @@ describe('JoinList', () => {
     it('rejects slugs with only special characters', async () => {
       const user = userEvent.setup();
       const { message } = await import('antd');
-      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
+      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
 
       renderJoinList('list123');
 
@@ -278,12 +309,12 @@ describe('JoinList', () => {
       await user.click(joinButton);
 
       expect(message.error).toHaveBeenCalledWith('Slug must contain at least one letter or number');
-      expect(firestore.setUserSlug).not.toHaveBeenCalled();
+      expect(mockUserBackend.setSlug).not.toHaveBeenCalled();
     });
 
     it('rejects empty slugs', async () => {
       const user = userEvent.setup();
-      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
+      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
 
       renderJoinList('list123');
 
@@ -298,14 +329,14 @@ describe('JoinList', () => {
       // Button should be disabled or input validation prevents submission
       await user.click(joinButton);
 
-      // Should not call setUserSlug with empty slug
-      expect(firestore.setUserSlug).not.toHaveBeenCalled();
+      // Should not call setSlug with empty slug
+      expect(mockUserBackend.setSlug).not.toHaveBeenCalled();
     });
 
     it('accepts valid slugs with alphanumeric characters', async () => {
       const user = userEvent.setup();
-      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
-      vi.mocked(firestore.setUserSlug).mockResolvedValue(undefined);
+      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
+      mockUserBackend.setSlug.mockResolvedValue(undefined);
 
       renderJoinList('list123');
 
@@ -321,14 +352,14 @@ describe('JoinList', () => {
       await user.click(joinButton);
 
       await waitFor(() => {
-        expect(firestore.setUserSlug).toHaveBeenCalledWith('user123', 'my-list-123', 'list123');
+        expect(mockUserBackend.setSlug).toHaveBeenCalledWith('user123', 'household', 'my-list-123', 'list123');
       });
     });
 
     it('strips leading and trailing dashes from slugs', async () => {
       const user = userEvent.setup();
-      vi.mocked(firestore.getListById).mockResolvedValue({ name: 'Test List' });
-      vi.mocked(firestore.setUserSlug).mockResolvedValue(undefined);
+      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
+      mockUserBackend.setSlug.mockResolvedValue(undefined);
 
       renderJoinList('list123');
 
@@ -345,7 +376,7 @@ describe('JoinList', () => {
 
       await waitFor(() => {
         // Should strip leading/trailing dashes
-        expect(firestore.setUserSlug).toHaveBeenCalledWith('user123', 'my-list', 'list123');
+        expect(mockUserBackend.setSlug).toHaveBeenCalledWith('user123', 'household', 'my-list', 'list123');
       });
     });
   });

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Button, Input, message } from "antd";
+import { Button, Input } from "antd";
 import { GoogleOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { getBackend } from "@kirkl/shared";
+import { getBackend, useFeedback } from "@kirkl/shared";
 
 const Container = styled.div`
   display: flex;
@@ -44,6 +44,7 @@ const DevLabel = styled.span`
 `;
 
 export function Auth() {
+  const { message } = useFeedback();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);

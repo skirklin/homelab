@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import { Button, Form, Input, Divider, message } from 'antd';
+import { Button, Form, Input, Divider } from 'antd';
 import { GoogleOutlined, MailOutlined } from '@ant-design/icons';
 
-import { useAuth, getBackend } from '@kirkl/shared';
+import { useAuth, getBackend, useFeedback } from '@kirkl/shared';
 
 const SignInCard = styled.div`
   margin: 40px auto;
@@ -20,6 +20,7 @@ const Title = styled.h1`
 `
 
 function Auth(props: { children: React.ReactNode }) {
+  const { message } = useFeedback();
   const { user, loading } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [submitting, setSubmitting] = useState(false);

@@ -15,20 +15,19 @@ import DownloadButton from '../Buttons/DownloadRecipe';
 import VisibilityControl from '../Buttons/Visibility';
 import ForkButton from '../Buttons/ForkRecipe';
 import { type AppState, type BoxId, type RecipeId, Visibility } from '../types';
-import { addCookingLogEvent } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
 import { Divider, RecipeActionGroup } from '../StyledComponents';
 import ByLine from './Byline';
 import Tags from './Tags';
-import { Button, Dropdown, Menu, Input, Modal, message } from 'antd';
+import { Button, Dropdown, Menu, Input, Modal } from 'antd';
 import { MoreOutlined, CheckCircleOutlined, RobotOutlined, EditOutlined } from '@ant-design/icons';
 import { useContext, useState } from 'react';
 import { Context } from '../context';
-import { setRecipeVisibility } from '../pocketbase';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
-import { addRecipeOwner, enrichRecipeManual } from '../backend';
+import { enrichRecipeManual } from '../backend';
 import EditButton from '../Buttons/EditRecipe';
-import { useAuth } from '@kirkl/shared';
+import { useAuth, useFeedback } from '@kirkl/shared';
 
 const RecipeContainer = styled.article`
   max-width: 800px;
@@ -96,9 +95,11 @@ const MadeItButton = styled(Button)`
 `
 
 function QuickMadeIt(props: RecipeCardProps) {
+  const { message } = useFeedback();
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const user = getAppUserFromState(state, authUser?.uid);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [note, setNote] = useState('');
@@ -109,7 +110,7 @@ function QuickMadeIt(props: RecipeCardProps) {
   const handleMadeIt = async () => {
     setLoading(true);
     try {
-      await addCookingLogEvent(boxId, recipeId, user.id, note.trim() || undefined);
+      await recipesBackend.addCookingLogEvent(boxId, recipeId, user.id, { notes: note.trim() || undefined });
       setNote('');
       setIsModalOpen(false);
       message.success('Added to cooking log!');
@@ -166,8 +167,10 @@ const MenuButton = styled.button`
 `
 
 function ActionMenu(props: RecipeCardProps) {
+  const { message } = useFeedback();
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
+  const recipesBackend = useRecipesBackend();
   const [enriching, setEnriching] = useState(false);
   const [modifyModalVisible, setModifyModalVisible] = useState(false);
   const recipe = getRecipeFromState(state, boxId, recipeId)
@@ -176,11 +179,7 @@ function ActionMenu(props: RecipeCardProps) {
   }
 
   function handleVisiblityChange(e: { key: string | undefined }) {
-    setRecipeVisibility(boxId, recipeId, e.key as Visibility)
-  }
-
-  function handleAddOwner(newOwnerEmail: string) {
-    addRecipeOwner({ boxId, recipeId, newOwnerEmail })
+    recipesBackend.setRecipeVisibility(recipeId, e.key as Visibility)
   }
 
   async function handleEnrich() {
@@ -214,7 +213,6 @@ function ActionMenu(props: RecipeCardProps) {
       <EditButton {...props} element="menu" />
       <VisibilityControl
         {...props}
-        handleAddOwner={handleAddOwner}
         handleChange={handleVisiblityChange}
         owners={recipe.owners}
         value={recipe.visibility} element="menu" />

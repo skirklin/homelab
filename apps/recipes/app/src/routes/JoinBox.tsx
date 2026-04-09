@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useBasePath } from "../RecipesRoutes";
-import { Button, Spin, message } from "antd";
+import { Button, Spin } from "antd";
 import styled from "styled-components";
-import { useAuth, getBackend } from "@kirkl/shared";
+import { useAuth, getBackend, useFeedback } from "@kirkl/shared";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -57,6 +57,7 @@ function pb() {
 }
 
 export default function JoinBox() {
+  const { message } = useFeedback();
   const { boxId } = useParams<{ boxId: string }>();
   const navigate = useNavigate();
   const basePath = useBasePath();

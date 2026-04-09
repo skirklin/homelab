@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import styled, { css } from "styled-components";
-import { InputNumber, message, Spin } from "antd";
+import { InputNumber, Spin } from "antd";
 import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
+import { useFeedback } from "@kirkl/shared";
 import type { NumberWidget as NumberWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, updateEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {
@@ -81,6 +82,8 @@ interface NumberWidgetProps {
 }
 
 export function NumberWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: NumberWidgetProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [value, setValue] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -110,9 +113,9 @@ export function NumberWidget({ widget, entries, userId, logId, timestamp, size =
     setSaved(false);
     try {
       if (entryId) {
-        await updateEntry(entryId, { data: { value: val } }, logId);
+        await life.updateEntry(entryId, { data: { value: val } });
       } else {
-        await addEntry(widget.id, { value: val }, userId, { logId, timestamp });
+        await life.addEntry(logId!, widget.id, { value: val }, userId, { timestamp });
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -122,7 +125,7 @@ export function NumberWidget({ widget, entries, userId, logId, timestamp, size =
     } finally {
       setSaving(false);
     }
-  }, [logId, userId, widget.id, timestamp]);
+  }, [logId, userId, widget.id, timestamp, life]);
 
   const handleChange = (val: number | null) => {
     setValue(val);

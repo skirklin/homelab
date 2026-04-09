@@ -1,10 +1,11 @@
 import { BookOutlined, GlobalOutlined, ShareAltOutlined, LinkOutlined, TeamOutlined } from "@ant-design/icons";
-import { Dropdown, message } from "antd";
+import { Dropdown } from "antd";
 import { ActionButton } from "../StyledComponents";
 import { Visibility } from "../types";
 import { useState, useContext } from "react";
+import { useFeedback } from "@kirkl/shared";
 import { Context } from "../context";
-import { AddOwnerModal } from "../Modals/AddOwnerModal";
+import { createShareInvite } from "../backend";
 import { OwnersModal } from "../Modals/OwnersModal";
 import type { MenuProps } from "antd";
 
@@ -17,13 +18,12 @@ interface VisibilityProps {
     owners?: string[]
     subscribers?: string[]
     handleChange: (e: { key: string }) => void
-    handleAddOwner: (newOwnerEmail: string) => void
 }
 
 export default function VisibilityControl(props: VisibilityProps) {
-    const { element, value, handleChange, disabled, handleAddOwner, boxId, recipeId, owners, subscribers } = props;
+    const { message } = useFeedback();
+    const { element, value, handleChange, disabled, boxId, recipeId, owners, subscribers } = props;
     const { state } = useContext(Context);
-    const [isAddOwnerVisible, setIsAddOwnerVisible] = useState(false);
     const [isOwnersVisible, setIsOwnersVisible] = useState(false);
 
     const handleCopyRecipeLink = () => {
@@ -39,6 +39,20 @@ export default function VisibilityControl(props: VisibilityProps) {
             const joinLink = `${window.location.origin}/join/${boxId}`;
             navigator.clipboard.writeText(joinLink);
             message.success("Join link copied!");
+        }
+    };
+
+    const handleCreateInvite = async () => {
+        try {
+            const targetType = recipeId ? "recipe" : "box";
+            const targetId = recipeId || boxId;
+            if (!targetId) return;
+
+            const result = await createShareInvite({ targetType, targetId });
+            await navigator.clipboard.writeText(result.data.url);
+            message.success("Invite link copied to clipboard!");
+        } catch (err) {
+            message.error("Failed to create invite link");
         }
     };
 
@@ -94,10 +108,10 @@ export default function VisibilityControl(props: VisibilityProps) {
             });
         }
         menuItems.push({
-            key: 'addOwner',
+            key: 'createInvite',
             icon: <ShareAltOutlined />,
-            label: 'Add owner by email',
-            onClick: () => setIsAddOwnerVisible(true),
+            label: 'Create invite link',
+            onClick: handleCreateInvite,
         });
         if (owners && owners.length > 0) {
             const subscriberOnlyCount = (subscribers || []).filter(id => !owners.includes(id)).length;
@@ -127,11 +141,6 @@ export default function VisibilityControl(props: VisibilityProps) {
             <Dropdown disabled={disabled} menu={{ items: menuItems }}>
                 {elt}
             </Dropdown>
-            <AddOwnerModal
-                isVisible={isAddOwnerVisible}
-                setIsVisible={setIsAddOwnerVisible}
-                handleOk={handleAddOwner}
-            />
             <OwnersModal
                 isVisible={isOwnersVisible}
                 setIsVisible={setIsOwnersVisible}

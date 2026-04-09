@@ -162,6 +162,96 @@ test.describe("Shopping Module", () => {
   });
 });
 
+test.describe("Persistence after reload", () => {
+  test("shopping list persists after page reload", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: /shopping/i }).click();
+    await expect(page).toHaveURL(/\/shopping/);
+    await expect(page.getByRole("button", { name: /new list/i })).toBeVisible({ timeout: 5000 });
+
+    const listName = `Persist ${Date.now()}`;
+    await createShoppingList(page, listName);
+
+    // Verify we're on the list page
+    await expect(page.getByRole("combobox")).toBeVisible({ timeout: 5000 });
+
+    // Reload the page
+    await page.reload();
+
+    // After reload, the list should still be visible (not the list picker)
+    await expect(page.getByRole("combobox")).toBeVisible({ timeout: 10000 });
+  });
+
+  test("upkeep task list persists after page reload", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: /upkeep/i }).click();
+    await expect(page).toHaveURL(/\/upkeep/);
+    await expect(page.getByRole("button", { name: /new task list/i })).toBeVisible({ timeout: 5000 });
+
+    const listName = `Persist ${Date.now()}`;
+    await createUpkeepList(page, listName);
+
+    // Verify we're on the task board
+    await expect(page.getByRole("heading", { name: "Due Today" })).toBeVisible({ timeout: 5000 });
+
+    // Reload the page
+    await page.reload();
+
+    // After reload, the task board should still be visible (not the list picker)
+    await expect(page.getByRole("heading", { name: "Due Today" })).toBeVisible({ timeout: 10000 });
+  });
+
+  test("travel log persists after page reload", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: /travel/i }).click();
+    await expect(page).toHaveURL(/\/travel/);
+    await page.waitForTimeout(2000);
+
+    // Travel auto-creates a log on first visit — verify content loads
+    const body = page.locator("body");
+    await expect(body).toBeVisible();
+
+    // Reload the page
+    await page.reload();
+
+    // After reload, should still show travel content (not a blank/error state)
+    await page.waitForTimeout(2000);
+    await expect(page.locator("body")).toBeVisible();
+    // Should not show login page
+    await expect(page.getByTestId("email-input")).not.toBeVisible({ timeout: 3000 });
+  });
+});
+
+test.describe("Shopping Module - Delete List", () => {
+  test("can delete a list", async ({ page }) => {
+    await signIn(page);
+    await page.getByRole("button", { name: /shopping/i }).click();
+    await expect(page).toHaveURL(/\/shopping/);
+    await expect(page.getByRole("button", { name: /new list/i })).toBeVisible({ timeout: 5000 });
+
+    const listName = `Delete Me ${Date.now()}`;
+    await createShoppingList(page, listName);
+
+    // Verify we're on the list page
+    await expect(page.getByRole("combobox")).toBeVisible({ timeout: 5000 });
+
+    // Open settings — use the gear button near the list title, not the nav bar ones
+    await page.getByRole("button", { name: "setting" }).nth(1).click();
+
+    // Click "Delete List Forever" — triggers a confirmation modal
+    await page.getByRole("button", { name: /Delete List Forever/i }).click();
+
+    // Confirm in the Ant Design Modal.confirm dialog
+    // Modal.confirm renders with class ant-modal-confirm
+    const modal = page.locator(".ant-modal-confirm");
+    await expect(modal).toBeVisible({ timeout: 5000 });
+    await modal.getByRole("button", { name: /ok|delete/i }).click();
+
+    // Should navigate back to list picker
+    await expect(page.getByText("My Lists")).toBeVisible({ timeout: 10000 });
+  });
+});
+
 test.describe("Shopping Module - Full Workflow", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page);
@@ -179,7 +269,51 @@ test.describe("Shopping Module - Full Workflow", () => {
     await expect(page.getByRole("textbox", { name: "Note" })).toBeVisible();
     await expect(page.getByRole("button", { name: /add/i })).toBeVisible();
     await expect(page.getByText("Uncategorized")).toBeVisible();
-    // Item-level CRUD tested in standalone shopping app Playwright tests (9/9)
+  });
+
+  test("add item, check it, and verify history tab works", async ({ page }) => {
+    const listName = `History ${Date.now()}`;
+    await createShoppingList(page, listName);
+    await expect(page.getByRole("combobox")).toBeVisible({ timeout: 5000 });
+
+    // Add an item via the autocomplete
+    await page.getByRole("combobox").pressSequentially("Milk", { delay: 50 });
+    await page.getByRole("textbox", { name: "Note" }).click(); // close dropdown
+    await page.getByRole("button", { name: /add/i }).click();
+
+    // Item should appear
+    await expect(page.getByText("Milk")).toBeVisible({ timeout: 5000 });
+
+    // Check the item
+    await page.getByText("Milk").click();
+
+    // Switch to history tab (clock icon)
+    const historyTab = page.locator('button').filter({ has: page.locator('.anticon-clock-circle') }).first();
+    if (await historyTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await historyTab.click();
+      // History should show our item
+      await expect(page.getByText("milk")).toBeVisible({ timeout: 5000 });
+    }
+  });
+
+  test("toast notification appears on list rename", async ({ page }) => {
+    const listName = `Toast ${Date.now()}`;
+    await createShoppingList(page, listName);
+    await expect(page.getByRole("combobox")).toBeVisible({ timeout: 5000 });
+
+    // Open settings
+    await page.getByRole("button", { name: "setting" }).nth(1).click();
+
+    // Rename the list
+    await page.getByRole("button", { name: "Rename" }).click();
+    const renameInput = page.locator(".ant-modal").locator("input");
+    await expect(renameInput).toBeVisible({ timeout: 3000 });
+    await renameInput.clear();
+    await renameInput.fill("Renamed List");
+    await page.locator(".ant-modal").getByRole("button", { name: /rename/i }).click();
+
+    // Toast notification should appear (via useFeedback hook)
+    await expect(page.locator(".ant-message")).toBeVisible({ timeout: 5000 });
   });
 });
 

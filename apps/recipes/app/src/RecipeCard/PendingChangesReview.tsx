@@ -3,7 +3,8 @@ import { Button, Tag } from 'antd';
 import { useContext } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
-import { applyChanges, rejectChanges } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
+import { pendingChangesToBackend } from '../adapters';
 import { getRecipeFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';
 import { RecipeDiffView } from '../Modals/RecipeDiffView';
@@ -85,6 +86,7 @@ const ButtonRow = styled.div`
 function PendingChangesReview(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
+  const recipesBackend = useRecipesBackend();
 
   const recipe = getRecipeFromState(state, boxId, recipeId);
   if (!recipe?.pendingChanges) {
@@ -115,14 +117,14 @@ function PendingChangesReview(props: RecipeCardProps) {
 
   async function handleAccept() {
     const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
-    await applyChanges(boxId, recipeId, changes, {
+    await recipesBackend.applyChanges(recipeId, pendingChangesToBackend(changes), {
       description: currentDescription,
       tags: tags as string[],
     });
   }
 
   async function handleReject() {
-    await rejectChanges(boxId, recipeId, changes.source);
+    await recipesBackend.rejectChanges(recipeId, changes.source);
   }
 
   const isModification = changes.source === 'modification';

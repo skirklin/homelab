@@ -4,6 +4,7 @@
  */
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "@kirkl/shared";
+import { BackendProvider } from "./backend-provider";
 import { UpkeepProvider } from "./upkeep-context";
 import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
@@ -32,11 +33,14 @@ export function UpkeepRoutes({ embedded = false }: UpkeepRoutesProps) {
 
 export function UpkeepModule() {
   return (
-    <UpkeepProvider>
-      <UpkeepRoutes />
-    </UpkeepProvider>
+    <BackendProvider>
+      <UpkeepProvider>
+        <UpkeepRoutes />
+      </UpkeepProvider>
+    </BackendProvider>
   );
 }
 
 export { UpkeepProvider, useUpkeepContext } from "./upkeep-context";
+export { BackendProvider as UpkeepBackendProvider } from "./backend-provider";
 export { isNotificationSupported, requestNotificationPermission, getFcmToken } from "./messaging";

@@ -1,10 +1,9 @@
 /**
  * PocketBase real-time subscriptions for the recipes app.
- * Replaces Firestore onSnapshot listeners with PocketBase SSE subscriptions.
+ * Uses shared subscription helpers from @kirkl/shared.
  */
 import type React from 'react';
-import type { RecordSubscription, RecordModel } from "pocketbase";
-import { getBackend, useAuth } from "@kirkl/shared";
+import { subscribeToRecord, subscribeToCollection, useAuth } from "@kirkl/shared";
 
 /** Auth user type — matches the shape from @kirkl/shared's useAuth() */
 type User = NonNullable<ReturnType<typeof useAuth>["user"]>;
@@ -13,38 +12,29 @@ import { type ActionType, type UnsubMap } from './types';
 
 import { boxFromRecord, recipeFromRecord, UserEntry, userFromRecord } from './storage';
 
-function pb() {
-  return getBackend();
-}
-
-export async function subscribeToUser(user: User, dispatch: React.Dispatch<ActionType>, unsubMap: UnsubMap, cancelled: () => boolean) {
+export function subscribeToUser(user: User, dispatch: React.Dispatch<ActionType>, unsubMap: UnsubMap, cancelled: () => boolean) {
   if (user === null) {
     return;
   }
 
-  try {
-    const userRecord = await pb().collection("users").getOne(user.uid, { $autoCancel: false });
-    if (cancelled()) return;
-    const userEntry = userFromRecord(userRecord);
-    dispatch({ type: "ADD_USER", user: userEntry });
-
-    // Subscribe to user record changes
-    pb().collection("users").subscribe(user.uid, (e: RecordSubscription<RecordModel>) => {
-      if (cancelled()) return;
-      if (e.action === "delete") return;
-      const updatedUser = userFromRecord(e.record);
-      dispatch({ type: "ADD_USER", user: updatedUser });
-      setupBoxSubscriptions(updatedUser, dispatch, unsubMap, cancelled);
-    });
-    unsubMap.userUnsub = () => pb().collection("users").unsubscribe(user.uid);
-
-    await setupBoxSubscriptions(userEntry, dispatch, unsubMap, cancelled);
-  } catch (err) {
-    console.error("[recipes] subscribeToUser failed:", err);
-  }
+  let initialLoad = true;
+  unsubMap.userUnsub = subscribeToRecord("users", user.uid, cancelled, {
+    onData: (record) => {
+      const userEntry = userFromRecord(record);
+      dispatch({ type: "ADD_USER", user: userEntry });
+      setupBoxSubscriptions(userEntry, dispatch, unsubMap, cancelled);
+      if (initialLoad) {
+        initialLoad = false;
+        dispatch({ type: "SET_LOADING", loading: 0 });
+      }
+    },
+    onError: (err) => {
+      console.error("[recipes] subscribeToUser failed:", err);
+    },
+  });
 }
 
-async function setupBoxSubscriptions(
+function setupBoxSubscriptions(
   user: UserEntry,
   dispatch: React.Dispatch<ActionType>,
   unsubMap: UnsubMap,
@@ -52,62 +42,44 @@ async function setupBoxSubscriptions(
 ) {
   for (const boxId of user.boxes) {
     if (cancelled()) return;
-    if (!unsubMap.boxMap.has(boxId)) {
-      // Fetch box — disable auto-cancel for initialization
-      try {
-        const boxRecord = await pb().collection("recipe_boxes").getOne(boxId, { $autoCancel: false });
-        if (cancelled()) return;
-        const box = boxFromRecord(boxRecord);
+    if (unsubMap.boxMap.has(boxId)) continue;
+
+    const boxUnsub = subscribeToRecord("recipe_boxes", boxId, cancelled, {
+      onData: (record) => {
+        const box = boxFromRecord(record);
         dispatch({ type: "ADD_BOX", boxId, payload: box });
-      } catch (error) {
-        console.error(`Error loading box ${boxId}:`, error);
-        continue;
-      }
+      },
+      onDelete: () => {
+        dispatch({ type: "REMOVE_BOX", boxId });
+      },
+      onError: (err) => {
+        console.error(`Error loading box ${boxId}:`, err);
+      },
+    });
 
-      // Subscribe to box changes
-      pb().collection("recipe_boxes").subscribe(boxId, (e: RecordSubscription<RecordModel>) => {
-        if (cancelled()) return;
-        if (e.action === "delete") {
-          dispatch({ type: "REMOVE_BOX", boxId });
-        } else {
-          const box = boxFromRecord(e.record);
-          dispatch({ type: "ADD_BOX", boxId, payload: box });
-        }
-      });
-
-      // Fetch recipes for this box
-      try {
-        const recipes = await pb().collection("recipes").getFullList({
-          filter: `box = "${boxId}"`,
-          $autoCancel: false,
-        });
-        if (cancelled()) return;
-        for (const recipeRecord of recipes) {
+    const recipesUnsub = subscribeToCollection("recipes", cancelled, {
+      filter: `box = "${boxId}"`,
+      belongsTo: (r) => r.box === boxId,
+      onInitial: (records) => {
+        for (const recipeRecord of records) {
           const recipe = recipeFromRecord(recipeRecord);
           dispatch({ type: "ADD_RECIPE", recipeId: recipeRecord.id, boxId, payload: recipe });
         }
-      } catch (error) {
-        console.error(`Error loading recipes for box ${boxId}:`, error);
-      }
-
-      // Subscribe to recipe changes for this box
-      // We subscribe to all recipes and filter by box ID
-      pb().collection("recipes").subscribe("*", (e: RecordSubscription<RecordModel>) => {
-        if (cancelled()) return;
-        if (e.record.box !== boxId) return;
-        if (e.action === "delete") {
-          dispatch({ type: "REMOVE_RECIPE", recipeId: e.record.id, boxId });
+      },
+      onChange: (action, record) => {
+        if (action === "delete") {
+          dispatch({ type: "REMOVE_RECIPE", recipeId: record.id, boxId });
         } else {
-          const recipe = recipeFromRecord(e.record);
-          dispatch({ type: "ADD_RECIPE", recipeId: e.record.id, boxId, payload: recipe });
+          const recipe = recipeFromRecord(record);
+          dispatch({ type: "ADD_RECIPE", recipeId: record.id, boxId, payload: recipe });
         }
-      });
+      },
+      onError: (err) => {
+        console.error(`Error loading recipes for box ${boxId}:`, err);
+      },
+    });
 
-      unsubMap.boxMap.set(boxId, {
-        boxUnsub: () => pb().collection("recipe_boxes").unsubscribe(boxId),
-        recipesUnsub: () => pb().collection("recipes").unsubscribe("*"),
-      });
-    }
+    unsubMap.boxMap.set(boxId, { boxUnsub, recipesUnsub });
   }
 }
 

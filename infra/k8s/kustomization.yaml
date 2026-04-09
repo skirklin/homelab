@@ -4,7 +4,9 @@ namespace: homelab
 
 resources:
   - namespace.yaml
+  - registry.yaml
   - caddy.yaml
   - pocketbase.yaml
   - apps.yaml
   - ingest.yaml
+  - api.yaml

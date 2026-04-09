@@ -24,13 +24,10 @@ async function newSignedInPage(browser: { newContext: () => Promise<BrowserConte
 }
 
 async function dismissModals(page: Page) {
-  // Dismiss any "What's New" or other modals that might block interaction
-  // Wait a moment for modals to render after navigation
   await page.waitForTimeout(500);
   const whatsNewModal = page.getByRole("dialog", { name: /what's new/i });
   if (await whatsNewModal.isVisible({ timeout: 2000 }).catch(() => false)) {
     await whatsNewModal.getByRole("button", { name: /got it/i }).click();
-    // Wait for modal animation to complete
     await expect(whatsNewModal).not.toBeVisible({ timeout: 3000 });
   }
 }
@@ -39,7 +36,6 @@ async function navigateToRecipes(page: Page) {
   await page.getByRole("button", { name: /recipes/i }).click();
   await expect(page).toHaveURL(/\/recipes/);
   await dismissModals(page);
-  // Wait for the recipes page to load — look for the "All Recipes" heading
   await expect(page.getByText("All Recipes")).toBeVisible({ timeout: 15000 });
 }
 
@@ -54,7 +50,6 @@ async function navigateToBoxes(page: Page) {
 async function createBox(page: Page, name: string) {
   await dismissModals(page);
   await page.getByTitle("Create new box.").click();
-  // Target the dialog that has OK/Cancel (the new-box modal), not the What's New modal
   const modal = page.getByRole("dialog").filter({ hasText: "OK" });
   await expect(modal).toBeVisible({ timeout: 5000 });
   await modal.locator('input').fill(name);
@@ -63,12 +58,10 @@ async function createBox(page: Page, name: string) {
 }
 
 test.describe("Recipe Box Sharing (Home App)", () => {
-  test.skip("User A creates a box, User B joins via link, box is visible", async ({ browser }) => {
-    // TODO: New boxes default to visibility="private", so non-owners can't view them via join link.
-    // Fix: either change default visibility to "unlisted" for shared boxes, or add a public join endpoint.
+  test("User A creates a box, shares via invite link, User B redeems", async ({ browser }) => {
     const boxName = `Shared ${Date.now()}`;
 
-    // --- User A: Create box ---
+    // --- User A: Create box and get invite link ---
     const { page: pageA, context: ctxA } = await newSignedInPage(browser);
     await navigateToRecipes(pageA);
     await navigateToBoxes(pageA);
@@ -76,23 +69,50 @@ test.describe("Recipe Box Sharing (Home App)", () => {
     await createBox(pageA, boxName);
     await expect(pageA.getByText(boxName)).toBeVisible({ timeout: 5000 });
 
-    // Navigate into the box and extract boxId from URL
+    // Navigate into the box
     await pageA.getByText(boxName).click();
     await expect(pageA).toHaveURL(/\/recipes\/boxes\//);
-    const boxId = pageA.url().match(/\/boxes\/([^/]+)/)![1];
+
+    // Click Sharing dropdown, then "Create invite link"
+    await pageA.getByRole("button", { name: /sharing/i }).click();
+    const inviteItem = pageA.getByText("Create invite link");
+    await expect(inviteItem).toBeVisible({ timeout: 5000 });
+
+    // Capture the clipboard content when invite is created
+    await pageA.evaluate(() => {
+      // Mock clipboard to capture the URL
+      (window as unknown as Record<string, unknown>).__clipboardText = "";
+      navigator.clipboard.writeText = async (text: string) => {
+        (window as unknown as Record<string, unknown>).__clipboardText = text;
+      };
+    });
+    await inviteItem.click();
+
+    // Wait for the invite to be created (toast should appear)
+    await expect(pageA.getByText(/invite link copied/i)).toBeVisible({ timeout: 10000 });
+
+    // Get the invite URL from the mocked clipboard
+    const inviteUrl = await pageA.evaluate(() =>
+      (window as unknown as Record<string, string>).__clipboardText
+    );
+    expect(inviteUrl).toContain("/invite/");
+
+    // Extract the invite path (relative)
+    const invitePath = new URL(inviteUrl).pathname;
     await ctxA.close();
 
-    // --- User B: Join via link ---
+    // --- User B: Redeem invite ---
     const { page: pageB, context: ctxB } = await newSignedInPage(browser);
-    await pageB.goto(`/recipes/join/${boxId}`);
-    await expect(pageB.getByText(boxName)).toBeVisible({ timeout: 10000 });
-    await pageB.getByRole("button", { name: /add to my boxes/i }).click();
+    await pageB.goto(invitePath);
+
+    // Should see success and redirect to the box
+    await expect(pageB.getByText(/invite accepted/i)).toBeVisible({ timeout: 10000 });
     await expect(pageB).toHaveURL(/\/recipes\/boxes\//, { timeout: 10000 });
 
     // Verify box appears in User B's boxes list
     await navigateToBoxes(pageB);
     await expect(pageB.getByText("Your Boxes")).toBeVisible({ timeout: 10000 });
-    await expect(pageB.getByText(boxName)).toBeVisible({ timeout: 5000 });
+    await expect(pageB.getByText(boxName)).toBeVisible({ timeout: 15000 });
     await ctxB.close();
   });
 

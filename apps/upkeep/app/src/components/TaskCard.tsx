@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Button, Tooltip, message, Dropdown } from "antd";
+import { Button, Tooltip, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import { CheckOutlined, EditOutlined, BellOutlined, BellFilled, InfoCircleOutlined, DownOutlined, UpOutlined, HistoryOutlined, ClockCircleOutlined, UndoOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import type { Task } from "../types";
 import { formatDueDate, isTaskSnoozed, formatSnoozeRemaining } from "../types";
-import { useAuth } from "@kirkl/shared";
-import { toggleTaskNotification, snoozeTask, unsnoozeTask } from "../pocketbase";
+import { useAuth, useFeedback } from "@kirkl/shared";
+import { useUpkeepBackend } from "../backend-provider";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "../messaging";
 
 const CardWrapper = styled.div<{ $snoozed?: boolean }>`
@@ -125,7 +125,9 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardProps) {
+  const { message } = useFeedback();
   const { user } = useAuth();
+  const upkeep = useUpkeepBackend();
   const [expanded, setExpanded] = useState(false);
   const userId = user?.uid;
   const isNotified = userId ? task.notifyUsers.includes(userId) : false;
@@ -135,7 +137,7 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
   const handleSnooze = async (hours: number) => {
     try {
       const until = new Date(Date.now() + hours * 60 * 60 * 1000);
-      await snoozeTask(task.id, until);
+      await upkeep.snoozeTask(task.id, until);
       const label = hours >= 24 ? `${Math.floor(hours / 24)} day${hours >= 48 ? 's' : ''}` : `${hours} hour${hours > 1 ? 's' : ''}`;
       message.success(`Snoozed for ${label}`);
     } catch (error) {
@@ -146,7 +148,7 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
 
   const handleUnsnooze = async () => {
     try {
-      await unsnoozeTask(task.id);
+      await upkeep.unsnoozeTask(task.id);
       message.success("Task unsnoozed");
     } catch (error) {
       console.error("Failed to unsnooze task:", error);
@@ -183,7 +185,7 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
         await getFcmToken(userId);
       }
 
-      await toggleTaskNotification(task.id, userId, !isNotified);
+      await upkeep.toggleTaskNotification(task.id, userId, !isNotified);
       message.success(isNotified ? "Notifications disabled" : "You'll be notified when this task is due");
     } catch (error) {
       console.error("Failed to toggle notification:", error);

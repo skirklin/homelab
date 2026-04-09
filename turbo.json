@@ -5,6 +5,10 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": ["dist/types/**", "dist/.tsbuildinfo"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

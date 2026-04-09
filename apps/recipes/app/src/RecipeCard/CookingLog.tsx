@@ -1,12 +1,13 @@
 import { CheckCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { useContext, useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { Button, Input, Popconfirm, message, Spin } from 'antd';
+import { Button, Input, Popconfirm, Spin } from 'antd';
 import { Context } from '../context';
 import { getAppUserFromState, getUserFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';
-import { getCookingLogEvents, updateCookingLogEvent, deleteCookingLogEvent } from '../pocketbase';
-import { useAuth, type Event } from '@kirkl/shared';
+import { useRecipesBackend } from '../backend-provider';
+import { useAuth, useFeedback, type Event } from '@kirkl/shared';
+import type { Event as BackendEvent } from '@homelab/backend';
 
 const LogContainer = styled.div`
   margin-top: var(--space-md);
@@ -101,10 +102,24 @@ function formatDate(date: Date): string {
   });
 }
 
+/** Convert a backend Event to the @kirkl/shared Event shape used in the UI */
+function backendEventToShared(e: BackendEvent): Event {
+  return {
+    id: e.id,
+    subjectId: e.subjectId,
+    timestamp: e.timestamp,
+    createdAt: e.createdAt,
+    createdBy: e.createdBy,
+    data: e.data,
+  };
+}
+
 function CookingLog(props: RecipeCardProps) {
+  const { message } = useFeedback();
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -118,9 +133,9 @@ function CookingLog(props: RecipeCardProps) {
     const fetchEvents = async () => {
       setLoading(true);
       try {
-        const fetchedEvents = await getCookingLogEvents(boxId, recipeId);
+        const fetchedEvents = await recipesBackend.getCookingLogEvents(boxId, recipeId);
         if (!cancelled) {
-          setEvents(fetchedEvents);
+          setEvents(fetchedEvents.map(backendEventToShared));
         }
       } catch (error) {
         console.error('Failed to fetch cooking log:', error);
@@ -133,7 +148,7 @@ function CookingLog(props: RecipeCardProps) {
 
     fetchEvents();
     return () => { cancelled = true; };
-  }, [boxId, recipeId]);
+  }, [boxId, recipeId, recipesBackend]);
 
   const getUserName = (userId: string): string => {
     const logUser = getUserFromState(state, userId);
@@ -150,7 +165,7 @@ function CookingLog(props: RecipeCardProps) {
 
   const handleSaveEdit = async (eventId: string, newNote: string) => {
     try {
-      await updateCookingLogEvent(boxId, eventId, newNote);
+      await recipesBackend.updateCookingLogEvent(eventId, newNote);
       // Update local state
       setEvents(prev => prev.map(e =>
         e.id === eventId
@@ -166,7 +181,7 @@ function CookingLog(props: RecipeCardProps) {
 
   const handleDelete = async (eventId: string) => {
     try {
-      await deleteCookingLogEvent(boxId, eventId);
+      await recipesBackend.deleteCookingLogEvent(eventId);
       // Update local state
       setEvents(prev => prev.filter(e => e.id !== eventId));
       message.success('Entry deleted');

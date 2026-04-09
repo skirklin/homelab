@@ -1,10 +1,10 @@
 import { useState } from "react";
 import styled, { css } from "styled-components";
-import { message } from "antd";
+import { useFeedback } from "@kirkl/shared";
 import { CheckOutlined } from "@ant-design/icons";
 import type { CheckboxWidget as CheckboxWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, deleteEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {
@@ -106,6 +106,8 @@ interface CheckboxWidgetProps {
 }
 
 export function CheckboxWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: CheckboxWidgetProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [saving, setSaving] = useState(false);
   const dayEntries = getEntriesForDate(entries, widget.id, timestamp);
   const isChecked = dayEntries.length > 0;
@@ -118,10 +120,10 @@ export function CheckboxWidget({ widget, entries, userId, logId, timestamp, size
     try {
       if (isChecked && currentEntryId) {
         // Uncheck - delete the entry
-        await deleteEntry(currentEntryId, logId);
+        await life.deleteEntry(currentEntryId);
       } else {
         // Check - create an entry
-        await addEntry(widget.id, { checked: true }, userId, { logId, timestamp });
+        await life.addEntry(logId!, widget.id, { checked: true }, userId, { timestamp });
       }
     } catch (error) {
       console.error("Failed to save:", error);

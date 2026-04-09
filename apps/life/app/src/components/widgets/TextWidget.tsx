@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import styled, { css } from "styled-components";
-import { Input, message, Spin } from "antd";
+import { Input, Spin } from "antd";
 import { CheckCircleFilled, LoadingOutlined } from "@ant-design/icons";
+import { useFeedback } from "@kirkl/shared";
 import type { TextWidget as TextWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry, updateEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 import { type WidgetSize } from "../../display-settings";
 
 const sizeStyles = {
@@ -66,6 +67,8 @@ interface TextWidgetProps {
 }
 
 export function TextWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: TextWidgetProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -95,9 +98,9 @@ export function TextWidget({ widget, entries, userId, logId, timestamp, size = "
     setSaved(false);
     try {
       if (entryId) {
-        await updateEntry(entryId, { data: { text: text.trim() } }, logId);
+        await life.updateEntry(entryId, { data: { text: text.trim() } });
       } else {
-        await addEntry(widget.id, { text: text.trim() }, userId, { logId, timestamp });
+        await life.addEntry(logId!, widget.id, { text: text.trim() }, userId, { timestamp });
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -107,7 +110,7 @@ export function TextWidget({ widget, entries, userId, logId, timestamp, size = "
     } finally {
       setSaving(false);
     }
-  }, [logId, userId, widget.id, timestamp]);
+  }, [logId, userId, widget.id, timestamp, life]);
 
   const handleChange = (text: string) => {
     setValue(text);

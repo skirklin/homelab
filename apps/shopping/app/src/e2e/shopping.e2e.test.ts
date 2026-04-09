@@ -1,6 +1,6 @@
 /**
- * Integration tests for the shopping app's pocketbase.ts functions.
- * Tests the actual app code against a real PocketBase instance.
+ * Integration tests for the shopping app using the @homelab/backend interface.
+ * Tests the PocketBase backend implementations against a real PocketBase instance.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
@@ -11,29 +11,17 @@ import {
   signInAsUser,
   type TestContext,
 } from "@kirkl/shared/test-utils";
-import {
-  createList,
-  renameList,
-  deleteList,
-  getListById,
-  setCurrentListId,
-  addItem,
-  toggleItem,
-  deleteItem,
-  updateItem,
-  updateItemCategory,
-  clearCheckedItems,
-  updateCategories,
-  getUserSlugs,
-  setUserSlug,
-  removeUserSlug,
-  renameUserSlug,
-} from "../pocketbase";
+import { PocketBaseShoppingBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
+import type { ShoppingItem } from "@homelab/backend";
 
 let ctx: TestContext;
+let shopping: PocketBaseShoppingBackend;
+let userBackend: PocketBaseUserBackend;
 
 beforeAll(async () => {
   ctx = await initTestPocketBase();
+  shopping = new PocketBaseShoppingBackend(() => ctx.userPb);
+  userBackend = new PocketBaseUserBackend(() => ctx.userPb);
 });
 
 afterAll(async () => {
@@ -43,51 +31,55 @@ afterAll(async () => {
 describe("List operations", () => {
   it("createList creates a list and sets the user slug", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Weekly Shop", "weekly", user.id);
+    const listId = await shopping.createList("Weekly Shop", user.id);
     expect(listId).toBeTruthy();
 
-    const list = await getListById(listId);
+    await userBackend.setSlug(user.id, "shopping", "weekly", listId);
+
+    const list = await shopping.getList(listId);
     expect(list).not.toBeNull();
     expect(list!.name).toBe("Weekly Shop");
 
-    const slugs = await getUserSlugs(user.id);
+    const slugs = await userBackend.getSlugs(user.id, "shopping");
     expect(slugs.weekly).toBe(listId);
   });
 
   it("renameList updates the name", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Old Name", "rename-test", user.id);
+    const listId = await shopping.createList("Old Name", user.id);
+    await userBackend.setSlug(user.id, "shopping", "rename-test", listId);
 
-    await renameList(listId, "New Name");
+    await shopping.renameList(listId, "New Name");
 
-    const list = await getListById(listId);
+    const list = await shopping.getList(listId);
     expect(list!.name).toBe("New Name");
   });
 
   it("deleteList removes the list", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("To Delete", "delete-test", user.id);
+    const listId = await shopping.createList("To Delete", user.id);
+    await userBackend.setSlug(user.id, "shopping", "delete-test", listId);
 
-    await deleteList(listId);
+    await shopping.deleteList(listId);
 
-    const list = await getListById(listId);
+    const list = await shopping.getList(listId);
     expect(list).toBeNull();
   });
 
   it("getListById returns null for non-existent list", async () => {
     await createTestUser(ctx);
-    const list = await getListById("nonexistent_id_12345");
+    const list = await shopping.getList("nonexistent_id_12345");
     expect(list).toBeNull();
   });
 });
 
 describe("Item operations", () => {
-  it("addItem creates an item on the current list", async () => {
+  it("addItem creates an item on the list", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Item Test", "items", user.id);
-    setCurrentListId(listId);
+    const listId = await shopping.createList("Item Test", user.id);
+    await userBackend.setSlug(user.id, "shopping", "items", listId);
 
-    await addItem("Milk", user.id);
+    await shopping.addItem(listId, "Milk", user.id);
 
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
@@ -100,11 +92,11 @@ describe("Item operations", () => {
 
   it("addItem saves history and reuses category from history", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("History Test", "history", user.id);
-    setCurrentListId(listId);
+    const listId = await shopping.createList("History Test", user.id);
+    await userBackend.setSlug(user.id, "shopping", "history", listId);
 
     // First add with explicit category
-    await addItem("Cheese", user.id, { categoryId: "dairy" });
+    await shopping.addItem(listId, "Cheese", user.id, { categoryId: "dairy" });
 
     // Check history was created
     const history = await ctx.pb.collection("shopping_history").getFullList({
@@ -118,9 +110,9 @@ describe("Item operations", () => {
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
     });
-    await deleteItem(items[0].id);
+    await shopping.deleteItem(items[0].id);
 
-    await addItem("Cheese", user.id);
+    await shopping.addItem(listId, "Cheese", user.id);
 
     const newItems = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
@@ -130,46 +122,37 @@ describe("Item operations", () => {
 
   it("toggleItem checks and unchecks an item", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Toggle Test", "toggle", user.id);
-    setCurrentListId(listId);
+    const listId = await shopping.createList("Toggle Test", user.id);
+    await userBackend.setSlug(user.id, "shopping", "toggle", listId);
 
-    await addItem("Eggs", user.id);
+    await shopping.addItem(listId, "Eggs", user.id);
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
     });
 
-    const shoppingItem = {
-      id: items[0].id,
-      ingredient: items[0].ingredient,
-      categoryId: items[0].category_id,
-      checked: false,
-      addedBy: items[0].added_by,
-      addedAt: new Date(items[0].created),
-    };
-
     // Toggle on
-    await toggleItem(shoppingItem, user.id);
+    await shopping.toggleItem(items[0].id, true, user.id);
     const checked = await ctx.pb.collection("shopping_items").getOne(items[0].id);
     expect(checked.checked).toBe(true);
     expect(checked.checked_by).toBe(user.id);
 
     // Toggle off
-    await toggleItem({ ...shoppingItem, checked: true }, user.id);
+    await shopping.toggleItem(items[0].id, false, user.id);
     const unchecked = await ctx.pb.collection("shopping_items").getOne(items[0].id);
     expect(unchecked.checked).toBe(false);
   });
 
   it("updateItem updates ingredient and note", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Update Test", "update", user.id);
-    setCurrentListId(listId);
+    const listId = await shopping.createList("Update Test", user.id);
+    await userBackend.setSlug(user.id, "shopping", "update", listId);
 
-    await addItem("Milk", user.id, { note: "whole" });
+    await shopping.addItem(listId, "Milk", user.id, { note: "whole" });
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
     });
 
-    await updateItem(items[0].id, { ingredient: "Oat Milk", note: "unsweetened" });
+    await shopping.updateItem(items[0].id, { ingredient: "Oat Milk", note: "unsweetened" });
 
     const updated = await ctx.pb.collection("shopping_items").getOne(items[0].id);
     expect(updated.ingredient).toBe("Oat Milk");
@@ -178,24 +161,15 @@ describe("Item operations", () => {
 
   it("updateItemCategory updates the item and history", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Category Test", "cat", user.id);
-    setCurrentListId(listId);
+    const listId = await shopping.createList("Category Test", user.id);
+    await userBackend.setSlug(user.id, "shopping", "cat", listId);
 
-    await addItem("Apples", user.id, { categoryId: "produce" });
+    await shopping.addItem(listId, "Apples", user.id, { categoryId: "produce" });
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
     });
 
-    const shoppingItem = {
-      id: items[0].id,
-      ingredient: items[0].ingredient,
-      categoryId: items[0].category_id,
-      checked: false,
-      addedBy: user.id,
-      addedAt: new Date(),
-    };
-
-    await updateItemCategory(shoppingItem, "fruit");
+    await shopping.updateItemCategory(items[0].id, "fruit", items[0].ingredient);
 
     const updated = await ctx.pb.collection("shopping_items").getOne(items[0].id);
     expect(updated.category_id).toBe("fruit");
@@ -208,11 +182,11 @@ describe("Item operations", () => {
 
   it("clearCheckedItems records a trip and deletes checked items", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Clear Test", "clear", user.id);
-    setCurrentListId(listId);
+    const listId = await shopping.createList("Clear Test", user.id);
+    await userBackend.setSlug(user.id, "shopping", "clear", listId);
 
-    await addItem("Bread", user.id);
-    await addItem("Butter", user.id);
+    await shopping.addItem(listId, "Bread", user.id);
+    await shopping.addItem(listId, "Butter", user.id);
 
     // Check both items
     const items = await ctx.pb.collection("shopping_items").getFullList({
@@ -225,21 +199,22 @@ describe("Item operations", () => {
       });
     }
 
-    // Reload with checked state
-    const checkedItems = (
+    // Reload with checked state and map to ShoppingItem
+    const checkedItems: ShoppingItem[] = (
       await ctx.pb.collection("shopping_items").getFullList({
         filter: `list = "${listId}"`,
       })
     ).map((item) => ({
       id: item.id,
+      list: item.list,
       ingredient: item.ingredient,
-      categoryId: item.category_id,
+      note: item.note || "",
+      categoryId: item.category_id || "uncategorized",
       checked: item.checked,
       addedBy: item.added_by,
-      addedAt: new Date(item.created),
     }));
 
-    await clearCheckedItems(checkedItems);
+    await shopping.clearCheckedItems(listId, checkedItems);
 
     const remaining = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
@@ -257,10 +232,10 @@ describe("Item operations", () => {
 describe("Category operations", () => {
   it("updateCategories sets category definitions on the list", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Cat Defs", "catdefs", user.id);
-    setCurrentListId(listId);
+    const listId = await shopping.createList("Cat Defs", user.id);
+    await userBackend.setSlug(user.id, "shopping", "catdefs", listId);
 
-    await updateCategories([
+    await shopping.updateCategories(listId, [
       { id: "produce", name: "Produce" },
       { id: "dairy", name: "Dairy" },
     ]);
@@ -274,36 +249,40 @@ describe("Category operations", () => {
 describe("User slug operations", () => {
   it("setUserSlug and getUserSlugs round-trip", async () => {
     const user = await createTestUser(ctx);
-    await createList("Slug Test", "slug-test", user.id);
+    const listId = await shopping.createList("Slug Test", user.id);
+    await userBackend.setSlug(user.id, "shopping", "slug-test", listId);
 
-    const slugs = await getUserSlugs(user.id);
+    const slugs = await userBackend.getSlugs(user.id, "shopping");
     expect(slugs["slug-test"]).toBeTruthy();
   });
 
   it("removeUserSlug removes a slug", async () => {
     const user = await createTestUser(ctx);
-    await createList("Remove Slug", "to-remove", user.id);
+    const listId = await shopping.createList("Remove Slug", user.id);
+    await userBackend.setSlug(user.id, "shopping", "to-remove", listId);
 
-    await removeUserSlug(user.id, "to-remove");
+    await userBackend.removeSlug(user.id, "shopping", "to-remove");
 
-    const slugs = await getUserSlugs(user.id);
+    const slugs = await userBackend.getSlugs(user.id, "shopping");
     expect(slugs["to-remove"]).toBeUndefined();
   });
 
   it("renameUserSlug renames a slug", async () => {
     const user = await createTestUser(ctx);
-    const listId = await createList("Rename Slug", "old-name", user.id);
+    const listId = await shopping.createList("Rename Slug", user.id);
+    await userBackend.setSlug(user.id, "shopping", "old-name", listId);
 
-    await renameUserSlug(user.id, "old-name", "new-name");
+    await userBackend.renameSlug(user.id, "shopping", "old-name", "new-name");
 
-    const slugs = await getUserSlugs(user.id);
+    const slugs = await userBackend.getSlugs(user.id, "shopping");
     expect(slugs["old-name"]).toBeUndefined();
     expect(slugs["new-name"]).toBe(listId);
   });
 
   it("joining a list: owner adds user2, then user2 sets their slug", async () => {
     const user1 = await createTestUser(ctx);
-    const listId = await createList("Shared List", "shared", user1.id);
+    const listId = await shopping.createList("Shared List", user1.id);
+    await userBackend.setSlug(user1.id, "shopping", "shared", listId);
 
     // Owner (user1) adds user2 to the list via admin client (simulating join endpoint)
     const user2 = await createUserWithoutSignIn(ctx);
@@ -314,9 +293,9 @@ describe("User slug operations", () => {
 
     // User2 signs in and sets their own slug
     await signInAsUser(ctx, user2);
-    await setUserSlug(user2.id, "my-list", listId);
+    await userBackend.setSlug(user2.id, "shopping", "my-list", listId);
 
-    const slugs = await getUserSlugs(user2.id);
+    const slugs = await userBackend.getSlugs(user2.id, "shopping");
     expect(slugs["my-list"]).toBe(listId);
 
     // Both users are owners

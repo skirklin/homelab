@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Modal, Input, InputNumber, Select, Button, message } from "antd";
+import { Modal, Input, InputNumber, Select, Button } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth } from "@kirkl/shared";
-import { addTask, updateTask, deleteTask } from "../pocketbase";
+import { useAuth, useFeedback } from "@kirkl/shared";
+import { useUpkeepBackend } from "../backend-provider";
+import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Frequency, FrequencyUnit } from "../types";
 
 const Form = styled.div`
@@ -46,7 +47,11 @@ interface TaskModalProps {
 }
 
 export function TaskModal({ open, task, onClose }: TaskModalProps) {
+  const { message } = useFeedback();
   const { user } = useAuth();
+  const upkeep = useUpkeepBackend();
+  const { state } = useUpkeepContext();
+  const listId = state.list?.id;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [frequencyValue, setFrequencyValue] = useState(1);
@@ -83,25 +88,22 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
     setSubmitting(true);
     try {
       if (isEditing && task) {
-        await updateTask(task.id, {
+        await upkeep.updateTask(task.id, {
           name: name.trim(),
           description: description.trim(),
-          frequency,
+          frequency: frequency as unknown as number,
         });
         message.success("Task updated");
       } else {
-        const now = new Date();
-        await addTask({
+        if (!listId) throw new Error("No list selected");
+        await upkeep.addTask(listId, {
           name: name.trim(),
           description: description.trim(),
           roomId: "general",
-          frequency,
+          frequency: frequency as unknown as number,
           lastCompleted: null,
           snoozedUntil: null,
           notifyUsers: [],
-          createdBy: user.uid,
-          createdAt: now,
-          updatedAt: now,
         });
         message.success("Task added");
       }
@@ -121,7 +123,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
 
     setSubmitting(true);
     try {
-      await deleteTask(task.id);
+      await upkeep.deleteTask(task.id);
       message.success("Task deleted");
       onClose();
     } catch (error) {

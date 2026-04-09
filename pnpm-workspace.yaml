@@ -4,3 +4,4 @@ packages:
   - "packages/*"
   - "services/functions"
   - "services/scripts"
+  - "services/api"

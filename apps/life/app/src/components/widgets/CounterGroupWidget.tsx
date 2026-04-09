@@ -1,9 +1,9 @@
 import { useState } from "react";
 import styled, { css } from "styled-components";
-import { message } from "antd";
+import { useFeedback } from "@kirkl/shared";
 import type { CounterGroupWidget as CounterGroupWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 import { type WidgetSize } from "../../display-settings";
 import { EntriesPopover } from "./EntriesPopover";
 
@@ -133,6 +133,8 @@ interface CounterGroupWidgetProps {
 }
 
 export function CounterGroupWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: CounterGroupWidgetProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const handleTap = async (counterId: string) => {
@@ -140,7 +142,7 @@ export function CounterGroupWidget({ widget, entries, userId, logId, timestamp, 
 
     setSavingId(counterId);
     try {
-      await addEntry(counterId, { count: 1 }, userId, { logId, timestamp });
+      await life.addEntry(logId, counterId, { count: 1 }, userId, { timestamp });
     } catch (error) {
       console.error("Failed to log:", error);
       message.error("Failed to log");

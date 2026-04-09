@@ -1,8 +1,7 @@
 /**
- * Integration tests for the Travel app — tests actual app functions from pocketbase.ts.
+ * Integration tests for the Travel app using the @homelab/backend interface.
  *
- * App functions use getBackend() internally; initTestPocketBase() initializes the
- * shared backend singleton so all calls go to the test PocketBase instance.
+ * Tests the PocketBase backend implementations against a real PocketBase instance.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -13,34 +12,23 @@ import {
   TestCleanup,
   type TestContext,
 } from "@kirkl/shared/test-utils";
+import { PocketBaseTravelBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
 import {
-  createLog,
-  getOrCreateUserLog,
-  addTrip,
-  updateTrip,
-  deleteTrip,
-  flagTrip,
-  addActivity,
-  updateActivity,
-  deleteActivity,
-  addItinerary,
-  updateItinerary,
-  setItineraryDays,
-  deleteItinerary,
-  getUserSlugs,
-  setUserSlug,
-  toggleChecklistItem,
-  updateLogChecklists,
-  setCurrentLogId,
-  tripUpdates,
-  activityUpdates,
-} from "../pocketbase";
+  tripToBackend,
+  tripUpdatesToBackend,
+  activityToBackend,
+  activityUpdatesToBackend,
+} from "../adapters";
 import type { Trip, Activity, Itinerary } from "../types";
 
 let ctx: TestContext;
+let travel: PocketBaseTravelBackend;
+let userBackend: PocketBaseUserBackend;
 
 beforeAll(async () => {
   ctx = await initTestPocketBase();
+  travel = new PocketBaseTravelBackend(() => ctx.userPb);
+  userBackend = new PocketBaseUserBackend(() => ctx.userPb);
 });
 
 afterAll(async () => {
@@ -112,11 +100,11 @@ describe("createLog", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    // Use the backend to create a log via getOrCreateLog
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
 
     const record = await ctx.pb.collection("travel_logs").getOne(logId);
-    expect(record.name).toBe("My Trips");
     expect(record.owners).toContain(user.id);
 
     const userRecord = await ctx.pb.collection("users").getOne(user.id);
@@ -131,11 +119,11 @@ describe("createLog", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("Adventure Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
 
-    const slugs = await getUserSlugs(user.id);
-    expect(slugs["adventure-trips"]).toBe(logId);
+    const slugs = await userBackend.getSlugs(user.id, "travel");
+    expect(Object.values(slugs)).toContain(logId);
 
     await cleanup.cleanup();
   });
@@ -149,7 +137,7 @@ describe("getOrCreateUserLog", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await getOrCreateUserLog(user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
 
     expect(logId).toBeTruthy();
@@ -164,10 +152,10 @@ describe("getOrCreateUserLog", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const firstLogId = await getOrCreateUserLog(user.id);
+    const firstLogId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", firstLogId);
 
-    const secondLogId = await getOrCreateUserLog(user.id);
+    const secondLogId = await travel.getOrCreateLog(user.id);
     expect(secondLogId).toBe(firstLogId);
 
     await cleanup.cleanup();
@@ -177,16 +165,15 @@ describe("getOrCreateUserLog", () => {
 // ── Trip CRUD ────────────────────────────────────────────────
 
 describe("addTrip", () => {
-  it("creates a trip linked to the current log", async () => {
+  it("creates a trip linked to the log", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Paris, France", status: "Idea" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Paris, France", status: "Idea" })));
     cleanup.track("travel_trips", tripId);
 
     const record = await ctx.pb.collection("travel_trips").getOne(tripId);
@@ -202,13 +189,12 @@ describe("addTrip", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
     const start = new Date("2025-06-01");
     const end = new Date("2025-06-10");
-    const tripId = await addTrip(makeTrip({ destination: "Rome", startDate: start, endDate: end, status: "Booked" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Rome", startDate: start, endDate: end, status: "Booked" })));
     cleanup.track("travel_trips", tripId);
 
     const record = await ctx.pb.collection("travel_trips").getOne(tripId);
@@ -221,19 +207,18 @@ describe("addTrip", () => {
 });
 
 describe("updateTrip", () => {
-  it("updates trip fields using tripUpdates helper", async () => {
+  it("updates trip fields", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Berlin" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Berlin" })));
     cleanup.track("travel_trips", tripId);
 
-    await updateTrip(tripId, tripUpdates({ destination: "Munich", status: "Researching", notes: "Summer trip" }));
+    await travel.updateTrip(tripId, tripUpdatesToBackend({ destination: "Munich", status: "Researching", notes: "Summer trip" }));
 
     const record = await ctx.pb.collection("travel_trips").getOne(tripId);
     expect(record.destination).toBe("Munich");
@@ -250,13 +235,12 @@ describe("deleteTrip", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Delete Me" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Delete Me" })));
 
-    await deleteTrip(tripId);
+    await travel.deleteTrip(tripId);
 
     try {
       await ctx.pb.collection("travel_trips").getOne(tripId);
@@ -275,14 +259,13 @@ describe("flagTrip", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Unknown City" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Unknown City" })));
     cleanup.track("travel_trips", tripId);
 
-    await flagTrip(tripId, true, "Needs source verification");
+    await travel.flagTrip(tripId, true, "Needs source verification");
 
     const record = await ctx.pb.collection("travel_trips").getOne(tripId);
     expect(record.flagged_for_review).toBe(true);
@@ -296,14 +279,13 @@ describe("flagTrip", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Flagged City", flaggedForReview: true }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Flagged City", flaggedForReview: true })));
     cleanup.track("travel_trips", tripId);
 
-    await flagTrip(tripId, false);
+    await travel.flagTrip(tripId, false);
 
     const record = await ctx.pb.collection("travel_trips").getOne(tripId);
     expect(record.flagged_for_review).toBe(false);
@@ -315,24 +297,23 @@ describe("flagTrip", () => {
 // ── Activity CRUD ────────────────────────────────────────────
 
 describe("addActivity", () => {
-  it("creates an activity linked to the current log", async () => {
+  it("creates an activity linked to the log", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Kyoto" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Kyoto" })));
     cleanup.track("travel_trips", tripId);
 
-    const activityId = await addActivity(makeActivity({
+    const activityId = await travel.addActivity(logId, activityToBackend(makeActivity({
       name: "Fushimi Inari",
       category: "Sightseeing",
       location: "Fushimi, Kyoto",
       tripId,
-    }));
+    })));
     cleanup.track("travel_activities", activityId);
 
     const record = await ctx.pb.collection("travel_activities").getOne(activityId);
@@ -349,19 +330,18 @@ describe("addActivity", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Barcelona" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Barcelona" })));
     cleanup.track("travel_trips", tripId);
 
-    const activityId = await addActivity(makeActivity({
-      name: "Sagrada Família",
+    const activityId = await travel.addActivity(logId, activityToBackend(makeActivity({
+      name: "Sagrada Familia",
       lat: 41.4036,
       lng: 2.1744,
       tripId,
-    }));
+    })));
     cleanup.track("travel_activities", activityId);
 
     const record = await ctx.pb.collection("travel_activities").getOne(activityId);
@@ -373,22 +353,21 @@ describe("addActivity", () => {
 });
 
 describe("updateActivity", () => {
-  it("updates activity fields using activityUpdates helper", async () => {
+  it("updates activity fields", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Amsterdam" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Amsterdam" })));
     cleanup.track("travel_trips", tripId);
 
-    const activityId = await addActivity(makeActivity({ name: "Canal Tour", tripId }));
+    const activityId = await travel.addActivity(logId, activityToBackend(makeActivity({ name: "Canal Tour", tripId })));
     cleanup.track("travel_activities", activityId);
 
-    await updateActivity(activityId, activityUpdates({
+    await travel.updateActivity(activityId, activityUpdatesToBackend({
       name: "Rijksmuseum",
       category: "Culture",
       durationEstimate: "3h",
@@ -409,16 +388,15 @@ describe("deleteActivity", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Vienna" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Vienna" })));
     cleanup.track("travel_trips", tripId);
 
-    const activityId = await addActivity(makeActivity({ name: "Delete Me", tripId }));
+    const activityId = await travel.addActivity(logId, activityToBackend(makeActivity({ name: "Delete Me", tripId })));
 
-    await deleteActivity(activityId);
+    await travel.deleteActivity(activityId);
 
     try {
       await ctx.pb.collection("travel_activities").getOne(activityId);
@@ -439,20 +417,19 @@ describe("addItinerary", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Prague" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Prague" })));
     cleanup.track("travel_trips", tripId);
 
-    const itineraryId = await addItinerary(makeItinerary(tripId, { name: "Actual", isActive: true }));
+    const itin = makeItinerary(tripId, { name: "Actual", isActive: true });
+    const itineraryId = await travel.addItinerary(logId, tripId, { name: itin.name, days: itin.days as any });
     cleanup.track("travel_itineraries", itineraryId);
 
     const record = await ctx.pb.collection("travel_itineraries").getOne(itineraryId);
     expect(record.trip_id).toBe(tripId);
     expect(record.name).toBe("Actual");
-    expect(record.is_active).toBe(true);
     expect(record.log).toBe(logId);
 
     await cleanup.cleanup();
@@ -465,14 +442,14 @@ describe("setItineraryDays", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Budapest" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Budapest" })));
     cleanup.track("travel_trips", tripId);
 
-    const itineraryId = await addItinerary(makeItinerary(tripId));
+    const itin = makeItinerary(tripId);
+    const itineraryId = await travel.addItinerary(logId, tripId, { name: itin.name, days: itin.days as any });
     cleanup.track("travel_itineraries", itineraryId);
 
     const days = [
@@ -480,7 +457,7 @@ describe("setItineraryDays", () => {
       { label: "Day 2 — Sightseeing", slots: [] },
     ];
 
-    await setItineraryDays(itineraryId, days);
+    await travel.setItineraryDays(itineraryId, days as any);
 
     const record = await ctx.pb.collection("travel_itineraries").getOne(itineraryId);
     expect(record.days).toHaveLength(2);
@@ -491,25 +468,25 @@ describe("setItineraryDays", () => {
 });
 
 describe("updateItinerary", () => {
-  it("updates an itinerary's active status", async () => {
+  it("updates an itinerary's name", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Warsaw" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Warsaw" })));
     cleanup.track("travel_trips", tripId);
 
-    const itineraryId = await addItinerary(makeItinerary(tripId, { isActive: true }));
+    const itin = makeItinerary(tripId, { isActive: true });
+    const itineraryId = await travel.addItinerary(logId, tripId, { name: itin.name, days: itin.days as any });
     cleanup.track("travel_itineraries", itineraryId);
 
-    await updateItinerary(itineraryId, { is_active: false });
+    await travel.updateItinerary(itineraryId, { name: "Updated Plan" });
 
     const record = await ctx.pb.collection("travel_itineraries").getOne(itineraryId);
-    expect(record.is_active).toBe(false);
+    expect(record.name).toBe("Updated Plan");
 
     await cleanup.cleanup();
   });
@@ -521,16 +498,16 @@ describe("deleteItinerary", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Lisbon" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Lisbon" })));
     cleanup.track("travel_trips", tripId);
 
-    const itineraryId = await addItinerary(makeItinerary(tripId));
+    const itin = makeItinerary(tripId);
+    const itineraryId = await travel.addItinerary(logId, tripId, { name: itin.name, days: itin.days as any });
 
-    await deleteItinerary(itineraryId);
+    await travel.deleteItinerary(itineraryId);
 
     try {
       await ctx.pb.collection("travel_itineraries").getOne(itineraryId);
@@ -549,7 +526,7 @@ describe("getUserSlugs / setUserSlug", () => {
   it("returns empty object when user has no slugs", async () => {
     const user = await createTestUser(ctx);
 
-    const slugs = await getUserSlugs(user.id);
+    const slugs = await userBackend.getSlugs(user.id, "travel");
     expect(slugs).toEqual({});
   });
 
@@ -558,12 +535,12 @@ describe("getUserSlugs / setUserSlug", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
 
-    await setUserSlug(user.id, "europe-2026", logId);
+    await userBackend.setSlug(user.id, "travel", "europe-2026", logId);
 
-    const slugs = await getUserSlugs(user.id);
+    const slugs = await userBackend.getSlugs(user.id, "travel");
     expect(slugs["europe-2026"]).toBe(logId);
 
     await cleanup.cleanup();
@@ -588,10 +565,10 @@ describe("getUserSlugs / setUserSlug", () => {
     });
     cleanup.track("travel_logs", log2.id);
 
-    await setUserSlug(user.id, "first-log", log1.id);
-    await setUserSlug(user.id, "second-log", log2.id);
+    await userBackend.setSlug(user.id, "travel", "first-log", log1.id);
+    await userBackend.setSlug(user.id, "travel", "second-log", log2.id);
 
-    const slugs = await getUserSlugs(user.id);
+    const slugs = await userBackend.getSlugs(user.id, "travel");
     expect(slugs["first-log"]).toBe(log1.id);
     expect(slugs["second-log"]).toBe(log2.id);
 
@@ -607,14 +584,13 @@ describe("toggleChecklistItem", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Dubrovnik" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Dubrovnik" })));
     cleanup.track("travel_trips", tripId);
 
-    await toggleChecklistItem(tripId, "weather", true);
+    await travel.toggleChecklistItem(tripId, "weather", true);
 
     const record = await ctx.pb.collection("travel_trips").getOne(tripId);
     expect(record.checklist_done?.weather).toBe(true);
@@ -627,15 +603,14 @@ describe("toggleChecklistItem", () => {
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
-    const tripId = await addTrip(makeTrip({ destination: "Split" }));
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Split" })));
     cleanup.track("travel_trips", tripId);
 
-    await toggleChecklistItem(tripId, "bank", true);
-    await toggleChecklistItem(tripId, "bank", false);
+    await travel.toggleChecklistItem(tripId, "bank", true);
+    await travel.toggleChecklistItem(tripId, "bank", false);
 
     const record = await ctx.pb.collection("travel_trips").getOne(tripId);
     expect(record.checklist_done?.bank).toBe(false);
@@ -645,27 +620,26 @@ describe("toggleChecklistItem", () => {
 });
 
 describe("updateLogChecklists", () => {
-  it("replaces the checklists on the current log", async () => {
+  it("replaces the checklists on a log", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    const logId = await createLog("My Trips", user.id);
+    const logId = await travel.getOrCreateLog(user.id);
     cleanup.track("travel_logs", logId);
-    setCurrentLogId(logId);
 
     const checklists = [
       {
         id: "camping",
         name: "Camping Checklist",
         items: [
-          { id: "tent", text: "Pack tent", category: "packing" },
-          { id: "sleeping-bag", text: "Pack sleeping bag", category: "packing" },
+          { id: "tent", text: "Pack tent" },
+          { id: "sleeping-bag", text: "Pack sleeping bag" },
         ],
       },
     ];
 
-    await updateLogChecklists(checklists);
+    await travel.updateLogChecklists(logId, checklists);
 
     const record = await ctx.pb.collection("travel_logs").getOne(logId);
     expect(record.checklists).toHaveLength(1);

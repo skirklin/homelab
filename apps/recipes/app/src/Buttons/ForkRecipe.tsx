@@ -6,7 +6,8 @@ import { PickBoxModal } from '../Modals/PickBoxModal';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
-import { addRecipe } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
+import { recipeDataToBackend } from '../adapters';
 import { getAppUserFromState, getRecipeFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import type { RecipeCardProps } from '../RecipeCard/RecipeCard';
@@ -23,6 +24,7 @@ export default function ForkButton(props: ForkProps) {
   const { boxId, recipeId, targetBoxId, element } = props;
   const { state } = useContext(Context)
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
   const navigate = useNavigate()
   const basePath = useBasePath()
   const [isModalVisible, setIsModalVisible] = useState(false)
@@ -31,10 +33,9 @@ export default function ForkButton(props: ForkProps) {
   if (recipe === undefined || user === undefined) return null
 
   const addNewRecipe = async (boxId: BoxId) => {
-    const clone = _.cloneDeep(recipe);
-    clone.owners = [user.id]
-    const recipeRef = await addRecipe(boxId, clone)
-    navigate(`${basePath}/boxes/${boxId}/recipes/${recipeRef.id}`)
+    const data = recipeDataToBackend(recipe);
+    const newId = await recipesBackend.addRecipe(boxId, data, user.id);
+    navigate(`${basePath}/boxes/${boxId}/recipes/${newId}`)
   }
 
   async function newRecipe(boxId: BoxId) {

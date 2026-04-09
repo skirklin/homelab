@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { ConfigProvider, theme } from "antd";
+import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect } from "react";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
 import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
@@ -92,6 +92,7 @@ function AppRoutes() {
 export function App() {
   return (
     <ConfigProvider theme={antTheme}>
+      <AntApp>
       <BrowserRouter>
         <AuthProvider>
           <ShoppingProvider>
@@ -111,6 +112,7 @@ export function App() {
           </ShoppingProvider>
         </AuthProvider>
       </BrowserRouter>
+      </AntApp>
     </ConfigProvider>
   );
 }

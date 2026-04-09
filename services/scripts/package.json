@@ -10,12 +10,16 @@
     "travel:cli": "tsx travel/cli.ts",
     "travel:migrate-all": "tsx travel/migrate-all.ts",
     "travel:migrate-sqlite": "tsx travel/migrate-sqlite.ts",
-    "export:firestore": "tsx export/export-firestore.ts"
+    "export:firestore": "tsx export/export-firestore.ts",
+    "migrate:firebase-to-pb": "tsx migrate-firebase.ts"
   },
   "dependencies": {
+    "@homelab/backend": "workspace:*",
     "@anthropic-ai/sdk": "^0.39.0",
     "better-sqlite3": "^11.0.0",
-    "firebase-admin": "^13.0.0"
+    "firebase": "^9.6.2",
+    "firebase-admin": "^13.0.0",
+    "pocketbase": "^0.25.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

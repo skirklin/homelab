@@ -4,7 +4,7 @@
 
 import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { createList, setUserSlug, getListById } from "../pocketbase";
+import { useShoppingBackend, useUserBackend } from "../backend-provider";
 import { appStorage, StorageKeys } from "../storage";
 
 const config: ListPickerConfig = {
@@ -18,12 +18,23 @@ const config: ListPickerConfig = {
 
 export function ListPicker() {
   const { state } = useShoppingContext();
+  const shopping = useShoppingBackend();
+  const userBackend = useUserBackend();
 
   const operations: ListOperations = {
     getUserSlugs: () => state.userSlugs,
-    createList,
-    setUserSlug,
-    getListById,
+    createList: async (name: string, slug: string, userId: string) => {
+      const listId = await shopping.createList(name, userId);
+      await userBackend.setSlug(userId, "shopping", slug, listId);
+      return listId;
+    },
+    setUserSlug: async (userId: string, slug: string, listId: string) => {
+      await userBackend.setSlug(userId, "shopping", slug, listId);
+    },
+    getListById: async (listId: string) => {
+      const list = await shopping.getList(listId);
+      return list ? { name: list.name } : null;
+    },
   };
 
   return (

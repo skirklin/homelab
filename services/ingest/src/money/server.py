@@ -582,7 +582,11 @@ class IngestHandler(BaseHTTPRequestHandler):
         """Return per-login freshness status."""
         from money.config import load_config
 
-        config = load_config()
+        try:
+            config = load_config()
+        except FileNotFoundError:
+            self._json_response(200, {"statuses": []})
+            return
 
         # Get account counts per profile
         account_rows = self.db.conn.execute("""
@@ -1272,7 +1276,11 @@ class IngestHandler(BaseHTTPRequestHandler):
         """Return list of people with account count, total balance, last sync."""
         from money.config import load_config
 
-        config = load_config()
+        try:
+            config = load_config()
+        except FileNotFoundError:
+            self._json_response(200, {"people": []})
+            return
 
         people_list: list[dict[str, Any]] = []
         for person_id, person_cfg in config.people.items():
@@ -1405,7 +1413,11 @@ class IngestHandler(BaseHTTPRequestHandler):
         """Return list of institutions with account count, total balance, last sync."""
         from money.config import load_config
 
-        config = load_config()
+        try:
+            config = load_config()
+        except FileNotFoundError:
+            self._json_response(200, {"institutions": []})
+            return
 
         institutions_list: list[dict[str, Any]] = []
         for inst_id, inst_cfg in config.institutions.items():

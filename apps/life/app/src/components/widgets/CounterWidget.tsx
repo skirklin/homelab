@@ -1,10 +1,10 @@
 import { useState } from "react";
 import styled, { css } from "styled-components";
-import { message } from "antd";
+import { useFeedback } from "@kirkl/shared";
 import { PlusOutlined } from "@ant-design/icons";
 import type { CounterWidget as CounterWidgetType, LogEntry } from "../../types";
 import { getEntriesForDate } from "../../types";
-import { addEntry } from "../../pocketbase";
+import { useLifeBackend } from "../../backend-provider";
 import { type WidgetSize } from "../../display-settings";
 import { EntriesPopover } from "./EntriesPopover";
 
@@ -155,6 +155,8 @@ interface CounterWidgetProps {
 }
 
 export function CounterWidget({ widget, entries, userId, logId, timestamp, size = "normal" }: CounterWidgetProps) {
+  const { message } = useFeedback();
+  const life = useLifeBackend();
   const [saving, setSaving] = useState(false);
   const dayEntries = getEntriesForDate(entries, widget.id, timestamp);
   const count = dayEntries.length;
@@ -164,7 +166,7 @@ export function CounterWidget({ widget, entries, userId, logId, timestamp, size 
 
     setSaving(true);
     try {
-      await addEntry(widget.id, { count: 1 }, userId, { logId, timestamp });
+      await life.addEntry(logId, widget.id, { count: 1 }, userId, { timestamp });
     } catch (error) {
       console.error("Failed to log:", error);
       message.error("Failed to log");

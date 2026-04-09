@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter } from "react-router-dom";
-import { ConfigProvider } from "antd";
+import { App as AntApp, ConfigProvider } from "antd";
 import styled from "styled-components";
 import { initializeBackend, AuthProvider, useAuth } from "@kirkl/shared";
 
@@ -49,6 +49,7 @@ function AppContent() {
 function App() {
   return (
     <ConfigProvider theme={theme}>
+      <AntApp>
       <BrowserRouter>
         <AuthProvider>
           <AppWrapper>
@@ -56,6 +57,7 @@ function App() {
           </AppWrapper>
         </AuthProvider>
       </BrowserRouter>
+      </AntApp>
     </ConfigProvider>
   );
 }

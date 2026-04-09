@@ -1,7 +1,8 @@
 import { UploadOutlined } from "@ant-design/icons";
 import { useContext } from "react";
 import { useBoxAction } from "../hooks/useBoxAction";
-import { uploadRecipes } from "../pocketbase";
+import { useRecipesBackend } from "../backend-provider";
+import { recipeDataToBackend } from "../adapters";
 import { getAppUserFromState } from "../state";
 import { ActionButton } from "../StyledComponents";
 import type { BoxId } from "../types";
@@ -21,17 +22,26 @@ export default function UploadButton(props: UploadProps) {
     const { executeWithBox, BoxPickerModal } = useBoxAction(boxId);
     const { state } = useContext(Context)
     const { user: authUser } = useAuth();
+    const recipesBackend = useRecipesBackend();
     const user = getAppUserFromState(state, authUser?.uid)
 
-    if (process.env.NODE_ENV !== "development") {
+    if (!import.meta.env.DEV) {
         return null
     }
 
-    const upload = (targetBoxId: BoxId) => {
+    const upload = async (targetBoxId: BoxId) => {
         if (user === undefined) {
             return
         }
-        uploadRecipes(targetBoxId, user)
+        const fileHandles = await (window as unknown as { showOpenFilePicker: (opts: { multiple: boolean }) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker({
+            multiple: true,
+        });
+        for (const fh of fileHandles) {
+            const f = await fh.getFile();
+            const text = await f.text();
+            const jsonobj = JSON.parse(text);
+            await recipesBackend.addRecipe(targetBoxId, jsonobj, user.id);
+        }
     }
 
     const handleClick = () => {

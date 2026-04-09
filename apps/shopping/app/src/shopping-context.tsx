@@ -4,8 +4,10 @@
 
 import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
-import { subscribeToUserSlugs, subscribeToList } from "./subscription";
+import { useShoppingBackend, useUserBackend } from "./backend-provider";
+import { setCurrentListId } from "./pocketbase";
 import type { ShoppingItem, ShoppingList, ItemHistory, ShoppingTrip } from "./types";
+import type { ShoppingBackend } from "@homelab/backend";
 
 export type SyncStatus = "synced" | "pending" | "offline";
 
@@ -79,51 +81,138 @@ interface ContextType {
 
 const ShoppingContext = createContext<ContextType | null>(null);
 
+/** Convert a backend ShoppingItem to the app's local ShoppingItem type. */
+function toLocalItem(item: import("@homelab/backend").ShoppingItem): ShoppingItem {
+  return {
+    id: item.id,
+    ingredient: item.ingredient,
+    note: item.note || undefined,
+    categoryId: item.categoryId,
+    checked: item.checked,
+    addedBy: item.addedBy || "",
+    addedAt: new Date(), // backend type doesn't carry addedAt; use now as placeholder
+    checkedBy: item.checkedBy,
+    checkedAt: item.checkedAt ? new Date(item.checkedAt) : undefined,
+  };
+}
+
+/** Convert a backend ShoppingList to the app's local ShoppingList type. */
+function toLocalList(list: import("@homelab/backend").ShoppingList): ShoppingList {
+  return {
+    id: list.id,
+    name: list.name,
+    owners: list.owners,
+    categories: list.categories,
+    created: new Date(), // backend type doesn't carry timestamps
+    updated: new Date(),
+  };
+}
+
+function subscribeToListViaBackend(
+  shopping: ShoppingBackend,
+  listId: string,
+  dispatch: React.Dispatch<ShoppingAction>,
+): () => void {
+  setCurrentListId(listId);
+
+  dispatch({ type: "CLEAR_ITEMS" });
+  dispatch({ type: "SET_LIST", list: null });
+  dispatch({ type: "SET_LOADING", loading: true });
+
+  let firstItems = true;
+
+  return shopping.subscribeToList(listId, {
+    onList: (list) => {
+      dispatch({ type: "SET_LIST", list: toLocalList(list) });
+    },
+    onItems: (items) => {
+      // The backend delivers full state each time. Reconcile with our Map.
+      dispatch({ type: "CLEAR_ITEMS" });
+      for (const item of items) {
+        dispatch({ type: "SET_ITEM", item: toLocalItem(item) });
+      }
+      if (firstItems) {
+        firstItems = false;
+        dispatch({ type: "SET_LOADING", loading: false });
+        dispatch({ type: "SET_SYNC_STATUS", status: "synced" });
+      }
+    },
+    onHistory: (entries) => {
+      dispatch({
+        type: "SET_HISTORY",
+        history: entries.map((e) => ({
+          ingredient: e.ingredient,
+          categoryId: e.categoryId,
+          lastAdded: e.lastAdded,
+        })),
+      });
+    },
+    onTrips: (trips) => {
+      dispatch({
+        type: "SET_TRIPS",
+        trips: trips.map((t) => ({
+          id: t.id,
+          completedAt: t.completedAt,
+          items: t.items.map((item) => ({
+            ingredient: item.ingredient,
+            note: item.note || undefined,
+            categoryId: item.categoryId,
+          })),
+        })),
+      });
+    },
+    onDeleted: () => {
+      dispatch({ type: "SET_LIST", list: null });
+    },
+  });
+}
+
 export function ShoppingProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { user } = useAuth();
+  const shopping = useShoppingBackend();
+  const userBackend = useUserBackend();
   const slugsUnsubRef = useRef<(() => void) | null>(null);
-  const listUnsubsRef = useRef<(() => void)[]>([]);
+  const listUnsubRef = useRef<(() => void) | null>(null);
   const currentListIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
     if (user) {
-      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch, () => cancelled);
+      slugsUnsubRef.current = userBackend.subscribeSlugs(user.uid, "shopping", (slugs) => {
+        dispatch({ type: "SET_USER_SLUGS", slugs });
+      });
     }
     return () => {
-      cancelled = true;
       if (slugsUnsubRef.current) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
       }
-      listUnsubsRef.current.forEach((unsub) => unsub());
-      listUnsubsRef.current = [];
+      if (listUnsubRef.current) {
+        listUnsubRef.current();
+        listUnsubRef.current = null;
+      }
     };
-  }, [user]);
+  }, [user, userBackend]);
 
   const setCurrentList = useCallback((listId: string) => {
     if (!user) return;
     if (currentListIdRef.current === listId) return;
 
-    listUnsubsRef.current.forEach((unsub) => unsub());
-    listUnsubsRef.current = [];
+    if (listUnsubRef.current) {
+      listUnsubRef.current();
+      listUnsubRef.current = null;
+    }
     currentListIdRef.current = listId;
 
-    const cancelled = () => currentListIdRef.current !== listId;
-    subscribeToList(listId, dispatch, cancelled).then((unsubs) => {
-      if (cancelled()) {
-        unsubs.forEach((unsub) => unsub());
-        return;
-      }
-      listUnsubsRef.current = unsubs;
-    }).catch((err) => {
-      console.error("[shopping] subscribeToList failed:", err);
-      if (!cancelled()) {
-        dispatch({ type: "SET_LOADING", loading: false });
-      }
-    });
-  }, [user]);
+    const unsub = subscribeToListViaBackend(shopping, listId, dispatch);
+
+    // Check if we navigated away before subscription resolved
+    if (currentListIdRef.current !== listId) {
+      unsub();
+      return;
+    }
+    listUnsubRef.current = unsub;
+  }, [user, shopping]);
 
   return (
     <ShoppingContext.Provider value={{ state, dispatch, setCurrentList }}>

@@ -1,10 +1,9 @@
-import { useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { ConfigProvider } from "antd";
+import { App as AntApp, ConfigProvider } from "antd";
 import styled from "styled-components";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
-import { UpkeepProvider, useUpkeepContext } from "./upkeep-context";
-import { subscribeToUserSlugs } from "./subscription";
+import { BackendProvider } from "./backend-provider";
+import { UpkeepProvider } from "./upkeep-context";
 import { Auth } from "./components/Auth";
 import { TaskBoard } from "./components/TaskBoard";
 import { ListPicker } from "./components/ListPicker";
@@ -36,21 +35,6 @@ const AppWrapper = styled.div`
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const { dispatch } = useUpkeepContext();
-  const slugsUnsubRef = useRef<(() => void) | null>(null);
-
-  // Subscribe to user's slugs when authenticated
-  useEffect(() => {
-    if (user) {
-      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch);
-    }
-    return () => {
-      if (slugsUnsubRef.current) {
-        slugsUnsubRef.current();
-        slugsUnsubRef.current = null;
-      }
-    };
-  }, [user, dispatch]);
 
   // Still determining auth state
   if (loading) {
@@ -73,15 +57,19 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <UpkeepProvider>
-        <ConfigProvider theme={theme}>
-          <BrowserRouter>
-            <AppWrapper>
-              <AppContent />
-            </AppWrapper>
-          </BrowserRouter>
-        </ConfigProvider>
-      </UpkeepProvider>
+      <BackendProvider>
+        <UpkeepProvider>
+          <ConfigProvider theme={theme}>
+            <AntApp>
+            <BrowserRouter>
+              <AppWrapper>
+                <AppContent />
+              </AppWrapper>
+            </BrowserRouter>
+            </AntApp>
+          </ConfigProvider>
+        </UpkeepProvider>
+      </BackendProvider>
     </AuthProvider>
   );
 }

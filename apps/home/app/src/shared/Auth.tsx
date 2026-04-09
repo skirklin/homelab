@@ -1,8 +1,8 @@
 import { useState } from "react";
 import styled from "styled-components";
-import { Button, Form, Input, Divider, message } from "antd";
+import { Button, Form, Input, Divider } from "antd";
 import { GoogleOutlined, MailOutlined } from "@ant-design/icons";
-import { getBackend } from "@kirkl/shared";
+import { getBackend, useFeedback } from "@kirkl/shared";
 
 const SignInCard = styled.div`
   margin: 40px auto;
@@ -20,6 +20,7 @@ const Title = styled.h1`
 `;
 
 export function Auth() {
+  const { message } = useFeedback();
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
 

@@ -5,7 +5,8 @@ import { Form, Input, Select, Button, Space } from "antd";
 const { TextArea } = Input;
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { addActivity, updateActivity, deleteActivity, activityUpdates } from "../pocketbase";
+import { useTravelBackend } from "../backend-provider";
+import { activityToBackend, activityUpdatesToBackend } from "../adapters";
 import type { ActivityCategory, Activity } from "../types";
 
 const CATEGORIES: ActivityCategory[] = [
@@ -19,6 +20,7 @@ export function ActivityForm() {
   const navigate = useNavigate();
   const { state } = useTravelContext();
   const { user } = useAuth();
+  const travel = useTravelBackend();
   const [saving, setSaving] = useState(false);
 
   const isEdit = !!activityId;
@@ -31,7 +33,7 @@ export function ActivityForm() {
 
     try {
       if (isEdit && activityId) {
-        await updateActivity(activityId, activityUpdates({
+        await travel.updateActivity(activityId, activityUpdatesToBackend({
           name: values.name as string,
           category: values.category as ActivityCategory,
           location: values.location as string,
@@ -44,28 +46,33 @@ export function ActivityForm() {
         }));
         navigate(-1);
       } else {
+        const logId = state.log?.id;
+        if (!logId) return;
         const now = new Date();
-        await addActivity({
-          name: values.name as string,
-          category: (values.category as ActivityCategory) || "Other",
-          location: (values.location as string) || "",
-          placeId: "",
-          lat: null,
-          lng: null,
-          description: (values.description as string) || "",
-          costNotes: (values.costNotes as string) || "",
-          durationEstimate: (values.durationEstimate as string) || "",
-          confirmationCode: (values.confirmationCode as string) || "",
-          details: (values.details as string) || "",
-          setting: ((values.setting as string) || "") as Activity["setting"],
-          bookingReqs: [],
-          rating: null,
-          ratingCount: null,
-          photoRef: "",
-          tripId,
-          created: now,
-          updated: now,
-        });
+        await travel.addActivity(
+          logId,
+          activityToBackend({
+            name: values.name as string,
+            category: (values.category as ActivityCategory) || "Other",
+            location: (values.location as string) || "",
+            placeId: "",
+            lat: null,
+            lng: null,
+            description: (values.description as string) || "",
+            costNotes: (values.costNotes as string) || "",
+            durationEstimate: (values.durationEstimate as string) || "",
+            confirmationCode: (values.confirmationCode as string) || "",
+            details: (values.details as string) || "",
+            setting: ((values.setting as string) || "") as Activity["setting"],
+            bookingReqs: [],
+            rating: null,
+            ratingCount: null,
+            photoRef: "",
+            tripId,
+            created: now,
+            updated: now,
+          })
+        );
         navigate(-1);
       }
     } finally {
@@ -75,7 +82,7 @@ export function ActivityForm() {
 
   const handleDelete = async () => {
     if (activityId) {
-      await deleteActivity(activityId);
+      await travel.deleteActivity(activityId);
       navigate(-1);
     }
   };

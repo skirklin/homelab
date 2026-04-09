@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Input, Modal, message } from "antd";
+import { Button, Input, Modal } from "antd";
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth } from "@kirkl/shared";
+import { useAuth, useFeedback } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { renameList, renameUserSlug, removeUserSlug, deleteList, updateCategories } from "../pocketbase";
+import { useShoppingBackend, useUserBackend } from "../backend-provider";
 import type { CategoryDef } from "../types";
 
 const Container = styled.div`
@@ -120,6 +120,9 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { state } = useShoppingContext();
+  const { modal, message } = useFeedback();
+  const shopping = useShoppingBackend();
+  const userBackend = useUserBackend();
 
   // Handle Escape key to go back
   useEffect(() => {
@@ -159,14 +162,14 @@ export function ListSettings({ slug, listId, onBack }: Props) {
     const newCat: CategoryDef = { id, name: trimmed };
     const updated = [...localCategories, newCat];
     setLocalCategories(updated);
-    updateCategories(updated);
+    shopping.updateCategories(listId, updated);
     setNewCategory("");
   };
 
   const handleRemoveCategory = (cat: CategoryDef) => {
     const updated = localCategories.filter((c) => c.id !== cat.id);
     setLocalCategories(updated);
-    updateCategories(updated);
+    shopping.updateCategories(listId, updated);
   };
 
   const handleRenameCategory = () => {
@@ -176,7 +179,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
       c.id === editingCategory.id ? { ...c, name: editCategoryName.trim() } : c
     );
     setLocalCategories(updated);
-    updateCategories(updated);
+    shopping.updateCategories(listId, updated);
     setEditingCategory(null);
     setEditCategoryName("");
   };
@@ -186,7 +189,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
     const updated = [...localCategories];
     [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]];
     setLocalCategories(updated);
-    updateCategories(updated);
+    shopping.updateCategories(listId, updated);
   };
 
   const handleMoveCategoryDown = (index: number) => {
@@ -194,7 +197,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
     const updated = [...localCategories];
     [updated[index], updated[index + 1]] = [updated[index + 1], updated[index]];
     setLocalCategories(updated);
-    updateCategories(updated);
+    shopping.updateCategories(listId, updated);
   };
 
   const handleRename = async () => {
@@ -202,7 +205,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
 
     setSubmitting(true);
     try {
-      await renameList(listId, newName.trim());
+      await shopping.renameList(listId, newName.trim());
       setRenameModalOpen(false);
       message.success("List renamed");
     } catch (error) {
@@ -230,7 +233,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
 
     setSubmitting(true);
     try {
-      await renameUserSlug(user.uid, slug, cleanSlug);
+      await userBackend.renameSlug(user.uid, "shopping", slug, cleanSlug);
       setSlugModalOpen(false);
       navigate(cleanSlug, { replace: true });
       message.success("URL updated");
@@ -245,13 +248,13 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   const handleRemoveFromMyLists = async () => {
     if (!user) return;
 
-    Modal.confirm({
+    modal.confirm({
       title: "Remove from My Lists?",
       content: "This will remove the list from your account. The list will still exist and others can still access it.",
       okText: "Remove",
       okButtonProps: { danger: true },
       onOk: async () => {
-        await removeUserSlug(user!.uid, slug);
+        await userBackend.removeSlug(user!.uid, "shopping", slug);
         navigate("..");
         message.success("List removed from your account");
       },
@@ -261,14 +264,14 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   const handleDeleteList = async () => {
     if (!user) return;
 
-    Modal.confirm({
+    modal.confirm({
       title: "Delete List Forever?",
       content: "This will permanently delete the list and all its items. This cannot be undone.",
       okText: "Delete Forever",
       okButtonProps: { danger: true },
       onOk: async () => {
-        await removeUserSlug(user!.uid, slug);
-        await deleteList(listId);
+        await userBackend.removeSlug(user!.uid, "shopping", slug);
+        await shopping.deleteList(listId);
         navigate("..");
         message.success("List deleted");
       },

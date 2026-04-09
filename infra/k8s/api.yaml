@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: functions
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: functions
+  template:
+    metadata:
+      labels:
+        app: functions
+    spec:
+      containers:
+        - name: functions
+          image: localhost:30500/homelab/functions:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: PB_URL
+              value: "http://pocketbase:8090"
+          envFrom:
+            - secretRef:
+                name: api-secrets
+                optional: true
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: functions
+  namespace: homelab
+spec:
+  selector:
+    app: functions
+  ports:
+    - port: 3000
+      targetPort: 3000

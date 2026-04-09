@@ -7,6 +7,7 @@
 
 import { Routes, Route } from "react-router-dom";
 import { useAuth } from "@kirkl/shared";
+import { BackendProvider } from "./backend-provider";
 import { ShoppingProvider } from "./shopping-context";
 import { ShoppingList } from "./components/ShoppingList";
 import { ListPicker } from "./components/ListPicker";
@@ -37,9 +38,11 @@ export function ShoppingRoutes({ embedded = false }: ShoppingRoutesProps) {
 
 export function ShoppingModule() {
   return (
-    <ShoppingProvider>
-      <ShoppingRoutes />
-    </ShoppingProvider>
+    <BackendProvider>
+      <ShoppingProvider>
+        <ShoppingRoutes />
+      </ShoppingProvider>
+    </BackendProvider>
   );
 }
 

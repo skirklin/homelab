@@ -1,8 +1,9 @@
-import { createContext, useContext, useReducer, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import { useAuth } from '@kirkl/shared';
-import type { ActionType, AppState, UnsubMap } from './types';
+import type { ActionType, AppState } from './types';
 import { initState, recipeBoxReducer } from './reducer';
-import { subscribeToUser, unsubscribe } from './subscription';
+import { useRecipesBackend } from './backend-provider';
+import { boxFromBackend, recipeFromBackend, userFromBackend } from './adapters';
 
 export type ContextType = {
   state: AppState
@@ -22,7 +23,7 @@ export const Context = createContext<ContextType>(
 export function RecipesProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(recipeBoxReducer, initState());
   const { user } = useAuth();
-  const unsubMapRef = useRef<UnsubMap | null>(null);
+  const recipes = useRecipesBackend();
 
   useEffect(() => {
     if (!user) {
@@ -30,31 +31,41 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    let cancelled = false;
-    const unsubMap: UnsubMap = {
-      userUnsub: undefined,
-      boxesUnsub: undefined,
-      boxMap: new Map<string, {
-        boxUnsub: (() => void) | undefined,
-        recipesUnsub: (() => void) | undefined,
-      }>(),
-    };
-    unsubMapRef.current = unsubMap;
+    let initialLoad = true;
 
-    subscribeToUser(user, dispatch, unsubMap, () => cancelled).finally(() => {
-      // Guard against StrictMode double-mount: only clear loading if this
-      // effect instance hasn't been cleaned up
-      if (!cancelled) {
-        dispatch({ type: "SET_LOADING", loading: 0 });
-      }
+    const unsub = recipes.subscribeToUser(user.uid, {
+      onUser: (u) => {
+        const userEntry = userFromBackend(u);
+        dispatch({ type: "ADD_USER", user: userEntry });
+        if (initialLoad) {
+          initialLoad = false;
+          dispatch({ type: "SET_LOADING", loading: 0 });
+        }
+      },
+      onBox: (box, boxRecipes) => {
+        const boxEntry = boxFromBackend(box);
+        dispatch({ type: "ADD_BOX", boxId: box.id, payload: boxEntry });
+        for (const r of boxRecipes) {
+          const recipeEntry = recipeFromBackend(r);
+          dispatch({ type: "ADD_RECIPE", recipeId: r.id, boxId: box.id, payload: recipeEntry });
+        }
+      },
+      onBoxRemoved: (boxId) => {
+        dispatch({ type: "REMOVE_BOX", boxId });
+      },
+      onRecipeChanged: (boxId, r) => {
+        const recipeEntry = recipeFromBackend(r);
+        dispatch({ type: "ADD_RECIPE", recipeId: r.id, boxId, payload: recipeEntry });
+      },
+      onRecipeRemoved: (boxId, recipeId) => {
+        dispatch({ type: "REMOVE_RECIPE", boxId, recipeId });
+      },
     });
 
     return () => {
-      cancelled = true;
-      unsubscribe(unsubMap);
-      unsubMapRef.current = null;
+      unsub();
     };
-  }, [user]);
+  }, [user, recipes]);
 
   return (
     <Context.Provider value={{ state, dispatch }}>

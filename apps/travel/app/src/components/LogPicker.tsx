@@ -6,7 +6,7 @@ import styled from "styled-components";
 import { PageContainer } from "@kirkl/shared";
 import { useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { getOrCreateUserLog } from "../pocketbase";
+import { useTravelBackend } from "../backend-provider";
 
 const Container = styled(PageContainer)`
   display: flex;
@@ -21,6 +21,7 @@ export function LogPicker() {
   const { state } = useTravelContext();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const travel = useTravelBackend();
 
   // Auto-navigate to first slug, or create one
   useEffect(() => {
@@ -40,7 +41,7 @@ export function LogPicker() {
 
   const handleCreate = async () => {
     if (!user) return;
-    await getOrCreateUserLog(user.uid);
+    await travel.getOrCreateLog(user.uid);
     // Slug subscription will trigger navigation
   };
 

@@ -2,45 +2,41 @@
  * PocketBase real-time subscriptions for the upkeep app.
  * Replaces Firestore onSnapshot listeners with PocketBase SSE subscriptions.
  */
-import { getBackend } from "@kirkl/shared";
-import { eventFromStore } from "@kirkl/shared";
-import { setCurrentListId, ensureListExists, getUserSlugs } from "./pocketbase";
+import {
+  eventFromStore,
+  subscribeToRecord,
+  subscribeToCollection,
+  subscribeToCollectionReload,
+} from "@kirkl/shared";
+import type { RecordModel } from "pocketbase";
+import { setCurrentListId, ensureListExists } from "./pocketbase";
 import { taskFromRecord, listFromRecord } from "./types";
 import type { Completion } from "./types";
 import type { UpkeepState, UpkeepAction } from "./upkeep-context";
 
 type Dispatch = React.Dispatch<UpkeepAction>;
 
-function pb() {
-  return getBackend();
-}
-
-export async function loadUserSlugs(userId: string, dispatch: Dispatch, cancelled: () => boolean) {
-  try {
-    const slugs = await getUserSlugs(userId, { $autoCancel: false });
-    if (cancelled()) return;
-    dispatch({ type: "SET_USER_SLUGS", slugs });
-  } catch (err) {
-    console.error("[upkeep] loadUserSlugs failed:", err);
-  }
+function recordsToCompletions(records: RecordModel[]): Completion[] {
+  return records.map((record) =>
+    eventFromStore(record.id, {
+      subject_id: record.subject_id,
+      timestamp: record.timestamp,
+      created_by: record.created_by,
+      data: record.data || {},
+      created: record.created,
+    })
+  );
 }
 
 export function subscribeToUserSlugs(userId: string, dispatch: Dispatch, cancelled: () => boolean): () => void {
-  // Load initial slugs
-  loadUserSlugs(userId, dispatch, cancelled).catch(console.error);
-
-  // Subscribe to user record changes
-  pb().collection("users").subscribe(userId, (e) => {
-    if (cancelled()) return;
-    dispatch({
-      type: "SET_USER_SLUGS",
-      slugs: e.record.household_slugs || {},
-    });
+  return subscribeToRecord("users", userId, cancelled, {
+    onData: (record) => {
+      dispatch({ type: "SET_USER_SLUGS", slugs: record.household_slugs || {} });
+    },
+    onError: (err) => {
+      console.error("[upkeep] loadUserSlugs failed:", err);
+    },
   });
-
-  return () => {
-    pb().collection("users").unsubscribe(userId);
-  };
 }
 
 export async function subscribeToList(
@@ -61,102 +57,64 @@ export async function subscribeToList(
 
   const unsubscribers: Array<() => void> = [];
 
-  // Load initial list data — disable auto-cancel to prevent React re-render races
-  const opts = { $autoCancel: false };
-  try {
-    const list = await pb().collection("task_lists").getOne(listId, opts);
-    if (cancelled()) return unsubscribers;
-    dispatch({ type: "SET_LIST", list: listFromRecord(list) });
-  } catch {
-    if (cancelled()) return unsubscribers;
-    dispatch({ type: "SET_LIST", list: null });
-  }
+  // Subscribe to list metadata
+  unsubscribers.push(
+    subscribeToRecord("task_lists", listId, cancelled, {
+      onData: (record) => {
+        dispatch({ type: "SET_LIST", list: listFromRecord(record) });
+      },
+      onDelete: () => {
+        dispatch({ type: "SET_LIST", list: null });
+      },
+      onError: () => {
+        dispatch({ type: "SET_LIST", list: null });
+      },
+    })
+  );
 
-  // Subscribe to list changes
-  pb().collection("task_lists").subscribe(listId, (e) => {
-    if (cancelled()) return;
-    if (e.action === "delete") {
-      dispatch({ type: "SET_LIST", list: null });
-    } else {
-      dispatch({ type: "SET_LIST", list: listFromRecord(e.record) });
-    }
-  });
-  unsubscribers.push(() => pb().collection("task_lists").unsubscribe(listId));
-
-  // Load initial tasks
-  try {
-    const tasks = await pb().collection("tasks").getFullList({
+  // Subscribe to tasks
+  unsubscribers.push(
+    subscribeToCollection("tasks", cancelled, {
       filter: `list = "${listId}"`,
-      $autoCancel: false,
-    });
-    if (cancelled()) return unsubscribers;
-    for (const task of tasks) {
-      dispatch({ type: "SET_TASK", task: taskFromRecord(task) });
-    }
-  } catch (e) {
-    console.error("Failed to load tasks:", e);
-  }
-  if (cancelled()) return unsubscribers;
-  dispatch({ type: "SET_LOADING", loading: false });
+      belongsTo: (r) => r.list === listId,
+      onInitial: (records) => {
+        for (const task of records) {
+          dispatch({ type: "SET_TASK", task: taskFromRecord(task) });
+        }
+        dispatch({ type: "SET_LOADING", loading: false });
+      },
+      onChange: (action, record) => {
+        if (action === "delete") {
+          dispatch({ type: "REMOVE_TASK", taskId: record.id });
+        } else {
+          dispatch({ type: "SET_TASK", task: taskFromRecord(record) });
+        }
+      },
+      onError: (e) => {
+        console.error("Failed to load tasks:", e);
+      },
+    })
+  );
 
-  // Subscribe to task changes
-  pb().collection("tasks").subscribe("*", (e) => {
-    if (cancelled()) return;
-    if (e.record.list !== listId) return;
-    if (e.action === "delete") {
-      dispatch({ type: "REMOVE_TASK", taskId: e.record.id });
-    } else {
-      dispatch({ type: "SET_TASK", task: taskFromRecord(e.record) });
-    }
-  });
-  unsubscribers.push(() => pb().collection("tasks").unsubscribe("*"));
-
-  // Load initial completions (most recent 100)
-  try {
-    const events = await pb().collection("task_events").getList(1, 100, {
+  // Subscribe to completions (most recent 100, reload on any change)
+  unsubscribers.push(
+    subscribeToCollectionReload("task_events", cancelled, {
       filter: `list = "${listId}"`,
       sort: "-timestamp",
-      $autoCancel: false,
-    });
-    if (cancelled()) return unsubscribers;
-    const completions: Completion[] = events.items.map((record) =>
-      eventFromStore(record.id, {
-        subject_id: record.subject_id,
-        timestamp: record.timestamp,
-        created_by: record.created_by,
-        data: record.data || {},
-        created: record.created,
-      })
-    );
-    dispatch({ type: "SET_COMPLETIONS", completions });
-  } catch (e) {
-    console.error("Failed to load completions:", e);
-  }
-
-  // Subscribe to event changes
-  pb().collection("task_events").subscribe("*", (e) => {
-    if (cancelled()) return;
-    if (e.record.list !== listId) return;
-    // Reload all events on any change (simpler than incremental updates)
-    pb().collection("task_events").getList(1, 100, {
-      filter: `list = "${listId}"`,
-      sort: "-timestamp",
-      $autoCancel: false,
-    }).then((events) => {
-      if (cancelled()) return;
-      const completions: Completion[] = events.items.map((record) =>
-        eventFromStore(record.id, {
-          subject_id: record.subject_id,
-          timestamp: record.timestamp,
-          created_by: record.created_by,
-          data: record.data || {},
-          created: record.created,
-        })
-      );
-      dispatch({ type: "SET_COMPLETIONS", completions });
-    }).catch(console.error);
-  });
-  unsubscribers.push(() => pb().collection("task_events").unsubscribe("*"));
+      page: 1,
+      perPage: 100,
+      belongsTo: (r) => r.list === listId,
+      onInitial: (records) => {
+        dispatch({ type: "SET_COMPLETIONS", completions: recordsToCompletions(records) });
+      },
+      onAnyChange: (records) => {
+        dispatch({ type: "SET_COMPLETIONS", completions: recordsToCompletions(records) });
+      },
+      onError: (e) => {
+        console.error("Failed to load completions:", e);
+      },
+    })
+  );
 
   return unsubscribers;
 }

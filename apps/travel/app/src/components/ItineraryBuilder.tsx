@@ -29,7 +29,8 @@ import {
 import styled from "styled-components";
 import type { Activity, Itinerary, ItineraryDay, ItinerarySlot } from "../types";
 import { dayTravelDistance } from "../types";
-import { updateItinerary } from "../pocketbase";
+import { useTravelBackend } from "../backend-provider";
+import { daysToBackend } from "../adapters";
 
 // ==========================================
 // Styled components
@@ -283,6 +284,7 @@ interface ItineraryBuilderProps {
 }
 
 export function ItineraryBuilder({ itinerary, activities, activityMap }: ItineraryBuilderProps) {
+  const travel = useTravelBackend();
   const [days, setDays] = useState<ItineraryDay[]>(itinerary.days);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
@@ -433,7 +435,7 @@ export function ItineraryBuilder({ itinerary, activities, activityMap }: Itinera
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateItinerary(itinerary.id, { days });
+      await travel.setItineraryDays(itinerary.id, daysToBackend(days));
       setDirty(false);
     } finally {
       setSaving(false);

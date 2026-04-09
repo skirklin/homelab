@@ -35,7 +35,7 @@ const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, tran
 };
 import { useShoppingContext } from "../shopping-context";
 import { getItemsByCategoryId } from "../subscription";
-import { updateItemCategory } from "../pocketbase";
+import { useShoppingBackend } from "../backend-provider";
 import { Header } from "./Header";
 import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";
@@ -127,6 +127,7 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { state, setCurrentList } = useShoppingContext();
+  const shopping = useShoppingBackend();
   const [view, setView] = useState<View>("list");
   const [draggedItem, setDraggedItem] = useState<ShoppingItem | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -171,7 +172,7 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
     const newCategoryId = over.id as CategoryId;
 
     if (item && newCategoryId && item.categoryId !== newCategoryId) {
-      updateItemCategory(item, newCategoryId);
+      shopping.updateItemCategory(item.id, newCategoryId, item.ingredient);
     }
   };
 

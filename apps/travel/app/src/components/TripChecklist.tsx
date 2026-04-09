@@ -1,7 +1,7 @@
 import { Checkbox, Typography, Progress } from "antd";
 import styled from "styled-components";
 import { useTravelContext } from "../travel-context";
-import { toggleChecklistItem } from "../pocketbase";
+import { useTravelBackend } from "../backend-provider";
 import type { Trip, ChecklistTemplate } from "../types";
 
 const Container = styled.div`
@@ -56,13 +56,14 @@ export function TripChecklist({ trip }: TripChecklistProps) {
 }
 
 function ChecklistSection({ template, trip }: { template: ChecklistTemplate; trip: Trip }) {
+  const travel = useTravelBackend();
   const done = trip.checklistDone || {};
   const doneCount = template.items.filter((i) => done[i.id]).length;
   const total = template.items.length;
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
   const handleToggle = (itemId: string, checked: boolean) => {
-    toggleChecklistItem(trip.id, itemId, checked);
+    travel.toggleChecklistItem(trip.id, itemId, checked);
   };
 
   // Group by category

@@ -5,7 +5,7 @@ import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { addItem } from "../pocketbase";
+import { useShoppingBackend } from "../backend-provider";
 import { getItemsFromState } from "../subscription";
 
 const Container = styled.div`
@@ -30,6 +30,7 @@ const NoteWrapper = styled.div`
 export function AddItem() {
   const { user } = useAuth();
   const { state } = useShoppingContext();
+  const shopping = useShoppingBackend();
   const [ingredient, setIngredient] = useState("");
   const [note, setNote] = useState("");
   const inputRef = useRef<BaseSelectRef>(null);
@@ -91,7 +92,9 @@ export function AddItem() {
 
     // Fire and forget - pass category to skip network lookup
     const trimmedNote = note.trim() || undefined;
-    addItem(trimmedIngredient, user.uid, { categoryId, note: trimmedNote }).catch((error) => {
+    const listId = state.list?.id;
+    if (!listId) return;
+    shopping.addItem(listId, trimmedIngredient, user.uid, { categoryId, note: trimmedNote }).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };

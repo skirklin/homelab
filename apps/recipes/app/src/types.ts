@@ -55,6 +55,7 @@ export type ActionType = {
   box?: BoxEntry
   userId?: UserId
   user?: UserEntry
+  loading?: number
   payload?: RecipeEntry
   | BoxEntry
   | Map<string, BoxEntry>

@@ -4,7 +4,7 @@ import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useDisplaySettings, type WidgetSize } from "../display-settings";
 import type { LifeLog } from "../types";
-import { getFcmTokens, clearAllFcmTokens } from "../pocketbase";
+import { useUserBackend } from "../backend-provider";
 
 const SettingRow = styled.div`
   display: flex;
@@ -85,6 +85,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: SettingsModalProps) {
   const { widgetSize, setWidgetSize } = useDisplaySettings();
+  const user = useUserBackend();
   const [showDebug, setShowDebug] = useState(false);
   const [fcmTokenCount, setFcmTokenCount] = useState<number | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(false);
@@ -97,7 +98,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   useEffect(() => {
     if (showDebug && userId && fcmTokenCount === null) {
       setLoadingTokens(true);
-      getFcmTokens(userId)
+      user.getFcmTokens(userId)
         .then(tokens => setFcmTokenCount(tokens.length))
         .catch(() => setFcmTokenCount(-1))
         .finally(() => setLoadingTokens(false));
@@ -108,7 +109,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
     if (!userId) return;
     setLoadingTokens(true);
     try {
-      await clearAllFcmTokens(userId);
+      await user.clearAllFcmTokens(userId);
       setFcmTokenCount(0);
     } catch (e) {
       console.error("Failed to clear tokens:", e);

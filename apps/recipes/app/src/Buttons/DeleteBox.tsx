@@ -3,7 +3,7 @@ import { Menu, Popconfirm } from 'antd';
 import { useContext } from 'react';
 import { Context } from '../context';
 import { useNavigate } from 'react-router-dom';
-import { deleteBox } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
 import { getAppUserFromState, getBoxFromState } from '../state';
 import { ActionButton } from '../StyledComponents';
 import type { BoxId } from '../types';
@@ -18,6 +18,7 @@ interface DeleteProps {
 function DeleteButton(props: DeleteProps) {
   const { state, dispatch } = useContext(Context)
   const { user: authUser } = useAuth();
+  const recipes = useRecipesBackend();
   const { writeable } = state;
   const navigate = useNavigate()
 
@@ -30,7 +31,8 @@ function DeleteButton(props: DeleteProps) {
   }
 
   async function del() {
-    deleteBox(boxId, dispatch)
+    dispatch({ type: "REMOVE_BOX", boxId });
+    await recipes.deleteBox(boxId);
     navigate(".")
   }
 

@@ -1,4 +1,7 @@
 /**
+ * @deprecated Use `@homelab/backend` via backend-provider.tsx instead.
+ * This file is kept for backward compatibility with e2e tests.
+ *
  * PocketBase data operations for the upkeep app.
  * Replaces the old firestore.ts.
  */

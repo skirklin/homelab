@@ -15,10 +15,13 @@ spec:
     spec:
       containers:
         - name: ingest
-          image: homelab/ingest:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/ingest:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 5555
+          volumeMounts:
+            - name: data
+              mountPath: /app/.data
           resources:
             requests:
               memory: 128Mi
@@ -26,6 +29,21 @@ spec:
             limits:
               memory: 512Mi
               cpu: 1000m
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ingest-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ingest-data
+  namespace: homelab
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Service
@@ -33,6 +51,7 @@ metadata:
   name: ingest
   namespace: homelab
 spec:
+  type: ClusterIP
   selector:
     app: ingest
   ports:

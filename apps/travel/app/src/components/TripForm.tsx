@@ -3,7 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Form, Input, Select, DatePicker, Button, Space } from "antd";
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
-import { addTrip, updateTrip, tripUpdates } from "../pocketbase";
+import { useTravelBackend } from "../backend-provider";
+import { tripToBackend, tripUpdatesToBackend } from "../adapters";
 import { STATUS_ORDER, type TripStatus } from "../types";
 import dayjs from "dayjs";
 
@@ -14,6 +15,7 @@ export function TripForm() {
   const navigate = useNavigate();
   const { state } = useTravelContext();
   const { user } = useAuth();
+  const travel = useTravelBackend();
   const [saving, setSaving] = useState(false);
 
   const isEdit = !!tripId && tripId !== "new";
@@ -30,9 +32,9 @@ export function TripForm() {
       const endDate = values.endDate ? (values.endDate as dayjs.Dayjs).toDate() : null;
 
       if (isEdit && tripId) {
-        await updateTrip(
+        await travel.updateTrip(
           tripId,
-          tripUpdates({
+          tripUpdatesToBackend({
             destination: values.destination as string,
             status: values.status as TripStatus,
             region: values.region as string,
@@ -44,21 +46,26 @@ export function TripForm() {
         );
         navigate(-1);
       } else {
+        const logId = state.log?.id;
+        if (!logId) return;
         const now = new Date();
-        const id = await addTrip({
-          destination: values.destination as string,
-          status: (values.status as TripStatus) || "Idea",
-          region: (values.region as string) || "",
-          startDate,
-          endDate,
-          notes: (values.notes as string) || "",
-          sourceRefs: (values.sourceRefs as string) || "",
-          flaggedForReview: false,
-          reviewComment: "",
-          checklistDone: {},
-          created: now,
-          updated: now,
-        });
+        const id = await travel.addTrip(
+          logId,
+          tripToBackend({
+            destination: values.destination as string,
+            status: (values.status as TripStatus) || "Idea",
+            region: (values.region as string) || "",
+            startDate,
+            endDate,
+            notes: (values.notes as string) || "",
+            sourceRefs: (values.sourceRefs as string) || "",
+            flaggedForReview: false,
+            reviewComment: "",
+            checklistDone: {},
+            created: now,
+            updated: now,
+          })
+        );
         navigate(`../${id}`, { replace: true });
       }
     } finally {

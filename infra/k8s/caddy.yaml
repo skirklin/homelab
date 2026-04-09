@@ -33,12 +33,23 @@ data:
         reverse_proxy homepage.homelab.svc.cluster.local:80
     }
 
-    money.beta.kirkl.in {
-        reverse_proxy money.homelab.svc.cluster.local:80
+    # money app is tailnet-only — no public Caddy route
+    # Access via http://<tailscale-ip>:30080/money or direct NodePort
+
+    registry.beta.kirkl.in {
+        basic_auth {
+            deploy {$REGISTRY_HTPASSWD}
+        }
+        reverse_proxy registry.homelab.svc.cluster.local:5000
     }
 
     api.beta.kirkl.in {
-        reverse_proxy pocketbase.homelab.svc.cluster.local:8090
+        handle_path /fn/* {
+            reverse_proxy functions.homelab.svc.cluster.local:3000
+        }
+        handle {
+            reverse_proxy pocketbase.homelab.svc.cluster.local:8090
+        }
     }
 ---
 apiVersion: apps/v1
@@ -48,6 +59,8 @@ metadata:
   namespace: homelab
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: caddy
@@ -59,6 +72,10 @@ spec:
       containers:
         - name: caddy
           image: caddy:2-alpine
+          envFrom:
+            - secretRef:
+                name: registry-auth
+                optional: true
           ports:
             - containerPort: 80
               hostPort: 80

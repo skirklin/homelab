@@ -5,7 +5,7 @@ import { Button } from "antd";
 import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { getBackend, AppHeader, ShareModal } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
-import { clearCheckedItems } from "../pocketbase";
+import { useShoppingBackend } from "../backend-provider";
 import { getItemsFromState } from "../subscription";
 import { appStorage, StorageKeys } from "../storage";
 import { SyncIndicator } from "./SyncIndicator";
@@ -27,6 +27,7 @@ interface Props {
 export function Header({ listId, onShowHistory, onShowSettings, embedded = false }: Props) {
   const navigate = useNavigate();
   const { state } = useShoppingContext();
+  const shopping = useShoppingBackend();
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const items = getItemsFromState(state);
   const checkedCount = items.filter((item) => item.checked).length;
@@ -42,9 +43,21 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
   const shareUrl = `${window.location.origin}/join/${listId}`;
 
   const handleDoneShopping = async () => {
-    if (checkedCount === 0) return;
+    if (checkedCount === 0 || !listId) return;
     try {
-      await clearCheckedItems(items);
+      // Convert local items to the backend's ShoppingItem shape
+      const backendItems = items.map((item) => ({
+        id: item.id,
+        list: listId,
+        ingredient: item.ingredient,
+        note: item.note || "",
+        categoryId: item.categoryId,
+        checked: item.checked,
+        checkedBy: item.checkedBy,
+        checkedAt: item.checkedAt?.toISOString(),
+        addedBy: item.addedBy,
+      }));
+      await shopping.clearCheckedItems(listId, backendItems);
     } catch (error) {
       console.error("Failed to clear items:", error);
     }

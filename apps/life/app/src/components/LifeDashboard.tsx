@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Button, Switch, message, Tooltip, DatePicker } from "antd";
+import { Button, Switch, Tooltip, DatePicker } from "antd";
 import { SettingOutlined, DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
@@ -12,6 +12,7 @@ import {
   Section,
   WidgetGrid,
   AppHeader,
+  useFeedback,
 } from "@kirkl/shared";
 import { useLife } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
@@ -29,7 +30,7 @@ import {
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
 } from "../messaging";
-import { addSampleResponse, clearSampleSchedule, getCachedLogId } from "../pocketbase";
+import { useLifeBackend } from "../backend-provider";
 
 // Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {
@@ -103,9 +104,11 @@ interface LifeDashboardProps {
 }
 
 export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
+  const { message } = useFeedback();
   const { user } = useAuth();
   const { state, dispatch } = useLife();
   const navigate = useNavigate();
+  const life = useLifeBackend();
   const [showManifestEditor, setShowManifestEditor] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSampleModal, setShowSampleModal] = useState(false);
@@ -231,8 +234,8 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     return dayjs(selectedDate).format("ddd, MMM D");
   };
 
-  // Subscribe to entries - use cached log ID for faster startup
-  const logId = state.log?.id ?? getCachedLogId();
+  // Subscribe to entries
+  const logId = state.log?.id ?? null;
   useEntriesSubscription(logId);
 
   const manifest = state.log?.manifest ?? DEFAULT_MANIFEST;
@@ -251,13 +254,13 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       return;
     }
     try {
-      await addSampleResponse({ [questionId]: value }, user.uid, state.log.id);
+      await life.addSampleResponse(state.log.id, { [questionId]: value }, user.uid);
       message.success("Response saved");
     } catch (error) {
       console.error("Failed to save quick response:", error);
       message.error("Failed to save response");
     }
-  }, [user?.uid, state.log?.id]);
+  }, [user?.uid, state.log?.id, life]);
 
   // Initialize messaging and listen for foreground messages
   useEffect(() => {
@@ -520,7 +523,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         userId={user?.uid}
         onResetSchedule={async () => {
           if (state.log?.id) {
-            await clearSampleSchedule(state.log.id);
+            await life.clearSampleSchedule(state.log.id);
           }
         }}
       />

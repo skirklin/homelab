@@ -19,8 +19,8 @@ spec:
     spec:
       containers:
         - name: home
-          image: homelab/home:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/home:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
@@ -58,8 +58,8 @@ spec:
     spec:
       containers:
         - name: recipes
-          image: homelab/recipes:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/recipes:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
@@ -97,8 +97,8 @@ spec:
     spec:
       containers:
         - name: shopping
-          image: homelab/shopping:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/shopping:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
@@ -139,8 +139,8 @@ spec:
     spec:
       containers:
         - name: upkeep
-          image: homelab/upkeep:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/upkeep:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
@@ -178,8 +178,8 @@ spec:
     spec:
       containers:
         - name: travel
-          image: homelab/travel:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/travel:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
@@ -217,8 +217,8 @@ spec:
     spec:
       containers:
         - name: money
-          image: homelab/money:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/money:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:
@@ -256,8 +256,8 @@ spec:
     spec:
       containers:
         - name: homepage
-          image: homelab/homepage:latest
-          imagePullPolicy: Never
+          image: localhost:30500/homelab/homepage:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:

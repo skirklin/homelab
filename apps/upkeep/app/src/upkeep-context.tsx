@@ -4,8 +4,11 @@
 
 import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
-import { subscribeToUserSlugs, subscribeToList } from "./subscription";
+import { useUpkeepBackend, useUserBackend } from "./backend-provider";
+import { setCurrentListId } from "./pocketbase";
+import { taskFromBackend, listFromBackend, completionFromBackend } from "./adapters";
 import type { Task, TaskList, Completion } from "./types";
+import type { UpkeepBackend } from "@homelab/backend";
 
 export interface UpkeepState {
   userSlugs: Record<string, string>; // { "home": "listId123" }
@@ -19,6 +22,7 @@ export type UpkeepAction =
   | { type: "SET_USER_SLUGS"; slugs: Record<string, string> }
   | { type: "SET_LIST"; list: TaskList | null }
   | { type: "SET_TASK"; task: Task }
+  | { type: "SET_TASKS"; tasks: Task[] }
   | { type: "REMOVE_TASK"; taskId: string }
   | { type: "CLEAR_TASKS" }
   | { type: "SET_COMPLETIONS"; completions: Completion[] }
@@ -35,6 +39,14 @@ function reducer(state: UpkeepState, action: UpkeepAction): UpkeepState {
     case "SET_TASK": {
       const newTasks = new Map(state.tasks);
       newTasks.set(action.task.id, action.task);
+      return { ...state, tasks: newTasks };
+    }
+
+    case "SET_TASKS": {
+      const newTasks = new Map<string, Task>();
+      for (const task of action.tasks) {
+        newTasks.set(task.id, task);
+      }
       return { ...state, tasks: newTasks };
     }
 
@@ -74,30 +86,67 @@ interface ContextType {
 
 const UpkeepContext = createContext<ContextType | null>(null);
 
+function subscribeToListViaBackend(
+  upkeep: UpkeepBackend,
+  listId: string,
+  dispatch: React.Dispatch<UpkeepAction>,
+): () => void {
+  // Keep pocketbase.ts currentListId in sync for any remaining direct callers
+  setCurrentListId(listId);
+
+  dispatch({ type: "CLEAR_TASKS" });
+  dispatch({ type: "SET_LIST", list: null });
+  dispatch({ type: "SET_LOADING", loading: true });
+
+  let firstTasks = true;
+
+  return upkeep.subscribeToList(listId, "", {
+    onList: (list) => {
+      dispatch({ type: "SET_LIST", list: listFromBackend(list) });
+    },
+    onTasks: (tasks) => {
+      dispatch({ type: "SET_TASKS", tasks: tasks.map(taskFromBackend) });
+      if (firstTasks) {
+        firstTasks = false;
+        dispatch({ type: "SET_LOADING", loading: false });
+      }
+    },
+    onCompletions: (completions) => {
+      dispatch({ type: "SET_COMPLETIONS", completions: completions.map(completionFromBackend) });
+    },
+    onDeleted: () => {
+      dispatch({ type: "SET_LIST", list: null });
+    },
+  });
+}
+
 export function UpkeepProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const { user } = useAuth();
+  const upkeep = useUpkeepBackend();
+  const userBackend = useUserBackend();
   const slugsUnsubRef = useRef<(() => void) | null>(null);
-  const listUnsubsRef = useRef<(() => void)[]>([]);
+  const listUnsubRef = useRef<(() => void) | null>(null);
   const currentListIdRef = useRef<string | null>(null);
 
   // Subscribe to user's slugs when authenticated
   useEffect(() => {
-    let cancelled = false;
     if (user) {
-      slugsUnsubRef.current = subscribeToUserSlugs(user.uid, dispatch, () => cancelled);
+      slugsUnsubRef.current = userBackend.subscribeSlugs(user.uid, "household", (slugs) => {
+        dispatch({ type: "SET_USER_SLUGS", slugs });
+      });
     }
     return () => {
-      cancelled = true;
       if (slugsUnsubRef.current) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
       }
-      // Also cleanup list subscriptions
-      listUnsubsRef.current.forEach((unsub) => unsub());
-      listUnsubsRef.current = [];
+      if (listUnsubRef.current) {
+        listUnsubRef.current();
+        listUnsubRef.current = null;
+      }
     };
-  }, [user]);
+  }, [user, userBackend]);
 
   // Function to subscribe to a specific list (called by components)
   const setCurrentList = useCallback((listId: string) => {
@@ -106,25 +155,22 @@ export function UpkeepProvider({ children }: { children: ReactNode }) {
     // Already subscribed to this list
     if (currentListIdRef.current === listId) return;
 
-    // Cleanup previous list subscriptions
-    listUnsubsRef.current.forEach((unsub) => unsub());
-    listUnsubsRef.current = [];
+    // Cleanup previous list subscription
+    if (listUnsubRef.current) {
+      listUnsubRef.current();
+      listUnsubRef.current = null;
+    }
     currentListIdRef.current = listId;
 
-    const cancelled = () => currentListIdRef.current !== listId;
-    subscribeToList(listId, user.uid, dispatch, cancelled).then((unsubs) => {
-      if (cancelled()) {
-        unsubs.forEach((unsub) => unsub());
-        return;
-      }
-      listUnsubsRef.current = unsubs;
-    }).catch((err) => {
-      console.error("[upkeep] subscribeToList failed:", err);
-      if (!cancelled()) {
-        dispatch({ type: "SET_LOADING", loading: false });
-      }
-    });
-  }, [user]);
+    const unsub = subscribeToListViaBackend(upkeep, listId, dispatch);
+
+    // Check if we navigated away before subscription resolved
+    if (currentListIdRef.current !== listId) {
+      unsub();
+      return;
+    }
+    listUnsubRef.current = unsub;
+  }, [user, upkeep]);
 
   return (
     <UpkeepContext.Provider value={{ state, dispatch, setCurrentList }}>

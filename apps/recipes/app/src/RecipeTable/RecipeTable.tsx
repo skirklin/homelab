@@ -12,7 +12,8 @@ import NewButton from '../Buttons/NewRecipe';
 import UploadButton from '../Buttons/UploadRecipes';
 import ImportButton from '../Buttons/ImportRecipes';
 import GenerateButton from '../Buttons/GenerateRecipe';
-import { addRecipe, deleteRecipe, setRecipeVisibility } from '../pocketbase';
+import { useRecipesBackend } from '../backend-provider';
+import { recipeDataToBackend } from '../adapters';
 import { Context } from '../context';
 import { PickBoxModal } from '../Modals/PickBoxModal';
 import BatchEnrichmentModal from '../Modals/BatchEnrichmentModal';
@@ -23,7 +24,6 @@ import { type BoxId, Visibility } from '../types';
 import styled from 'styled-components';
 import { useMediaQuery } from 'react-responsive'
 import VisibilityControl from '../Buttons/Visibility';
-import { addRecipeOwner } from '../backend';
 
 const TableContainer = styled.div`
   background: var(--color-bg);
@@ -120,6 +120,7 @@ export function RecipeTable(props: RecipeTableProps) {
 
   const { writeable, recipes, boxId } = props;
   const { state, dispatch } = useContext(Context)
+  const recipesBackend = useRecipesBackend();
   const [filteredRows, setFilteredRows] = useState<RowType[]>()
 
   // Count recipes with pending changes (enrichments or modifications)
@@ -157,36 +158,27 @@ export function RecipeTable(props: RecipeTableProps) {
   const hasSelected = selectedRowKeys.length > 0;
 
   async function del() {
-    selectedRows.forEach(
-      (value: RowType) => {
-        deleteRecipe(state.boxes, value.box.id, value.recipe.id, dispatch)
-      }
-    )
+    for (const value of selectedRows) {
+      dispatch({ type: "REMOVE_RECIPE", boxId: value.box.id, recipeId: value.recipe.id });
+      await recipesBackend.deleteRecipe(value.recipe.id);
+    }
     setSelectedRowKeys([])
     setSelectedRows([])
   }
 
   async function fork(boxId: BoxId) {
-    selectedRows.forEach(
-      (value: RowType) => {
-        addRecipe(boxId, _.cloneDeep(value.recipe))
-      }
-    )
+    for (const value of selectedRows) {
+      const data = recipeDataToBackend(value.recipe);
+      const userId = value.recipe.owners[0] || "";
+      await recipesBackend.addRecipe(boxId, data, userId);
+    }
     navigate(`${basePath}/boxes/${boxId}`)
   }
 
   function handleVisiblityChange(e: { key: string }) {
     selectedRows.forEach(
       (value: RowType) => {
-        setRecipeVisibility(value.box.id, value.recipe.id, e.key as Visibility)
-      }
-    )
-  }
-
-  function handleAddOwner(newOwnerEmail: string) {
-    selectedRows.forEach(
-      (value: RowType) => {
-        addRecipeOwner({ boxId: value.box.id, recipeId: value.recipe.id, newOwnerEmail })
+        recipesBackend.setRecipeVisibility(value.recipe.id, e.key as Visibility)
       }
     )
   }
@@ -262,7 +254,6 @@ export function RecipeTable(props: RecipeTableProps) {
           <VisibilityControl
             disabled={!writeable || !hasSelected}
             handleChange={handleVisiblityChange}
-            handleAddOwner={handleAddOwner}
             value={Visibility.public}
             element="button"
           />

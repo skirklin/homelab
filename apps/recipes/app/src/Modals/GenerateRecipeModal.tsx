@@ -5,10 +5,9 @@ import type { Recipe } from 'schema-dts';
 import styled from 'styled-components';
 import { generateRecipe } from '../backend';
 import { Context } from '../context';
-import { addRecipe } from '../pocketbase';
-import { RecipeEntry } from '../storage';
+import { useRecipesBackend } from '../backend-provider';
 import { getAppUserFromState } from '../state';
-import { type BoxId, Visibility } from '../types';
+import type { BoxId } from '../types';
 import { useAuth } from '@kirkl/shared';
 
 const { Text } = Typography;
@@ -64,6 +63,7 @@ function GenerateRecipeModal(props: GenerateRecipeModalProps) {
   const [generatedRecipe, setGeneratedRecipe] = useState<Recipe | null>(null);
   const { state } = useContext(Context);
   const { user: authUser } = useAuth();
+  const recipesBackend = useRecipesBackend();
 
   const user = getAppUserFromState(state, authUser?.uid);
 
@@ -89,8 +89,7 @@ function GenerateRecipeModal(props: GenerateRecipeModalProps) {
   function handleAddToBox() {
     if (!generatedRecipe || !boxId || !user) return;
 
-    const now = new Date();
-    const recipeWithAuthor = {
+    const recipeData = {
       ...generatedRecipe,
       author: {
         '@type': 'Person' as const,
@@ -98,18 +97,8 @@ function GenerateRecipeModal(props: GenerateRecipeModalProps) {
         url: 'https://claude.ai',
       },
     };
-    const recipeEntry = new RecipeEntry(
-      recipeWithAuthor,
-      [user.id],
-      Visibility.private,
-      user.id,
-      '',
-      now,
-      now,
-      user.id
-    );
 
-    addRecipe(boxId, recipeEntry);
+    recipesBackend.addRecipe(boxId, recipeData as unknown as import("@homelab/backend").RecipeData, user.id);
     handleClose();
   }
 
