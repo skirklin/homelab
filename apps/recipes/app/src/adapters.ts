@@ -10,14 +10,12 @@ import { BoxEntry, RecipeEntry, UserEntry } from "./storage";
 import { type CookingLogEntry, EnrichmentStatus, Visibility } from "./types";
 import { CURRENT_UPDATE_VERSION } from "./Modals/WhatsNew";
 
-const DUMMY_FIRST_DATE = new Date(2022, 0, 0);
-
 /** Convert a backend Recipe to the app's RecipeEntry class */
 export function recipeFromBackend(r: BackendRecipe): RecipeEntry {
   const cookingLog: CookingLogEntry[] = Array.isArray(r.cookingLog)
     ? (r.cookingLog as Array<{ madeAt?: string; madeBy?: string; note?: string }>).map(
         (entry) => ({
-          madeAt: entry.madeAt ? new Date(entry.madeAt) : DUMMY_FIRST_DATE,
+          madeAt: entry.madeAt ? new Date(entry.madeAt) : new Date(r.created),
           madeBy: entry.madeBy || "",
           note: entry.note,
         }),
@@ -28,11 +26,11 @@ export function recipeFromBackend(r: BackendRecipe): RecipeEntry {
     r.data as import("schema-dts").Recipe,
     r.owners || [],
     (r.visibility as Visibility) || Visibility.private,
-    r.owners?.[0] || "",
+    r.creator || r.owners?.[0] || "",
     r.id,
-    DUMMY_FIRST_DATE, // backend doesn't expose created/updated timestamps
-    DUMMY_FIRST_DATE,
-    "",
+    new Date(r.created),
+    new Date(r.updated),
+    r.lastUpdatedBy || "",
     r.pendingChanges || undefined,
     r.stepIngredients || undefined,
     cookingLog,
@@ -46,11 +44,11 @@ export function boxFromBackend(b: RecipeBox): BoxEntry {
     { name: b.name || "", description: b.description || undefined },
     b.owners || [],
     (b.visibility as Visibility) || Visibility.private,
-    b.owners?.[0] || "",
+    b.creator || b.owners?.[0] || "",
     b.id,
-    DUMMY_FIRST_DATE,
-    DUMMY_FIRST_DATE,
-    "",
+    new Date(b.created),
+    new Date(b.updated),
+    b.lastUpdatedBy || "",
     b.subscribers || [],
   );
 }
@@ -61,8 +59,8 @@ export function userFromBackend(u: RecipesUser): UserEntry {
     "", // backend RecipesUser doesn't carry a name
     Visibility.private,
     u.boxes,
-    DUMMY_FIRST_DATE,
-    DUMMY_FIRST_DATE,
+    new Date(), // RecipesUser doesn't have timestamps
+    new Date(),
     u.id,
     u.cookingModeSeen,
     u.lastSeenUpdateVersion || CURRENT_UPDATE_VERSION,

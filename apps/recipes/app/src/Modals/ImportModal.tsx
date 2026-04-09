@@ -58,7 +58,7 @@ function ImportModal(props: ImportProps) {
     if (result.error) {
       alert(result.error)
     }
-    const recipes = JSON.parse(result.recipes)
+    const recipes = result.recipes as unknown as Recipe[]
     const now = new Date()
     const fullRecipes = recipes.map(
       (recipe: Recipe) => {

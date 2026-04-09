@@ -22,22 +22,22 @@ export interface TravelBackend {
 
   // --- Trip CRUD ---
 
-  addTrip(logId: string, trip: Omit<Trip, "id" | "log">): Promise<string>;
-  updateTrip(tripId: string, updates: Partial<Omit<Trip, "id" | "log">>): Promise<void>;
+  addTrip(logId: string, trip: Omit<Trip, "id" | "log" | "created" | "updated">): Promise<string>;
+  updateTrip(tripId: string, updates: Partial<Omit<Trip, "id" | "log" | "created" | "updated">>): Promise<void>;
   deleteTrip(tripId: string): Promise<void>;
   flagTrip(tripId: string, flagged: boolean, comment?: string): Promise<void>;
   toggleChecklistItem(tripId: string, itemId: string, done: boolean): Promise<void>;
 
   // --- Activity CRUD ---
 
-  addActivity(logId: string, activity: Omit<Activity, "id" | "log">): Promise<string>;
-  updateActivity(activityId: string, updates: Partial<Omit<Activity, "id" | "log">>): Promise<void>;
+  addActivity(logId: string, activity: Omit<Activity, "id" | "log" | "created" | "updated">): Promise<string>;
+  updateActivity(activityId: string, updates: Partial<Omit<Activity, "id" | "log" | "created" | "updated">>): Promise<void>;
   deleteActivity(activityId: string): Promise<void>;
 
   // --- Itinerary CRUD ---
 
-  addItinerary(logId: string, tripId: string, itinerary: Omit<Itinerary, "id" | "log" | "trip">): Promise<string>;
-  updateItinerary(itineraryId: string, updates: Partial<Omit<Itinerary, "id" | "log" | "trip">>): Promise<void>;
+  addItinerary(logId: string, tripId: string, itinerary: Omit<Itinerary, "id" | "log" | "trip" | "created" | "updated">): Promise<string>;
+  updateItinerary(itineraryId: string, updates: Partial<Omit<Itinerary, "id" | "log" | "trip" | "created" | "updated">>): Promise<void>;
   setItineraryDays(itineraryId: string, days: ItineraryDay[]): Promise<void>;
   deleteItinerary(itineraryId: string): Promise<void>;
 

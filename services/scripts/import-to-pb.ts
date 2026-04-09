@@ -184,7 +184,7 @@ async function importRecipes() {
 
     // Idempotency check
     try {
-      const existing = await pb.collection("recipe_boxes").getFirstListItem(`name = "${name.replace(/"/g, '\\"')}"`, { $autoCancel: false });
+      const existing = await pb.collection("recipe_boxes").getFirstListItem(pb.filter("name = {:name}", { name }), { $autoCancel: false });
       getMap("recipe_boxes").set(box._id, existing.id);
       console.log(`  Exists: "${name}" -> ${existing.id}`);
       boxStats.skipped++;
@@ -226,7 +226,7 @@ async function importRecipes() {
       const rName = recipe.data?.name || "Untitled Recipe";
       try {
         const existingR = await pb.collection("recipes").getFirstListItem(
-          `box = "${pbBoxId}" && data.name = "${rName.replace(/"/g, '\\"')}"`, { $autoCancel: false }
+          pb.filter("box = {:pbBoxId} && data.name = {:rName}", { pbBoxId, rName }), { $autoCancel: false }
         );
         getMap("recipes").set(recipe._id, existingR.id);
         recipeStats.skipped++;
@@ -298,7 +298,7 @@ async function importShopping() {
 
     let pbListId: string;
     try {
-      const existing = await pb.collection("shopping_lists").getFirstListItem(`name = "${name.replace(/"/g, '\\"')}"`, { $autoCancel: false });
+      const existing = await pb.collection("shopping_lists").getFirstListItem(pb.filter("name = {:name}", { name }), { $autoCancel: false });
       pbListId = existing.id;
       getMap("shopping_lists").set(list._id, pbListId);
       console.log(`  Exists: "${name}" -> ${pbListId}`);
@@ -442,7 +442,7 @@ async function importUpkeep() {
 
     let pbListId: string;
     try {
-      const existing = await pb.collection("task_lists").getFirstListItem(`name = "${name.replace(/"/g, '\\"')}"`, { $autoCancel: false });
+      const existing = await pb.collection("task_lists").getFirstListItem(pb.filter("name = {:name}", { name }), { $autoCancel: false });
       pbListId = existing.id;
       getMap("task_lists").set(list._id, pbListId);
       console.log(`  Exists: "${name}" -> ${pbListId}`);

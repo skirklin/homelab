@@ -47,7 +47,3 @@ export interface ShoppingTrip {
 
 export type { UserProfile, UserProfileStore } from "@kirkl/shared";
 
-export type ItemHistoryStore = ItemHistory;
-export type LegacyItemHistoryStore = { name?: string };
-export type ShoppingTripStore = ShoppingTrip;
-

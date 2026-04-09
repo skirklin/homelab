@@ -22,9 +22,9 @@ export function taskFromBackend(t: BackendTask): Task {
     lastCompleted: t.lastCompleted,
     snoozedUntil: t.snoozedUntil,
     notifyUsers: t.notifyUsers,
-    createdBy: "", // backend type doesn't carry this
-    createdAt: new Date(), // placeholder — backend type doesn't carry timestamps
-    updatedAt: new Date(),
+    createdBy: t.createdBy,
+    createdAt: new Date(t.created),
+    updatedAt: new Date(t.updated),
   };
 }
 
@@ -35,8 +35,8 @@ export function listFromBackend(l: BackendTaskList): TaskList {
     name: l.name,
     owners: l.owners,
     rooms: l.rooms,
-    created: new Date(), // backend type doesn't carry timestamps
-    updated: new Date(),
+    created: new Date(l.created),
+    updated: new Date(l.updated),
   };
 }
 

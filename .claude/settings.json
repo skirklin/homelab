@@ -10,7 +10,8 @@
       "Bash(grep -E \"^\\\\.env$|^\\\\.data\" .gitignore)",
       "Bash(ls /home/skirklin/projects/homelab/infra/k8s/ingest*)",
       "Bash(ls /home/skirklin/projects/homelab/infra/k8s/caddy*)",
-      "Bash(chmod +x /home/skirklin/projects/homelab/infra/build-extension.sh)"
+      "Bash(chmod +x /home/skirklin/projects/homelab/infra/build-extension.sh)",
+      "Bash(bash infra/build-extension.sh)"
     ]
   }
 }

@@ -13,10 +13,18 @@ COOKIE_RELAY_DIR = DATA_DIR / "cookies"
 RAW_STORE_DIR = DATA_DIR / "raw"
 DEBUG_DIR = DATA_DIR / "debug"
 
-# User config lives in ~/.config/money/
-CONFIG_DIR = Path.home() / ".config" / "money"
-CONFIG_FILE = CONFIG_DIR / "config.json"
-ENV_FILE = CONFIG_DIR / ".env"
+# User config: check data dir first (persists in PVC), fall back to ~/.config/money/
+_USER_CONFIG_DIR = Path.home() / ".config" / "money"
+CONFIG_FILE = _USER_CONFIG_DIR / "config.json"  # legacy default
+ENV_FILE = _USER_CONFIG_DIR / ".env"
+
+
+def _resolve_config_file() -> Path:
+    """Return the config file path, preferring the data dir (PVC-persisted)."""
+    data_config = DATA_DIR / "config.json"
+    if data_config.exists():
+        return data_config
+    return CONFIG_FILE
 
 DEFAULT_VAULT = "Personal"
 
@@ -70,10 +78,13 @@ def _load_env() -> None:
 
 
 def load_config() -> AppConfig:
-    if not CONFIG_FILE.exists():
+    config_path = _resolve_config_file()
+    if not config_path.exists():
         msg = (
-            f"Config file not found at {CONFIG_FILE}. "
-            f"Create it with institution and login mappings, e.g.:\n"
+            f"Config file not found. Checked:\n"
+            f"  - {DATA_DIR / 'config.json'} (PVC/data dir)\n"
+            f"  - {CONFIG_FILE} (user config dir)\n"
+            f"Create one with institution and login mappings, e.g.:\n"
             + json.dumps(
                 {
                     "institutions": {
@@ -93,7 +104,7 @@ def load_config() -> AppConfig:
         )
         raise FileNotFoundError(msg)
 
-    raw = json.loads(CONFIG_FILE.read_text())
+    raw = json.loads(config_path.read_text())
 
     institutions: dict[str, InstitutionConfig] = {}
     for inst_name, inst_data in raw.get("institutions", {}).items():

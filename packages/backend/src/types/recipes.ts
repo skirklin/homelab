@@ -9,6 +9,10 @@ export interface RecipeBox {
   owners: string[];
   subscribers: string[];
   visibility: Visibility;
+  created: string;
+  updated: string;
+  creator: string;
+  lastUpdatedBy: string;
 }
 
 export interface Recipe {
@@ -21,6 +25,10 @@ export interface Recipe {
   pendingChanges: PendingChanges | null;
   stepIngredients: Record<string, string[]> | null;
   cookingLog: unknown;
+  created: string;
+  updated: string;
+  creator: string;
+  lastUpdatedBy: string;
 }
 
 export interface RecipeData {

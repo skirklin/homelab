@@ -119,6 +119,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/institutions/"):
             self._handle_get_institution_detail()
             return
+        if self.path == "/api/config":
+            self._handle_get_config()
+            return
         if self.path == "/extension/version":
             self._handle_extension_version()
             return
@@ -1743,6 +1746,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/suggestions/"):
             self._handle_suggestion_action()
             return
+        if self.path == "/api/config":
+            self._handle_put_config()
+            return
         self._json_response(404, {"error": "not found"})
 
     def do_OPTIONS(self) -> None:
@@ -2157,6 +2163,51 @@ class IngestHandler(BaseHTTPRequestHandler):
                 )
             )
             self._json_response(500, {"error": str(e)})
+
+    def _handle_get_config(self) -> None:
+        """Return the current config.json contents."""
+        from money.config import _resolve_config_file
+
+        config_path = _resolve_config_file()
+        if not config_path.exists():
+            self._json_response(200, {
+                "config": {},
+                "path": str(config_path),
+                "exists": False,
+            })
+            return
+        raw = json.loads(config_path.read_text())
+        self._json_response(200, {
+            "config": raw,
+            "path": str(config_path),
+            "exists": True,
+        })
+
+    def _handle_put_config(self) -> None:
+        """Update config.json. Always writes to the data dir (PVC-persisted)."""
+        from money.config import DATA_DIR
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self._json_response(400, {"error": "empty request body"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length))
+        except json.JSONDecodeError as e:
+            self._json_response(400, {"error": f"invalid JSON: {e}"})
+            return
+
+        config = data.get("config")
+        if not isinstance(config, dict):
+            self._json_response(400, {"error": "'config' must be an object"})
+            return
+
+        config_path = DATA_DIR / "config.json"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config, indent=2))
+        log.info("Config updated at %s", config_path)
+        self._json_response(200, {"status": "ok", "path": str(config_path)})
 
     def _handle_extension_version(self) -> None:
         """Return the latest extension version and download URL."""

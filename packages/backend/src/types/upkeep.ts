@@ -7,6 +7,8 @@ export interface TaskList {
   name: string;
   owners: string[];
   rooms: RoomDef[];
+  created: string;
+  updated: string;
 }
 
 export interface RoomDef {
@@ -30,6 +32,9 @@ export interface Task {
   lastCompleted: Date | null;
   snoozedUntil: Date | null;
   notifyUsers: string[];
+  createdBy: string;
+  created: string;
+  updated: string;
 }
 
 export type TaskCompletion = Event;

@@ -1,11 +1,7 @@
 import _ from "lodash";
-import type { RecordModel } from "pocketbase";
 import type { Recipe } from "schema-dts";
 import { type BoxType, type BoxId, type UserId, type PendingChanges, type CookingLogEntry, EnrichmentStatus, type StepIngredients, Visibility } from "./types";
 import { decodeStr } from "./converters";
-import { CURRENT_UPDATE_VERSION } from "./Modals/WhatsNew";
-
-const DUMMY_FIRST_DATE = new Date(2022, 0, 0)
 
 export class RecipeEntry {
     id: string;
@@ -42,8 +38,8 @@ export class RecipeEntry {
         this.creator = creator
         this.owners = owners;
         this.visibility = visibility;
-        this.created = created || DUMMY_FIRST_DATE;
-        this.updated = updated || DUMMY_FIRST_DATE;
+        this.created = created || new Date(0);
+        this.updated = updated || new Date(0);
         this.lastUpdatedBy = lastUpdatedBy || this.creator;
         this.pendingChanges = pendingChanges;
         this.stepIngredients = stepIngredients;
@@ -88,30 +84,6 @@ export class RecipeEntry {
 
 }
 
-/** Convert a PocketBase record to a RecipeEntry */
-export function recipeFromRecord(record: RecordModel): RecipeEntry {
-    const cookingLog: CookingLogEntry[] = (record.cooking_log || []).map((entry: { madeAt?: string; madeBy?: string; note?: string }) => ({
-        madeAt: entry.madeAt ? new Date(entry.madeAt) : DUMMY_FIRST_DATE,
-        madeBy: entry.madeBy || "",
-        note: entry.note,
-    }));
-    return new RecipeEntry(
-        record.data as Recipe,
-        record.owners || [],
-        (record.visibility as Visibility) || Visibility.private,
-        record.creator || "",
-        record.id,
-        record.created ? new Date(record.created) : DUMMY_FIRST_DATE,
-        record.updated ? new Date(record.updated) : DUMMY_FIRST_DATE,
-        record.last_updated_by || "",
-        record.pending_changes || undefined,
-        record.step_ingredients || undefined,
-        cookingLog,
-        (record.enrichment_status as EnrichmentStatus) || EnrichmentStatus.needed,
-    );
-}
-
-
 export class BoxEntry {
     data: BoxType;
     changed?: BoxType;
@@ -142,8 +114,8 @@ export class BoxEntry {
         this.subscribers = subscribers || [];
         this.visibility = visibility;
         this.creator = creator
-        this.created = created || DUMMY_FIRST_DATE;
-        this.updated = updated || DUMMY_FIRST_DATE;
+        this.created = created || new Date(0);
+        this.updated = updated || new Date(0);
         this.lastUpdatedBy = lastUpdatedBy || this.creator;
 
         this.recipes = new Map<string, RecipeEntry>()
@@ -174,22 +146,6 @@ export class BoxEntry {
     }
 }
 
-/** Convert a PocketBase record to a BoxEntry */
-export function boxFromRecord(record: RecordModel): BoxEntry {
-    return new BoxEntry(
-        { name: record.name || "", description: record.description || undefined },
-        record.owners || [],
-        (record.visibility as Visibility) || Visibility.private,
-        record.creator || "",
-        record.id,
-        record.created ? new Date(record.created) : DUMMY_FIRST_DATE,
-        record.updated ? new Date(record.updated) : DUMMY_FIRST_DATE,
-        record.last_updated_by || "",
-        record.subscribers || [],
-    );
-}
-
-
 export class UserEntry {
     name: string
     visibility: Visibility
@@ -212,17 +168,3 @@ export class UserEntry {
     }
 }
 
-/** Convert a PocketBase user record to a UserEntry */
-export function userFromRecord(record: RecordModel): UserEntry {
-    const boxes: string[] = record.recipe_boxes || [];
-    return new UserEntry(
-        record.name ?? "",
-        Visibility.private,
-        boxes,
-        record.updated ? new Date(record.updated) : DUMMY_FIRST_DATE,
-        record.created ? new Date(record.created) : DUMMY_FIRST_DATE,
-        record.id,
-        record.cooking_mode_seen ?? false,
-        record.last_seen_update_version || CURRENT_UPDATE_VERSION,
-    );
-}

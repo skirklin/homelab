@@ -17,6 +17,8 @@ function listFromRecord(r: RecordModel): TaskList {
     name: r.name || "",
     owners: Array.isArray(r.owners) ? r.owners : [],
     rooms: Array.isArray(r.room_defs) ? r.room_defs : [],
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -31,6 +33,9 @@ function taskFromRecord(r: RecordModel): Task {
     lastCompleted: r.last_completed ? new Date(r.last_completed) : null,
     snoozedUntil: r.snoozed_until ? new Date(r.snoozed_until) : null,
     notifyUsers: Array.isArray(r.notify_users) ? r.notify_users : [],
+    createdBy: r.created_by || "",
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -77,7 +82,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     await this.pb().collection("task_lists").update(listId, { room_defs: rooms });
   }
 
-  async addTask(listId: string, task: Omit<Task, "id" | "list">): Promise<string> {
+  async addTask(listId: string, task: Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">): Promise<string> {
     const record = await this.pb().collection("tasks").create({
       list: listId,
       name: task.name,
@@ -91,7 +96,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     return record.id;
   }
 
-  async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "list">>): Promise<void> {
+  async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">>): Promise<void> {
     const data: Record<string, unknown> = {};
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.description !== undefined) data.description = updates.description;

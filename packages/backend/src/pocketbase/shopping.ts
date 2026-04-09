@@ -20,6 +20,8 @@ function listFromRecord(r: RecordModel): ShoppingList {
     name: r.name || "",
     owners: Array.isArray(r.owners) ? r.owners : [],
     categories: Array.isArray(r.category_defs) ? r.category_defs : [],
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -34,6 +36,9 @@ function itemFromRecord(r: RecordModel): ShoppingItem {
     checkedBy: r.checked_by || undefined,
     checkedAt: r.checked_at || undefined,
     addedBy: r.added_by || undefined,
+    addedAt: r.created,
+    created: r.created,
+    updated: r.updated,
   };
 }
 

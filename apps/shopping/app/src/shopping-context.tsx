@@ -89,7 +89,7 @@ function toLocalItem(item: import("@homelab/backend").ShoppingItem): ShoppingIte
     categoryId: item.categoryId,
     checked: item.checked,
     addedBy: item.addedBy || "",
-    addedAt: new Date(), // backend type doesn't carry addedAt; use now as placeholder
+    addedAt: new Date(item.addedAt),
     checkedBy: item.checkedBy,
     checkedAt: item.checkedAt ? new Date(item.checkedAt) : undefined,
   };
@@ -102,8 +102,8 @@ function toLocalList(list: import("@homelab/backend").ShoppingList): ShoppingLis
     name: list.name,
     owners: list.owners,
     categories: list.categories,
-    created: new Date(), // backend type doesn't carry timestamps
-    updated: new Date(),
+    created: new Date(list.created),
+    updated: new Date(list.updated),
   };
 }
 

@@ -2,6 +2,7 @@
  * AI/Anthropic utilities — ported from services/functions/src/utils/ai.ts
  */
 import Anthropic from "@anthropic-ai/sdk";
+import type PocketBase from "pocketbase";
 
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 
@@ -16,12 +17,45 @@ export function getAnthropicClient(): Anthropic {
   return client;
 }
 
+/** Extract the text content from an Anthropic message response. */
+export function extractText(response: Anthropic.Messages.Message): string {
+  const block = response.content.find((b) => b.type === "text");
+  return block?.text ?? "";
+}
+
 export function parseAIResponse<T>(text: string): T {
   let jsonStr = text.trim();
   if (jsonStr.startsWith("```")) {
     jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
   }
-  return JSON.parse(jsonStr) as T;
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch (err) {
+    const preview = jsonStr.slice(0, 200);
+    throw new Error(
+      `Failed to parse AI response as JSON: ${err instanceof Error ? err.message : err}\nResponse preview: ${preview}`,
+    );
+  }
+}
+
+/** Fetch a recipe record and extract its ingredients and instructions. */
+export async function fetchRecipeData(pb: PocketBase, recipeId: string) {
+  const record = await pb.collection("recipes").getOne(recipeId);
+  const recipe = record.data as Record<string, unknown>;
+  if (!recipe) {
+    throw Object.assign(new Error("Recipe data is missing"), { statusCode: 404 });
+  }
+
+  const ingredients = Array.isArray(recipe.recipeIngredient)
+    ? (recipe.recipeIngredient as string[])
+    : [];
+  const instructions = Array.isArray(recipe.recipeInstructions)
+    ? (recipe.recipeInstructions as Array<{ text?: string } | string>).map((i) =>
+        typeof i === "string" ? i : (i as { text?: string }).text || "",
+      )
+    : [];
+
+  return { record, recipe, ingredients, instructions };
 }
 
 export function normalizeTags(tags: string[] | undefined): string[] {

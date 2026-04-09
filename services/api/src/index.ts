@@ -9,6 +9,7 @@ export type AppEnv = {
     userEmail: string;
     userToken: string;
     isApiKey: boolean;
+    pb: import("pocketbase").default;
   };
 };
 import { authMiddleware } from "./middleware/auth";

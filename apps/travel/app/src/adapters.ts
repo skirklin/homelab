@@ -39,8 +39,8 @@ export function tripFromBackend(bt: BackendTrip): Trip {
     flaggedForReview: bt.flagged || false,
     reviewComment: bt.flagComment || "",
     checklistDone: bt.checklistDone || {},
-    created: new Date((bt.created as string) || Date.now()),
-    updated: new Date((bt.updated as string) || Date.now()),
+    created: new Date(bt.created),
+    updated: new Date(bt.updated),
   };
 }
 
@@ -64,8 +64,8 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     ratingCount: ba.ratingCount ?? null,
     photoRef: ba.photoRef || "",
     tripId: ba.trip || "",
-    created: new Date(ba.created || Date.now()),
-    updated: new Date(ba.updated || Date.now()),
+    created: new Date(ba.created),
+    updated: new Date(ba.updated),
   };
 }
 
@@ -82,8 +82,8 @@ export function itineraryFromBackend(bi: BackendItinerary): Itinerary {
       flights: d.flights,
       slots: d.slots || [],
     })),
-    created: new Date((bi.created as string) || Date.now()),
-    updated: new Date((bi.updated as string) || Date.now()),
+    created: new Date(bi.created),
+    updated: new Date(bi.updated),
   };
 }
 
@@ -101,8 +101,8 @@ export function logFromBackend(bl: BackendTravelLog): TravelLog {
         category: i.category || "",
       })),
     })) : [DEFAULT_CHECKLIST],
-    created: new Date((bl.created as string) || Date.now()),
-    updated: new Date((bl.updated as string) || Date.now()),
+    created: new Date(bl.created),
+    updated: new Date(bl.updated),
   };
 }
 
@@ -110,7 +110,7 @@ export function logFromBackend(bl: BackendTravelLog): TravelLog {
 // App -> Backend conversions (for mutations)
 // ==========================================
 
-export function tripToBackend(trip: Omit<Trip, "id">): Omit<BackendTrip, "id" | "log"> {
+export function tripToBackend(trip: Omit<Trip, "id">): Omit<BackendTrip, "id" | "log" | "created" | "updated"> {
   return {
     name: trip.destination,
     destination: trip.destination,
@@ -136,7 +136,7 @@ export function tripUpdatesToBackend(fields: {
   sourceRefs?: string;
   flaggedForReview?: boolean;
   reviewComment?: string;
-}): Partial<Omit<BackendTrip, "id" | "log">> {
+}): Partial<Omit<BackendTrip, "id" | "log" | "created" | "updated">> {
   const updates: Record<string, unknown> = {};
   if (fields.destination !== undefined) {
     updates.name = fields.destination;
@@ -150,10 +150,10 @@ export function tripUpdatesToBackend(fields: {
   if (fields.sourceRefs !== undefined) updates.sourceRefs = fields.sourceRefs;
   if (fields.flaggedForReview !== undefined) updates.flagged = fields.flaggedForReview;
   if (fields.reviewComment !== undefined) updates.flagComment = fields.reviewComment;
-  return updates as Partial<Omit<BackendTrip, "id" | "log">>;
+  return updates as Partial<Omit<BackendTrip, "id" | "log" | "created" | "updated">>;
 }
 
-export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendActivity, "id" | "log"> {
+export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendActivity, "id" | "log" | "created" | "updated"> {
   return {
     name: activity.name,
     location: activity.location,
@@ -190,7 +190,7 @@ export function activityUpdatesToBackend(fields: {
   details?: string;
   setting?: string;
   tripId?: string;
-}): Partial<Omit<BackendActivity, "id" | "log">> {
+}): Partial<Omit<BackendActivity, "id" | "log" | "created" | "updated">> {
   const updates: Record<string, unknown> = {};
   if (fields.name !== undefined) updates.name = fields.name;
   if (fields.category !== undefined) updates.category = fields.category;
@@ -205,7 +205,7 @@ export function activityUpdatesToBackend(fields: {
   if (fields.details !== undefined) updates.details = fields.details;
   if (fields.setting !== undefined) updates.setting = fields.setting;
   if (fields.tripId !== undefined) updates.trip = fields.tripId;
-  return updates as Partial<Omit<BackendActivity, "id" | "log">>;
+  return updates as Partial<Omit<BackendActivity, "id" | "log" | "created" | "updated">>;
 }
 
 /**

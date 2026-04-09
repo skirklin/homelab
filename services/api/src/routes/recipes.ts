@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { scrapeRecipesFromUrl } from "../lib/scraper";
+import { handler } from "../lib/handler";
 
 export const recipesRoutes = new Hono();
 
@@ -57,7 +58,7 @@ function validateUrl(url: string): string | null {
   return null;
 }
 
-recipesRoutes.post("/scrape", async (c) => {
+recipesRoutes.post("/scrape", handler(async (c) => {
   const { url } = await c.req.json<{ url: string }>();
 
   if (!url || typeof url !== "string" || !url.trim()) {
@@ -69,11 +70,6 @@ recipesRoutes.post("/scrape", async (c) => {
     return c.json({ error: urlError }, 400);
   }
 
-  try {
-    const recipes = await scrapeRecipesFromUrl(url.trim());
-    return c.json({ recipes: JSON.stringify(recipes) });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch URL";
-    return c.json({ error: message }, 500);
-  }
-});
+  const recipes = await scrapeRecipesFromUrl(url.trim());
+  return c.json({ recipes });
+}));

@@ -26,6 +26,10 @@ function boxFromRecord(r: RecordModel): RecipeBox {
     owners: Array.isArray(r.owners) ? r.owners : [],
     subscribers: Array.isArray(r.subscribers) ? r.subscribers : [],
     visibility: r.visibility || "private",
+    created: r.created,
+    updated: r.updated,
+    creator: r.creator || "",
+    lastUpdatedBy: r.last_updated_by || "",
   };
 }
 
@@ -40,6 +44,10 @@ function recipeFromRecord(r: RecordModel): Recipe {
     pendingChanges: r.pending_changes || null,
     stepIngredients: r.step_ingredients || null,
     cookingLog: r.cooking_log || null,
+    created: r.created,
+    updated: r.updated,
+    creator: r.creator || "",
+    lastUpdatedBy: r.last_updated_by || "",
   };
 }
 

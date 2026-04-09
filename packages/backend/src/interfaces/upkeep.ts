@@ -20,8 +20,8 @@ export interface UpkeepBackend {
 
   // --- Task CRUD ---
 
-  addTask(listId: string, task: Omit<Task, "id" | "list">): Promise<string>;
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "list">>): Promise<void>;
+  addTask(listId: string, task: Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">): Promise<string>;
+  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">>): Promise<void>;
   deleteTask(taskId: string): Promise<void>;
 
   // --- Task actions ---

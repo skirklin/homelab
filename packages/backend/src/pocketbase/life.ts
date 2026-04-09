@@ -12,6 +12,8 @@ function logFromRecord(r: RecordModel): LifeLog {
     id: r.id,
     manifest: r.manifest || { widgets: [] },
     sampleSchedule: r.sample_schedule || null,
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -24,6 +26,8 @@ function entryFromRecord(r: RecordModel): LifeEntry {
     createdBy: r.created_by || "",
     data: r.data || {},
     notes: r.notes || undefined,
+    created: r.created,
+    updated: r.updated,
   };
 }
 

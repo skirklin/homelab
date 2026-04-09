@@ -4,6 +4,8 @@ export interface LifeLog {
   id: string;
   manifest: LifeManifest;
   sampleSchedule: unknown;
+  created: string;
+  updated: string;
 }
 
 export interface LifeManifest {
@@ -26,4 +28,6 @@ export interface LifeEntry {
   createdBy: string;
   data: Record<string, unknown>;
   notes?: string;
+  created: string;
+  updated: string;
 }

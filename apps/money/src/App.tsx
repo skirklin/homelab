@@ -11,6 +11,7 @@ import { Accounts } from './pages/Accounts'
 import AccountDetail from './pages/AccountDetail'
 import PersonDetail from './pages/PersonDetail'
 import InstitutionDetail from './pages/InstitutionDetail'
+import { Settings } from './pages/Settings'
 import './App.css'
 
 const fmtDollar = (v: number) =>
@@ -72,6 +73,7 @@ function App() {
             <NavLink to="/transactions">Transactions</NavLink>
             <NavLink to="/travel">Travel</NavLink>
             <NavLink to="/accounts">Accounts</NavLink>
+            <NavLink to="/settings">Settings</NavLink>
           </nav>
         </header>
         <main>
@@ -85,6 +87,7 @@ function App() {
             <Route path="/accounts/:id" element={<AccountDetail />} />
             <Route path="/people/:person" element={<PersonDetail />} />
             <Route path="/institutions/:institution" element={<InstitutionDetail />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
       </div>

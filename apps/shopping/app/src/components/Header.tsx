@@ -56,6 +56,9 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
         checkedBy: item.checkedBy,
         checkedAt: item.checkedAt?.toISOString(),
         addedBy: item.addedBy,
+        addedAt: item.addedAt?.toISOString() || "",
+        created: "",
+        updated: "",
       }));
       await shopping.clearCheckedItems(listId, backendItems);
     } catch (error) {

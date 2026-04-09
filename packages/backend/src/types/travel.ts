@@ -5,8 +5,8 @@ export interface TravelLog {
   name: string;
   owners: string[];
   checklists: ChecklistTemplate[];
-  created?: string;
-  updated?: string;
+  created: string;
+  updated: string;
 }
 
 export interface ChecklistTemplate {
@@ -35,8 +35,8 @@ export interface Trip {
   status: string;
   region: string;
   sourceRefs: string;
-  created?: string;
-  updated?: string;
+  created: string;
+  updated: string;
 }
 
 export interface Activity {
@@ -60,8 +60,8 @@ export interface Activity {
   bookingReqs?: unknown[];
   ratingCount?: number;
   photoRef?: string;
-  created?: string;
-  updated?: string;
+  created: string;
+  updated: string;
 }
 
 export interface Itinerary {
@@ -71,8 +71,8 @@ export interface Itinerary {
   name: string;
   isActive?: boolean;
   days: ItineraryDay[];
-  created?: string;
-  updated?: string;
+  created: string;
+  updated: string;
 }
 
 export interface ActivitySlot {

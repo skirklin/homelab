@@ -5,7 +5,15 @@ import PocketBase from "pocketbase";
 const PB_URL = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
 const API_KEY = process.env.API_KEY || "";
 
-// Simple token validation cache (token → { userId, email, expiresAt })
+/** Create a PocketBase client authenticated as the requesting user. */
+export function userClient(token: string): PocketBase {
+  const pb = new PocketBase(PB_URL);
+  pb.autoCancellation(false);
+  pb.authStore.save(token, null);
+  return pb;
+}
+
+// Simple token validation cache (token -> { userId, email, expiresAt })
 const tokenCache = new Map<string, { userId: string; email: string; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
 
@@ -17,18 +25,17 @@ function cleanCache() {
 }
 
 export async function authMiddleware(c: Context, next: Next) {
-  // Skip auth for health check (already handled before middleware)
-  if (c.req.path === "/health") return next();
-
   // Check API key first (for MCP/curl)
   const apiKey = c.req.header("X-API-Key");
   if (apiKey && API_KEY && apiKey.length === API_KEY.length &&
       timingSafeEqual(Buffer.from(apiKey), Buffer.from(API_KEY))) {
     // API key auth — use a default admin identity
+    const token = process.env.API_KEY_USER_TOKEN || "";
     c.set("userId", process.env.API_KEY_USER_ID || "");
     c.set("userEmail", process.env.API_KEY_USER_EMAIL || "");
-    c.set("userToken", process.env.API_KEY_USER_TOKEN || "");
+    c.set("userToken", token);
     c.set("isApiKey", true);
+    if (token) c.set("pb", userClient(token));
     return next();
   }
 
@@ -47,6 +54,7 @@ export async function authMiddleware(c: Context, next: Next) {
     c.set("userId", cached.userId);
     c.set("userEmail", cached.email);
     c.set("userToken", token);
+    c.set("pb", userClient(token));
     return next();
   }
 
@@ -67,6 +75,7 @@ export async function authMiddleware(c: Context, next: Next) {
     c.set("userId", userId);
     c.set("userEmail", email);
     c.set("userToken", token);
+    c.set("pb", userClient(token));
     return next();
   } catch {
     return c.json({ error: "Invalid or expired token" }, 401);

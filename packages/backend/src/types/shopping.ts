@@ -5,6 +5,8 @@ export interface ShoppingList {
   name: string;
   owners: string[];
   categories: CategoryDef[];
+  created: string;
+  updated: string;
 }
 
 export interface CategoryDef {
@@ -23,6 +25,9 @@ export interface ShoppingItem {
   checkedBy?: string;
   checkedAt?: string;
   addedBy?: string;
+  addedAt: string;
+  created: string;
+  updated: string;
 }
 
 export interface HistoryEntry {

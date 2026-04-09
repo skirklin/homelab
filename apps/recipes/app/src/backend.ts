@@ -35,8 +35,8 @@ async function apiFetch<T>(path: string, options: { method?: string; body?: unkn
 // API client functions
 // ============================================
 
-export const getRecipes = async (args: { url: string | undefined }): Promise<{ error?: string; recipes: string }> => {
-  return apiFetch<{ recipes: string; error?: string }>("/recipes/scrape", {
+export const getRecipes = async (args: { url: string | undefined }): Promise<{ error?: string; recipes: Record<string, unknown>[] }> => {
+  return apiFetch<{ recipes: Record<string, unknown>[]; error?: string }>("/recipes/scrape", {
     body: { url: args.url },
   });
 };

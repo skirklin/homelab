@@ -13,6 +13,8 @@ function logFromRecord(r: RecordModel): TravelLog {
     name: r.name || "",
     owners: Array.isArray(r.owners) ? r.owners : [],
     checklists: r.checklists || [],
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -23,6 +25,7 @@ function tripFromRecord(r: RecordModel): Trip {
     flagged: !!r.flagged_for_review, flagComment: r.review_comment || "",
     checklistDone: r.checklist_done || {},
     status: r.status, region: r.region, sourceRefs: r.source_refs,
+    created: r.created, updated: r.updated,
   };
 }
 
@@ -69,12 +72,12 @@ export class PocketBaseTravelBackend implements TravelBackend {
     await this.pb().collection("travel_logs").update(logId, { checklists });
   }
 
-  async addTrip(logId: string, trip: Omit<Trip, "id" | "log">): Promise<string> {
+  async addTrip(logId: string, trip: Omit<Trip, "id" | "log" | "created" | "updated">): Promise<string> {
     const r = await this.pb().collection("travel_trips").create({ log: logId, ...this.tripData(trip) });
     return r.id;
   }
 
-  async updateTrip(tripId: string, updates: Partial<Omit<Trip, "id" | "log">>): Promise<void> {
+  async updateTrip(tripId: string, updates: Partial<Omit<Trip, "id" | "log" | "created" | "updated">>): Promise<void> {
     await this.pb().collection("travel_trips").update(tripId, this.tripData(updates));
   }
 
@@ -92,12 +95,12 @@ export class PocketBaseTravelBackend implements TravelBackend {
     await this.pb().collection("travel_trips").update(tripId, { checklist_done: checklistDone });
   }
 
-  async addActivity(logId: string, activity: Omit<Activity, "id" | "log">): Promise<string> {
+  async addActivity(logId: string, activity: Omit<Activity, "id" | "log" | "created" | "updated">): Promise<string> {
     const r = await this.pb().collection("travel_activities").create({ log: logId, ...this.activityData(activity) });
     return r.id;
   }
 
-  async updateActivity(activityId: string, updates: Partial<Omit<Activity, "id" | "log">>): Promise<void> {
+  async updateActivity(activityId: string, updates: Partial<Omit<Activity, "id" | "log" | "created" | "updated">>): Promise<void> {
     await this.pb().collection("travel_activities").update(activityId, this.activityData(updates));
   }
 
@@ -105,14 +108,14 @@ export class PocketBaseTravelBackend implements TravelBackend {
     await this.pb().collection("travel_activities").delete(activityId);
   }
 
-  async addItinerary(logId: string, tripId: string, itinerary: Omit<Itinerary, "id" | "log" | "trip">): Promise<string> {
+  async addItinerary(logId: string, tripId: string, itinerary: Omit<Itinerary, "id" | "log" | "trip" | "created" | "updated">): Promise<string> {
     const r = await this.pb().collection("travel_itineraries").create({
       log: logId, trip_id: tripId, name: itinerary.name, days: itinerary.days || [],
     });
     return r.id;
   }
 
-  async updateItinerary(itineraryId: string, updates: Partial<Omit<Itinerary, "id" | "log" | "trip">>): Promise<void> {
+  async updateItinerary(itineraryId: string, updates: Partial<Omit<Itinerary, "id" | "log" | "trip" | "created" | "updated">>): Promise<void> {
     const data: Record<string, unknown> = {};
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.days !== undefined) data.days = updates.days;
@@ -173,7 +176,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     return () => { cancelled = true; unsubs.forEach((u) => u()); };
   }
 
-  private tripData(t: Partial<Omit<Trip, "id" | "log">>): Record<string, unknown> {
+  private tripData(t: Partial<Omit<Trip, "id" | "log" | "created" | "updated">>): Record<string, unknown> {
     const d: Record<string, unknown> = {};
     if (t.name !== undefined) d.name = t.name;
     if (t.destination !== undefined) d.destination = t.destination;
@@ -192,7 +195,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     return d;
   }
 
-  private activityData(a: Partial<Omit<Activity, "id" | "log">>): Record<string, unknown> {
+  private activityData(a: Partial<Omit<Activity, "id" | "log" | "created" | "updated">>): Record<string, unknown> {
     const d: Record<string, unknown> = {};
     if (a.trip !== undefined) d.trip_id = a.trip;
     if (a.name !== undefined) d.name = a.name;
