@@ -91,10 +91,17 @@ async function checkForUpdate() {
     const manifest = chrome.runtime.getManifest();
     if (data.version && data.version !== manifest.version && data.available) {
       banner.style.display = "block";
-      banner.textContent = `Update available: v${data.version} (you have v${manifest.version}). Click to download.`;
-      banner.onclick = () => {
-        chrome.tabs.create({ url: `${baseUrl}/extension/download` });
-      };
+      banner.innerHTML = `
+        <div style="margin-bottom: 4px; font-weight: 600;">
+          Update available: v${data.version} (you have v${manifest.version})
+        </div>
+        <div style="font-size: 11px;">
+          Run in terminal to update, then reload the extension in chrome://extensions:
+        </div>
+        <code style="display: block; margin-top: 4px; padding: 4px 6px; background: #fef9c3; border-radius: 3px; font-size: 11px; user-select: all;">
+          curl -sL ${baseUrl}/extension/install.sh | sh
+        </code>
+      `;
     }
   } catch {
     // Server not available or no extension hosted — that's fine

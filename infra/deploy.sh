@@ -182,7 +182,17 @@ ssh "${VPS}" "kubectl apply -k ~/homelab-manifests/"
 
 echo ""
 echo "=== Restarting deployments ==="
-ssh "${VPS}" "kubectl rollout restart -n homelab deployments,statefulsets 2>/dev/null || true"
+if [ ${#APPS[@]} -eq 0 ]; then
+    # Full deploy: restart everything
+    ssh "${VPS}" "kubectl rollout restart -n homelab deployments,statefulsets 2>/dev/null || true"
+else
+    # Selective deploy: only restart what was built
+    for app in "${APPS[@]}"; do
+        echo "Restarting ${app}..."
+        # Try as deployment first, then statefulset (pocketbase is a statefulset)
+        ssh "${VPS}" "kubectl rollout restart -n homelab deployment/${app} 2>/dev/null || kubectl rollout restart -n homelab statefulset/${app} 2>/dev/null || echo '  (no deployment/statefulset named ${app})'";
+    done
+fi
 
 echo ""
 echo "=== Pod status ==="

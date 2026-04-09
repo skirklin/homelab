@@ -6,6 +6,7 @@ import threading
 import uuid
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from money.db import Database
@@ -127,6 +128,12 @@ class IngestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/extension/download":
             self._handle_extension_download()
+            return
+        if self.path == "/extension/install.sh":
+            self._handle_extension_install_script()
+            return
+        if self.path.startswith("/extension/files/"):
+            self._handle_extension_file()
             return
         self._json_response(404, {"error": "not found"})
 
@@ -2209,31 +2216,38 @@ class IngestHandler(BaseHTTPRequestHandler):
         log.info("Config updated at %s", config_path)
         self._json_response(200, {"status": "ok", "path": str(config_path)})
 
-    def _handle_extension_version(self) -> None:
-        """Return the latest extension version and download URL."""
+    @staticmethod
+    def _find_extension_files() -> tuple[Path | None, str]:
+        """Find the extension zip and version. Checks bundled image path first, then data dir."""
         from money.config import DATA_DIR
 
-        ext_dir = DATA_DIR / "extension"
-        zip_path = ext_dir / "money-collector.zip"
-        # Read version from the bundled manifest.json inside the zip, or
-        # from a version file written by the build script.
-        version_file = ext_dir / "version.txt"
-        version = "0.0.0"
-        if version_file.exists():
-            version = version_file.read_text().strip()
+        # Bundled into the Docker image at build time
+        bundled = Path("/app/extension-dist")
+        # Manually placed in the data dir (PVC)
+        data_ext = DATA_DIR / "extension"
+
+        for ext_dir in (bundled, data_ext):
+            zip_path = ext_dir / "money-collector.zip"
+            version_file = ext_dir / "version.txt"
+            if zip_path.exists():
+                version = version_file.read_text().strip() if version_file.exists() else "0.0.0"
+                return zip_path, version
+        return None, "0.0.0"
+
+    def _handle_extension_version(self) -> None:
+        """Return the latest extension version and download URL."""
+        zip_path, version = self._find_extension_files()
         self._json_response(200, {
             "version": version,
             "download_url": "/extension/download",
-            "available": zip_path.exists(),
+            "available": zip_path is not None,
         })
 
     def _handle_extension_download(self) -> None:
         """Serve the extension zip file."""
-        from money.config import DATA_DIR
-
-        zip_path = DATA_DIR / "extension" / "money-collector.zip"
-        if not zip_path.exists():
-            self._json_response(404, {"error": "Extension not built yet. Run infra/build-extension.sh on the server."})
+        zip_path, _ = self._find_extension_files()
+        if zip_path is None:
+            self._json_response(404, {"error": "Extension not available."})
             return
 
         data = zip_path.read_bytes()
@@ -2241,6 +2255,122 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._set_cors_headers()
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", "attachment; filename=money-collector.zip")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _find_extension_source_dir() -> Path | None:
+        """Find the raw extension source directory (baked into Docker image)."""
+        bundled = Path("/app/extension-src")
+        if bundled.is_dir():
+            return bundled
+        # Local dev: look for the extension dir relative to the project
+        from money.config import PROJECT_DIR
+        local = PROJECT_DIR.parent.parent / "extension"
+        if local.is_dir():
+            return local
+        return None
+
+    def _handle_extension_install_script(self) -> None:
+        """Serve a shell script that downloads the extension files."""
+        host = self.headers.get("Host", "localhost:5555")
+        scheme = "https" if "ts.net" in host else "http"
+        base_url = f"{scheme}://{host}"
+
+        ext_dir = self._find_extension_source_dir()
+        if ext_dir is None:
+            self._text_response(404, "Extension source not available.")
+            return
+
+        # Collect all files relative to the extension root
+        files = []
+        for f in sorted(ext_dir.rglob("*")):
+            if f.is_file() and not f.name.startswith("."):
+                files.append(str(f.relative_to(ext_dir)))
+
+        script = f"""#!/bin/sh
+# Money Collector extension installer
+# Run: curl -sL {base_url}/extension/install.sh | sh
+set -e
+
+INSTALL_DIR="${{1:-$HOME/money-collector-extension}}"
+echo "Installing Money Collector extension to $INSTALL_DIR ..."
+
+mkdir -p "$INSTALL_DIR"
+"""
+        # Add mkdir for subdirectories
+        dirs = sorted({str(Path(f).parent) for f in files if "/" in f})
+        for d in dirs:
+            script += f'mkdir -p "$INSTALL_DIR/{d}"\n'
+
+        script += "\n"
+        for f in files:
+            script += f'curl -sL "{base_url}/extension/files/{f}" -o "$INSTALL_DIR/{f}"\n'
+
+        script += f"""
+echo ""
+echo "Installed to $INSTALL_DIR"
+echo ""
+echo "To load in Chrome:"
+echo "  1. Open chrome://extensions"
+echo "  2. Enable Developer mode (top right)"
+echo "  3. Click 'Load unpacked' and select: $INSTALL_DIR"
+echo ""
+echo "To update later, just run this script again."
+"""
+        body = script.encode()
+        self.send_response(200)
+        self._set_cors_headers()
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_extension_file(self) -> None:
+        """Serve a single extension source file."""
+        ext_dir = self._find_extension_source_dir()
+        if ext_dir is None:
+            self._json_response(404, {"error": "Extension source not available."})
+            return
+
+        # Strip /extension/files/ prefix
+        rel_path = self.path[len("/extension/files/"):]
+        file_path = (ext_dir / rel_path).resolve()
+
+        # Prevent directory traversal
+        if not str(file_path).startswith(str(ext_dir.resolve())):
+            self._json_response(403, {"error": "forbidden"})
+            return
+
+        if not file_path.is_file():
+            self._json_response(404, {"error": f"not found: {rel_path}"})
+            return
+
+        content_types = {
+            ".js": "application/javascript",
+            ".json": "application/json",
+            ".html": "text/html",
+            ".css": "text/css",
+            ".png": "image/png",
+            ".md": "text/markdown",
+        }
+        ext = file_path.suffix.lower()
+        content_type = content_types.get(ext, "application/octet-stream")
+
+        data = file_path.read_bytes()
+        self.send_response(200)
+        self._set_cors_headers()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _text_response(self, status: int, body: str) -> None:
+        data = body.encode()
+        self.send_response(status)
+        self._set_cors_headers()
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

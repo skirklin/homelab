@@ -104,6 +104,29 @@ async function checkServerHealth() {
   }
 }
 
+// ── Update check ────────────────────────────────────────────────────
+
+async function checkForUpdate() {
+  const baseUrl = await getServerUrl();
+  try {
+    const resp = await fetch(`${baseUrl}/extension/version`, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const currentVersion = chrome.runtime.getManifest().version;
+    if (data.version && data.version !== currentVersion && data.available) {
+      await chrome.storage.local.set({ updateAvailable: data.version });
+      setBadge("⬆", "#f59e0b");
+      logActivity(`Update available: v${data.version} (you have v${currentVersion})`);
+    } else {
+      await chrome.storage.local.remove("updateAvailable");
+    }
+  } catch { /* server not available */ }
+}
+
+// Check for updates on startup and every 6 hours
+checkForUpdate();
+setInterval(checkForUpdate, 6 * 60 * 60 * 1000);
+
 // ── Badge & logging ──────────────────────────────────────────────────
 
 function setBadge(text, color = "#34d399") {
