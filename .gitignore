@@ -18,6 +18,7 @@ handoff/
 services/scripts/export/data/
 
 # Three Man Team working files + skills (embedded git repos)
+.claude/settings.json
 .claude/skills/
 ARCHITECT-BRIEF.md
 BUILD-LOG.md
