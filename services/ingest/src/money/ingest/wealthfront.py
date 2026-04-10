@@ -337,8 +337,11 @@ def parse_raw_wealthfront(
 
 
 def sync_wealthfront(db: Database, store: RawStore, profile: str,
-                     cookies: dict[str, str]) -> None:
+                     cookies: dict[str, str] | None = None,
+                     entries: list[dict[str, Any]] | None = None) -> None:
     """Sync Wealthfront accounts and balances via internal API."""
+    if not cookies:
+        raise ValueError("Wealthfront sync requires cookies")
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
@@ -428,6 +431,26 @@ def sync_wealthfront(db: Database, store: RawStore, profile: str,
 
 from money.ingest.registry import InstitutionInfo  # noqa: E402
 
+
+def _extract_identity(
+    cookies: list[dict[str, Any]], entries: list[dict[str, Any]],
+) -> str | None:
+    """Extract email from Wealthfront /api/users/current-user response."""
+    for entry in entries:
+        url = entry.get("url", "")
+        if "/api/users/current-user" not in url:
+            continue
+        body = entry.get("responseBody")
+        if isinstance(body, str):
+            try:
+                body = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if isinstance(body, dict) and body.get("email"):
+            return body["email"]
+    return None
+
+
 INSTITUTION = InstitutionInfo(
     name="wealthfront",
     dir_name="wealthfront",
@@ -435,4 +458,5 @@ INSTITUTION = InstitutionInfo(
     parse_fn=parse_raw_wealthfront,
     anchor_file="overviews.json",
     display_name="Wealthfront",
+    extract_identity=_extract_identity,
 )

@@ -1,6 +1,7 @@
 """Chase ingester — parses captured network log data."""
 
 import logging
+from typing import Any
 from datetime import date, datetime
 from pathlib import Path
 
@@ -222,6 +223,8 @@ def sync_chase(
     db: Database,
     store: RawStore,
     profile: str,
+    cookies: dict[str, str] | None = None,
+    entries: list[dict[str, Any]] | None = None,
 ) -> None:
     """Sync Chase accounts from captured network log data.
 

@@ -53,7 +53,7 @@
       if (responseBody === null && url.includes('/api/')) {
         try {
           const text = await clone.text();
-          responseText = text.substring(0, 5000);
+          responseText = text;
           responseBody = JSON.parse(text);
         } catch(e) {}
       }
@@ -75,7 +75,7 @@
         method: method,
         status: response.status,
         contentType: contentType,
-        requestBody: reqBody ? reqBody.substring(0, 2000) : null,
+        requestBody: reqBody || null,
         requestHeaders: requestHeaders,
         responseBody: responseBody,
         responseText: responseBody === null ? responseText : undefined,
@@ -161,7 +161,7 @@
         method: method,
         status: this.status,
         contentType: contentType,
-        requestBody: (body && typeof body === 'string') ? body.substring(0, 2000) : null,
+        requestBody: (body && typeof body === 'string') ? body : null,
         requestHeaders: allHeaders,
         responseBody: responseBody,
         responseSize: responseBody ? JSON.stringify(responseBody).length : null,

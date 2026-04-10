@@ -1,58 +1,24 @@
-// Popup script for Money Data Collector extension.
-
 const INSTITUTIONS = [
-  { id: "ally", name: "Ally Bank", patterns: ["secure.ally.com", "wwws.ally.com"] },
+  { id: "ally", name: "Ally Bank", patterns: ["secure.ally.com"] },
   { id: "wealthfront", name: "Wealthfront", patterns: ["www.wealthfront.com"] },
   { id: "betterment", name: "Betterment", patterns: ["wwws.betterment.com"] },
-  { id: "morgan_stanley", name: "Morgan Stanley", patterns: ["stockplanconnect.morganstanley.com", "www.morganstanley.com", "shareworks.solium.com"] },
-  { id: "capital_one", name: "Capital One", patterns: ["myaccounts.capitalone.com", "www.capitalone.com"] },
-  { id: "bofa", name: "Bank of America", patterns: ["secure.bankofamerica.com", "www.bankofamerica.com"] },
-  { id: "chase", name: "Chase", patterns: ["secure.chase.com", "chase.com"] },
-  { id: "fidelity", name: "Fidelity NetBenefits", patterns: ["nb.fidelity.com", "workplaceservices.fidelity.com"] },
+  { id: "morgan_stanley", name: "Morgan Stanley", patterns: ["shareworks.solium.com"] },
+  { id: "capital_one", name: "Capital One", patterns: ["myaccounts.capitalone.com"] },
+  { id: "chase", name: "Chase", patterns: ["secure.chase.com"] },
+  { id: "fidelity", name: "Fidelity", patterns: ["workplaceservices.fidelity.com"] },
 ];
 
 async function init() {
   await loadSettings();
   await checkServer();
   await checkForUpdate();
-  await renderInstitutions();
-  await renderActivityLog();
-}
-
-async function renderActivityLog() {
-  const container = document.getElementById("activityLog");
-  const result = await chrome.storage.local.get("activityLog");
-  const log = result.activityLog || [];
-
-  if (log.length === 0) {
-    container.innerHTML = '<div style="color: #aaa; padding: 4px 0;">No recent activity</div>';
-    return;
-  }
-
-  container.innerHTML = log.map(entry => {
-    const time = new Date(entry.time);
-    const ago = timeAgo(time);
-    return `<div style="padding: 2px 0; border-bottom: 1px solid #f0f0f0;">
-      <span style="color: #aaa;">${ago}</span> ${entry.message}
-    </div>`;
-  }).join("");
-}
-
-function timeAgo(date) {
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  renderDetected();
+  renderActivityLog();
 }
 
 async function loadSettings() {
-  const result = await chrome.storage.local.get(["serverUrl", "profile"]);
+  const result = await chrome.storage.local.get(["serverUrl"]);
   document.getElementById("serverUrlInput").value = result.serverUrl || "https://homelab-0.tail56ca88.ts.net:8443";
-  document.getElementById("profileSelect").value = result.profile || "scott";
-
   document.getElementById("serverUrlInput").addEventListener("change", async (e) => {
     const url = e.target.value.trim();
     if (url) {
@@ -60,24 +26,14 @@ async function loadSettings() {
       await checkServer();
     }
   });
-
-  document.getElementById("profileSelect").addEventListener("change", async (e) => {
-    await chrome.storage.local.set({ profile: e.target.value });
-  });
 }
 
 async function checkServer() {
   const response = await chrome.runtime.sendMessage({ type: "CHECK_HEALTH" });
   const dot = document.getElementById("serverStatus");
   const label = document.getElementById("serverLabel");
-
-  if (response.healthy) {
-    dot.className = "status-dot connected";
-    label.textContent = "Server connected";
-  } else {
-    dot.className = "status-dot disconnected";
-    label.textContent = "Server not running (money serve)";
-  }
+  dot.className = response.healthy ? "status-dot connected" : "status-dot disconnected";
+  label.textContent = response.healthy ? "Connected" : "Not connected";
 }
 
 async function checkForUpdate() {
@@ -91,147 +47,41 @@ async function checkForUpdate() {
     const manifest = chrome.runtime.getManifest();
     if (data.version && data.version !== manifest.version && data.available) {
       banner.style.display = "block";
-      banner.innerHTML = `
-        <div style="margin-bottom: 4px; font-weight: 600;">
-          Update available: v${data.version} (you have v${manifest.version})
-        </div>
-        <div style="font-size: 11px;">
-          Run in terminal to update, then reload the extension in chrome://extensions:
-        </div>
-        <code style="display: block; margin-top: 4px; padding: 4px 6px; background: #fef9c3; border-radius: 3px; font-size: 11px; user-select: all;">
-          curl -sL ${baseUrl}/extension/install.sh | sh
-        </code>
-      `;
+      banner.textContent = `Update available: v${data.version} (you have v${manifest.version})`;
+      banner.onclick = () => chrome.tabs.create({ url: `${baseUrl}/extension/download` });
     }
-  } catch {
-    // Server not available or no extension hosted — that's fine
-  }
+  } catch {}
 }
 
-async function renderInstitutions() {
+async function renderDetected() {
   const container = document.getElementById("institutions");
-  container.innerHTML = "";
-
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const currentUrl = tab?.url || "";
+  const url = tab?.url || "";
 
-  const detected = INSTITUTIONS.filter((inst) =>
-    inst.patterns.some((p) => currentUrl.includes(p))
-  );
-
+  const detected = INSTITUTIONS.filter(i => i.patterns.some(p => url.includes(p)));
   if (detected.length === 0) {
-    container.innerHTML = `
-      <div style="padding: 20px 16px; text-align: center; color: #999; font-size: 12px;">
-        Navigate to a supported financial site to collect data.
-      </div>
-    `;
+    container.innerHTML = '<div style="padding: 16px; text-align: center; color: #999; font-size: 12px;">Navigate to a bank site to capture data automatically.</div>';
     return;
   }
 
-  for (const inst of detected) {
-    const div = document.createElement("div");
-    div.className = "institution";
-
-    // Check recording status for this tab
-    let isRecording = false;
-    let recordCount = 0;
-    try {
-      const recordStatus = await chrome.runtime.sendMessage({
-        type: "GET_RECORDING_STATUS",
-        tabId: tab?.id,
-      });
-      if (recordStatus) {
-        isRecording = recordStatus.recording && recordStatus.institution === inst.id;
-        recordCount = isRecording ? recordStatus.count : 0;
-      }
-    } catch (e) {}
-
-    div.innerHTML = `
-      <div class="inst-header">
-        <span class="inst-name">${inst.name}</span>
-        <span class="inst-status detected">On page</span>
-      </div>
-      <div class="btn-row">
-        <button class="cookie-btn" id="cookies-${inst.id}"
-          title="Capture session cookies">
-          Cookies
-        </button>
-        <button class="record-btn ${isRecording ? "recording" : ""}" id="record-${inst.id}"
-          title="Record network requests (captures API calls + responses)">
-          ${isRecording ? `Stop (${recordCount})` : "Record"}
-        </button>
-      </div>
-      <div class="sync-result" id="result-${inst.id}"></div>
-    `;
-
-    container.appendChild(div);
-
-    document.getElementById(`cookies-${inst.id}`).addEventListener("click", () =>
-      captureCookies(inst.id, document.getElementById(`cookies-${inst.id}`))
-    );
-
-    document.getElementById(`record-${inst.id}`).addEventListener("click", () =>
-      toggleRecording(inst.id, tab.id, document.getElementById(`record-${inst.id}`), isRecording)
-    );
-  }
+  container.innerHTML = detected.map(i =>
+    `<div class="institution"><span class="inst-name">${i.name}</span><span class="inst-status detected">Capturing</span></div>`
+  ).join("");
 }
 
-async function captureCookies(institutionId, btn) {
-  btn.disabled = true;
-  btn.textContent = "...";
-
-  const resultEl = document.getElementById(`result-${institutionId}`);
-  const response = await chrome.runtime.sendMessage({
-    type: "CAPTURE_COOKIES",
-    institution: institutionId,
-  });
-
-  if (response.success) {
-    btn.textContent = "Sent!";
-    btn.className = "cookie-btn success";
-    resultEl.textContent = `${response.count} cookie(s) captured`;
-  } else {
-    btn.textContent = "Failed";
-    btn.className = "cookie-btn error";
-    resultEl.textContent = response.error;
+async function renderActivityLog() {
+  const container = document.getElementById("activityLog");
+  const result = await chrome.storage.local.get("activityLog");
+  const log = result.activityLog || [];
+  if (log.length === 0) {
+    container.innerHTML = '<div style="color: #aaa; padding: 4px 0;">No recent activity</div>';
+    return;
   }
-}
-
-async function toggleRecording(institutionId, tabId, btn, isCurrentlyRecording) {
-  const resultEl = document.getElementById(`result-${institutionId}`);
-
-  if (isCurrentlyRecording) {
-    btn.disabled = true;
-    btn.textContent = "Sending...";
-
-    const response = await chrome.runtime.sendMessage({
-      type: "STOP_NETWORK_RECORDING",
-      tabId,
-      institution: institutionId,
-    });
-
-    if (response.success) {
-      btn.textContent = "Done!";
-      btn.className = "record-btn success";
-      resultEl.textContent = `${response.count} request(s) sent to server`;
-    } else {
-      btn.textContent = "Failed";
-      btn.className = "record-btn";
-      resultEl.textContent = response.error;
-    }
-  } else {
-    const response = await chrome.runtime.sendMessage({
-      type: "START_NETWORK_RECORDING",
-      tabId,
-      institution: institutionId,
-    });
-
-    if (response.started) {
-      btn.textContent = "Stop (0)";
-      btn.className = "record-btn recording";
-      resultEl.textContent = "Recording... browse the site, then click Stop";
-    }
-  }
+  container.innerHTML = log.map(entry => {
+    const seconds = Math.floor((Date.now() - new Date(entry.time).getTime()) / 1000);
+    const ago = seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds/60)}m` : seconds < 86400 ? `${Math.floor(seconds/3600)}h` : `${Math.floor(seconds/86400)}d`;
+    return `<div style="padding: 2px 0; border-bottom: 1px solid #f0f0f0;"><span style="color: #aaa;">${ago}</span> ${entry.message}</div>`;
+  }).join("");
 }
 
 document.addEventListener("DOMContentLoaded", init);

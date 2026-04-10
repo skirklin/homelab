@@ -173,9 +173,12 @@ def sync_capital_one(
     db: Database,
     store: RawStore,
     profile: str,
-    cookies: dict[str, str],
+    cookies: dict[str, str] | None = None,
+    entries: list[dict[str, Any]] | None = None,
 ) -> None:
     """Sync Capital One credit card accounts, balances, and transactions."""
+    if not cookies:
+        raise ValueError("Capital One sync requires cookies")
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
@@ -302,6 +305,20 @@ def sync_capital_one(
 
 from money.ingest.registry import InstitutionInfo  # noqa: E402
 
+
+def _extract_identity(
+    cookies: list[dict[str, Any]], entries: list[dict[str, Any]],
+) -> str | None:
+    """Extract username from Capital One SIC_RM_VAL cookie (url-encoded: 'user|hash')."""
+    from urllib.parse import unquote
+    for cookie in cookies:
+        if cookie.get("name") == "SIC_RM_VAL":
+            val = unquote(cookie.get("value", ""))
+            if "|" in val:
+                return val.split("|", 1)[0]
+    return None
+
+
 INSTITUTION = InstitutionInfo(
     name="capital_one",
     dir_name="capital_one",
@@ -309,4 +326,5 @@ INSTITUTION = InstitutionInfo(
     parse_fn=parse_raw_capital_one,
     anchor_file="accounts.json",
     display_name="Capital One",
+    extract_identity=_extract_identity,
 )

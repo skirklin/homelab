@@ -1756,6 +1756,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/config":
             self._handle_put_config()
             return
+        if self.path == "/capture":
+            self._handle_capture()
+            return
         self._json_response(404, {"error": "not found"})
 
     def do_OPTIONS(self) -> None:
@@ -1764,26 +1767,70 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._set_cors_headers()
         self.end_headers()
 
-    def _resolve_login_id(self, institution: str, profile: str | None = None) -> str | None:
-        """Look up the login_id for an institution from config.
+    def _resolve_login_id(
+        self,
+        institution: str,
+        cookies: list[dict[str, Any]] | None = None,
+        entries: list[dict[str, Any]] | None = None,
+        user_identity: str | None = None,
+    ) -> str | None:
+        """Resolve which login owns this capture by extracting user identity
+        from the captured data and matching it against configured usernames.
 
-        If profile is given (e.g. "scott"), resolves to "{profile}@{institution}".
-        Otherwise falls back to the first matching login for the institution.
+        Returns login_id on success, None on failure (caller should reject the capture).
         """
         from money.config import load_config
+        from money.ingest import registry
 
-        try:
-            config = load_config()
-            if profile:
-                login_id = f"{profile}@{institution}"
-                if login_id in config.logins:
-                    return login_id
-                log.warning("Login %s not found in config, falling back", login_id)
-            for lid, lc in config.logins.items():
-                if lc.institution == institution:
+        config = load_config()
+        inst_logins = {lid: lc for lid, lc in config.logins.items()
+                      if lc.institution == institution}
+
+        if not inst_logins:
+            log.error("No logins configured for %s", institution)
+            return None
+
+        # Extract identity from captured data
+        identity = user_identity
+        if not identity and (cookies or entries):
+            try:
+                inst_info = registry.get(institution)
+                if inst_info.extract_identity:
+                    identity = inst_info.extract_identity(
+                        cookies or [], entries or [],
+                    )
+            except KeyError:
+                log.error("Institution %s not found in registry", institution)
+                return None
+
+        if identity:
+            log.info("Extracted identity '%s' for %s", identity, institution)
+            identity_lower = identity.lower()
+            for lid, lc in inst_logins.items():
+                if lc.username and lc.username.lower() == identity_lower:
+                    log.info("Matched login %s via identity '%s'", lid, identity)
                     return lid
-        except Exception:
-            pass
+            log.error(
+                "Identity '%s' for %s did not match any configured username. "
+                "Add this username to the login in Settings.",
+                identity, institution,
+            )
+            return None
+
+        # No identity extracted. This is only acceptable for institutions where
+        # exactly one person has an account — unambiguous without identity.
+        # For multi-login institutions this is an error: we refuse to guess.
+        if len(inst_logins) == 1:
+            lid = next(iter(inst_logins))
+            log.info("No identity extracted for %s; single login %s (unambiguous)", institution, lid)
+            return lid
+
+        log.error(
+            "No identity extracted for %s and %d logins configured — "
+            "cannot determine which user this data belongs to. "
+            "Ensure the institution's extract_identity is working.",
+            institution, len(inst_logins),
+        )
         return None
 
     def _trigger_auto_sync(
@@ -1804,6 +1851,84 @@ class IngestHandler(BaseHTTPRequestHandler):
         )
         thread.start()
         return sync_id
+
+    def _handle_capture(self) -> None:
+        """Unified capture endpoint — receives cookies + network entries in one request."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self._json_response(400, {"error": "empty request body"})
+            return
+
+        try:
+            data = json.loads(self.rfile.read(content_length))
+        except json.JSONDecodeError as e:
+            self._json_response(400, {"error": f"invalid JSON: {e}"})
+            return
+
+        institution = data.get("institution")
+        if not institution or not isinstance(institution, str):
+            self._json_response(400, {"error": "missing or invalid 'institution' field"})
+            return
+
+        from money.config import DATA_DIR
+
+        cookies_raw = data.get("cookies", [])
+        entries = data.get("entries", [])
+        user_identity = data.get("user_identity")
+
+        # Resolve login using identity extraction
+        login_id = self._resolve_login_id(
+            institution,
+            cookies=cookies_raw if isinstance(cookies_raw, list) else None,
+            entries=entries if isinstance(entries, list) else None,
+            user_identity=user_identity,
+        )
+
+        if not login_id:
+            self._json_response(400, {
+                "error": f"Could not determine user for {institution}. "
+                         "Check identity extraction and login usernames in config.",
+            })
+            return
+
+        # Persist cookies
+        if cookies_raw:
+            cookies_dir = DATA_DIR / "cookies"
+            cookies_dir.mkdir(parents=True, exist_ok=True)
+            persist_path = cookies_dir / f"{login_id}.json"
+            persist_path.write_text(json.dumps(
+                {"institution": institution, "cookies": cookies_raw, "captured_at": data.get("captured_at")},
+                indent=2,
+            ))
+            log.info("Stored %d cookies for %s at %s", len(cookies_raw), institution, persist_path)
+
+        # Persist network log
+        if entries:
+            log_dir = DATA_DIR / "network_logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = log_dir / f"{institution}_{timestamp}.json"
+            path.write_text(json.dumps(
+                {"institution": institution, "entries": entries, "captured_at": data.get("captured_at")},
+                indent=2,
+            ))
+            log.info("Stored %d network entries for %s at %s", len(entries), institution, path)
+
+        # Convert cookies for sync
+        cookies_dict: dict[str, str] | None = None
+        if cookies_raw:
+            cookies_dict = {c["name"]: c["value"] for c in cookies_raw if "name" in c and "value" in c}
+
+        sync_id = self._trigger_auto_sync(institution, login_id, cookies=cookies_dict)
+
+        self._json_response(200, {
+            "status": "ok",
+            "sync_id": sync_id,
+            "institution": institution,
+            "login_id": login_id,
+            "cookies_stored": len(cookies_raw),
+            "entries_stored": len(entries),
+        })
 
     def _handle_cookies(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))
@@ -1829,18 +1954,20 @@ class IngestHandler(BaseHTTPRequestHandler):
 
         from money.config import DATA_DIR
 
-        profile = data.get("profile")
-        login_id = self._resolve_login_id(institution, profile)
+        user_identity = data.get("user_identity")
+        login_id = self._resolve_login_id(
+            institution, cookies=cookies_raw, user_identity=user_identity,
+        )
 
         # Persist cookies for CLI use
         cookies_dir = DATA_DIR / "cookies"
         cookies_dir.mkdir(parents=True, exist_ok=True)
-        persist_key = login_id or institution
+        persist_key = login_id
         persist_path = cookies_dir / f"{persist_key}.json"
         persist_path.write_text(json.dumps(data, indent=2))
         log.info(
-            "Stored %d cookies for %s (profile=%s) at %s",
-            len(cookies_raw), institution, profile, persist_path,
+            "Stored %d cookies for %s (login=%s) at %s",
+            len(cookies_raw), institution, login_id, persist_path,
         )
 
         # Convert cookie list to dict and pass directly to sync
@@ -1903,8 +2030,10 @@ class IngestHandler(BaseHTTPRequestHandler):
             for route in sorted(routes):
                 log.info("  %s", route)
 
-        profile = data.get("profile")
-        login_id = self._resolve_login_id(institution, profile)
+        user_identity = data.get("user_identity")
+        login_id = self._resolve_login_id(
+            institution, entries=entries, user_identity=user_identity,
+        )
         sync_id = self._trigger_auto_sync(institution, login_id)
 
         self._json_response(
@@ -2491,12 +2620,12 @@ def _run_auto_sync(
     db_path: str,
     store: RawStore,
     institution: str,
-    login_id: str | None = None,
+    login_id: str,
     cookies: dict[str, str] | None = None,
     sync_id: str | None = None,
 ) -> None:
     """Run a sync for an institution in the background after receiving fresh auth data."""
-    sync_key = login_id or institution
+    sync_key = login_id
 
     with _sync_lock:
         if sync_key in _active_syncs:
@@ -2547,12 +2676,7 @@ def _run_auto_sync(
         ).fetchone()
         assert before is not None
 
-        # Cookie-based institutions get cookies passed through;
-        # network-log institutions (chase, morgan_stanley) don't use cookies.
-        if cookies is not None:
-            inst.sync_fn(db, store, profile=login_id, cookies=cookies)
-        else:
-            inst.sync_fn(db, store, profile=login_id)
+        inst.sync_fn(db, store, profile=login_id, cookies=cookies or {}, entries=[])
 
         # Enrich and recategorize after sync
         from money.benchmarks import enrich_holdings_asset_classes

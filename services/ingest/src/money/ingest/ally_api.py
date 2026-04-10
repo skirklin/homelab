@@ -470,7 +470,9 @@ def sync_ally_api(db: Database, store: RawStore, profile: str,
         raise
 
 
-def sync_ally(db: Database, store: RawStore, profile: str) -> None:
+def sync_ally(db: Database, store: RawStore, profile: str,
+              cookies: dict[str, str] | None = None,
+              entries: list[dict[str, Any]] | None = None) -> None:
     """Sync Ally Bank from captured network log data.
 
     The extension captures API responses made by the SPA (including injected
@@ -488,16 +490,16 @@ def sync_ally(db: Database, store: RawStore, profile: str) -> None:
                 "No Ally network logs found. Visit Ally in Chrome to capture data."
             )
 
-        entries: list[dict[str, Any]] = []
+        all_entries: list[dict[str, Any]] = []
         for log_file in logs:
             file_data: dict[str, Any] = json.loads(log_file.read_text())
-            entries.extend(file_data.get("entries", []))
-        log.info("Loaded %d entries from %d network log files", len(entries), len(logs))
+            all_entries.extend(file_data.get("entries", []))
+        log.info("Loaded %d entries from %d network log files", len(all_entries), len(logs))
 
         accounts_data: dict[str, Any] | None = None
         all_transactions: list[dict[str, Any]] = []
 
-        for entry in entries:
+        for entry in all_entries:
             url: str = entry.get("url", "")
             body = entry.get("responseBody")
             if not isinstance(body, dict):
@@ -574,6 +576,26 @@ def sync_ally(db: Database, store: RawStore, profile: str) -> None:
 
 from money.ingest.registry import InstitutionInfo  # noqa: E402
 
+
+def _extract_identity(
+    cookies: list[dict[str, Any]], entries: list[dict[str, Any]],
+) -> str | None:
+    """Extract the Ally username (uid) from login request bodies."""
+    import re
+    for entry in entries:
+        url = entry.get("url", "")
+        if "auth/login" not in url:
+            continue
+        req = entry.get("requestBody", "")
+        if not isinstance(req, str):
+            req = json.dumps(req)
+        # Request bodies may be truncated, so use regex instead of parsing
+        m = re.search(r'"uid":\s*"([^"]+)"', req)
+        if m:
+            return m.group(1)
+    return None
+
+
 INSTITUTION = InstitutionInfo(
     name="ally",
     dir_name="ally",
@@ -582,4 +604,5 @@ INSTITUTION = InstitutionInfo(
     anchor_file="accounts.json",
     display_name="Ally Bank",
     post_replay_fn=parse_raw_ally_extension,
+    extract_identity=_extract_identity,
 )

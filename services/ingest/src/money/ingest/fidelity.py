@@ -7,6 +7,7 @@ and return percentages for the 401k plan.
 
 import logging
 import urllib.request
+from typing import Any
 from datetime import datetime
 from pathlib import Path
 
@@ -47,9 +48,13 @@ def _api_get(cookies: dict[str, str], url: str) -> bytes:
 
 
 def sync_fidelity(
-    db: Database, store: RawStore, profile: str, cookies: dict[str, str]
+    db: Database, store: RawStore, profile: str,
+    cookies: dict[str, str] | None = None,
+    entries: list[dict[str, Any]] | None = None,
 ) -> None:
     """Sync Fidelity 401k balance and performance data."""
+    if not cookies:
+        raise ValueError("Fidelity sync requires cookies")
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 

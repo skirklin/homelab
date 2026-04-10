@@ -10,9 +10,9 @@ COOKIE_RELAY_DIR = DATA_DIR / "cookies"
 RAW_STORE_DIR = DATA_DIR / "raw"
 DEBUG_DIR = DATA_DIR / "debug"
 
-# User config: check data dir first (persists in PVC), fall back to ~/.config/money/
-_USER_CONFIG_DIR = Path.home() / ".config" / "money"
-CONFIG_FILE = _USER_CONFIG_DIR / "config.json"  # legacy default
+# User config directory (~/.config/money/) for local files like credentials, rules
+CONFIG_DIR = Path.home() / ".config" / "money"
+CONFIG_FILE = CONFIG_DIR / "config.json"  # legacy default
 
 
 def _resolve_config_file() -> Path:
@@ -32,6 +32,7 @@ class PersonConfig:
 class LoginConfig:
     person: str
     institution: str
+    username: str | None = None
 
 
 @dataclass
@@ -76,6 +77,7 @@ def load_config() -> AppConfig:
         logins[login_id] = LoginConfig(
             person=login_data["person"],
             institution=login_data["institution"],
+            username=login_data.get("username"),
         )
 
     return AppConfig(

@@ -1,22 +1,33 @@
-// Chase handler — records network log (API can't be replayed with cookies).
-// Waits for the user to browse the dashboard, then flushes captured data.
-
 export default {
   domains: [".chase.com", "secure.chase.com", "secure03b.chase.com"],
   authPattern: /secure\d*\w?\.chase\.com/,
-  recordNetwork: true,
 
   async onPageLoad(ctx) {
-    await ctx.startNetworkRecording();
+    await ctx.startRecording();
 
-    // Wait for the SPA to make its API calls
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    // Wait for the key API routes the parser needs
+    await ctx.waitForEntries(["account/detail/dda/list"], { timeout: 30000 });
 
-    const flushResult = await ctx.flushNetworkLog();
-    if (flushResult.sync_id) {
-      const syncResult = await ctx.pollSyncResult(flushResult.sync_id);
-      return { type: "sync", ...syncResult };
-    }
-    return flushResult;
+    // Try to scrape the logged-in user's name from the page header
+    const name = await ctx.scrapeText(() => {
+      for (const sel of [
+        '[data-testid="greeting"]', '.greeting', '.welcome-name',
+        '[class*="greeting"]', '[class*="customerName"]',
+        '[data-testid="user-name"]', '.user-name',
+      ]) {
+        const el = document.querySelector(sel);
+        if (el?.textContent?.trim()) {
+          const m = el.textContent.match(/(?:Hi|Hello|Welcome),?\s+(\w+)/i);
+          if (m) return m[1];
+          return el.textContent.trim();
+        }
+      }
+      return null;
+    });
+    if (name) ctx.setUserIdentity(name);
+
+    const result = await ctx.capture();
+    if (result.sync_id) return await ctx.pollSyncResult(result.sync_id);
+    return result;
   },
 };

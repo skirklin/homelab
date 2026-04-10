@@ -439,8 +439,11 @@ def parse_raw_betterment(
 
 
 def sync_betterment(db: Database, store: RawStore, profile: str,
-                    cookies: dict[str, str]) -> None:
+                    cookies: dict[str, str] | None = None,
+                    entries: list[dict[str, Any]] | None = None) -> None:
     """Sync Betterment accounts and balances via GraphQL API."""
+    if not cookies:
+        raise ValueError("Betterment sync requires cookies")
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
@@ -570,6 +573,37 @@ def sync_betterment(db: Database, store: RawStore, profile: str,
 
 from money.ingest.registry import InstitutionInfo  # noqa: E402
 
+HEADER_QUERY = """\
+query Header @operationServiceConfig(feature: "app_home") {
+  user {
+    id
+    commonFirstName
+    __typename
+  }
+}"""
+
+
+def _extract_identity(
+    cookies: list[dict[str, Any]], entries: list[dict[str, Any]],
+) -> str | None:
+    """Extract first name from Betterment via the Header GraphQL query."""
+    if not cookies:
+        return None
+    cookies_dict = {c["name"]: c["value"] for c in cookies if "name" in c and "value" in c}
+    if not cookies_dict:
+        return None
+    try:
+        csrf = _fetch_csrf_token(cookies_dict)
+        result = _graphql(cookies_dict, csrf, "Header", HEADER_QUERY)
+        user = result.get("data", {}).get("user", {})
+        name = user.get("commonFirstName")
+        if name:
+            return name
+    except Exception:
+        log.debug("Could not extract Betterment identity", exc_info=True)
+    return None
+
+
 INSTITUTION = InstitutionInfo(
     name="betterment",
     dir_name="betterment",
@@ -577,4 +611,5 @@ INSTITUTION = InstitutionInfo(
     parse_fn=parse_raw_betterment,
     anchor_file="sidebar.json",
     display_name="Betterment",
+    extract_identity=_extract_identity,
 )

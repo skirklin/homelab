@@ -186,6 +186,8 @@ def sync_morgan_stanley(
     db: Database,
     store: RawStore,
     profile: str,
+    cookies: dict[str, str] | None = None,
+    entries: list[dict[str, Any]] | None = None,
 ) -> None:
     """Sync Morgan Stanley Shareworks stock option/RSU data."""
     started_at = datetime.now()

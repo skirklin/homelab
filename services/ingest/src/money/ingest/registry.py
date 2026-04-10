@@ -15,6 +15,13 @@ log = logging.getLogger(__name__)
 SyncFn = Callable[..., None]
 ParseFn = Callable[[Database, Path, str, "str | None"], "dict[str, int]"]
 PostReplayFn = Callable[[Database, Path, str], Any]
+# Extracts a username/email from raw captured data.
+# Receives cookies (list of cookie dicts) and/or network entries.
+# Returns a string that can be matched against LoginConfig.username, or None.
+IdentityFn = Callable[
+    ["list[dict[str, Any]]", "list[dict[str, Any]]"],  # (cookies, entries)
+    "str | None",
+]
 
 # Modules that are not institution implementations
 _SKIP_MODULES = {"common", "registry", "schemas", "base", "browser"}
@@ -31,7 +38,7 @@ class InstitutionInfo:
     anchor_file: str
     display_name: str = ""
     post_replay_fn: PostReplayFn | None = None
-    playwright_sync: bool = False  # requires Playwright login, not cookie/network-log auto-sync
+    extract_identity: IdentityFn | None = None
 
 
 _registry: dict[str, InstitutionInfo] = {}

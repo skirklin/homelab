@@ -73,7 +73,7 @@ function App() {
             <NavLink to="/transactions">Transactions</NavLink>
             <NavLink to="/travel">Travel</NavLink>
             <NavLink to="/accounts">Accounts</NavLink>
-            <NavLink to="/settings">Settings</NavLink>
+            <NavLink to="/settings" title="Settings" style={{ opacity: 0.5, fontSize: '0.9em' }}>&#9881;</NavLink>
           </nav>
         </header>
         <main>
