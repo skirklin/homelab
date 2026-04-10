@@ -71,9 +71,15 @@ async function getFromServer(path) {
 
 // ── Badge & logging ──────────────────────────────────────────────────
 
-function setBadge(text, color = "#34d399") {
+let badgeTimer = null;
+
+function setBadge(text, color = "#34d399", { persist = false } = {}) {
   chrome.action.setBadgeText({ text });
   chrome.action.setBadgeBackgroundColor({ color });
+  if (badgeTimer) clearTimeout(badgeTimer);
+  if (!persist && text) {
+    badgeTimer = setTimeout(() => chrome.action.setBadgeText({ text: "" }), 5000);
+  }
 }
 
 async function logActivity(message) {
@@ -91,7 +97,7 @@ async function checkForUpdate() {
   const current = chrome.runtime.getManifest().version;
   if (data.version && data.version !== current && data.available) {
     await chrome.storage.local.set({ updateAvailable: data.version });
-    setBadge("⬆", "#f59e0b");
+    setBadge("⬆", "#f59e0b", { persist: true });
     logActivity(`Update available: v${data.version} (you have v${current})`);
   } else {
     await chrome.storage.local.remove("updateAvailable");

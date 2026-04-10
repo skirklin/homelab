@@ -10,3 +10,4 @@ resources:
   - apps.yaml
   - ingest.yaml
   - api.yaml
+  - cronjobs.yaml

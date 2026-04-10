@@ -1,0 +1,29 @@
+# Daily upkeep task notification check — 8 AM Pacific
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: upkeep-notifications
+  namespace: homelab
+spec:
+  schedule: "0 8 * * *"
+  timeZone: "America/Los_Angeles"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  curl -sf -X POST \
+                    -H "X-API-Key: $API_KEY" \
+                    http://functions.homelab.svc.cluster.local:3000/notifications/upkeep-check
+              envFrom:
+                - secretRef:
+                    name: api-secrets
