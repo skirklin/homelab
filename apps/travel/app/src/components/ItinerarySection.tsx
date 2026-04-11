@@ -19,7 +19,6 @@ import {
   ClockCircleOutlined,
   DollarOutlined,
   SwapOutlined,
-  BuildOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
@@ -34,7 +33,6 @@ import {
   type DayLoad,
 } from "../types";
 import type { DayRouteInfo } from "./ItineraryMap";
-import { ItineraryBuilder } from "./ItineraryBuilder";
 import { ItineraryCompare } from "./ItineraryCompare";
 
 const Section = styled.div`
@@ -503,7 +501,6 @@ function ItineraryTimeline({
 
 export function ItinerarySection({
   itineraries,
-  activities,
   activityMap,
   focusDay,
   routeInfo,
@@ -512,7 +509,6 @@ export function ItinerarySection({
   navigate,
 }: {
   itineraries: Itinerary[];
-  activities: Activity[];
   activityMap: Map<string, Activity>;
   focusDay: number | null;
   routeInfo?: DayRouteInfo;
@@ -544,42 +540,26 @@ export function ItinerarySection({
 
   const currentItin = itineraries.find((i) => i.id === selectedItin);
 
-  const tabItems = [
+  const timeline = currentItin ? (
+    <ItineraryTimeline itinerary={currentItin} activityMap={activityMap} focusDay={focusDay} routeInfo={routeInfo} onDayClick={onDayClick} onDayNav={onDayNav}
+      onEditActivity={(id) => navigate(`activities/${id}/edit`)}
+      onDeleteActivity={(id) => travel.deleteActivity(id)} />
+  ) : null;
+
+  const tabItems = itineraries.length > 1 ? [
     {
       key: "timeline",
       label: <span><UnorderedListOutlined /> Timeline</span>,
-      children: currentItin ? (
-        <ItineraryTimeline itinerary={currentItin} activityMap={activityMap} focusDay={focusDay} routeInfo={routeInfo} onDayClick={onDayClick} onDayNav={onDayNav}
-          onEditActivity={(id) => navigate(`activities/${id}/edit`)}
-          onDeleteActivity={(id) => travel.deleteActivity(id)} />
-      ) : null,
+      children: timeline,
     },
     {
-      key: "builder",
-      label: <span><BuildOutlined /> Builder</span>,
-      children: currentItin ? (
-        <ItineraryBuilder
-          itinerary={currentItin}
-          activities={activities}
-          activityMap={activityMap}
-        />
-      ) : null,
+      key: "compare",
+      label: <span><SwapOutlined /> Compare ({itineraries.length})</span>,
+      children: (
+        <ItineraryCompare itineraries={itineraries} activityMap={activityMap} />
+      ),
     },
-    ...(itineraries.length > 1
-      ? [
-          {
-            key: "compare",
-            label: <span><SwapOutlined /> Compare ({itineraries.length})</span>,
-            children: (
-              <ItineraryCompare
-                itineraries={itineraries}
-                activityMap={activityMap}
-              />
-            ),
-          },
-        ]
-      : []),
-  ];
+  ] : null;
 
   const handleCreateItinerary = async () => {
     const tripId = currentItin?.tripId;
@@ -641,7 +621,9 @@ export function ItinerarySection({
           )}
         </Space>
       </SectionHeader>
-      <Tabs items={tabItems} size="small" activeKey={activeTab} onChange={setTab} />
+      {tabItems
+        ? <Tabs items={tabItems} size="small" activeKey={activeTab} onChange={setTab} />
+        : timeline}
     </Section>
   );
 }

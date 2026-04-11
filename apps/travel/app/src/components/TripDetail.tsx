@@ -266,7 +266,6 @@ export function TripDetail() {
           {itineraries.length > 0 && (
             <ItinerarySection
               itineraries={itineraries}
-              activities={activities}
               activityMap={activityMap}
               focusDay={focusDay}
               routeInfo={routeInfo}
