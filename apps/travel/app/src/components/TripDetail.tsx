@@ -29,7 +29,7 @@ import {
   type Activity,
 } from "../types";
 import { ItinerarySection } from "./ItinerarySection";
-import { ItineraryMap } from "./ItineraryMap";
+import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
 
@@ -173,6 +173,7 @@ export function TripDetail() {
   }, [activities]);
 
   const [focusDay, setFocusDay] = useState<number | null>(null);
+  const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
 
   if (state.loading) {
     return (
@@ -268,6 +269,7 @@ export function TripDetail() {
               activities={activities}
               activityMap={activityMap}
               focusDay={focusDay}
+              routeInfo={routeInfo}
               onDayClick={(day) => setFocusDay(focusDay === day ? null : day)}
               onDayNav={(day) => setFocusDay(day)}
               navigate={navigate}
@@ -342,6 +344,7 @@ export function TripDetail() {
               activities={activities}
               activityMap={activityMap}
               focusDay={focusDay}
+              onRouteInfo={(info) => setRouteInfo(prev => ({ ...prev, ...info }))}
             />
           </StickyMap>
         )}

@@ -33,6 +33,7 @@ import {
   type Itinerary,
   type DayLoad,
 } from "../types";
+import type { DayRouteInfo } from "./ItineraryMap";
 import { ItineraryBuilder } from "./ItineraryBuilder";
 import { ItineraryCompare } from "./ItineraryCompare";
 
@@ -278,6 +279,7 @@ function ItineraryTimeline({
   itinerary,
   activityMap,
   focusDay,
+  routeInfo,
   onDayClick,
   onDayNav,
   onEditActivity,
@@ -286,6 +288,7 @@ function ItineraryTimeline({
   itinerary: Itinerary;
   activityMap: Map<string, Activity>;
   focusDay: number | null;
+  routeInfo?: DayRouteInfo;
   onDayClick: (dayIndex: number) => void;
   onDayNav: (dayIndex: number) => void;
   onEditActivity: (activityId: string) => void;
@@ -329,12 +332,19 @@ function ItineraryTimeline({
                 style={{ marginLeft: 8, color: "#8c8c8c", fontSize: 12 }}>
                 All days
               </Button>
-              {load.totalHours > 0 && (
-                <LoadBadge $level={load.level} style={{ fontSize: 11, padding: "1px 6px" }}>
-                  {load.activityHours.toFixed(1)}h activities{load.driveMiles > 5 ? ` + ~${Math.round(load.driveMiles)} mi driving` : ""}
-                  {load.level === "overpacked" && " \u26a0 overpacked"}
-                </LoadBadge>
-              )}
+              {load.totalHours > 0 && (() => {
+                const ri = routeInfo?.[focusDay];
+                const hasDriving = load.driveMiles > 5;
+                const driveStr = ri
+                  ? `${Math.round(ri.durationMinutes / 60 * 10) / 10}h driving`
+                  : hasDriving ? "? driving" : "";
+                return (
+                  <LoadBadge $level={load.level} style={{ fontSize: 11, padding: "1px 6px" }}>
+                    {load.activityHours.toFixed(1)}h activities{driveStr ? ` + ${driveStr}` : ""}
+                    {load.level === "overpacked" && " \u26a0 overpacked"}
+                  </LoadBadge>
+                );
+              })()}
             </div>
             {lodging && (() => {
               const url = mapsUrl(lodging);
@@ -442,11 +452,18 @@ function ItineraryTimeline({
                   </LodgingBadge>
                 );
               })()}
-              {load.totalHours > 0 && (
-                <LoadBadge $level={load.level}>
-                  {load.activityHours.toFixed(1)}h{load.driveMiles > 5 ? ` + ${Math.round(load.driveMiles)}mi` : ""}
-                </LoadBadge>
-              )}
+              {load.totalHours > 0 && (() => {
+                const ri = routeInfo?.[i];
+                const hasDriving = load.driveMiles > 5;
+                const driveStr = ri
+                  ? `${Math.round(ri.durationMinutes / 60 * 10) / 10}h`
+                  : hasDriving ? "?" : "";
+                return (
+                  <LoadBadge $level={load.level}>
+                    {load.activityHours.toFixed(1)}h{driveStr ? ` + ${driveStr} drive` : ""}
+                  </LoadBadge>
+                );
+              })()}
             </CompactDayTitle>
 
             {flights.map((f, j) => (
@@ -489,6 +506,7 @@ export function ItinerarySection({
   activities,
   activityMap,
   focusDay,
+  routeInfo,
   onDayClick,
   onDayNav,
   navigate,
@@ -497,6 +515,7 @@ export function ItinerarySection({
   activities: Activity[];
   activityMap: Map<string, Activity>;
   focusDay: number | null;
+  routeInfo?: DayRouteInfo;
   onDayClick: (dayIndex: number) => void;
   onDayNav: (dayIndex: number) => void;
   navigate: (path: string) => void;
@@ -530,7 +549,7 @@ export function ItinerarySection({
       key: "timeline",
       label: <span><UnorderedListOutlined /> Timeline</span>,
       children: currentItin ? (
-        <ItineraryTimeline itinerary={currentItin} activityMap={activityMap} focusDay={focusDay} onDayClick={onDayClick} onDayNav={onDayNav}
+        <ItineraryTimeline itinerary={currentItin} activityMap={activityMap} focusDay={focusDay} routeInfo={routeInfo} onDayClick={onDayClick} onDayNav={onDayNav}
           onEditActivity={(id) => navigate(`activities/${id}/edit`)}
           onDeleteActivity={(id) => travel.deleteActivity(id)} />
       ) : null,

@@ -87,7 +87,13 @@ function MarkerDot({ color, isAccommodation }: { color: string; isAccommodation:
 }
 
 // Route component — uses Routes API for driving routes, falls back to straight lines
-function DayRoute({ path, color }: { path: { lat: number; lng: number }[]; color: string }) {
+export interface RouteInfo { durationMinutes: number; distanceMiles: number }
+
+function DayRoute({ path, color, onRouteComputed }: {
+  path: { lat: number; lng: number }[];
+  color: string;
+  onRouteComputed?: (info: RouteInfo) => void;
+}) {
   const map = useMap(MAP_ID);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
 
@@ -116,14 +122,15 @@ function DayRoute({ path, color }: { path: { lat: number; lng: number }[]; color
       destination: new google.maps.LatLng(destination.lat, destination.lng),
       intermediates: intermediates.map((p) => new google.maps.LatLng(p.lat, p.lng)),
       travelMode: "DRIVING",
-      fields: ["path"],
+      fields: ["path", "duration", "distanceMeters"],
     };
 
     routesNs.Route.computeRoutes(request)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then(({ routes: computedRoutes }: { routes: any[] }) => {
         if (computedRoutes && computedRoutes.length > 0) {
-          const routePolylines: google.maps.Polyline[] = computedRoutes[0].createPolylines();
+          const route = computedRoutes[0];
+          const routePolylines: google.maps.Polyline[] = route.createPolylines();
           routePolylines.forEach((polyline: google.maps.Polyline) => {
             polyline.setOptions({
               strokeColor: color,
@@ -133,6 +140,16 @@ function DayRoute({ path, color }: { path: { lat: number; lng: number }[]; color
             polyline.setMap(map);
           });
           polylinesRef.current = routePolylines;
+
+          if (onRouteComputed) {
+            const durationSecs = route.duration ?? route.legs?.reduce(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (sum: number, leg: any) => sum + (leg.duration ?? 0), 0) ?? 0;
+            const distanceMeters = route.distanceMeters ?? route.legs?.reduce(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (sum: number, leg: any) => sum + (leg.distanceMeters ?? 0), 0) ?? 0;
+            onRouteComputed({ durationMinutes: Math.round(durationSecs / 60), distanceMiles: Math.round(distanceMeters / 1609) });
+          }
         } else {
           drawFallback();
         }
@@ -161,14 +178,17 @@ function DayRoute({ path, color }: { path: { lat: number; lng: number }[]; color
   return null;
 }
 
+export interface DayRouteInfo { [dayIndex: number]: RouteInfo }
+
 interface ItineraryMapProps {
   itinerary: Itinerary;
   activities: Activity[];
   activityMap: globalThis.Map<string, Activity>;
   focusDay?: number | null;
+  onRouteInfo?: (info: DayRouteInfo) => void;
 }
 
-export function ItineraryMap({ itinerary, activities, activityMap, focusDay }: ItineraryMapProps) {
+export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onRouteInfo }: ItineraryMapProps) {
   const selectedDay: number | "all" = focusDay != null ? focusDay : "all";
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
 
@@ -319,7 +339,8 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay }: I
                 ...(endCoord && startCoord && endCoord.lat === startCoord.lat && endCoord.lng === startCoord.lng ? [endCoord] : []),
               ];
 
-              return <DayRoute key={da.dayIndex} path={path} color={da.color} />;
+              return <DayRoute key={da.dayIndex} path={path} color={da.color}
+                onRouteComputed={onRouteInfo ? (info) => onRouteInfo({ [da.dayIndex]: info }) : undefined} />;
             })}
 
             {/* Scheduled activity markers */}
