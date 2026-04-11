@@ -15,6 +15,7 @@ export {
 // Auth
 export { AuthProvider, useAuth, AuthContext } from "./auth";
 export type { User } from "./auth";
+export { LoginScreen } from "./LoginScreen";
 
 // Storage
 export { createAppStorage, migrateStorageKey } from "./appStorage";
