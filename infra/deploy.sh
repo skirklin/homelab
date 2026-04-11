@@ -61,6 +61,18 @@ if [ "$PUSH_ONLY" = false ]; then
         BUILD_LIST=("${!APP_BUILDS[@]}" homepage pocketbase ingest functions)
     else
         BUILD_LIST=("${APPS[@]}")
+        # Home app embeds these modules — rebuild home when any module changes
+        HOME_MODULES=(shopping recipes upkeep travel)
+        NEEDS_HOME=false
+        for app in "${BUILD_LIST[@]}"; do
+            for mod in "${HOME_MODULES[@]}"; do
+                if [ "$app" = "$mod" ]; then NEEDS_HOME=true; break 2; fi
+            done
+        done
+        if [ "$NEEDS_HOME" = true ] && ! printf '%s\n' "${BUILD_LIST[@]}" | grep -qx "home"; then
+            echo "(Also rebuilding home — embeds ${HOME_MODULES[*]})"
+            BUILD_LIST+=("home")
+        fi
     fi
 
     TOTAL=${#BUILD_LIST[@]}
