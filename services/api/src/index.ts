@@ -18,6 +18,7 @@ import { aiRoutes } from "./routes/ai";
 import { sharingRoutes } from "./routes/sharing";
 import { dataRoutes } from "./routes/data";
 import { pushRoutes } from "./routes/push";
+import { authRoutes } from "./routes/auth";
 import { notificationRoutes } from "./routes/notifications";
 import { startScheduler } from "./lib/notifications/scheduler";
 const app = new Hono<AppEnv>();
@@ -52,6 +53,7 @@ app.route("/ai", aiRoutes);
 app.route("/sharing", sharingRoutes);
 app.route("/data", dataRoutes);
 app.route("/push", pushRoutes);
+app.route("/auth", authRoutes);
 app.route("/notifications", notificationRoutes);
 
 const port = parseInt(process.env.PORT || "3000");

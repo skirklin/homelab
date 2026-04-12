@@ -1,9 +1,9 @@
 import type { Context, Next } from "hono";
-import { timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import PocketBase from "pocketbase";
+import { getAdminPb } from "../lib/pb";
 
 const PB_URL = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
-const API_KEY = process.env.API_KEY || "";
 
 /** Create a PocketBase client authenticated as the requesting user. */
 export function userClient(token: string): PocketBase {
@@ -14,7 +14,7 @@ export function userClient(token: string): PocketBase {
 }
 
 // Simple token validation cache (token -> { userId, email, expiresAt })
-const tokenCache = new Map<string, { userId: string; email: string; expiresAt: number }>();
+const tokenCache = new Map<string, { userId: string; email: string; isApiKey: boolean; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
 
 function cleanCache() {
@@ -24,22 +24,11 @@ function cleanCache() {
   }
 }
 
-export async function authMiddleware(c: Context, next: Next) {
-  // Check API key first (for MCP/curl)
-  const apiKey = c.req.header("X-API-Key");
-  if (apiKey && API_KEY && apiKey.length === API_KEY.length &&
-      timingSafeEqual(Buffer.from(apiKey), Buffer.from(API_KEY))) {
-    // API key auth — use a default admin identity
-    const token = process.env.API_KEY_USER_TOKEN || "";
-    c.set("userId", process.env.API_KEY_USER_ID || "");
-    c.set("userEmail", process.env.API_KEY_USER_EMAIL || "");
-    c.set("userToken", token);
-    c.set("isApiKey", true);
-    if (token) c.set("pb", userClient(token));
-    return next();
-  }
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
-  // PocketBase token auth
+export async function authMiddleware(c: Context, next: Next) {
   const authHeader = c.req.header("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return c.json({ error: "Authentication required" }, 401);
@@ -47,18 +36,68 @@ export async function authMiddleware(c: Context, next: Next) {
 
   const token = authHeader.slice(7);
 
-  // Check cache
+  // Check cache first
   cleanCache();
   const cached = tokenCache.get(token);
   if (cached && cached.expiresAt > Date.now()) {
     c.set("userId", cached.userId);
     c.set("userEmail", cached.email);
     c.set("userToken", token);
-    c.set("pb", userClient(token));
+    c.set("isApiKey", cached.isApiKey);
+    if (cached.isApiKey) {
+      // API tokens use the admin PB client scoped to the user's data
+      const adminPb = await getAdminPb();
+      c.set("pb", adminPb);
+    } else {
+      c.set("pb", userClient(token));
+    }
     return next();
   }
 
-  // Validate against PocketBase
+  // API token auth (hlk_ prefix)
+  if (token.startsWith("hlk_")) {
+    try {
+      const tokenHash = hashToken(token);
+      const adminPb = await getAdminPb();
+      const record = await adminPb.collection("api_tokens").getFirstListItem(
+        adminPb.filter("token_hash = {:tokenHash}", { tokenHash }),
+      );
+
+      // Check expiry
+      if (record.expires_at && new Date(record.expires_at) < new Date()) {
+        return c.json({ error: "API token expired" }, 401);
+      }
+
+      // Look up the user
+      const user = await adminPb.collection("users").getOne(record.user);
+
+      // Update last_used (fire and forget)
+      adminPb.collection("api_tokens").update(record.id, {
+        last_used: new Date().toISOString(),
+      }).catch(() => {});
+
+      const userId = user.id;
+      const email = user.email as string;
+
+      tokenCache.set(token, {
+        userId,
+        email,
+        isApiKey: true,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
+
+      c.set("userId", userId);
+      c.set("userEmail", email);
+      c.set("userToken", token);
+      c.set("isApiKey", true);
+      c.set("pb", adminPb);
+      return next();
+    } catch {
+      return c.json({ error: "Invalid API token" }, 401);
+    }
+  }
+
+  // PocketBase user token auth
   try {
     const pb = new PocketBase(PB_URL);
     pb.authStore.save(token, null);
@@ -69,12 +108,14 @@ export async function authMiddleware(c: Context, next: Next) {
     tokenCache.set(token, {
       userId,
       email,
+      isApiKey: false,
       expiresAt: Date.now() + CACHE_TTL_MS,
     });
 
     c.set("userId", userId);
     c.set("userEmail", email);
     c.set("userToken", token);
+    c.set("isApiKey", false);
     c.set("pb", userClient(token));
     return next();
   } catch {

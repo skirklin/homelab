@@ -8,15 +8,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const API_BASE = process.env.API_BASE || "http://localhost:3000";
-const API_KEY = process.env.API_KEY || "";
+const API_BASE = process.env.API_BASE || "https://api.beta.kirkl.in/fn";
+const API_TOKEN = process.env.API_TOKEN || "";
+
+if (!API_TOKEN) {
+  console.error("API_TOKEN env var is required. Generate one with: npx tsx services/scripts/generate-api-token.ts");
+  process.exit(1);
+}
 
 async function api(path: string, init?: RequestInit): Promise<unknown> {
   const url = `${API_BASE}/data${path}`;
   const res = await fetch(url, {
     ...init,
     headers: {
-      "X-API-Key": API_KEY,
+      "Authorization": `Bearer ${API_TOKEN}`,
       "Content-Type": "application/json",
       ...init?.headers,
     },

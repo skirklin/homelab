@@ -12,7 +12,25 @@
       "Bash(ls /home/skirklin/projects/homelab/infra/k8s/caddy*)",
       "Bash(chmod +x /home/skirklin/projects/homelab/infra/build-extension.sh)",
       "Bash(bash infra/build-extension.sh)",
-      "Bash(grep -r \"browser\" /home/skirklin/projects/homelab/services/ingest/src/money/ingest/*.py)"
+      "Bash(grep -r \"browser\" /home/skirklin/projects/homelab/services/ingest/src/money/ingest/*.py)",
+      "Bash(npx --prefix apps/money tsc --noEmit)",
+      "Bash(ssh.exe scott@5.78.200.161 \"sudo kubectl exec -n homelab \\\\$\\(kubectl get pod -n homelab -l app=ingest -o name | head -1 | sed 's|pod/||'\\) -- ls /app/.data/cookies/ 2>/dev/null\")",
+      "Read(//home/skirklin/projects/money/.data/**)",
+      "Bash(python3)",
+      "Bash(tmux send-keys:*)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(grep -E '\\\\.\\(js|ts\\)$')",
+      "Bash(ls -la /home/skirklin/projects/homelab/extension/*.js /home/skirklin/projects/homelab/extension/*.html)",
+      "Bash(ls /home/skirklin/projects/homelab/apps/home/app/src/*.tsx)",
+      "Bash(grep -c \"def test_\" /home/skirklin/projects/homelab/services/ingest/tests/*.py)",
+      "Bash(grep -c \"it\\\\|test\" /home/skirklin/projects/homelab/apps/recipes/app/src/*.test.tsx)",
+      "Bash(ssh.exe scott@5.78.200.161 \"sudo kubectl get secret api-secrets -n homelab -o json 2>/dev/null | python3 -c 'import sys,json,base64; d=json.load\\(sys.stdin\\); keys=d.get\\(\\\\\"data\\\\\",{}\\); print\\(\\\\\"Keys:\\\\\", list\\(keys.keys\\(\\)\\)\\)'\")",
+      "Bash(ssh.exe scott@5.78.200.161 \"kubectl get pods -n homelab -l app=travel\")",
+      "Bash(ssh.exe scott@5.78.200.161 \"kubectl exec -n homelab deployment/travel -- ls /usr/share/nginx/html/ 2>&1\")",
+      "Read(//mnt/c/Users/Scott/AppData/Roaming/Claude/**)"
+    ],
+    "additionalDirectories": [
+      "/home/skirklin/.config/money"
     ]
   }
 }
