@@ -8,6 +8,7 @@ import { createHash, randomBytes } from "crypto";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 import { getAdminPb } from "../lib/pb";
+import { tokenCache } from "../middleware/auth";
 
 export const authRoutes = new Hono<AppEnv>();
 
@@ -67,13 +68,12 @@ authRoutes.post("/tokens", handler(async (c) => {
 
 // List your tokens (no raw tokens — just metadata)
 authRoutes.get("/tokens", handler(async (c) => {
-  const pb = c.get("pb");
   const userId = c.get("userId");
 
-  const tokens = await pb.collection("api_tokens").getFullList({
-    filter: pb.filter("user = {:userId}", { userId }),
-    sort: "-created",
-  });
+  // Use admin client to avoid API rule issues with relation field filtering
+  const adminPb = await getAdminPb();
+  const allTokens = await adminPb.collection("api_tokens").getFullList();
+  const tokens = allTokens.filter(t => t.user === userId);
 
   return c.json(tokens.map((t) => ({
     id: t.id,
@@ -87,8 +87,27 @@ authRoutes.get("/tokens", handler(async (c) => {
 
 // Revoke a token
 authRoutes.delete("/tokens/:id", handler(async (c) => {
-  const pb = c.get("pb");
+  const userId = c.get("userId");
   const id = c.req.param("id")!;
-  await pb.collection("api_tokens").delete(id);
+
+  // Verify the token belongs to this user before deleting
+  const adminPb = await getAdminPb();
+  const token = await adminPb.collection("api_tokens").getOne(id);
+  if (token.user !== userId) {
+    return c.json({ error: "Not your token" }, 403);
+  }
+
+  await adminPb.collection("api_tokens").delete(id);
+
+  // Invalidate any cached auth for this token hash
+  for (const [cachedToken, entry] of tokenCache) {
+    if (cachedToken.startsWith("hlk_") && entry.userId === userId) {
+      const cachedHash = hashToken(cachedToken);
+      if (cachedHash === token.token_hash) {
+        tokenCache.delete(cachedToken);
+      }
+    }
+  }
+
   return c.json({ deleted: true });
 }));

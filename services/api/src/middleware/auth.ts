@@ -3,18 +3,20 @@ import { createHash } from "node:crypto";
 import PocketBase from "pocketbase";
 import { getAdminPb } from "../lib/pb";
 
-const PB_URL = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
+function getPbUrl() {
+  return process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
+}
 
 /** Create a PocketBase client authenticated as the requesting user. */
 export function userClient(token: string): PocketBase {
-  const pb = new PocketBase(PB_URL);
+  const pb = new PocketBase(getPbUrl());
   pb.autoCancellation(false);
   pb.authStore.save(token, null);
   return pb;
 }
 
-// Simple token validation cache (token -> { userId, email, expiresAt })
-const tokenCache = new Map<string, { userId: string; email: string; isApiKey: boolean; expiresAt: number }>();
+// Token validation cache — exported so revoke can invalidate
+export const tokenCache = new Map<string, { userId: string; email: string; isApiKey: boolean; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
 
 function cleanCache() {
@@ -99,7 +101,7 @@ export async function authMiddleware(c: Context, next: Next) {
 
   // PocketBase user token auth
   try {
-    const pb = new PocketBase(PB_URL);
+    const pb = new PocketBase(getPbUrl());
     pb.authStore.save(token, null);
     const result = await pb.collection("users").authRefresh({ $autoCancel: false });
     const userId = result.record.id;

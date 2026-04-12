@@ -4,22 +4,22 @@
  */
 import PocketBase from "pocketbase";
 
-const PB_URL = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
-const PB_ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || "";
-const PB_ADMIN_PASSWORD = process.env.PB_ADMIN_PASSWORD || "";
-
 let adminPb: PocketBase | null = null;
 
 export async function getAdminPb(): Promise<PocketBase> {
   if (adminPb?.authStore.isValid) return adminPb;
 
-  if (!PB_ADMIN_EMAIL || !PB_ADMIN_PASSWORD) {
+  const pbUrl = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
+  const email = process.env.PB_ADMIN_EMAIL || "";
+  const password = process.env.PB_ADMIN_PASSWORD || "";
+
+  if (!email || !password) {
     throw new Error("PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD must be set");
   }
 
-  const pb = new PocketBase(PB_URL);
+  const pb = new PocketBase(pbUrl);
   pb.autoCancellation(false);
-  await pb.collection("_superusers").authWithPassword(PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD);
+  await pb.collection("_superusers").authWithPassword(email, password);
   adminPb = pb;
   return pb;
 }
