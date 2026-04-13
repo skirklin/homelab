@@ -30,7 +30,9 @@
       "Read(//mnt/c/Users/Scott/AppData/Roaming/Claude/**)",
       "WebFetch(domain:developers.google.com)",
       "Bash(curl -s \"https://api.beta.kirkl.in/_/api/collections/travel_activities/records?perPage=1\")",
-      "Bash(ls /home/skirklin/.claude/*.json)"
+      "Bash(ls /home/skirklin/.claude/*.json)",
+      "Bash(HOMELAB_API_TOKEN=\"hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\" API_BASE=\"https://api.beta.kirkl.in/fn\" /home/skirklin/.local/share/fnm/node-versions/v20.20.1/installation/bin/node --import tsx /home/skirklin/projects/homelab/services/api/src/mcp.ts)",
+      "Bash(/home/skirklin/.local/share/fnm/node-versions/v20.20.1/installation/bin/npx tsx:*)"
     ],
     "additionalDirectories": [
       "/home/skirklin/.config/money"

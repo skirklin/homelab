@@ -118,6 +118,126 @@ dataRoutes.post("/shopping/items", handler(async (c) => {
   return c.json({ id: record.id, ingredient: record.ingredient }, 201);
 }));
 
+// ---- Travel ----
+
+// List travel logs for the authenticated user
+dataRoutes.get("/travel/logs", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const user = await pb.collection("users").getOne(userId);
+  const slugs = (user.travel_slugs || {}) as Record<string, string>;
+  const logs = await Promise.all(
+    Object.entries(slugs).map(async ([slug, logId]) => {
+      try {
+        const log = await pb.collection("travel_logs").getOne(logId);
+        return { id: logId, slug, name: log.name };
+      } catch {
+        return { id: logId, slug, name: "(not found)" };
+      }
+    })
+  );
+  return c.json(logs);
+}));
+
+// List trips in a travel log
+dataRoutes.get("/travel/trips", handler(async (c) => {
+  const pb = c.get("pb");
+  const logId = c.req.query("log");
+  if (!logId) return c.json({ error: "log query param required" }, 400);
+
+  const trips = await pb.collection("travel_trips").getFullList({ filter: pb.filter("log = {:logId}", { logId }) });
+  return c.json(trips.map((t) => ({
+    id: t.id,
+    log: t.log,
+    destination: t.destination,
+    status: t.status,
+    region: t.region,
+    start_date: t.start_date,
+    end_date: t.end_date,
+    notes: t.notes,
+  })));
+}));
+
+// List activities in a travel log
+dataRoutes.get("/travel/activities", handler(async (c) => {
+  const pb = c.get("pb");
+  const logId = c.req.query("log");
+  if (!logId) return c.json({ error: "log query param required" }, 400);
+
+  const activities = await pb.collection("travel_activities").getFullList({ filter: pb.filter("log = {:logId}", { logId }) });
+  return c.json(activities.map((a) => ({
+    id: a.id,
+    log: a.log,
+    name: a.name,
+    category: a.category,
+    location: a.location,
+    description: a.description,
+    cost_notes: a.cost_notes,
+    duration_estimate: a.duration_estimate,
+    setting: a.setting,
+    rating: a.rating,
+    trip_id: a.trip_id,
+  })));
+}));
+
+// List itineraries in a travel log
+dataRoutes.get("/travel/itineraries", handler(async (c) => {
+  const pb = c.get("pb");
+  const logId = c.req.query("log");
+  if (!logId) return c.json({ error: "log query param required" }, 400);
+
+  const itineraries = await pb.collection("travel_itineraries").getFullList({ filter: pb.filter("log = {:logId}", { logId }) });
+  return c.json(itineraries.map((i) => ({
+    id: i.id,
+    log: i.log,
+    trip_id: i.trip_id,
+    name: i.name,
+    is_active: i.is_active,
+    days: i.days,
+  })));
+}));
+
+// ---- Life ----
+
+// Get the user's life log
+dataRoutes.get("/life/log", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const user = await pb.collection("users").getOne(userId);
+  const logId = user.life_log_id as string;
+  if (!logId) return c.json({ error: "no life log configured" }, 404);
+
+  const log = await pb.collection("life_logs").getOne(logId);
+  return c.json({
+    id: log.id,
+    name: log.name,
+    manifest: log.manifest,
+    sample_schedule: log.sample_schedule,
+  });
+}));
+
+// List entries (events) in a life log
+dataRoutes.get("/life/entries", handler(async (c) => {
+  const pb = c.get("pb");
+  const logId = c.req.query("log");
+  if (!logId) return c.json({ error: "log query param required" }, 400);
+
+  const entries = await pb.collection("life_events").getFullList({
+    filter: pb.filter("log = {:logId}", { logId }),
+    sort: "-timestamp",
+  });
+  return c.json(entries.map((e) => ({
+    id: e.id,
+    log: e.log,
+    subject_id: e.subject_id,
+    timestamp: e.timestamp,
+    data: e.data,
+    created_by: e.created_by,
+  })));
+}));
+
+// ---- Upkeep ----
+
 // List upkeep tasks
 dataRoutes.get("/tasks", handler(async (c) => {
   const pb = c.get("pb");
