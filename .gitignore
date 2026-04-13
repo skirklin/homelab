@@ -28,3 +28,4 @@ SESSION-CHECKPOINT.md
 test-results/
 playwright-report/
 .data/
+.mcp.json

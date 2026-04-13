@@ -27,7 +27,10 @@
       "Bash(ssh.exe scott@5.78.200.161 \"sudo kubectl get secret api-secrets -n homelab -o json 2>/dev/null | python3 -c 'import sys,json,base64; d=json.load\\(sys.stdin\\); keys=d.get\\(\\\\\"data\\\\\",{}\\); print\\(\\\\\"Keys:\\\\\", list\\(keys.keys\\(\\)\\)\\)'\")",
       "Bash(ssh.exe scott@5.78.200.161 \"kubectl get pods -n homelab -l app=travel\")",
       "Bash(ssh.exe scott@5.78.200.161 \"kubectl exec -n homelab deployment/travel -- ls /usr/share/nginx/html/ 2>&1\")",
-      "Read(//mnt/c/Users/Scott/AppData/Roaming/Claude/**)"
+      "Read(//mnt/c/Users/Scott/AppData/Roaming/Claude/**)",
+      "WebFetch(domain:developers.google.com)",
+      "Bash(curl -s \"https://api.beta.kirkl.in/_/api/collections/travel_activities/records?perPage=1\")",
+      "Bash(ls /home/skirklin/.claude/*.json)"
     ],
     "additionalDirectories": [
       "/home/skirklin/.config/money"
