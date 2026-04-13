@@ -248,13 +248,17 @@ dataRoutes.get("/travel/trips/:id", handler(async (c) => {
   });
 }));
 
-// List activities in a travel log
+// List activities in a travel log (optionally filtered by trip_id)
 dataRoutes.get("/travel/activities", handler(async (c) => {
   const pb = c.get("pb");
   const logId = c.req.query("log");
   if (!logId) return c.json({ error: "log query param required" }, 400);
+  const tripId = c.req.query("trip_id");
 
-  const activities = await pb.collection("travel_activities").getFullList({ filter: pb.filter("log = {:logId}", { logId }) });
+  let filter = pb.filter("log = {:logId}", { logId });
+  if (tripId) filter += " && " + pb.filter("trip_id = {:tripId}", { tripId });
+
+  const activities = await pb.collection("travel_activities").getFullList({ filter });
   return c.json(activities.map((a) => ({
     id: a.id,
     log: a.log,
@@ -270,13 +274,17 @@ dataRoutes.get("/travel/activities", handler(async (c) => {
   })));
 }));
 
-// List itineraries in a travel log
+// List itineraries in a travel log (optionally filtered by trip_id)
 dataRoutes.get("/travel/itineraries", handler(async (c) => {
   const pb = c.get("pb");
   const logId = c.req.query("log");
   if (!logId) return c.json({ error: "log query param required" }, 400);
+  const tripId = c.req.query("trip_id");
 
-  const itineraries = await pb.collection("travel_itineraries").getFullList({ filter: pb.filter("log = {:logId}", { logId }) });
+  let filter = pb.filter("log = {:logId}", { logId });
+  if (tripId) filter += " && " + pb.filter("trip_id = {:tripId}", { tripId });
+
+  const itineraries = await pb.collection("travel_itineraries").getFullList({ filter });
   return c.json(itineraries.map((i) => ({
     id: i.id,
     log: i.log,
@@ -396,6 +404,240 @@ dataRoutes.post("/travel/itineraries", handler(async (c) => {
     days: body.days || [],
   });
   return c.json({ id: record.id, name: record.name }, 201);
+}));
+
+// Delete a travel trip
+dataRoutes.delete("/travel/trips/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("travel_trips").delete(id);
+  return c.json({ success: true });
+}));
+
+// Delete a travel activity
+dataRoutes.delete("/travel/activities/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("travel_activities").delete(id);
+  return c.json({ success: true });
+}));
+
+// Delete a travel itinerary
+dataRoutes.delete("/travel/itineraries/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("travel_itineraries").delete(id);
+  return c.json({ success: true });
+}));
+
+// Update a travel itinerary
+dataRoutes.patch("/travel/itineraries/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<Record<string, unknown>>();
+  const record = await pb.collection("travel_itineraries").update(id, body);
+  return c.json({
+    id: record.id,
+    name: record.name,
+    is_active: record.is_active,
+    trip_id: record.trip_id,
+    days: record.days,
+  });
+}));
+
+// Geocode a single travel activity using Google Places API
+dataRoutes.post("/travel/activities/:id/geocode", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+
+  const apiKey = process.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return c.json({ error: "VITE_GOOGLE_MAPS_API_KEY not configured on the server" }, 500);
+  }
+
+  const activity = await pb.collection("travel_activities").getOne(id);
+  const body: { searchQuery?: string } = await c.req.json<{ searchQuery?: string }>().catch(() => ({}));
+
+  let searchQuery = body.searchQuery;
+  if (!searchQuery) {
+    // For Transportation activities with a trip, use trip destination + "airport"
+    if (activity.category === "Transportation" && activity.trip_id) {
+      try {
+        const trip = await pb.collection("travel_trips").getOne(activity.trip_id as string);
+        searchQuery = `${trip.destination} airport`;
+      } catch {
+        // Fall through to default
+      }
+    }
+    // Default: activity name + location
+    if (!searchQuery) {
+      searchQuery = [activity.name, activity.location].filter(Boolean).join(", ");
+    }
+  }
+
+  if (!searchQuery) {
+    return c.json({ error: "Could not construct a search query — activity has no name or location" }, 400);
+  }
+
+  const placesRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.formattedAddress",
+    },
+    body: JSON.stringify({ textQuery: searchQuery }),
+  });
+
+  if (!placesRes.ok) {
+    const errBody = await placesRes.text();
+    return c.json({ error: `Google Places API error ${placesRes.status}: ${errBody}` }, 502);
+  }
+
+  const placesData = await placesRes.json() as {
+    places?: Array<{
+      id: string;
+      displayName?: { text: string };
+      location?: { latitude: number; longitude: number };
+      formattedAddress?: string;
+    }>;
+  };
+
+  const place = placesData.places?.[0];
+  if (!place) {
+    return c.json({ error: `No places found for query: "${searchQuery}"` }, 404);
+  }
+
+  const updated = await pb.collection("travel_activities").update(id, {
+    place_id: place.id,
+    lat: place.location?.latitude ?? 0,
+    lng: place.location?.longitude ?? 0,
+  });
+
+  return c.json({
+    id: updated.id,
+    name: updated.name,
+    place_id: updated.place_id,
+    lat: updated.lat,
+    lng: updated.lng,
+    searchQuery,
+    placeName: place.displayName?.text,
+    formattedAddress: place.formattedAddress,
+  });
+}));
+
+// Batch geocode travel activities
+dataRoutes.post("/travel/activities/batch-geocode", handler(async (c) => {
+  const pb = c.get("pb");
+
+  const apiKey = process.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return c.json({ error: "VITE_GOOGLE_MAPS_API_KEY not configured on the server" }, 500);
+  }
+
+  const body = await c.req.json<{ log: string; trip_id?: string }>();
+  if (!body.log) return c.json({ error: "log required" }, 400);
+
+  let filter = pb.filter("log = {:log}", { log: body.log });
+  if (body.trip_id) filter += " && " + pb.filter("trip_id = {:tripId}", { tripId: body.trip_id });
+  // Only activities without a place_id
+  filter += ' && place_id = ""';
+
+  const activities = await pb.collection("travel_activities").getFullList({ filter });
+  let geocoded = 0;
+  let skipped = 0;
+  let errors = 0;
+  const details: Array<{ id: string; name: string; status: string; error?: string }> = [];
+
+  for (const activity of activities) {
+    // Construct search query
+    let searchQuery: string | undefined;
+
+    if (activity.category === "Transportation" && activity.trip_id) {
+      try {
+        const trip = await pb.collection("travel_trips").getOne(activity.trip_id as string);
+        searchQuery = `${trip.destination} airport`;
+      } catch {
+        // Fall through
+      }
+    }
+    if (!searchQuery) {
+      searchQuery = [activity.name, activity.location].filter(Boolean).join(", ");
+    }
+
+    if (!searchQuery) {
+      skipped++;
+      details.push({ id: activity.id, name: activity.name as string, status: "skipped", error: "no name or location" });
+      continue;
+    }
+
+    try {
+      const placesRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": apiKey,
+          "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.formattedAddress",
+        },
+        body: JSON.stringify({ textQuery: searchQuery }),
+      });
+
+      if (!placesRes.ok) {
+        errors++;
+        const errBody = await placesRes.text();
+        details.push({ id: activity.id, name: activity.name as string, status: "error", error: `Places API ${placesRes.status}: ${errBody}` });
+        continue;
+      }
+
+      const placesData = await placesRes.json() as {
+        places?: Array<{
+          id: string;
+          location?: { latitude: number; longitude: number };
+        }>;
+      };
+
+      const place = placesData.places?.[0];
+      if (!place) {
+        skipped++;
+        details.push({ id: activity.id, name: activity.name as string, status: "skipped", error: `no results for "${searchQuery}"` });
+        continue;
+      }
+
+      await pb.collection("travel_activities").update(activity.id, {
+        place_id: place.id,
+        lat: place.location?.latitude ?? 0,
+        lng: place.location?.longitude ?? 0,
+      });
+
+      geocoded++;
+      details.push({ id: activity.id, name: activity.name as string, status: "geocoded" });
+
+      // Small delay between API calls to avoid rate limiting
+      if (activities.indexOf(activity) < activities.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    } catch (err) {
+      errors++;
+      details.push({ id: activity.id, name: activity.name as string, status: "error", error: String(err) });
+    }
+  }
+
+  return c.json({ total: activities.length, geocoded, skipped, errors, details });
+}));
+
+// Replace the days array on a travel itinerary
+dataRoutes.put("/travel/itineraries/:id/days", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const { days } = await c.req.json<{ days: unknown }>();
+  if (days === undefined) return c.json({ error: "days array required" }, 400);
+
+  const record = await pb.collection("travel_itineraries").update(id, { days });
+  return c.json({
+    id: record.id,
+    name: record.name,
+    days: record.days,
+  });
 }));
 
 // ---- Life ----

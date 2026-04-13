@@ -29,3 +29,4 @@ test-results/
 playwright-report/
 .data/
 .mcp.json
+services/api/run-mcp.sh

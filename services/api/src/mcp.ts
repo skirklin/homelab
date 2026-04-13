@@ -166,12 +166,21 @@ server.tool(
   },
   async ({ status }) => {
     const logs = (await api("/travel/logs")) as Array<{ id: string; slug: string; name: string }>;
-    const allTrips: unknown[] = [];
+    const allTrips: Array<Record<string, unknown>> = [];
     for (const log of logs) {
       const qs = status ? `&status=${encodeURIComponent(status)}` : "";
       const trips = (await api(`/travel/trips?log=${log.id}${qs}`)) as Array<Record<string, unknown>>;
       allTrips.push(...trips.map((t) => ({ ...t, logName: log.name })));
     }
+    // Sort by status priority: Ongoing > Booked > Researching > Idea > Completed
+    const statusOrder: Record<string, number> = {
+      Ongoing: 0, Booked: 1, Researching: 2, Idea: 3, Completed: 4,
+    };
+    allTrips.sort((a, b) => {
+      const oa = statusOrder[String(a.status)] ?? 3;
+      const ob = statusOrder[String(b.status)] ?? 3;
+      return oa - ob;
+    });
     return { content: [{ type: "text", text: JSON.stringify(allTrips, null, 2) }] };
   },
 );
@@ -184,13 +193,11 @@ server.tool(
     // Get full trip details directly
     const trip = (await api(`/travel/trips/${id}`)) as Record<string, unknown>;
     const logId = trip.log as string;
-    // Fetch related activities and itineraries
-    const [activities, itineraries] = await Promise.all([
-      api(`/travel/activities?log=${logId}`) as Promise<Array<Record<string, unknown>>>,
-      api(`/travel/itineraries?log=${logId}`) as Promise<Array<Record<string, unknown>>>,
+    // Fetch related activities and itineraries (filtered server-side by trip_id)
+    const [tripActivities, tripItineraries] = await Promise.all([
+      api(`/travel/activities?log=${logId}&trip_id=${id}`) as Promise<Array<Record<string, unknown>>>,
+      api(`/travel/itineraries?log=${logId}&trip_id=${id}`) as Promise<Array<Record<string, unknown>>>,
     ]);
-    const tripActivities = activities.filter((a) => a.trip_id === id);
-    const tripItineraries = itineraries.filter((i) => i.trip_id === id);
     return {
       content: [{
         type: "text",
@@ -490,6 +497,100 @@ server.tool(
   },
 );
 
+// --- Travel delete tools ---
+
+server.tool(
+  "delete_travel_trip",
+  "Delete a travel trip by ID",
+  { id: z.string().describe("The trip record ID to delete") },
+  async ({ id }) => {
+    const data = await api(`/travel/trips/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_travel_activity",
+  "Delete a travel activity by ID",
+  { id: z.string().describe("The activity record ID to delete") },
+  async ({ id }) => {
+    const data = await api(`/travel/activities/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_travel_itinerary",
+  "Delete a travel itinerary by ID",
+  { id: z.string().describe("The itinerary record ID to delete") },
+  async ({ id }) => {
+    const data = await api(`/travel/itineraries/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+// --- Travel itinerary update tool ---
+
+server.tool(
+  "update_travel_itinerary",
+  "Update an existing itinerary. If days is provided, it replaces the entire day-by-day plan.",
+  {
+    id: z.string().describe("The itinerary record ID"),
+    name: z.string().optional().describe("Itinerary name"),
+    is_active: z.boolean().optional().describe("Whether this is the active itinerary"),
+    days: z.array(z.object({
+      date: z.string().optional().describe("Date for this day (ISO format)"),
+      label: z.string().describe("Day label (e.g. 'Day 1 — Arrival')"),
+      lodgingActivityId: z.string().optional().describe("Activity ID for lodging"),
+      slots: z.array(z.object({
+        activityId: z.string().describe("Activity ID"),
+        startTime: z.string().optional().describe("Start time (e.g. '09:00')"),
+        notes: z.string().optional().describe("Slot-specific notes"),
+      })).describe("Activity slots for this day"),
+      flights: z.array(z.unknown()).optional().describe("Flight data for this day"),
+    })).optional().describe("Complete day-by-day plan (replaces existing days)"),
+  },
+  async ({ id, ...fields }) => {
+    // Build the update body from provided fields
+    const body: Record<string, unknown> = {};
+    if (fields.name !== undefined) body.name = fields.name;
+    if (fields.is_active !== undefined) body.is_active = fields.is_active;
+
+    // If days provided, use the dedicated PUT endpoint for the array replacement,
+    // plus PATCH for any metadata fields
+    if (fields.days !== undefined) {
+      const requests = [
+        api(`/travel/itineraries/${id}/days`, {
+          method: "PUT",
+          body: JSON.stringify({ days: fields.days }),
+        }),
+      ];
+      if (Object.keys(body).length > 0) {
+        requests.push(
+          api(`/travel/itineraries/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify(body),
+          }),
+        );
+      }
+      await Promise.all(requests);
+      // Return the final merged state
+      const final = await api(`/travel/itineraries/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({}),
+      });
+      return { content: [{ type: "text", text: JSON.stringify(final, null, 2) }] };
+    }
+
+    // No days — just PATCH the metadata fields
+    const data = await api(`/travel/itineraries/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Upkeep write tools ---
 
 server.tool(
@@ -534,6 +635,50 @@ server.tool(
       body: JSON.stringify({ until }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+// --- Geocoding tools ---
+
+server.tool(
+  "geocode_activity",
+  "Geocode a single travel activity using Google Places API. Updates the activity with place_id, lat, lng.",
+  {
+    activityId: z.string().describe("The travel activity record ID"),
+    searchQuery: z.string().optional().describe("Custom search query (default: activity name + location)"),
+  },
+  async ({ activityId, searchQuery }) => {
+    const body: Record<string, unknown> = {};
+    if (searchQuery) body.searchQuery = searchQuery;
+    const data = await api(`/travel/activities/${activityId}/geocode`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "geocode_trip_activities",
+  "Batch geocode all un-geocoded activities for a trip. Returns progress summary.",
+  {
+    tripId: z.string().describe("The travel trip record ID"),
+  },
+  async ({ tripId }) => {
+    // First get the trip to find the log ID
+    const trip = (await api(`/travel/trips/${tripId}`)) as { log: string; destination: string };
+    const data = await api("/travel/activities/batch-geocode", {
+      method: "POST",
+      body: JSON.stringify({ log: trip.log, trip_id: tripId }),
+    });
+    const result = data as { total: number; geocoded: number; skipped: number; errors: number; details: Array<{ id: string; name: string; status: string; error?: string }> };
+    // Build a human-friendly summary
+    const lines = [`Batch geocode for trip "${trip.destination}":`, `  Total: ${result.total}, Geocoded: ${result.geocoded}, Skipped: ${result.skipped}, Errors: ${result.errors}`];
+    for (const d of result.details || []) {
+      const suffix = d.error ? ` — ${d.error}` : "";
+      lines.push(`  ${d.status}: ${d.name}${suffix}`);
+    }
+    return { content: [{ type: "text", text: lines.join("\n") }] };
   },
 );
 

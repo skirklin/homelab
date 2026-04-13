@@ -34,7 +34,7 @@ Life is a module embedded in the home app, not a standalone deployment.
 
 The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the user asks about their recipes, shopping lists, travel plans, tasks, or life data.
 
-### Available tools (27 total):
+### Available tools (31 total):
 
 **Recipes (read):**
 - `list_boxes` — list all recipe boxes
@@ -74,8 +74,12 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `add_travel_trip` — create a trip
 - `update_travel_trip` — update trip fields
 - `add_travel_activity` — create an activity
-- `update_travel_activity` — update activity fields
+- `update_travel_activity` — update activity fields (including trip_id reassignment)
 - `add_travel_itinerary` — create an itinerary
+- `update_travel_itinerary` — update itinerary fields or replace days array
+- `delete_travel_trip` — delete a trip
+- `delete_travel_activity` — delete an activity
+- `delete_travel_itinerary` — delete an itinerary
 
 **Life (read):**
 - `list_life_entries` — recent entries (optional days filter)
