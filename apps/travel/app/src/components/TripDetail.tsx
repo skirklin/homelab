@@ -36,7 +36,7 @@ import { TripChecklist } from "./TripChecklist";
 const TwoColumn = styled.div`
   display: grid;
   grid-template-columns: 1fr 400px;
-  gap: 24px;
+  gap: 12px;
   align-items: start;
 
   @media (max-width: 1000px) {

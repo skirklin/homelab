@@ -155,7 +155,7 @@ const ExpandedDay = styled.div`
   border: 2px solid #1677ff;
   border-radius: 8px;
   padding: 12px 16px;
-  width: 100%;
+  max-width: 500px;
 `;
 
 const ExpandedDayHeader = styled.div`
@@ -418,6 +418,8 @@ function ItineraryTimeline({
     <DayGrid>
       {itinerary.days.map((day, i) => {
         const lodging = day.lodgingActivityId ? activityMap.get(day.lodgingActivityId) : null;
+        const prevLodgingId = i > 0 ? itinerary.days[i - 1].lodgingActivityId : null;
+        const lodgingChanged = lodging && day.lodgingActivityId !== prevLodgingId;
         const flights = (day.flights || []).map((f) => ({
           ...f,
           activity: activityMap.get(f.activityId),
@@ -433,7 +435,7 @@ function ItineraryTimeline({
               <span>
                 Day {i + 1}{day.date ? ` \u2014 ${new Date(day.date + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : ""}
               </span>
-              {lodging && (() => {
+              {lodgingChanged && (() => {
                 const url = mapsUrl(lodging);
                 return (
                   <LodgingBadge as={url ? "a" : "span"} href={url || undefined} target="_blank" rel="noopener noreferrer"
@@ -468,12 +470,11 @@ function ItineraryTimeline({
               return (
                 <Popover
                   key={j}
-                  trigger="hover"
+                  trigger="click"
                   placement="right"
-                  mouseEnterDelay={0.3}
                   content={activity ? <ActivityTooltip activity={activity} apiKey={apiKey} /> : null}
                 >
-                  <CompactSlot>
+                  <CompactSlot style={{ cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                     {slot.startTime && <CompactTime>{slot.startTime}</CompactTime>}
                     <CompactName>{activity?.name || slot.activityId}</CompactName>
                   </CompactSlot>
