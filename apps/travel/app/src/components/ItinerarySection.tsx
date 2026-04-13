@@ -89,24 +89,16 @@ const LodgingBadge = styled.span`
 
 const DayGrid = styled.div`
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 10px;
 `;
 
 const CompactDayCard = styled.div`
-  width: calc(33.33% - 8px);
-  min-width: 200px;
+  width: 100%;
   background: #fafafa;
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 12px;
-
-  @media (max-width: 1100px) {
-    width: calc(50% - 6px);
-  }
-  @media (max-width: 700px) {
-    width: 100%;
-  }
 `;
 
 const LOAD_COLORS = {
