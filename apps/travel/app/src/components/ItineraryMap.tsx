@@ -277,6 +277,30 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
     return dayActivities.filter((d) => d.dayIndex === selectedDay);
   }, [dayActivities, selectedDay]);
 
+  // Zoom to fit visible day's activities when focusDay changes
+  const map = useMap(MAP_ID);
+  useEffect(() => {
+    if (!map || visibleDays.length === 0) return;
+
+    const coords = visibleDays.flatMap((d) =>
+      d.activities.filter((a) => a.lat != null && a.lng != null)
+    );
+
+    if (coords.length === 0) return;
+
+    if (coords.length === 1) {
+      map.panTo({ lat: coords[0].lat!, lng: coords[0].lng! });
+      map.setZoom(14);
+      return;
+    }
+
+    const bounds = new google.maps.LatLngBounds();
+    for (const a of coords) {
+      bounds.extend({ lat: a.lat!, lng: a.lng! });
+    }
+    map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
+  }, [map, visibleDays, selectedDay]);
+
   const handleMarkerClick = useCallback((actId: string) => {
     setSelectedActivity(actId === selectedActivity ? null : actId);
   }, [selectedActivity]);
