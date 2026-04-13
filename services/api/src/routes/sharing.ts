@@ -45,6 +45,60 @@ sharingRoutes.post("/invite", handler(async (c) => {
   });
 }));
 
+/**
+ * Look up a list by ID for the join flow.
+ * Uses admin PB client so it works even when the user isn't an owner yet.
+ * Only returns the list name — not the full record.
+ */
+sharingRoutes.get("/list-info/:collection/:listId", handler(async (c) => {
+  const { getAdminPb } = await import("../lib/pb");
+  const collection = c.req.param("collection") ?? "";
+  const listId = c.req.param("listId") ?? "";
+
+  const allowed = ["shopping_lists", "task_lists", "life_logs"];
+  if (!allowed.includes(collection)) {
+    return c.json({ error: "Invalid collection" }, 400);
+  }
+
+  try {
+    const pb = await getAdminPb();
+    const record = await pb.collection(collection).getOne(listId, { $autoCancel: false });
+    return c.json({ id: record.id, name: record.name });
+  } catch {
+    return c.json({ error: "List not found" }, 404);
+  }
+}));
+
+/**
+ * Join a list — add the authenticated user to the list's owners.
+ * Uses admin PB client to bypass owner-only update rules.
+ */
+sharingRoutes.post("/join-list", handler(async (c) => {
+  const { getAdminPb } = await import("../lib/pb");
+  const userId = c.get("userId");
+  const { collection, listId } = await c.req.json<{ collection: string; listId: string }>();
+
+  const allowed = ["shopping_lists", "task_lists", "life_logs"];
+  if (!allowed.includes(collection)) {
+    return c.json({ error: "Invalid collection" }, 400);
+  }
+
+  try {
+    const pb = await getAdminPb();
+    const record = await pb.collection(collection).getOne(listId, { $autoCancel: false });
+    const owners: string[] = record.owners || [];
+
+    if (!owners.includes(userId)) {
+      owners.push(userId);
+      await pb.collection(collection).update(listId, { owners }, { $autoCancel: false });
+    }
+
+    return c.json({ success: true, name: record.name });
+  } catch {
+    return c.json({ error: "List not found" }, 404);
+  }
+}));
+
 // Get display info for a list of owner IDs
 sharingRoutes.get("/owner-info", handler(async (c) => {
   const pb = c.get("pb");
