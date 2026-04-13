@@ -118,6 +118,69 @@ dataRoutes.post("/shopping/items", handler(async (c) => {
   return c.json({ id: record.id, ingredient: record.ingredient }, 201);
 }));
 
+// Delete a shopping item
+dataRoutes.delete("/shopping/items/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("shopping_items").delete(id);
+  return c.json({ success: true });
+}));
+
+// Toggle checked status on a shopping item
+dataRoutes.patch("/shopping/items/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{ checked?: boolean }>();
+  const record = await pb.collection("shopping_items").update(id, body);
+  return c.json({ id: record.id, checked: record.checked });
+}));
+
+// Clear all checked items from a shopping list
+dataRoutes.post("/shopping/clear-checked", handler(async (c) => {
+  const pb = c.get("pb");
+  const { list } = await c.req.json<{ list: string }>();
+  if (!list) return c.json({ error: "list required" }, 400);
+
+  const items = await pb.collection("shopping_items").getFullList({
+    filter: pb.filter("list = {:list} && checked = true", { list }),
+  });
+  await Promise.all(items.map((i) => pb.collection("shopping_items").delete(i.id)));
+  return c.json({ deleted: items.length });
+}));
+
+// ---- Recipe write ----
+
+// Create a recipe box
+dataRoutes.post("/boxes", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const { name, description } = await c.req.json<{ name: string; description?: string }>();
+  if (!name) return c.json({ error: "name required" }, 400);
+
+  const record = await pb.collection("recipe_boxes").create({
+    name,
+    description: description || "",
+    visibility: "private",
+    owners: [userId],
+  });
+  return c.json({ id: record.id, name: record.name }, 201);
+}));
+
+// Create a recipe in a box
+dataRoutes.post("/recipes", handler(async (c) => {
+  const pb = c.get("pb");
+  const { boxId, data } = await c.req.json<{ boxId: string; data: Record<string, unknown> }>();
+  if (!boxId || !data) return c.json({ error: "boxId and data required" }, 400);
+
+  const record = await pb.collection("recipes").create({
+    box: boxId,
+    data,
+    visibility: "private",
+    enrichment_status: "none",
+  });
+  return c.json({ id: record.id, name: (record.data as Record<string, unknown>)?.name }, 201);
+}));
+
 // ---- Travel ----
 
 // List travel logs for the authenticated user
@@ -197,6 +260,117 @@ dataRoutes.get("/travel/itineraries", handler(async (c) => {
   })));
 }));
 
+// Create a travel trip
+dataRoutes.post("/travel/trips", handler(async (c) => {
+  const pb = c.get("pb");
+  const body = await c.req.json<{
+    log: string;
+    destination: string;
+    status?: string;
+    region?: string;
+    start_date?: string;
+    end_date?: string;
+    notes?: string;
+  }>();
+  if (!body.log || !body.destination) return c.json({ error: "log and destination required" }, 400);
+
+  const record = await pb.collection("travel_trips").create({
+    log: body.log,
+    destination: body.destination,
+    status: body.status || "planning",
+    region: body.region || "",
+    start_date: body.start_date || "",
+    end_date: body.end_date || "",
+    notes: body.notes || "",
+  });
+  return c.json({ id: record.id, destination: record.destination }, 201);
+}));
+
+// Update a travel trip
+dataRoutes.patch("/travel/trips/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<Record<string, unknown>>();
+  const record = await pb.collection("travel_trips").update(id, body);
+  return c.json({
+    id: record.id,
+    destination: record.destination,
+    status: record.status,
+    region: record.region,
+    start_date: record.start_date,
+    end_date: record.end_date,
+    notes: record.notes,
+  });
+}));
+
+// Create a travel activity
+dataRoutes.post("/travel/activities", handler(async (c) => {
+  const pb = c.get("pb");
+  const body = await c.req.json<{
+    log: string;
+    trip_id: string;
+    name: string;
+    category?: string;
+    location?: string;
+    description?: string;
+    cost_notes?: string;
+    duration_estimate?: string;
+    setting?: string;
+  }>();
+  if (!body.log || !body.name) return c.json({ error: "log and name required" }, 400);
+
+  const record = await pb.collection("travel_activities").create({
+    log: body.log,
+    trip_id: body.trip_id || "",
+    name: body.name,
+    category: body.category || "",
+    location: body.location || "",
+    description: body.description || "",
+    cost_notes: body.cost_notes || "",
+    duration_estimate: body.duration_estimate || "",
+    setting: body.setting || "",
+  });
+  return c.json({ id: record.id, name: record.name }, 201);
+}));
+
+// Update a travel activity
+dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<Record<string, unknown>>();
+  const record = await pb.collection("travel_activities").update(id, body);
+  return c.json({
+    id: record.id,
+    name: record.name,
+    category: record.category,
+    location: record.location,
+    description: record.description,
+    trip_id: record.trip_id,
+  });
+}));
+
+// Create a travel itinerary
+dataRoutes.post("/travel/itineraries", handler(async (c) => {
+  const pb = c.get("pb");
+  const body = await c.req.json<{
+    log: string;
+    trip_id: string;
+    name: string;
+    is_active?: boolean;
+    days?: unknown;
+  }>();
+  if (!body.log || !body.trip_id || !body.name) return c.json({ error: "log, trip_id, and name required" }, 400);
+
+  const record = await pb.collection("travel_itineraries").create({
+    log: body.log,
+    trip_id: body.trip_id,
+    name: body.name,
+    is_active: body.is_active ?? false,
+    days: body.days || [],
+  });
+  return c.json({ id: record.id, name: record.name }, 201);
+}));
+
 // ---- Life ----
 
 // Get the user's life log
@@ -254,4 +428,49 @@ dataRoutes.get("/tasks", handler(async (c) => {
     last_completed: t.last_completed,
     snoozed_until: t.snoozed_until,
   })));
+}));
+
+// Create a task
+dataRoutes.post("/tasks", handler(async (c) => {
+  const pb = c.get("pb");
+  const body = await c.req.json<{
+    list: string;
+    name: string;
+    description?: string;
+    room_id?: string;
+    frequency?: number;
+  }>();
+  if (!body.list || !body.name) return c.json({ error: "list and name required" }, 400);
+
+  const record = await pb.collection("tasks").create({
+    list: body.list,
+    name: body.name,
+    description: body.description || "",
+    room_id: body.room_id || "",
+    frequency: body.frequency || 0,
+  });
+  return c.json({ id: record.id, name: record.name }, 201);
+}));
+
+// Complete a task
+dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const now = new Date().toISOString();
+  const record = await pb.collection("tasks").update(id, {
+    last_completed: now,
+    snoozed_until: "",
+  });
+  return c.json({ id: record.id, last_completed: record.last_completed });
+}));
+
+// Snooze a task
+dataRoutes.post("/tasks/:id/snooze", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const { until } = await c.req.json<{ until: string }>();
+  if (!until) return c.json({ error: "until (ISO date) required" }, 400);
+
+  const record = await pb.collection("tasks").update(id, { snoozed_until: until });
+  return c.json({ id: record.id, snoozed_until: record.snoozed_until });
 }));

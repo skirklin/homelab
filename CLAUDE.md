@@ -4,36 +4,15 @@ You are the Architect on this project. Read ARCHITECT.md before doing anything e
 
 ## What this is
 
-Personal web apps monorepo, migrating from Firebase (Firestore, Auth, Cloud Functions) to self-hosted PocketBase + Caddy on a VPS (Hetzner, 5.78.200.161, user `scott`).
+Personal web apps monorepo, self-hosted on PocketBase + Caddy on a VPS (Hetzner, 5.78.200.161, user `scott`).
 
-## Current state (2026-04-07)
+## Current state (2026-04-12)
 
-Infra deployed and serving. PocketBase backend migration complete for all apps. E2E tests in place.
+All apps deployed and serving. Backend abstraction layer complete. MCP server connected.
 
-### Done
-- Monorepo structure finalized with pnpm workspaces + Turborepo
-- k3s + Docker on VPS, Caddy with auto Let's Encrypt
-- All frontend apps built and deployed as nginx containers
-- PocketBase deployed with schema migration (16 collections, API rules)
-- DNS: `beta.kirkl.in` + `*.beta.kirkl.in` → VPS, HTTPS working
-- PocketBase admin: scott.kirklin@gmail.com at https://api.beta.kirkl.in/_/
-- Typed PocketBase client package at packages/pb-client
-- All app backends migrated from Firebase to PocketBase (shopping, life, recipes, upkeep, travel)
-- Vitest integration tests for all app backends (shopping, life, recipes, upkeep, travel, home)
-- Playwright browser tests for shopping app (9 tests) and home app (28 tests covering all modules)
-- Fixed PocketBase auto-cancellation bug across all modules (init requests need `$autoCancel: false`)
-- Renamed all "groceries" references to "shopping"
+### Architecture
 
-### Not done yet
-- Cloud Functions need replacing with PocketBase hooks or custom endpoints
-- money app should eventually move to tailnet-only (Tailscale not set up)
-- Data migration from Firestore (if needed)
-- Google OAuth setup in PocketBase admin (required for real users)
-- Some Playwright tests still flaky (recipes spinner, some list creation races)
-
-## Architecture
-
-k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxies to app services by cluster DNS name. Each frontend app is an nginx container serving Vite build output. PocketBase is a StatefulSet with a PVC.
+k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxies to app services. Each frontend app is an nginx container serving Vite build output. PocketBase is a StatefulSet with a PVC. API service (Hono/TypeScript) handles recipe scraping, AI, sharing, push notifications, and data endpoints.
 
 | Subdomain | k8s Service |
 |---|---|
@@ -43,34 +22,106 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 | `upkeep.beta.kirkl.in` | upkeep |
 | `travel.beta.kirkl.in` | travel |
 | `me.beta.kirkl.in` | homepage |
-| `money.beta.kirkl.in` | money |
-| `api.beta.kirkl.in` | pocketbase |
+| `api.beta.kirkl.in` | pocketbase (direct) + functions (under `/fn/`) |
+| `registry.beta.kirkl.in` | private Docker registry (auth required) |
 
-Note: life is a module embedded in the home app, not a standalone deployment.
+Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.net`).
+Life is a module embedded in the home app, not a standalone deployment.
+
+## MCP Server
+
+**This project has an MCP server connected.** Use it to read and write all app data.
+
+The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the user asks about their recipes, shopping lists, travel plans, tasks, or life data.
+
+### Available tools (27 total):
+
+**Recipes (read):**
+- `list_boxes` — list all recipe boxes
+- `search_recipes` — search by name across all boxes
+- `get_recipe` — full recipe details by ID
+
+**Recipes (write):**
+- `scrape_recipe` — scrape a recipe from a URL
+- `generate_recipe` — AI recipe generation from a text prompt
+- `create_recipe_box` — create a new box
+- `add_recipe_to_box` — add a recipe with structured data
+
+**Shopping (read):**
+- `list_shopping_lists` — list all lists
+- `list_shopping_items` — items in a list
+
+**Shopping (write):**
+- `add_shopping_item` — add item to a list
+- `check_shopping_item` — toggle checked status
+- `remove_shopping_item` — delete an item
+- `clear_checked_items` — done shopping, clear checked
+
+**Upkeep (read):**
+- `list_tasks` — list tasks in a task list
+
+**Upkeep (write):**
+- `add_task` — create a task
+- `complete_task` — mark done
+- `snooze_task` — snooze until a date
+
+**Travel (read):**
+- `list_travel_trips` — all trips across logs
+- `get_travel_trip` — single trip with activities + itineraries
+- `search_travel` — search trips/activities by destination/name
+
+**Travel (write):**
+- `add_travel_trip` — create a trip
+- `update_travel_trip` — update trip fields
+- `add_travel_activity` — create an activity
+- `update_travel_activity` — update activity fields
+- `add_travel_itinerary` — create an itinerary
+
+**Life (read):**
+- `list_life_entries` — recent entries (optional days filter)
+
+**Sharing:**
+- `create_invite` — generate a sharing invite link
+
+### MCP auth
+Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (beta.kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.
+
+### MCP config
+`.mcp.json` at project root (gitignored) configures the MCP server for Claude Code. Uses the project's local `tsx` binary to run `services/api/src/mcp.ts`.
 
 ## Repo layout
 
 - `apps/{home,recipes,shopping,life,upkeep,travel,money,homepage}` — frontend apps
 - `home` is the shell app that embeds shopping, recipes, life, upkeep, travel as modules
 - Most apps have their code under `app/` subdirectory; money and homepage are at root level
-- `recipes` builds to `build/` not `dist/`
-- `packages/ui` is `@kirkl/shared` — consumed as raw TS source, no build step
-- `packages/pb-client` is `@homelab/pb-client` — typed PocketBase SDK wrapper
-- `services/functions` — Firebase Cloud Functions (to be replaced)
-- `services/scripts` — migration scripts (TypeScript, run via tsx)
-- `services/ingest` — Python backend, `src/money/` layout, managed with uv
+- `packages/backend` is `@homelab/backend` — backend abstraction interfaces + PocketBase implementations
+- `packages/ui` is `@kirkl/shared` — shared React components, auth, backend provider
+- `services/api` — Hono API service (recipe scraping, AI, sharing, push, data endpoints, MCP server)
+- `services/ingest` — Python backend for money/financial data, managed with uv
+- `services/scripts` — migration and utility scripts (export-firebase, import-to-pb, wipe-pb)
 - `extension/` — Chrome extension for financial data capture
 - `infra/` — Dockerfiles, k8s manifests, build/deploy scripts
-- `infra/pocketbase/pb_migrations/` — PocketBase schema (baked into Docker image)
+- `infra/pocketbase/pb_migrations/` — PocketBase schema migrations
+- `infra/pocketbase/pb_hooks/` — PocketBase JS hooks (invite redemption)
+
+## Backend abstraction (`@homelab/backend`)
+
+All apps use interfaces from `packages/backend/` instead of calling PocketBase directly. Each app has adapters that convert between backend types and app-local types.
+
+Interfaces: `AuthBackend`, `UserBackend`, `ShoppingBackend`, `RecipesBackend`, `UpkeepBackend`, `TravelBackend`, `LifeBackend`
+
+Implementations live in `packages/backend/src/pocketbase/`. Apps get backends via `BackendProvider` from `@kirkl/shared`.
 
 ## Conventions
 
 - Workspace deps use `workspace:*` protocol in package.json
 - Prefer userspace installs (fnm, uv) over system-level (apt, sudo npm -g)
-- PocketBase collections use snake_case (shopping_lists, shopping_items, etc.)
-- Python module is still named `money` internally (renaming is a separate task)
-- Deploy: `./infra/deploy.sh` builds locally, pushes images via SSH, applies k8s manifests
-- VPS has KUBECONFIG set in /etc/environment — no need for explicit export in SSH commands
+- PocketBase collections use snake_case; TypeScript types use camelCase; PB mappers translate between them
+- Backend types are camelCase only — no snake_case aliases
+- Deploy: `./infra/deploy.sh [apps...]` builds locally, pushes to registry, applies k8s manifests
+- Private Docker registry at `registry.beta.kirkl.in` — deploys take ~30-60s
+- API tokens: `hlk_` prefix, SHA-256 hashed in PocketBase, created via Settings UI
+- `.env` at project root has secrets (gitignored): `PB_ADMIN_PASSWORD`, `HOMELAB_API_TOKEN`, `VITE_GOOGLE_MAPS_API_KEY`
 
 ## Three Man Team
 Available agents: Alice (Architect), Bob (Builder), Robert (Reviewer)

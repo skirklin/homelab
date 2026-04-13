@@ -18,6 +18,16 @@ if (!API_TOKEN) {
 
 async function api(path: string, init?: RequestInit): Promise<unknown> {
   const url = `${API_BASE}/data${path}`;
+  return apiFetch(url, init);
+}
+
+/** Call a non-data route (e.g. /recipes/scrape, /ai/generate, /sharing/invite) */
+async function apiRaw(path: string, init?: RequestInit): Promise<unknown> {
+  const url = `${API_BASE}${path}`;
+  return apiFetch(url, init);
+}
+
+async function apiFetch(url: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(url, {
     ...init,
     headers: {
@@ -261,6 +271,296 @@ server.tool(
           : `No life entries in the last ${days ?? 7} days`,
       }],
     };
+  },
+);
+
+// --- Shopping write tools ---
+
+server.tool(
+  "check_shopping_item",
+  "Toggle the checked status of a shopping item",
+  {
+    id: z.string().describe("The shopping item ID"),
+    checked: z.boolean().describe("Whether the item is checked"),
+  },
+  async ({ id, checked }) => {
+    const data = await api(`/shopping/items/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ checked }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_shopping_item",
+  "Delete a shopping item from a list",
+  { id: z.string().describe("The shopping item ID to delete") },
+  async ({ id }) => {
+    const data = await api(`/shopping/items/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "clear_checked_items",
+  "Remove all checked items from a shopping list (done shopping)",
+  { list: z.string().describe("The shopping list ID") },
+  async ({ list }) => {
+    const data = await api("/shopping/clear-checked", {
+      method: "POST",
+      body: JSON.stringify({ list }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+// --- Recipe write tools ---
+
+server.tool(
+  "scrape_recipe",
+  "Scrape a recipe from a URL. Returns structured recipe data.",
+  { url: z.string().describe("The URL of the recipe page to scrape") },
+  async ({ url }) => {
+    const data = await apiRaw("/recipes/scrape", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "generate_recipe",
+  "Generate a recipe from a text prompt using AI",
+  { prompt: z.string().describe("Description of the recipe to generate (e.g. 'spicy Thai basil chicken')") },
+  async ({ prompt }) => {
+    const data = await apiRaw("/ai/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "create_recipe_box",
+  "Create a new recipe box",
+  {
+    name: z.string().describe("Name of the recipe box"),
+    description: z.string().optional().describe("Optional description"),
+  },
+  async ({ name, description }) => {
+    const data = await api("/boxes", {
+      method: "POST",
+      body: JSON.stringify({ name, description }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_recipe_to_box",
+  "Create a recipe in a recipe box",
+  {
+    boxId: z.string().describe("The recipe box ID"),
+    data: z.object({
+      name: z.string().describe("Recipe name"),
+      description: z.string().optional().describe("Recipe description"),
+      recipeIngredient: z.array(z.string()).optional().describe("List of ingredients"),
+      recipeInstructions: z.array(z.object({ text: z.string() })).optional().describe("List of instruction steps"),
+      recipeCategory: z.array(z.string()).optional().describe("Recipe tags/categories"),
+    }).describe("Recipe data object"),
+  },
+  async ({ boxId, data }) => {
+    const result = await api("/recipes", {
+      method: "POST",
+      body: JSON.stringify({ boxId, data }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+// --- Travel write tools ---
+
+server.tool(
+  "add_travel_trip",
+  "Create a new travel trip in a log",
+  {
+    log: z.string().describe("The travel log ID"),
+    destination: z.string().describe("Trip destination"),
+    status: z.enum(["planning", "booked", "completed"]).optional().describe("Trip status (default: planning)"),
+    region: z.string().optional().describe("Geographic region"),
+    start_date: z.string().optional().describe("Start date (ISO format)"),
+    end_date: z.string().optional().describe("End date (ISO format)"),
+    notes: z.string().optional().describe("Trip notes"),
+  },
+  async ({ log, destination, status, region, start_date, end_date, notes }) => {
+    const data = await api("/travel/trips", {
+      method: "POST",
+      body: JSON.stringify({ log, destination, status, region, start_date, end_date, notes }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_travel_trip",
+  "Update fields on an existing travel trip",
+  {
+    id: z.string().describe("The trip record ID"),
+    destination: z.string().optional().describe("Trip destination"),
+    status: z.enum(["planning", "booked", "completed"]).optional().describe("Trip status"),
+    region: z.string().optional().describe("Geographic region"),
+    start_date: z.string().optional().describe("Start date (ISO format)"),
+    end_date: z.string().optional().describe("End date (ISO format)"),
+    notes: z.string().optional().describe("Trip notes"),
+  },
+  async ({ id, ...fields }) => {
+    // Only send non-undefined fields
+    const body: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined) body[k] = v;
+    }
+    const data = await api(`/travel/trips/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_travel_activity",
+  "Create a new activity in a travel log",
+  {
+    log: z.string().describe("The travel log ID"),
+    trip_id: z.string().optional().describe("The trip this activity belongs to"),
+    name: z.string().describe("Activity name"),
+    category: z.string().optional().describe("Activity category"),
+    location: z.string().optional().describe("Location"),
+    description: z.string().optional().describe("Description"),
+    cost_notes: z.string().optional().describe("Cost notes"),
+    duration_estimate: z.string().optional().describe("Duration estimate"),
+    setting: z.string().optional().describe("Setting (indoor/outdoor)"),
+  },
+  async ({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting }) => {
+    const data = await api("/travel/activities", {
+      method: "POST",
+      body: JSON.stringify({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_travel_activity",
+  "Update fields on an existing travel activity",
+  {
+    id: z.string().describe("The activity record ID"),
+    name: z.string().optional().describe("Activity name"),
+    category: z.string().optional().describe("Activity category"),
+    location: z.string().optional().describe("Location"),
+    description: z.string().optional().describe("Description"),
+    cost_notes: z.string().optional().describe("Cost notes"),
+    duration_estimate: z.string().optional().describe("Duration estimate"),
+    setting: z.string().optional().describe("Setting"),
+    trip_id: z.string().optional().describe("Trip ID to associate with"),
+  },
+  async ({ id, ...fields }) => {
+    const body: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined) body[k] = v;
+    }
+    const data = await api(`/travel/activities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_travel_itinerary",
+  "Create a new itinerary for a trip",
+  {
+    log: z.string().describe("The travel log ID"),
+    trip_id: z.string().describe("The trip this itinerary belongs to"),
+    name: z.string().describe("Itinerary name"),
+    is_active: z.boolean().optional().describe("Whether this is the active itinerary (default: false)"),
+    days: z.unknown().optional().describe("Day-by-day plan data"),
+  },
+  async ({ log, trip_id, name, is_active, days }) => {
+    const data = await api("/travel/itineraries", {
+      method: "POST",
+      body: JSON.stringify({ log, trip_id, name, is_active, days }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+// --- Upkeep write tools ---
+
+server.tool(
+  "add_task",
+  "Create a new upkeep task in a task list",
+  {
+    list: z.string().describe("The task list ID"),
+    name: z.string().describe("Task name"),
+    description: z.string().optional().describe("Task description"),
+    room_id: z.string().optional().describe("Room ID"),
+    frequency: z.number().optional().describe("Frequency in days (0 = one-time)"),
+  },
+  async ({ list, name, description, room_id, frequency }) => {
+    const data = await api("/tasks", {
+      method: "POST",
+      body: JSON.stringify({ list, name, description, room_id, frequency }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "complete_task",
+  "Mark an upkeep task as completed (sets last_completed to now)",
+  { id: z.string().describe("The task record ID") },
+  async ({ id }) => {
+    const data = await api(`/tasks/${id}/complete`, { method: "POST" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "snooze_task",
+  "Snooze an upkeep task until a given date",
+  {
+    id: z.string().describe("The task record ID"),
+    until: z.string().describe("ISO date to snooze until (e.g. 2026-04-20)"),
+  },
+  async ({ id, until }) => {
+    const data = await api(`/tasks/${id}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ until }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+// --- Sharing tools ---
+
+server.tool(
+  "create_invite",
+  "Create a sharing invite link for a recipe box or recipe",
+  {
+    targetType: z.enum(["box", "recipe"]).describe("Type of resource to share"),
+    targetId: z.string().describe("ID of the box or recipe to share"),
+  },
+  async ({ targetType, targetId }) => {
+    const data = await apiRaw("/sharing/invite", {
+      method: "POST",
+      body: JSON.stringify({ targetType, targetId }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );
 
