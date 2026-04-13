@@ -90,14 +90,14 @@ const LodgingBadge = styled.span`
 const DayGrid = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
+  max-width: 500px;
 `;
 
 const CompactDayCard = styled.div`
-  width: 100%;
   background: #fafafa;
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   font-size: 12px;
 `;
 
@@ -126,8 +126,8 @@ const CompactDayTitle = styled.div`
   border-bottom: 1px solid #e8e8e8;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 `;
 
 const CompactSlot = styled.div`
