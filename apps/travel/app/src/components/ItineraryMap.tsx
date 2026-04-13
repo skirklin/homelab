@@ -122,7 +122,7 @@ function DayRoute({ path, color, onRouteComputed }: {
       destination: new google.maps.LatLng(destination.lat, destination.lng),
       intermediates: intermediates.map((p) => new google.maps.LatLng(p.lat, p.lng)),
       travelMode: "DRIVING",
-      fields: ["path", "duration", "distanceMeters"],
+      fields: ["path", "durationMillis", "distanceMeters"],
     };
 
     routesNs.Route.computeRoutes(request)
@@ -142,13 +142,12 @@ function DayRoute({ path, color, onRouteComputed }: {
           polylinesRef.current = routePolylines;
 
           if (onRouteComputed) {
-            const durationSecs = route.duration ?? route.legs?.reduce(
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (sum: number, leg: any) => sum + (leg.duration ?? 0), 0) ?? 0;
-            const distanceMeters = route.distanceMeters ?? route.legs?.reduce(
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (sum: number, leg: any) => sum + (leg.distanceMeters ?? 0), 0) ?? 0;
-            onRouteComputed({ durationMinutes: Math.round(durationSecs / 60), distanceMiles: Math.round(distanceMeters / 1609) });
+            const durationMs = route.durationMillis ?? 0;
+            const meters = route.distanceMeters ?? 0;
+            onRouteComputed({
+              durationMinutes: Math.round(durationMs / 60000),
+              distanceMiles: Math.round(meters / 1609),
+            });
           }
         } else {
           drawFallback();
