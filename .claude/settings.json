@@ -40,7 +40,8 @@
       "Bash(chmod +x /home/skirklin/projects/homelab/services/api/run-mcp.sh)",
       "Bash(HOMELAB_API_TOKEN=\"hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\" API_BASE=\"https://api.beta.kirkl.in/fn\" /home/skirklin/projects/homelab/services/api/run-mcp.sh)",
       "Bash(/home/skirklin/projects/homelab/infra/deploy.sh travel:*)",
-      "Bash(grep -n \"AddToShoppingModal\\\\|shopping\\\\|Shop\" /home/skirklin/projects/homelab/apps/recipes/app/src/RecipeCard/*.tsx)"
+      "Bash(grep -n \"AddToShoppingModal\\\\|shopping\\\\|Shop\" /home/skirklin/projects/homelab/apps/recipes/app/src/RecipeCard/*.tsx)",
+      "mcp__homelab__search_travel"
     ],
     "additionalDirectories": [
       "/home/skirklin/.config/money"

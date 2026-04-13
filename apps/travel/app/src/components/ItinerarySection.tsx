@@ -11,7 +11,6 @@ import {
 } from "antd";
 import {
   ArrowLeftOutlined,
-  ArrowRightOutlined,
   DeleteOutlined,
   EditOutlined,
   HomeOutlined,
@@ -148,6 +147,11 @@ const CompactTime = styled.span`
 
 const CompactName = styled.span`
   font-weight: 500;
+  cursor: pointer;
+  &:hover {
+    color: #1677ff;
+    text-decoration: underline;
+  }
 `;
 
 const ExpandedDay = styled.div`
@@ -170,6 +174,7 @@ const ExpandedDayHeader = styled.div`
 const ExpandedDayTitle = styled.div`
   font-size: 14px;
   font-weight: 600;
+  white-space: nowrap;
 `;
 
 const ExpandedSlot = styled.div`
@@ -312,16 +317,15 @@ function ItineraryTimeline({
           <ExpandedDayHeader>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Button type="text" size="small" icon={<ArrowLeftOutlined />}
+                onClick={() => onDayClick(focusDay)}
+                title="Back to all days" />
+              <Button type="text" size="small"
                 onClick={() => hasPrev ? onDayNav(focusDay - 1) : undefined}
-                disabled={!hasPrev} />
+                disabled={!hasPrev} style={{ fontSize: 11, padding: "0 4px" }}>‹</Button>
               <ExpandedDayTitle>Day {focusDay + 1} / {totalDays}</ExpandedDayTitle>
-              <Button type="text" size="small" icon={<ArrowRightOutlined />}
+              <Button type="text" size="small"
                 onClick={() => hasNext ? onDayNav(focusDay + 1) : undefined}
-                disabled={!hasNext} />
-              <Button type="text" size="small" onClick={() => onDayClick(focusDay)}
-                style={{ marginLeft: 8, color: "#8c8c8c", fontSize: 12 }}>
-                All days
-              </Button>
+                disabled={!hasNext} style={{ fontSize: 11, padding: "0 4px" }}>›</Button>
               {load.totalHours > 0 && (() => {
                 const ri = routeInfo?.[focusDay];
                 const hasDriving = load.driveMiles > 5;
