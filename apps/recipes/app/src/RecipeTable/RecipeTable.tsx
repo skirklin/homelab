@@ -14,6 +14,7 @@ import ImportButton from '../Buttons/ImportRecipes';
 import GenerateButton from '../Buttons/GenerateRecipe';
 import { useRecipesBackend } from '@kirkl/shared';
 import { recipeDataToBackend } from '../adapters';
+import { getRecentViews } from '../recentlyViewed';
 import { Context } from '../context';
 import { PickBoxModal } from '../Modals/PickBoxModal';
 import BatchEnrichmentModal from '../Modals/BatchEnrichmentModal';
@@ -127,7 +128,12 @@ export function RecipeTable(props: RecipeTableProps) {
   const pendingChangesCount = recipes.filter(r => r.recipe.pendingChanges).length;
 
   useEffect(() => {
-    const sortedRecipes = _.sortBy(recipes, row => -row.recipe.updated)
+    const recentViews = getRecentViews();
+    const sortedRecipes = _.sortBy(recipes, row => {
+      const viewedAt = recentViews.get(row.recipe.id);
+      // Recently viewed recipes sort first (by view time), then by updated time
+      return viewedAt ? -viewedAt : -row.recipe.updated;
+    });
     setFilteredRows(sortedRecipes)
   },
     [recipes]
