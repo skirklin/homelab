@@ -124,16 +124,25 @@ export function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Save current path when navigating to a sub-app
+  // Save current path per module so we can restore it when switching back
   useEffect(() => {
     const subApps = ["/life", "/shopping", "/recipes", "/travel", "/upkeep"];
-    const isSubApp = subApps.some(app => location.pathname.startsWith(app));
-    if (isSubApp) {
-      localStorage.setItem(LAST_PATH_KEY, location.pathname);
+    for (const app of subApps) {
+      if (location.pathname.startsWith(app)) {
+        localStorage.setItem(LAST_PATH_KEY, location.pathname);
+        localStorage.setItem(`home:lastPath:${app}`, location.pathname);
+        break;
+      }
     }
   }, [location.pathname]);
 
   const isActive = (path: string) => location.pathname.startsWith(path);
+
+  /** Navigate to a module, restoring the last visited path within it. */
+  const goTo = (basePath: string) => {
+    const last = localStorage.getItem(`home:lastPath:${basePath}`);
+    navigate(last && last !== basePath ? last : basePath);
+  };
 
   const handleSignOut = () => {
     getBackend().authStore.clear();
@@ -146,35 +155,35 @@ export function Shell() {
         <Nav>
           <NavButton
             $active={isActive("/life")}
-            onClick={() => navigate("/life")}
+            onClick={() => goTo("/life")}
           >
             <NavIcon $active={isActive("/life")}><ExperimentOutlined /></NavIcon>
             <span className="nav-label">Life</span>
           </NavButton>
           <NavButton
             $active={isActive("/recipes")}
-            onClick={() => navigate("/recipes")}
+            onClick={() => goTo("/recipes")}
           >
             <NavIcon $active={isActive("/recipes")}><BookOutlined /></NavIcon>
             <span className="nav-label">Recipes</span>
           </NavButton>
           <NavButton
             $active={isActive("/shopping")}
-            onClick={() => navigate("/shopping")}
+            onClick={() => goTo("/shopping")}
           >
             <NavIcon $active={isActive("/shopping")}><ShoppingCartOutlined /></NavIcon>
             <span className="nav-label">Shopping</span>
           </NavButton>
           <NavButton
             $active={isActive("/travel")}
-            onClick={() => navigate("/travel")}
+            onClick={() => goTo("/travel")}
           >
             <NavIcon $active={isActive("/travel")}><CompassOutlined /></NavIcon>
             <span className="nav-label">Travel</span>
           </NavButton>
           <NavButton
             $active={isActive("/upkeep")}
-            onClick={() => navigate("/upkeep")}
+            onClick={() => goTo("/upkeep")}
           >
             <NavIcon $active={isActive("/upkeep")}><CheckSquareOutlined /></NavIcon>
             <span className="nav-label">Upkeep</span>

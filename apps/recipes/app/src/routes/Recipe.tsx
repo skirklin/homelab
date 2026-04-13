@@ -1,9 +1,10 @@
-import { useContext } from 'react';
+import { useContext, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Spin } from 'antd';
 import { Context } from '../context';
 import RecipeCard from '../RecipeCard/RecipeCard';
 import { getRecipeFromState } from '../state';
+import { recordRecentView } from '../recentlyViewed';
 import type { BoxId, RecipeId } from '../types';
 
 interface RecipeProps {
@@ -15,6 +16,8 @@ interface RecipeProps {
 export function Recipe(props: RecipeProps) {
   const { recipeId, boxId } = props;
   const { state } = useContext(Context)
+
+  useEffect(() => { recordRecentView(recipeId); }, [recipeId]);
 
   const recipe = getRecipeFromState(state, boxId, recipeId)
 
