@@ -160,14 +160,17 @@ server.tool(
 
 server.tool(
   "list_travel_trips",
-  "List all travel trips across all travel logs for the authenticated user",
-  {},
-  async () => {
+  "List travel trips (summary view — use get_travel_trip for full details). Optionally filter by status.",
+  {
+    status: z.string().optional().describe("Filter by status: Completed, Booked, Researching, Idea, Ongoing"),
+  },
+  async ({ status }) => {
     const logs = (await api("/travel/logs")) as Array<{ id: string; slug: string; name: string }>;
     const allTrips: unknown[] = [];
     for (const log of logs) {
-      const trips = (await api(`/travel/trips?log=${log.id}`)) as Array<Record<string, unknown>>;
-      allTrips.push(...trips.map((t) => ({ ...t, logName: log.name, logSlug: log.slug })));
+      const qs = status ? `&status=${encodeURIComponent(status)}` : "";
+      const trips = (await api(`/travel/trips?log=${log.id}${qs}`)) as Array<Record<string, unknown>>;
+      allTrips.push(...trips.map((t) => ({ ...t, logName: log.name })));
     }
     return { content: [{ type: "text", text: JSON.stringify(allTrips, null, 2) }] };
   },
@@ -175,25 +178,13 @@ server.tool(
 
 server.tool(
   "get_travel_trip",
-  "Get a single travel trip with its activities and itineraries",
+  "Get full details for a single trip including notes, activities, and itineraries",
   { id: z.string().describe("The travel trip record ID") },
   async ({ id }) => {
-    // We need to find the trip's log to fetch activities/itineraries
-    const logs = (await api("/travel/logs")) as Array<{ id: string; slug: string; name: string }>;
-    let trip: Record<string, unknown> | null = null;
-    let logId: string | null = null;
-    for (const log of logs) {
-      const trips = (await api(`/travel/trips?log=${log.id}`)) as Array<Record<string, unknown>>;
-      const found = trips.find((t) => t.id === id);
-      if (found) {
-        trip = found;
-        logId = log.id;
-        break;
-      }
-    }
-    if (!trip || !logId) {
-      return { content: [{ type: "text", text: `Trip "${id}" not found` }] };
-    }
+    // Get full trip details directly
+    const trip = (await api(`/travel/trips/${id}`)) as Record<string, unknown>;
+    const logId = trip.log as string;
+    // Fetch related activities and itineraries
     const [activities, itineraries] = await Promise.all([
       api(`/travel/activities?log=${logId}`) as Promise<Array<Record<string, unknown>>>,
       api(`/travel/itineraries?log=${logId}`) as Promise<Array<Record<string, unknown>>>,

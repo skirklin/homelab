@@ -209,8 +209,12 @@ dataRoutes.get("/travel/trips", handler(async (c) => {
   const pb = c.get("pb");
   const logId = c.req.query("log");
   if (!logId) return c.json({ error: "log query param required" }, 400);
+  const status = c.req.query("status"); // optional filter by status
 
-  const trips = await pb.collection("travel_trips").getFullList({ filter: pb.filter("log = {:logId}", { logId }) });
+  let filter = pb.filter("log = {:logId}", { logId });
+  if (status) filter += ` && status = "${status}"`;
+
+  const trips = await pb.collection("travel_trips").getFullList({ filter });
   return c.json(trips.map((t) => ({
     id: t.id,
     log: t.log,
@@ -219,8 +223,29 @@ dataRoutes.get("/travel/trips", handler(async (c) => {
     region: t.region,
     start_date: t.start_date,
     end_date: t.end_date,
-    notes: t.notes,
+    // Summary only — use GET /travel/trips/:id for full notes
+    notes_preview: t.notes ? t.notes.slice(0, 100) + (t.notes.length > 100 ? "..." : "") : "",
   })));
+}));
+
+// Get a single trip with full details
+dataRoutes.get("/travel/trips/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const t = await pb.collection("travel_trips").getOne(id);
+  return c.json({
+    id: t.id,
+    log: t.log,
+    destination: t.destination,
+    status: t.status,
+    region: t.region,
+    start_date: t.start_date,
+    end_date: t.end_date,
+    notes: t.notes,
+    flagged_for_review: t.flagged_for_review,
+    review_comment: t.review_comment,
+    checklist_done: t.checklist_done,
+  });
 }));
 
 // List activities in a travel log

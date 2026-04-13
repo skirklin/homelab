@@ -34,7 +34,8 @@
       "Bash(HOMELAB_API_TOKEN=\"hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\" API_BASE=\"https://api.beta.kirkl.in/fn\" /home/skirklin/.local/share/fnm/node-versions/v20.20.1/installation/bin/node --import tsx /home/skirklin/projects/homelab/services/api/src/mcp.ts)",
       "Bash(/home/skirklin/.local/share/fnm/node-versions/v20.20.1/installation/bin/npx tsx:*)",
       "mcp__homelab__list_travel_trips",
-      "mcp__homelab__get_travel_trip"
+      "mcp__homelab__get_travel_trip",
+      "mcp__homelab__update_travel_activity"
     ],
     "additionalDirectories": [
       "/home/skirklin/.config/money"
