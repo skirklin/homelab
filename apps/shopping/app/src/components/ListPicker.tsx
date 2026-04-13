@@ -22,6 +22,7 @@ export function ListPicker() {
   const userBackend = useUserBackend();
 
   const operations: ListOperations = {
+    collection: "shopping_lists",
     getUserSlugs: () => state.userSlugs,
     createList: async (name: string, slug: string, userId: string) => {
       const listId = await shopping.createList(name, userId);

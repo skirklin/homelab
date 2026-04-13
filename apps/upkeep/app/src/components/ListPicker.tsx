@@ -22,6 +22,7 @@ export function ListPicker() {
   const userBackend = useUserBackend();
 
   const operations: ListOperations = {
+    collection: "task_lists",
     getUserSlugs: () => state.userSlugs,
     createList: async (name: string, slug: string, userId: string) => {
       const listId = await upkeep.createList(name, userId);

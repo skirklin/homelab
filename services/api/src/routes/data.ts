@@ -380,6 +380,10 @@ dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
     category: record.category,
     location: record.location,
     description: record.description,
+    cost_notes: record.cost_notes,
+    duration_estimate: record.duration_estimate,
+    setting: record.setting,
+    rating: record.rating,
     trip_id: record.trip_id,
   });
 }));

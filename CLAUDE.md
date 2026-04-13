@@ -87,6 +87,23 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 **Sharing:**
 - `create_invite` — generate a sharing invite link
 
+### Activity field guide
+
+When creating or updating travel activities, fill in ALL relevant fields — don't put structured data in the description:
+
+| Field | Purpose | Examples |
+|---|---|---|
+| `name` | Short name. No "Overnight in" prefix for lodging. | `Desert Botanical Garden`, `SpringHill Suites Phoenix` |
+| `category` | Type of activity | `Attraction`, `Lodging`, `Transport`, `Food`, `Adventure`, `Culture` |
+| `location` | City or area | `Phoenix, AZ`, `Taos, NM` |
+| `description` | Brief qualifying note only — what makes this specific. NOT costs, durations, or logistics. | `Ancient Puebloan great houses, 650+ rooms. Unpaved road in.` |
+| `duration_estimate` | How long the activity takes (not including travel to/from) | `2h`, `half day`, `1.5h` |
+| `cost_notes` | Price info | `$25/person`, `Free`, `$15 parking` |
+| `setting` | Indoor/outdoor/both | `outdoor`, `indoor`, `both` |
+| `trip_id` | Which trip this belongs to | (record ID) |
+
+**Do not** put durations in the description. **Do not** prefix lodging names with "Overnight in". Use the actual hotel/property name.
+
 ### MCP auth
 Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (beta.kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.
 

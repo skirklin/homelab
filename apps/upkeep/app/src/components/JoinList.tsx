@@ -17,6 +17,7 @@ export function JoinList() {
   const userBackend = useUserBackend();
 
   const operations: ListOperations = {
+    collection: "task_lists",
     getUserSlugs: () => state.userSlugs,
     createList: async () => { throw new Error("Not implemented"); },
     setUserSlug: async (userId: string, slug: string, listId: string) => {
