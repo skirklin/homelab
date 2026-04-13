@@ -9,10 +9,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const API_BASE = process.env.API_BASE || "https://api.beta.kirkl.in/fn";
-const API_TOKEN = process.env.API_TOKEN || process.env.MCP_API_TOKEN || "";
+const API_TOKEN = process.env.HOMELAB_API_TOKEN || "";
 
 if (!API_TOKEN) {
-  console.error("API_TOKEN (or MCP_API_TOKEN) env var is required. Generate one in Settings → API Tokens.");
+  console.error("HOMELAB_API_TOKEN env var is required. Generate one in Settings → API Tokens.");
   process.exit(1);
 }
 
