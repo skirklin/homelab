@@ -169,14 +169,16 @@ dataRoutes.post("/boxes", handler(async (c) => {
 // Create a recipe in a box
 dataRoutes.post("/recipes", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const { boxId, data } = await c.req.json<{ boxId: string; data: Record<string, unknown> }>();
   if (!boxId || !data) return c.json({ error: "boxId and data required" }, 400);
 
   const record = await pb.collection("recipes").create({
     box: boxId,
     data,
+    owners: [userId],
     visibility: "private",
-    enrichment_status: "none",
+    enrichment_status: "needed",
   });
   return c.json({ id: record.id, name: (record.data as Record<string, unknown>)?.name }, 201);
 }));
