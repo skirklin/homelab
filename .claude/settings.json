@@ -45,7 +45,12 @@
       "Bash(curl -s \"https://api.beta.kirkl.in/fn/data/travel/activities?log=8c0mnnv4i0pi1m5&trip_id=1v5u3lq1ix226ex\" -H \"Authorization: Bearer hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\")",
       "Bash(curl -s \"https://api.beta.kirkl.in/api/collections/travel_activities\" -H \"Authorization: Bearer hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\")",
       "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) for f in data.get\\('fields', []\\): print\\(f'{f[\\\\\"name\\\\\"]:20} {f[\\\\\"type\\\\\"]}'\\)\")",
-      "Bash(ls /home/skirklin/projects/homelab/apps/shopping/app/playwright.config.*)"
+      "Bash(ls /home/skirklin/projects/homelab/apps/shopping/app/playwright.config.*)",
+      "Bash(VITE_PB_URL=http://127.0.0.1:8091 npx vite --port 5173)",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(curl -s http://127.0.0.1:3001/health)",
+      "Bash(pnpm --filter @homelab/travel typecheck)",
+      "Bash(chmod +x /home/skirklin/projects/homelab/infra/billing-cap/deploy.sh)"
     ],
     "additionalDirectories": [
       "/home/skirklin/.config/money"

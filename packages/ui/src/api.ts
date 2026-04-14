@@ -4,9 +4,14 @@
 import { getBackend } from "./backend";
 
 function getApiBase(): string {
-  const pbUrl = getBackend().baseURL;
-  // PB URL is https://api.beta.kirkl.in, API service is at /fn/
-  return pbUrl.replace(/\/$/, "") + "/fn";
+  const pbUrl = getBackend().baseURL.replace(/\/$/, "");
+  // In production, PB and API share a host (api.beta.kirkl.in/fn/).
+  // In dev, the vite dev server proxies /fn/ to the local API service.
+  const isLocalPb = pbUrl.includes("localhost") || pbUrl.includes("127.0.0.1");
+  if (isLocalPb && typeof window !== "undefined") {
+    return window.location.origin + "/fn";
+  }
+  return pbUrl + "/fn";
 }
 
 function getAuthHeaders(): Record<string, string> {

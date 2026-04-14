@@ -86,16 +86,33 @@ function MarkerDot({ color, isAccommodation }: { color: string; isAccommodation:
   );
 }
 
-// Route component — uses Routes API for driving routes, falls back to straight lines
+// Route component — uses Routes API with per-session caching.
+// Routes are cached by a hash of the coordinate path so each unique
+// route is only computed once per page view.
 export interface RouteInfo { durationMinutes: number; distanceMiles: number }
 
-function DayRoute({ path, color, onRouteComputed }: {
-  path: { lat: number; lng: number }[];
+// Module-level cache: pathKey → encoded polyline path or null (pending/failed)
+const routeCache = new Map<string, google.maps.LatLng[] | "pending" | "failed">();
+const routeInfoCache = new Map<string, RouteInfo>();
+
+function pathKey(path: { lat: number; lng: number }[]): string {
+  return path.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|");
+}
+
+function DayRoute({ pathCoords, color, onRouteComputed }: {
+  pathCoords: string; // stable string key from pathKey()
   color: string;
   onRouteComputed?: (info: RouteInfo) => void;
 }) {
   const map = useMap(MAP_ID);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
+  const path = useMemo(() =>
+    pathCoords.split("|").map((s) => {
+      const [lat, lng] = s.split(",").map(Number);
+      return { lat, lng };
+    }),
+    [pathCoords],
+  );
 
   useEffect(() => {
     if (!map || path.length < 2) return;
@@ -104,58 +121,86 @@ function DayRoute({ path, color, onRouteComputed }: {
     polylinesRef.current.forEach((p) => p.setMap(null));
     polylinesRef.current = [];
 
-    const origin = path[0];
-    const destination = path[path.length - 1];
-    const intermediates = path.slice(1, -1);
+    const key = pathCoords;
+    const cached = routeCache.get(key);
 
-    // Use the new Routes API (google.maps.routes.Route.computeRoutes)
-    // Types not yet in @types/google.maps, so use dynamic access
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const routesNs = (google.maps as any).routes;
-    if (!routesNs?.Route?.computeRoutes) {
-      drawFallback();
-      return;
+    if (cached === "pending") return; // another instance is computing this
+    if (cached === "failed" || !cached) {
+      if (cached === "failed") {
+        drawFallback();
+        return;
+      }
+
+      // Try the Routes API
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const routesNs = (google.maps as any).routes;
+      if (!routesNs?.Route?.computeRoutes) {
+        routeCache.set(key, "failed");
+        drawFallback();
+        return;
+      }
+
+      routeCache.set(key, "pending");
+
+      const origin = path[0];
+      const destination = path[path.length - 1];
+      const intermediates = path.slice(1, -1);
+
+      routesNs.Route.computeRoutes({
+        origin: new google.maps.LatLng(origin.lat, origin.lng),
+        destination: new google.maps.LatLng(destination.lat, destination.lng),
+        intermediates: intermediates.map((p) => new google.maps.LatLng(p.lat, p.lng)),
+        travelMode: "DRIVING",
+        fields: ["path", "durationMillis", "distanceMeters"],
+      })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .then(({ routes: computedRoutes }: { routes: any[] }) => {
+          if (computedRoutes?.[0]) {
+            const route = computedRoutes[0];
+            // Cache the decoded path
+            const routePolylines: google.maps.Polyline[] = route.createPolylines();
+            const allPoints: google.maps.LatLng[] = [];
+            routePolylines.forEach((pl: google.maps.Polyline) => {
+              allPoints.push(...pl.getPath().getArray());
+              pl.setMap(null); // clean up the auto-created polylines
+            });
+            routeCache.set(key, allPoints);
+
+            const info: RouteInfo = {
+              durationMinutes: Math.round((route.durationMillis ?? 0) / 60000),
+              distanceMiles: Math.round((route.distanceMeters ?? 0) / 1609),
+            };
+            routeInfoCache.set(key, info);
+
+            // Draw from cache
+            drawCached(allPoints);
+            onRouteComputed?.(info);
+          } else {
+            routeCache.set(key, "failed");
+            drawFallback();
+          }
+        })
+        .catch(() => {
+          routeCache.set(key, "failed");
+          drawFallback();
+        });
+    } else {
+      // Cache hit — draw the cached polyline
+      drawCached(cached);
+      const info = routeInfoCache.get(key);
+      if (info) onRouteComputed?.(info);
     }
 
-    const request = {
-      origin: new google.maps.LatLng(origin.lat, origin.lng),
-      destination: new google.maps.LatLng(destination.lat, destination.lng),
-      intermediates: intermediates.map((p) => new google.maps.LatLng(p.lat, p.lng)),
-      travelMode: "DRIVING",
-      fields: ["path", "durationMillis", "distanceMeters"],
-    };
-
-    routesNs.Route.computeRoutes(request)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .then(({ routes: computedRoutes }: { routes: any[] }) => {
-        if (computedRoutes && computedRoutes.length > 0) {
-          const route = computedRoutes[0];
-          const routePolylines: google.maps.Polyline[] = route.createPolylines();
-          routePolylines.forEach((polyline: google.maps.Polyline) => {
-            polyline.setOptions({
-              strokeColor: color,
-              strokeOpacity: 0.7,
-              strokeWeight: 4,
-            });
-            polyline.setMap(map);
-          });
-          polylinesRef.current = routePolylines;
-
-          if (onRouteComputed) {
-            const durationMs = route.durationMillis ?? 0;
-            const meters = route.distanceMeters ?? 0;
-            onRouteComputed({
-              durationMinutes: Math.round(durationMs / 60000),
-              distanceMiles: Math.round(meters / 1609),
-            });
-          }
-        } else {
-          drawFallback();
-        }
-      })
-      .catch(() => {
-        drawFallback();
+    function drawCached(points: google.maps.LatLng[]) {
+      const polyline = new google.maps.Polyline({
+        path: points,
+        strokeColor: color,
+        strokeOpacity: 0.7,
+        strokeWeight: 4,
+        map,
       });
+      polylinesRef.current = [polyline];
+    }
 
     function drawFallback() {
       const polyline = new google.maps.Polyline({
@@ -172,7 +217,7 @@ function DayRoute({ path, color, onRouteComputed }: {
     return () => {
       polylinesRef.current.forEach((p) => p.setMap(null));
     };
-  }, [map, path, color]);
+  }, [map, pathCoords, color]); // pathCoords is a stable string, not a new array
 
   return null;
 }
@@ -217,7 +262,7 @@ interface ItineraryMapProps {
   onRouteInfo?: (info: DayRouteInfo) => void;
 }
 
-export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onRouteInfo }: ItineraryMapProps) {
+export function ItineraryMap({ itinerary, activities, activityMap, focusDay }: ItineraryMapProps) {
   const selectedDay: number | "all" = focusDay != null ? focusDay : "all";
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
 
@@ -369,8 +414,8 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
                 ...(endCoord && startCoord && endCoord.lat === startCoord.lat && endCoord.lng === startCoord.lng ? [endCoord] : []),
               ];
 
-              return <DayRoute key={da.dayIndex} path={path} color={da.color}
-                onRouteComputed={onRouteInfo ? (info) => onRouteInfo({ [da.dayIndex]: info }) : undefined} />;
+              const coords = pathKey(path);
+              return <DayRoute key={da.dayIndex} pathCoords={coords} color={da.color} />;
             })}
 
             {/* Scheduled activity markers */}

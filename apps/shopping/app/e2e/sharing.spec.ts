@@ -33,22 +33,15 @@ test.describe("List sharing", () => {
     // Close the modal
     await page.keyboard.press("Escape");
 
-    // Sign out user A
-    await page.evaluate(() => {
-      const pb = (window as any).__pocketbase;
-      if (pb) pb.authStore.clear();
-      localStorage.clear();
-    });
-
-    // Navigate to join URL as user B
-    // Use a new page to avoid stale auth state
-    const page2 = await context.newPage();
-    await page2.goto(joinUrl);
-
-    // Sign in as user B
+    // Open a separate browser context for user B (clean session)
+    const context2 = await page.context().browser()!.newContext();
+    const page2 = await context2.newPage();
+    await page2.goto("http://localhost:5173/?pick=true");
     await signInAsUser2(page2);
+    await expect(page2.getByText("My Lists")).toBeVisible({ timeout: 10000 });
 
-    // Should see the join page with the list name
+    // Now navigate to the join URL
+    await page2.goto(joinUrl);
     await expect(page2.getByText(listName)).toBeVisible({ timeout: 10000 });
 
     // Click join button
