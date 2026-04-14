@@ -1,3 +1,4 @@
+import React from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Button,
@@ -19,6 +20,7 @@ import {
   DollarOutlined,
   SwapOutlined,
   UnorderedListOutlined,
+  CarOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useTravelBackend } from "@kirkl/shared";
@@ -227,6 +229,15 @@ const ExpandedSlotPhoto = styled.img`
   flex-shrink: 0;
 `;
 
+const DriveTimeBadge = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #8c8c8c;
+  padding: 2px 0 2px 60px;
+`;
+
 const HoverTooltip = styled.div`
   max-width: 250px;
   font-size: 12px;
@@ -367,10 +378,25 @@ function ItineraryTimeline({
             </ExpandedSlot>
           ))}
 
-          {day.slots.map((slot, j) => {
+          {day.slots.flatMap((slot, j) => {
             const activity = activityMap.get(slot.activityId);
             const actUrl = activity ? mapsUrl(activity) : null;
-            return (
+            const ri = routeInfo?.[focusDay];
+            // legs[0] = lodging→first activity, legs[1] = first→second, etc.
+            const leg = ri?.legs?.[j];
+            const elements: React.ReactNode[] = [];
+            if (leg && leg.durationMinutes > 0) {
+              elements.push(
+                <DriveTimeBadge key={`drive-${j}`}>
+                  <CarOutlined />
+                  {leg.durationMinutes < 60
+                    ? `${leg.durationMinutes} min`
+                    : `${(leg.durationMinutes / 60).toFixed(1)}h`}
+                  {leg.distanceMiles > 0 && ` (${leg.distanceMiles} mi)`}
+                </DriveTimeBadge>
+              );
+            }
+            elements.push(
               <ExpandedSlot key={j}>
                 <ExpandedSlotTime>{slot.startTime || ""}</ExpandedSlotTime>
                 {activity?.photoRef && (
@@ -411,7 +437,24 @@ function ItineraryTimeline({
                 </Space>
               </ExpandedSlot>
             );
+            return elements;
           })}
+          {/* Drive time to lodging after last activity */}
+          {(() => {
+            const ri = routeInfo?.[focusDay];
+            const lastLeg = ri?.legs?.[day.slots.length];
+            if (!lastLeg || lastLeg.durationMinutes <= 0) return null;
+            return (
+              <DriveTimeBadge>
+                <CarOutlined />
+                {lastLeg.durationMinutes < 60
+                  ? `${lastLeg.durationMinutes} min`
+                  : `${(lastLeg.durationMinutes / 60).toFixed(1)}h`}
+                {lastLeg.distanceMiles > 0 && ` (${lastLeg.distanceMiles} mi)`}
+                {" to lodging"}
+              </DriveTimeBadge>
+            );
+          })()}
         </ExpandedDay>
       </div>
     );

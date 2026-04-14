@@ -89,7 +89,8 @@ function MarkerDot({ color, isAccommodation }: { color: string; isAccommodation:
 // Route component — uses Routes API with per-session caching.
 // Routes are cached by a hash of the coordinate path so each unique
 // route is only computed once per page view.
-export interface RouteInfo { durationMinutes: number; distanceMiles: number }
+export interface LegInfo { durationMinutes: number; distanceMiles: number }
+export interface RouteInfo { durationMinutes: number; distanceMiles: number; legs: LegInfo[] }
 
 // Module-level cache: pathKey → encoded polyline path or null (pending/failed)
 const routeCache = new Map<string, google.maps.LatLng[] | "pending" | "failed">();
@@ -97,6 +98,34 @@ const routeInfoCache = new Map<string, RouteInfo>();
 
 function pathKey(path: { lat: number; lng: number }[]): string {
   return path.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|");
+}
+
+/** Haversine distance in miles between two points */
+function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 3959; // Earth radius in miles
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h = sinLat * sinLat + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * sinLng * sinLng;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/** Estimate route info from straight-line distances (1.3x detour factor, 45mph avg) */
+function estimateRouteInfo(path: { lat: number; lng: number }[]): RouteInfo {
+  const legs: LegInfo[] = [];
+  let totalMiles = 0;
+  for (let i = 1; i < path.length; i++) {
+    const miles = Math.round(haversineMiles(path[i - 1], path[i]) * 1.3);
+    const minutes = Math.round(miles / 45 * 60);
+    legs.push({ durationMinutes: minutes, distanceMiles: miles });
+    totalMiles += miles;
+  }
+  return {
+    durationMinutes: Math.round(totalMiles / 45 * 60),
+    distanceMiles: Math.round(totalMiles),
+    legs,
+  };
 }
 
 function DayRoute({ pathCoords, color, onRouteComputed }: {
@@ -125,9 +154,23 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
     const cached = routeCache.get(key);
 
     if (cached === "pending") return; // another instance is computing this
+
+    function failWithEstimate() {
+      routeCache.set(key, "failed");
+      drawFallback();
+      // Provide estimated route info from straight-line distances
+      if (!routeInfoCache.has(key)) {
+        const est = estimateRouteInfo(path);
+        routeInfoCache.set(key, est);
+        onRouteComputed?.(est);
+      }
+    }
+
     if (cached === "failed" || !cached) {
       if (cached === "failed") {
         drawFallback();
+        const info = routeInfoCache.get(key);
+        if (info) onRouteComputed?.(info);
         return;
       }
 
@@ -135,8 +178,7 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const routesNs = (google.maps as any).routes;
       if (!routesNs?.Route?.computeRoutes) {
-        routeCache.set(key, "failed");
-        drawFallback();
+        failWithEstimate();
         return;
       }
 
@@ -151,7 +193,7 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
         destination: new google.maps.LatLng(destination.lat, destination.lng),
         intermediates: intermediates.map((p) => new google.maps.LatLng(p.lat, p.lng)),
         travelMode: "DRIVING",
-        fields: ["path", "durationMillis", "distanceMeters"],
+        fields: ["path", "durationMillis", "distanceMeters", "legs"],
       })
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .then(({ routes: computedRoutes }: { routes: any[] }) => {
@@ -166,9 +208,15 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
             });
             routeCache.set(key, allPoints);
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const legs: LegInfo[] = (route.legs || []).map((leg: any) => ({
+              durationMinutes: Math.round((leg.durationMillis ?? 0) / 60000),
+              distanceMiles: Math.round((leg.distanceMeters ?? 0) / 1609),
+            }));
             const info: RouteInfo = {
               durationMinutes: Math.round((route.durationMillis ?? 0) / 60000),
               distanceMiles: Math.round((route.distanceMeters ?? 0) / 1609),
+              legs,
             };
             routeInfoCache.set(key, info);
 
@@ -176,13 +224,11 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
             drawCached(allPoints);
             onRouteComputed?.(info);
           } else {
-            routeCache.set(key, "failed");
-            drawFallback();
+            failWithEstimate();
           }
         })
         .catch(() => {
-          routeCache.set(key, "failed");
-          drawFallback();
+          failWithEstimate();
         });
     } else {
       // Cache hit — draw the cached polyline
@@ -262,7 +308,7 @@ interface ItineraryMapProps {
   onRouteInfo?: (info: DayRouteInfo) => void;
 }
 
-export function ItineraryMap({ itinerary, activities, activityMap, focusDay }: ItineraryMapProps) {
+export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onRouteInfo }: ItineraryMapProps) {
   const selectedDay: number | "all" = focusDay != null ? focusDay : "all";
   const [selectedActivity, setSelectedActivity] = useState<string | null>(null);
 
@@ -415,7 +461,8 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay }: I
               ];
 
               const coords = pathKey(path);
-              return <DayRoute key={da.dayIndex} pathCoords={coords} color={da.color} />;
+              return <DayRoute key={da.dayIndex} pathCoords={coords} color={da.color}
+                onRouteComputed={(info) => onRouteInfo?.({ [da.dayIndex]: info })} />;
             })}
 
             {/* Scheduled activity markers */}

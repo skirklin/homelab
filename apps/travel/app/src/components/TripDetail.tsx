@@ -35,7 +35,7 @@ import { TripChecklist } from "./TripChecklist";
 
 const TwoColumn = styled.div`
   display: grid;
-  grid-template-columns: 1fr 400px;
+  grid-template-columns: 400px 1fr;
   gap: 12px;
   align-items: start;
 
@@ -261,6 +261,19 @@ export function TripDetail() {
       )}
 
       <TwoColumn>
+        {/* Sticky map on the left */}
+        {hasMapData && activeItin && (
+          <StickyMap>
+            <ItineraryMap
+              itinerary={activeItin}
+              activities={activities}
+              activityMap={activityMap}
+              focusDay={focusDay}
+              onRouteInfo={(info) => setRouteInfo(prev => ({ ...prev, ...info }))}
+            />
+          </StickyMap>
+        )}
+
         <div>
           {/* Itinerary section */}
           {itineraries.length > 0 && (
@@ -334,19 +347,6 @@ export function TripDetail() {
             );
           })()}
         </div>
-
-        {/* Sticky map on the right */}
-        {hasMapData && activeItin && (
-          <StickyMap>
-            <ItineraryMap
-              itinerary={activeItin}
-              activities={activities}
-              activityMap={activityMap}
-              focusDay={focusDay}
-              onRouteInfo={(info) => setRouteInfo(prev => ({ ...prev, ...info }))}
-            />
-          </StickyMap>
-        )}
       </TwoColumn>
     </WideContainer>
   );
