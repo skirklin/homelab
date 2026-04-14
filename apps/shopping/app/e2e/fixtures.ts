@@ -1,6 +1,7 @@
 import { test as base, expect, type Page } from "@playwright/test";
 
 const TEST_EMAIL = "playwright@test.local";
+const TEST_EMAIL_2 = "playwright2@test.local";
 const TEST_PASSWORD = "testpassword123";
 
 /**
@@ -27,4 +28,13 @@ export const test = base.extend<{ authedPage: Page }>({
   },
 });
 
-export { expect, signIn };
+async function signInAsUser2(page: Page) {
+  await page.fill('[data-testid="email-input"]', TEST_EMAIL_2);
+  await page.fill('[data-testid="password-input"]', TEST_PASSWORD);
+  await page.click('[data-testid="email-sign-in"]');
+  await expect(page.locator('[data-testid="email-sign-in"]')).not.toBeVisible({
+    timeout: 10000,
+  });
+}
+
+export { expect, signIn, signInAsUser2 };

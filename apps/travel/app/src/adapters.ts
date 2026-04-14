@@ -53,7 +53,7 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     placeId: ba.placeId || "",
     lat: ba.lat ?? null,
     lng: ba.lng ?? null,
-    description: ba.notes || "",
+    description: ba.description || "",
     costNotes: ba.costNotes || "",
     durationEstimate: ba.durationEstimate || "",
     confirmationCode: ba.confirmationCode || "",
@@ -160,7 +160,7 @@ export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendA
     lat: activity.lat ?? undefined,
     lng: activity.lng ?? undefined,
     placeId: activity.placeId || undefined,
-    notes: activity.description || "",
+    description: activity.description || "",
     rating: activity.rating ?? undefined,
     tags: [],
     trip: activity.tripId,
@@ -198,7 +198,7 @@ export function activityUpdatesToBackend(fields: {
   if (fields.placeId !== undefined) updates.placeId = fields.placeId;
   if (fields.lat !== undefined) updates.lat = fields.lat;
   if (fields.lng !== undefined) updates.lng = fields.lng;
-  if (fields.description !== undefined) updates.notes = fields.description;
+  if (fields.description !== undefined) updates.description = fields.description;
   if (fields.costNotes !== undefined) updates.costNotes = fields.costNotes;
   if (fields.durationEstimate !== undefined) updates.durationEstimate = fields.durationEstimate;
   if (fields.confirmationCode !== undefined) updates.confirmationCode = fields.confirmationCode;

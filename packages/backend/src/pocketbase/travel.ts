@@ -33,7 +33,7 @@ function activityFromRecord(r: RecordModel): Activity {
   return {
     id: r.id, log: r.log, trip: r.trip_id || undefined, name: r.name || "",
     location: r.location || "", lat: r.lat, lng: r.lng, placeId: r.place_id,
-    notes: r.notes || "", rating: r.rating, tags: r.tags || [],
+    description: r.description || "", rating: r.rating, tags: r.tags || [],
     category: r.category || "", costNotes: r.cost_notes || "",
     durationEstimate: r.duration_estimate || "", confirmationCode: r.confirmation_code || "",
     details: r.details, setting: r.setting,
@@ -203,7 +203,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (a.lat !== undefined) d.lat = a.lat;
     if (a.lng !== undefined) d.lng = a.lng;
     if (a.placeId !== undefined) d.place_id = a.placeId;
-    if (a.notes !== undefined) d.notes = a.notes;
+    if (a.description !== undefined) d.description = a.description;
     if (a.rating !== undefined) d.rating = a.rating;
     if (a.tags !== undefined) d.tags = a.tags;
     if (a.category !== undefined) d.category = a.category;

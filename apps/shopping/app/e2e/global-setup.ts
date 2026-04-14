@@ -2,6 +2,7 @@ import PocketBase from "pocketbase";
 
 const PB_URL = process.env.PB_TEST_URL || "http://127.0.0.1:8091";
 const TEST_EMAIL = "playwright@test.local";
+const TEST_EMAIL_2 = "playwright2@test.local";
 const TEST_PASSWORD = "testpassword123";
 
 async function globalSetup() {
@@ -39,6 +40,24 @@ async function globalSetup() {
       password: TEST_PASSWORD,
       passwordConfirm: TEST_PASSWORD,
       name: "Playwright Test User",
+    });
+  }
+
+  // Create a second test user for sharing tests (idempotent)
+  try {
+    const existing = await pb.collection("users").getFirstListItem(
+      `email = "${TEST_EMAIL_2}"`
+    );
+    await pb.collection("users").update(existing.id, {
+      password: TEST_PASSWORD,
+      passwordConfirm: TEST_PASSWORD,
+    });
+  } catch {
+    await pb.collection("users").create({
+      email: TEST_EMAIL_2,
+      password: TEST_PASSWORD,
+      passwordConfirm: TEST_PASSWORD,
+      name: "Playwright Test User 2",
     });
   }
 

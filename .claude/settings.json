@@ -41,7 +41,11 @@
       "Bash(HOMELAB_API_TOKEN=\"hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\" API_BASE=\"https://api.beta.kirkl.in/fn\" /home/skirklin/projects/homelab/services/api/run-mcp.sh)",
       "Bash(/home/skirklin/projects/homelab/infra/deploy.sh travel:*)",
       "Bash(grep -n \"AddToShoppingModal\\\\|shopping\\\\|Shop\" /home/skirklin/projects/homelab/apps/recipes/app/src/RecipeCard/*.tsx)",
-      "mcp__homelab__search_travel"
+      "mcp__homelab__search_travel",
+      "Bash(curl -s \"https://api.beta.kirkl.in/fn/data/travel/activities?log=8c0mnnv4i0pi1m5&trip_id=1v5u3lq1ix226ex\" -H \"Authorization: Bearer hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\")",
+      "Bash(curl -s \"https://api.beta.kirkl.in/api/collections/travel_activities\" -H \"Authorization: Bearer hlk_v7cbZWvl2QgBX5DcVY5YfXR599qv2zfOcMQ4bpCEoy8\")",
+      "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) for f in data.get\\('fields', []\\): print\\(f'{f[\\\\\"name\\\\\"]:20} {f[\\\\\"type\\\\\"]}'\\)\")",
+      "Bash(ls /home/skirklin/projects/homelab/apps/shopping/app/playwright.config.*)"
     ],
     "additionalDirectories": [
       "/home/skirklin/.config/money"

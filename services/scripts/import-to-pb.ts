@@ -574,7 +574,7 @@ async function importTravel() {
             lat: act.lat,
             lng: act.lng,
             placeId: act.placeId,
-            notes: act.description || act.notes || "",
+            description: act.description || act.notes || "",
             rating: act.rating,
             tags: act.tags || [],
             category: act.category,

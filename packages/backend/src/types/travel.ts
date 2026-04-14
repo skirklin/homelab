@@ -48,7 +48,7 @@ export interface Activity {
   lat?: number;
   lng?: number;
   placeId?: string;
-  notes: string;
+  description: string;
   rating?: number;
   tags: string[];
   category: string;
