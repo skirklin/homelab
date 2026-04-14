@@ -521,7 +521,7 @@ export function JoinList({ config, operations }: JoinListProps) {
       await joinListApi(operations.collection, listId);
       // Save the user's slug mapping
       await operations.setUserSlug(user.uid, cleanSlug, listId);
-      navigate(cleanSlug);
+      navigate("/" + cleanSlug);
     } catch (err) {
       console.error("[JoinList] Failed to join list:", err);
       const errorMessage = err instanceof Error ? err.message : String(err);

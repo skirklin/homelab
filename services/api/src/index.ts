@@ -43,6 +43,21 @@ app.get("/push/vapid-key", (c) => {
   if (!key) return c.json({ error: "VAPID keys not configured" }, 503);
   return c.json({ publicKey: key });
 });
+// List info for join flow — needs to work before user is an owner
+app.get("/sharing/list-info/:collection/:listId", async (c) => {
+  const { getAdminPb } = await import("./lib/pb");
+  const collection = c.req.param("collection") ?? "";
+  const listId = c.req.param("listId") ?? "";
+  const allowed = ["shopping_lists", "task_lists", "life_logs"];
+  if (!allowed.includes(collection)) return c.json({ error: "Invalid collection" }, 400);
+  try {
+    const pb = await getAdminPb();
+    const record = await pb.collection(collection).getOne(listId, { $autoCancel: false });
+    return c.json({ id: record.id, name: record.name });
+  } catch {
+    return c.json({ error: "List not found" }, 404);
+  }
+});
 
 // All other routes require auth
 app.use("*", authMiddleware);

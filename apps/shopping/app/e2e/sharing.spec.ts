@@ -47,7 +47,7 @@ test.describe("List sharing", () => {
     // Click join button
     await page2.getByRole("button", { name: /Add to My Lists/i }).click();
 
-    // Should navigate to the list view (combobox for adding items appears)
+    // Should see the list view with the add-item input
     await expect(page2.getByRole("combobox")).toBeVisible({ timeout: 10000 });
   });
 });
