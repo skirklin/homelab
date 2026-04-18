@@ -99,11 +99,16 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
         await upkeep.addTask(listId, {
           name: name.trim(),
           description: description.trim(),
-          roomId: "general",
+          parentId: "",
+          position: 0,
+          taskType: "recurring",
           frequency,
           lastCompleted: null,
+          completed: false,
           snoozedUntil: null,
           notifyUsers: [],
+          tags: [],
+          collapsed: false,
         });
         message.success("Task added");
       }

@@ -6,7 +6,7 @@ import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
-import { UpkeepProvider, UpkeepRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
+import { UpkeepProvider, UpkeepRoutes, TasksRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
@@ -46,6 +46,7 @@ function AuthenticatedRoutes() {
         <Route path="/recipes/*" element={<RecipesRoutes embedded />} />
         <Route path="/travel/*" element={<TravelRoutes embedded />} />
         <Route path="/upkeep/*" element={<UpkeepRoutes embedded />} />
+        <Route path="/tasks/*" element={<TasksRoutes embedded />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,10 +1,10 @@
 /**
- * Upkeep (household tasks) backend interface.
+ * Unified task system backend interface.
  *
- * Covers: task lists, tasks, completions, notification preferences.
+ * Covers: task lists, tree-structured tasks, completions, notification preferences.
  */
 import type { Unsubscribe } from "../types/common";
-import type { TaskList, Task, RoomDef, TaskCompletion } from "../types/upkeep";
+import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
 
 export interface UpkeepBackend {
   // --- List CRUD ---
@@ -14,22 +14,40 @@ export interface UpkeepBackend {
   deleteList(listId: string): Promise<void>;
   getList(listId: string): Promise<TaskList | null>;
 
-  // --- Rooms ---
+  // --- Task CRUD (tree-aware) ---
 
-  updateRooms(listId: string, rooms: RoomDef[]): Promise<void>;
-
-  // --- Task CRUD ---
-
-  addTask(listId: string, task: Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">): Promise<string>;
-  updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">>): Promise<void>;
+  addTask(
+    listId: string,
+    task: Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">,
+  ): Promise<string>;
+  updateTask(
+    taskId: string,
+    updates: Partial<Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">>,
+  ): Promise<void>;
   deleteTask(taskId: string): Promise<void>;
+  moveTask(taskId: string, newParentId: string | null, position: number): Promise<void>;
 
   // --- Task actions ---
 
   snoozeTask(taskId: string, until: Date): Promise<void>;
   unsnoozeTask(taskId: string): Promise<void>;
+  /** Mark a recurring task as completed (creates a task_event, updates last_completed). */
   completeTask(taskId: string, userId: string, options?: { notes?: string; completedAt?: Date }): Promise<void>;
+  /** Toggle a one-shot task's completed boolean. */
+  toggleComplete(taskId: string): Promise<void>;
   toggleTaskNotification(taskId: string, userId: string, enable: boolean): Promise<void>;
+  /** Toggle the collapsed state (expand/collapse children in outliner). */
+  toggleCollapsed(taskId: string): Promise<void>;
+
+  // --- Tree queries ---
+
+  getSubtree(rootTaskId: string): Promise<Task[]>;
+  getTasksByTag(listId: string, tag: string): Promise<Task[]>;
+
+  // --- Templates ---
+
+  /** Deep-copy a template subtree, applying the given tags to all copies. Returns new root ID. */
+  instantiateTemplate(templateRootId: string, tags: string[]): Promise<string>;
 
   // --- Completion history ---
 
@@ -40,7 +58,7 @@ export interface UpkeepBackend {
 
   /**
    * Subscribe to all data for a task list.
-   * Callbacks receive full current state on initial load and after every change.
+   * Returns flat Task[] — frontend builds tree from parentId + position.
    */
   subscribeToList(
     listId: string,

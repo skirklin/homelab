@@ -6,6 +6,7 @@ import {
   ExperimentOutlined,
   ShoppingCartOutlined,
   CheckSquareOutlined,
+  UnorderedListOutlined,
   CompassOutlined,
   LogoutOutlined,
   BookOutlined,
@@ -126,7 +127,7 @@ export function Shell() {
 
   // Save current path per module so we can restore it when switching back
   useEffect(() => {
-    const subApps = ["/life", "/shopping", "/recipes", "/travel", "/upkeep"];
+    const subApps = ["/life", "/shopping", "/recipes", "/travel", "/upkeep", "/tasks"];
     for (const app of subApps) {
       if (location.pathname.startsWith(app)) {
         localStorage.setItem(LAST_PATH_KEY, location.pathname);
@@ -180,6 +181,13 @@ export function Shell() {
           >
             <NavIcon $active={isActive("/travel")}><CompassOutlined /></NavIcon>
             <span className="nav-label">Travel</span>
+          </NavButton>
+          <NavButton
+            $active={isActive("/tasks")}
+            onClick={() => goTo("/tasks")}
+          >
+            <NavIcon $active={isActive("/tasks")}><UnorderedListOutlined /></NavIcon>
+            <span className="nav-label">Tasks</span>
           </NavButton>
           <NavButton
             $active={isActive("/upkeep")}

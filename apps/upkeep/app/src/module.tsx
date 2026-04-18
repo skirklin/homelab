@@ -7,6 +7,7 @@ import { useAuth } from "@kirkl/shared";
 import { BackendProvider } from "@kirkl/shared";
 import { UpkeepProvider } from "./upkeep-context";
 import { TaskBoard } from "./components/TaskBoard";
+import { TaskOutliner } from "./components/TaskOutliner";
 import { ListPicker } from "./components/ListPicker";
 import { JoinList } from "./components/JoinList";
 // Storage is imported to trigger legacy key migration on startup
@@ -27,6 +28,20 @@ export function UpkeepRoutes({ embedded = false }: UpkeepRoutesProps) {
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
       <Route path="/:slug" element={<TaskBoard embedded={embedded} />} />
+    </Routes>
+  );
+}
+
+/** Tasks module — outliner view on the same data as upkeep. Mounted at /tasks/* */
+export function TasksRoutes({ embedded = false }: UpkeepRoutesProps) {
+  const { user } = useAuth();
+
+  if (!user) return null;
+
+  return (
+    <Routes>
+      <Route path="/" element={<ListPicker />} />
+      <Route path="/:slug" element={<TaskOutliner embedded={embedded} />} />
     </Routes>
   );
 }

@@ -1,4 +1,4 @@
-/** Upkeep (household tasks) domain types */
+/** Upkeep / unified task system domain types */
 
 import type { Event } from "./common";
 
@@ -6,15 +6,8 @@ export interface TaskList {
   id: string;
   name: string;
   owners: string[];
-  rooms: RoomDef[];
   created: string;
   updated: string;
-}
-
-export interface RoomDef {
-  id: string;
-  name: string;
-  icon?: string;
 }
 
 export interface Frequency {
@@ -22,17 +15,25 @@ export interface Frequency {
   unit: "days" | "weeks" | "months";
 }
 
+export type TaskType = "recurring" | "one_shot";
+
 export interface Task {
   id: string;
   list: string;
+  parentId: string;
+  path: string;
+  position: number;
   name: string;
   description: string;
-  roomId: string;
+  taskType: TaskType;
   frequency: Frequency;
   lastCompleted: Date | null;
+  completed: boolean;
   snoozedUntil: Date | null;
   notifyUsers: string[];
   createdBy: string;
+  tags: string[];
+  collapsed: boolean;
   created: string;
   updated: string;
 }

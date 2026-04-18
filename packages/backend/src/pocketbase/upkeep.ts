@@ -1,10 +1,10 @@
 /**
- * PocketBase implementation of UpkeepBackend.
+ * PocketBase implementation of UpkeepBackend (unified task system).
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { UpkeepBackend } from "../interfaces/upkeep";
-import type { TaskList, Task, RoomDef, TaskCompletion } from "../types/upkeep";
+import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
 import type { Unsubscribe } from "../types/common";
 
 // --- Pagination limits ---
@@ -16,7 +16,6 @@ function listFromRecord(r: RecordModel): TaskList {
     id: r.id,
     name: r.name || "",
     owners: Array.isArray(r.owners) ? r.owners : [],
-    rooms: Array.isArray(r.room_defs) ? r.room_defs : [],
     created: r.created,
     updated: r.updated,
   };
@@ -26,14 +25,20 @@ function taskFromRecord(r: RecordModel): Task {
   return {
     id: r.id,
     list: r.list,
+    parentId: r.parent_id || "",
+    path: r.path || r.id,
+    position: r.position ?? 0,
     name: r.name || "",
     description: r.description || "",
-    roomId: r.room_id || "",
+    taskType: r.task_type || "recurring",
     frequency: r.frequency || 0,
     lastCompleted: r.last_completed ? new Date(r.last_completed) : null,
+    completed: !!r.completed,
     snoozedUntil: r.snoozed_until ? new Date(r.snoozed_until) : null,
     notifyUsers: Array.isArray(r.notify_users) ? r.notify_users : [],
     createdBy: r.created_by || "",
+    tags: Array.isArray(r.tags) ? r.tags : [],
+    collapsed: !!r.collapsed,
     created: r.created,
     updated: r.updated,
   };
@@ -57,7 +62,6 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     const list = await this.pb().collection("task_lists").create({
       name,
       owners: [userId],
-      room_defs: [],
     }, { $autoCancel: false });
     return list.id;
   }
@@ -78,38 +82,103 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     }
   }
 
-  async updateRooms(listId: string, rooms: RoomDef[]): Promise<void> {
-    await this.pb().collection("task_lists").update(listId, { room_defs: rooms });
-  }
-
-  async addTask(listId: string, task: Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">): Promise<string> {
+  async addTask(
+    listId: string,
+    task: Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">,
+  ): Promise<string> {
+    // Create the record first to get an ID, then set the path
     const record = await this.pb().collection("tasks").create({
       list: listId,
+      parent_id: task.parentId || "",
+      path: "", // placeholder, set below
+      position: task.position ?? 0,
       name: task.name,
-      description: task.description,
-      room_id: task.roomId,
+      description: task.description || "",
+      task_type: task.taskType || "recurring",
       frequency: task.frequency,
       last_completed: task.lastCompleted?.toISOString() || null,
+      completed: task.completed || false,
       snoozed_until: null,
       notify_users: task.notifyUsers || [],
+      tags: task.tags || [],
+      collapsed: false,
     });
+
+    // Build path: parent's path + "/" + own ID, or just own ID for root
+    let path = record.id;
+    if (task.parentId) {
+      const parent = await this.pb().collection("tasks").getOne(task.parentId);
+      path = `${parent.path}/${record.id}`;
+    }
+    await this.pb().collection("tasks").update(record.id, { path });
+
     return record.id;
   }
 
-  async updateTask(taskId: string, updates: Partial<Omit<Task, "id" | "list" | "created" | "updated" | "createdBy">>): Promise<void> {
+  async updateTask(
+    taskId: string,
+    updates: Partial<Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">>,
+  ): Promise<void> {
     const data: Record<string, unknown> = {};
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.description !== undefined) data.description = updates.description;
-    if (updates.roomId !== undefined) data.room_id = updates.roomId;
+    if (updates.taskType !== undefined) data.task_type = updates.taskType;
     if (updates.frequency !== undefined) data.frequency = updates.frequency;
     if (updates.lastCompleted !== undefined) data.last_completed = updates.lastCompleted?.toISOString() || null;
+    if (updates.completed !== undefined) data.completed = updates.completed;
     if (updates.snoozedUntil !== undefined) data.snoozed_until = updates.snoozedUntil?.toISOString() || null;
     if (updates.notifyUsers !== undefined) data.notify_users = updates.notifyUsers;
+    if (updates.tags !== undefined) data.tags = updates.tags;
+    if (updates.collapsed !== undefined) data.collapsed = updates.collapsed;
+    if (updates.position !== undefined) data.position = updates.position;
+    if (updates.parentId !== undefined) data.parent_id = updates.parentId;
     await this.pb().collection("tasks").update(taskId, data);
   }
 
   async deleteTask(taskId: string): Promise<void> {
+    // Delete the task and all descendants (by path prefix)
+    const task = await this.pb().collection("tasks").getOne(taskId);
+    const descendants = await this.pb().collection("tasks").getFullList({
+      filter: this.pb().filter("path ~ {:prefix}", { prefix: `${task.path}/%` }),
+      $autoCancel: false,
+    });
+    // Delete children first (deepest first to avoid cascade issues)
+    descendants.sort((a, b) => b.path.length - a.path.length);
+    for (const d of descendants) {
+      await this.pb().collection("tasks").delete(d.id);
+    }
     await this.pb().collection("tasks").delete(taskId);
+  }
+
+  async moveTask(taskId: string, newParentId: string | null, position: number): Promise<void> {
+    const task = await this.pb().collection("tasks").getOne(taskId);
+    const oldPath = task.path;
+
+    // Compute new path
+    let newPath: string;
+    if (newParentId) {
+      const parent = await this.pb().collection("tasks").getOne(newParentId);
+      newPath = `${parent.path}/${taskId}`;
+    } else {
+      newPath = taskId;
+    }
+
+    // Update the task itself
+    await this.pb().collection("tasks").update(taskId, {
+      parent_id: newParentId || "",
+      path: newPath,
+      position,
+    });
+
+    // Update all descendants' paths (swap prefix)
+    const descendants = await this.pb().collection("tasks").getFullList({
+      filter: this.pb().filter("path ~ {:prefix}", { prefix: `${oldPath}/%` }),
+      $autoCancel: false,
+    });
+    for (const d of descendants) {
+      const updatedPath = newPath + d.path.slice(oldPath.length);
+      await this.pb().collection("tasks").update(d.id, { path: updatedPath });
+    }
   }
 
   async snoozeTask(taskId: string, until: Date): Promise<void> {
@@ -132,12 +201,70 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     });
   }
 
+  async toggleComplete(taskId: string): Promise<void> {
+    const task = await this.pb().collection("tasks").getOne(taskId);
+    await this.pb().collection("tasks").update(taskId, { completed: !task.completed });
+  }
+
   async toggleTaskNotification(taskId: string, userId: string, enable: boolean): Promise<void> {
     if (enable) {
       await this.pb().collection("tasks").update(taskId, { "notify_users+": userId });
     } else {
       await this.pb().collection("tasks").update(taskId, { "notify_users-": userId });
     }
+  }
+
+  async toggleCollapsed(taskId: string): Promise<void> {
+    const task = await this.pb().collection("tasks").getOne(taskId);
+    await this.pb().collection("tasks").update(taskId, { collapsed: !task.collapsed });
+  }
+
+  async getSubtree(rootTaskId: string): Promise<Task[]> {
+    const root = await this.pb().collection("tasks").getOne(rootTaskId);
+    const descendants = await this.pb().collection("tasks").getFullList({
+      filter: this.pb().filter("path ~ {:prefix}", { prefix: `${root.path}/%` }),
+      $autoCancel: false,
+    });
+    return [root, ...descendants].map(taskFromRecord);
+  }
+
+  async getTasksByTag(listId: string, tag: string): Promise<Task[]> {
+    const records = await this.pb().collection("tasks").getFullList({
+      filter: this.pb().filter("list = {:listId} && tags ~ {:tag}", { listId, tag }),
+      $autoCancel: false,
+    });
+    return records.map(taskFromRecord);
+  }
+
+  async instantiateTemplate(templateRootId: string, tags: string[]): Promise<string> {
+    // Get the full template subtree
+    const subtree = await this.getSubtree(templateRootId);
+    // Sort by path length (parents first)
+    subtree.sort((a, b) => a.path.length - b.path.length);
+
+    // Map old IDs to new IDs
+    const idMap = new Map<string, string>();
+
+    for (const task of subtree) {
+      const newParentId = task.parentId ? (idMap.get(task.parentId) || "") : "";
+      const newId = await this.addTask(task.list, {
+        parentId: newParentId,
+        position: task.position,
+        name: task.name,
+        description: task.description,
+        taskType: task.taskType,
+        frequency: task.frequency,
+        lastCompleted: null,
+        completed: false,
+        snoozedUntil: null,
+        notifyUsers: [],
+        tags: tags.filter((t) => !t.startsWith("template:")), // apply target tags, strip template tags
+        collapsed: task.collapsed,
+      });
+      idMap.set(task.id, newId);
+    }
+
+    return idMap.get(subtree[0].id)!;
   }
 
   async updateCompletion(eventId: string, updates: { notes?: string; timestamp?: Date }): Promise<void> {

@@ -20,7 +20,7 @@ export type {
   RecipeBox, Recipe, RecipeData, RecipeInstruction, EnrichmentStatus,
   PendingChanges, CookingLogEvent,
 } from "./types/recipes";
-export type { TaskList, Task, RoomDef, TaskCompletion, Frequency } from "./types/upkeep";
+export type { TaskList, Task, TaskCompletion, Frequency, TaskType } from "./types/upkeep";
 export type {
   TravelLog, Trip, Activity, Itinerary, ItineraryDay,
   ActivitySlot, FlightSlot, ChecklistTemplate, ChecklistItem,
