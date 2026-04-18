@@ -69,8 +69,6 @@ export async function authMiddleware(c: Context, next: Next) {
       if (record.expires_at && new Date(record.expires_at) < new Date()) {
         return c.json({ error: "API token expired" }, 401);
       }
-
-      // Look up the user
       const user = await adminPb.collection("users").getOne(record.user);
 
       // Update last_used (fire and forget)
@@ -94,7 +92,8 @@ export async function authMiddleware(c: Context, next: Next) {
       c.set("isApiKey", true);
       c.set("pb", adminPb);
       return next();
-    } catch {
+    } catch (err) {
+      console.error("[auth] API token validation failed:", err instanceof Error ? err.message : err);
       return c.json({ error: "Invalid API token" }, 401);
     }
   }
@@ -120,7 +119,8 @@ export async function authMiddleware(c: Context, next: Next) {
     c.set("isApiKey", false);
     c.set("pb", userClient(token));
     return next();
-  } catch {
+  } catch (err) {
+    console.error("[auth] PB token validation failed:", err instanceof Error ? err.message : err);
     return c.json({ error: "Invalid or expired token" }, 401);
   }
 }
