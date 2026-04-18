@@ -11,16 +11,25 @@ import { useUpkeepBackend } from "@kirkl/shared";
 import { formatDueDate, formatFrequency, isTaskSnoozed, formatSnoozeRemaining } from "../types";
 import type { TaskNode } from "../types";
 
-const Row = styled.div<{ $depth: number; $focused: boolean; $dragging: boolean }>`
+type DropZone = "before" | "inside" | "after" | null;
+
+const Row = styled.div<{ $depth: number; $focused: boolean; $dragging: boolean; $dropZone: DropZone }>`
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 4px 8px 4px ${(p) => 8 + p.$depth * 24}px;
   min-height: 32px;
-  background: ${(p) => (p.$dragging ? "#e6f4ff" : p.$focused ? "#f0f5ff" : "transparent")};
+  background: ${(p) => {
+    if (p.$dragging) return "#e6f4ff";
+    if (p.$dropZone === "inside") return "#e6f4ff";
+    if (p.$focused) return "#f0f5ff";
+    return "transparent";
+  }};
   border-radius: 4px;
   cursor: pointer;
   opacity: ${(p) => (p.$dragging ? 0.5 : 1)};
+  border-top: ${(p) => (p.$dropZone === "before" ? "2px solid #1677ff" : "2px solid transparent")};
+  border-bottom: ${(p) => (p.$dropZone === "after" ? "2px solid #1677ff" : "2px solid transparent")};
 
   &:hover {
     background: ${(p) => (p.$focused ? "#f0f5ff" : "#fafafa")};
@@ -133,6 +142,7 @@ export function OutlinerRow({
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.name);
   const [dragging, setDragging] = useState(false);
+  const [dropZone, setDropZone] = useState<DropZone>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasChildren = children.length > 0;
   const isFocused = focusedId === task.id;
@@ -221,22 +231,45 @@ export function OutlinerRow({
     setDragging(false);
   }, []);
 
+  const getDropZone = useCallback((e: React.DragEvent): DropZone => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const third = rect.height / 3;
+    if (y < third) return "before";
+    if (y > third * 2) return "after";
+    return "inside";
+  }, []);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
+    setDropZone(getDropZone(e));
+  }, [getDropZone]);
+
+  const handleDragLeave = useCallback(() => {
+    setDropZone(null);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const draggedId = e.dataTransfer.getData("text/plain");
-    if (draggedId && draggedId !== task.id) {
-      // Drop as sibling after this task
-      onAddSibling(task.id, task.parentId);
-      // Actually we need a move operation, not add. Use the parent's onMoveAfter
-      // For now, the drag just triggers a reparent to same parent, positioned after this task
+    const zone = getDropZone(e);
+    setDropZone(null);
+    if (!draggedId || draggedId === task.id) return;
+
+    // Prevent dropping a parent into its own subtree
+    if (task.path.includes(draggedId)) return;
+
+    if (zone === "inside") {
+      // Drop as first child of this task
+      upkeep.moveTask(draggedId, task.id, 0);
+      if (task.collapsed) upkeep.toggleCollapsed(task.id);
+    } else if (zone === "before") {
+      upkeep.moveTask(draggedId, task.parentId || null, task.position - 0.5);
+    } else {
       upkeep.moveTask(draggedId, task.parentId || null, task.position + 0.5);
     }
-  }, [task.id, task.parentId, task.position, upkeep, onAddSibling]);
+  }, [task.id, task.parentId, task.position, task.path, task.collapsed, upkeep, getDropZone]);
 
   return (
     <>
@@ -244,10 +277,12 @@ export function OutlinerRow({
         $depth={depth}
         $focused={isFocused}
         $dragging={dragging}
+        $dropZone={dropZone}
         onClick={() => onFocus(task.id)}
         onDoubleClick={() => { setEditValue(task.name); setEditing(true); }}
         onKeyDown={handleKeyDown}
         onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         tabIndex={0}
         data-task-id={task.id}
