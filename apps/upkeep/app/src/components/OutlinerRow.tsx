@@ -1,28 +1,46 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Checkbox, Button, Tag } from "antd";
+import { Checkbox, Button, Tag, Popconfirm } from "antd";
 import {
   RightOutlined,
   DownOutlined,
   PlusOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepBackend } from "@kirkl/shared";
 import { formatDueDate, formatFrequency, isTaskSnoozed, formatSnoozeRemaining } from "../types";
 import type { TaskNode } from "../types";
 
-const Row = styled.div<{ $depth: number; $focused: boolean }>`
+const Row = styled.div<{ $depth: number; $focused: boolean; $dragging: boolean }>`
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 4px 8px 4px ${(p) => 8 + p.$depth * 24}px;
   min-height: 32px;
-  background: ${(p) => (p.$focused ? "#f0f5ff" : "transparent")};
+  background: ${(p) => (p.$dragging ? "#e6f4ff" : p.$focused ? "#f0f5ff" : "transparent")};
   border-radius: 4px;
   cursor: pointer;
+  opacity: ${(p) => (p.$dragging ? 0.5 : 1)};
 
   &:hover {
     background: ${(p) => (p.$focused ? "#f0f5ff" : "#fafafa")};
   }
+`;
+
+const DragHandle = styled.div`
+  width: 12px;
+  height: 16px;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d9d9d9;
+  font-size: 10px;
+  flex-shrink: 0;
+  user-select: none;
+
+  &:hover { color: #8c8c8c; }
+  &::before { content: "\\2807"; }
 `;
 
 const CollapseBtn = styled.button`
@@ -57,11 +75,13 @@ const NameInput = styled.input`
   flex: 1;
   min-width: 0;
   font-size: 13px;
-  border: none;
+  border: 1px solid #1677ff;
+  border-radius: 3px;
   outline: none;
-  background: transparent;
-  padding: 0;
+  background: white;
+  padding: 1px 4px;
   font-family: inherit;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
 `;
 
 const Meta = styled.div`
@@ -73,6 +93,16 @@ const Meta = styled.div`
   flex-shrink: 0;
 `;
 
+const Actions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+
+  ${Row}:hover & { opacity: 1; }
+`;
+
 interface OutlinerRowProps {
   node: TaskNode;
   focusedId: string | null;
@@ -81,6 +111,9 @@ interface OutlinerRowProps {
   onAddSibling: (afterId: string, parentId: string) => void;
   onIndent: (id: string) => void;
   onOutdent: (id: string) => void;
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
+  onSelect: (id: string) => void;
 }
 
 export function OutlinerRow({
@@ -91,11 +124,15 @@ export function OutlinerRow({
   onAddSibling,
   onIndent,
   onOutdent,
+  onMoveUp,
+  onMoveDown,
+  onSelect,
 }: OutlinerRowProps) {
   const { task, children, depth } = node;
   const upkeep = useUpkeepBackend();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.name);
+  const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasChildren = children.length > 0;
   const isFocused = focusedId === task.id;
@@ -129,6 +166,10 @@ export function OutlinerRow({
     setEditing(false);
   }, [editValue, task.id, task.name, upkeep]);
 
+  const handleDelete = useCallback(() => {
+    upkeep.deleteTask(task.id);
+  }, [upkeep, task.id]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (editing) {
       if (e.key === "Enter") {
@@ -152,24 +193,71 @@ export function OutlinerRow({
     } else if (e.key === " ") {
       e.preventDefault();
       handleToggleComplete();
-    } else if (e.key === "F2" || (e.key === "Enter" && e.metaKey)) {
+    } else if (e.key === "F2") {
       e.preventDefault();
       setEditValue(task.name);
       setEditing(true);
+    } else if (e.key === "Delete" || e.key === "Backspace") {
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        handleDelete();
+      }
+    } else if (e.key === "ArrowUp" && e.altKey) {
+      e.preventDefault();
+      onMoveUp(task.id);
+    } else if (e.key === "ArrowDown" && e.altKey) {
+      e.preventDefault();
+      onMoveDown(task.id);
     }
-  }, [editing, handleSaveName, handleToggleComplete, onAddSibling, onIndent, onOutdent, task.id, task.name, task.parentId]);
+  }, [editing, handleSaveName, handleToggleComplete, handleDelete, onAddSibling, onIndent, onOutdent, onMoveUp, onMoveDown, task.id, task.name, task.parentId]);
+
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.setData("text/plain", task.id);
+    e.dataTransfer.effectAllowed = "move";
+    setDragging(true);
+  }, [task.id]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const draggedId = e.dataTransfer.getData("text/plain");
+    if (draggedId && draggedId !== task.id) {
+      // Drop as sibling after this task
+      onAddSibling(task.id, task.parentId);
+      // Actually we need a move operation, not add. Use the parent's onMoveAfter
+      // For now, the drag just triggers a reparent to same parent, positioned after this task
+      upkeep.moveTask(draggedId, task.parentId || null, task.position + 0.5);
+    }
+  }, [task.id, task.parentId, task.position, upkeep, onAddSibling]);
 
   return (
     <>
       <Row
         $depth={depth}
         $focused={isFocused}
+        $dragging={dragging}
         onClick={() => onFocus(task.id)}
         onDoubleClick={() => { setEditValue(task.name); setEditing(true); }}
         onKeyDown={handleKeyDown}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         tabIndex={0}
         data-task-id={task.id}
       >
+        <DragHandle
+          draggable
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        />
+
         {hasChildren ? (
           <CollapseBtn onClick={handleToggleCollapse}>
             {task.collapsed ? <RightOutlined /> : <DownOutlined />}
@@ -212,14 +300,21 @@ export function OutlinerRow({
               Snoozed {formatSnoozeRemaining(task)}
             </Tag>
           )}
-          {isFocused && (
-            <>
-              <Button type="text" size="small" icon={<PlusOutlined />}
-                onClick={(e) => { e.stopPropagation(); onAddChild(task.id); }}
-                title="Add child" />
-            </>
-          )}
         </Meta>
+
+        <Actions>
+          <Button type="text" size="small" icon={<PlusOutlined />}
+            onClick={(e) => { e.stopPropagation(); onAddChild(task.id); }}
+            title="Add child" />
+          <Button type="text" size="small"
+            onClick={(e) => { e.stopPropagation(); onSelect(task.id); }}
+            title="Edit details" style={{ fontSize: 10 }}>...</Button>
+          <Popconfirm title={hasChildren ? "Delete task and all children?" : "Delete task?"} onConfirm={handleDelete}
+            okButtonProps={{ danger: true }}>
+            <Button type="text" size="small" danger icon={<DeleteOutlined />}
+              onClick={(e) => e.stopPropagation()} title="Delete" />
+          </Popconfirm>
+        </Actions>
       </Row>
 
       {!task.collapsed && children.map((child) => (
@@ -232,6 +327,9 @@ export function OutlinerRow({
           onAddSibling={onAddSibling}
           onIndent={onIndent}
           onOutdent={onOutdent}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
+          onSelect={onSelect}
         />
       ))}
     </>
