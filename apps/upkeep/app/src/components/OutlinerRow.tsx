@@ -5,6 +5,7 @@ import {
   DownOutlined,
   PlusOutlined,
   DeleteOutlined,
+  CheckOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepBackend } from "@kirkl/shared";
@@ -163,10 +164,12 @@ export function OutlinerRow({
   }, [upkeep, task.id]);
 
   const handleToggleComplete = useCallback(() => {
-    if (isOneShot) {
-      upkeep.toggleComplete(task.id);
-    }
-  }, [upkeep, task.id, isOneShot]);
+    upkeep.toggleComplete(task.id);
+  }, [upkeep, task.id]);
+
+  const handleCompleteRecurring = useCallback(() => {
+    upkeep.completeTask(task.id, "", {});
+  }, [upkeep, task.id]);
 
   const handleSaveName = useCallback(() => {
     const trimmed = editValue.trim();
@@ -301,14 +304,6 @@ export function OutlinerRow({
           <Spacer />
         )}
 
-        {isOneShot && (
-          <Checkbox
-            checked={isDone}
-            onChange={handleToggleComplete}
-            onClick={(e) => e.stopPropagation()}
-          />
-        )}
-
         {editing ? (
           <NameInput
             ref={inputRef}
@@ -338,6 +333,18 @@ export function OutlinerRow({
         </Meta>
 
         <Actions>
+          {isOneShot && (
+            <Checkbox
+              checked={isDone}
+              onChange={handleToggleComplete}
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
+          {task.taskType === "recurring" && (
+            <Button type="text" size="small" icon={<CheckOutlined />}
+              onClick={(e) => { e.stopPropagation(); handleCompleteRecurring(); }}
+              title="Mark done" style={{ color: "#52c41a" }} />
+          )}
           <Button type="text" size="small" icon={<PlusOutlined />}
             onClick={(e) => { e.stopPropagation(); onAddChild(task.id); }}
             title="Add child" />
