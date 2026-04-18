@@ -22,7 +22,7 @@ spec:
               args:
                 - |
                   curl -sf -X POST \
-                    -H "X-API-Key: $API_KEY" \
+                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
                     http://functions.homelab.svc.cluster.local:3000/notifications/upkeep-check
               envFrom:
                 - secretRef:
