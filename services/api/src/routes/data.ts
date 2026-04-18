@@ -685,21 +685,38 @@ dataRoutes.get("/life/entries", handler(async (c) => {
 
 // ---- Upkeep ----
 
-// List upkeep tasks
+// List tasks (supports filtering by parent_id, tag, task_type)
 dataRoutes.get("/tasks", handler(async (c) => {
   const pb = c.get("pb");
   const listId = c.req.query("list");
   if (!listId) return c.json({ error: "list query param required" }, 400);
 
-  const tasks = await pb.collection("tasks").getFullList({ filter: pb.filter("list = {:listId}", { listId }) });
+  const filters = [pb.filter("list = {:listId}", { listId })];
+  const parentId = c.req.query("parent_id");
+  if (parentId !== undefined) filters.push(pb.filter("parent_id = {:parentId}", { parentId }));
+  const tag = c.req.query("tag");
+  if (tag) filters.push(pb.filter("tags ~ {:tag}", { tag }));
+  const taskType = c.req.query("task_type");
+  if (taskType) filters.push(pb.filter("task_type = {:taskType}", { taskType }));
+
+  const tasks = await pb.collection("tasks").getFullList({
+    filter: filters.join(" && "),
+    sort: "position",
+  });
   return c.json(tasks.map((t) => ({
     id: t.id,
     name: t.name,
     description: t.description,
-    room_id: t.room_id,
+    parent_id: t.parent_id,
+    path: t.path,
+    position: t.position,
+    task_type: t.task_type,
     frequency: t.frequency,
     last_completed: t.last_completed,
+    completed: t.completed,
     snoozed_until: t.snoozed_until,
+    tags: t.tags,
+    collapsed: t.collapsed,
   })));
 }));
 
@@ -710,8 +727,11 @@ dataRoutes.post("/tasks", handler(async (c) => {
     list: string;
     name: string;
     description?: string;
-    room_id?: string;
-    frequency?: number;
+    parent_id?: string;
+    position?: number;
+    task_type?: string;
+    frequency?: unknown;
+    tags?: string[];
   }>();
   if (!body.list || !body.name) return c.json({ error: "list and name required" }, 400);
 
@@ -719,16 +739,50 @@ dataRoutes.post("/tasks", handler(async (c) => {
     list: body.list,
     name: body.name,
     description: body.description || "",
-    room_id: body.room_id || "",
+    parent_id: body.parent_id || "",
+    position: body.position ?? 0,
+    task_type: body.task_type || "one_shot",
     frequency: body.frequency || 0,
+    tags: body.tags || [],
   });
+
+  // Set path after creation (needs the ID)
+  let path = record.id;
+  if (body.parent_id) {
+    const parent = await pb.collection("tasks").getOne(body.parent_id);
+    path = `${parent.path}/${record.id}`;
+  }
+  await pb.collection("tasks").update(record.id, { path });
+
   return c.json({ id: record.id, name: record.name }, 201);
 }));
 
-// Complete a task
+// Update a task
+dataRoutes.patch("/tasks/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<Record<string, unknown>>();
+  const allowed = ["name", "description", "task_type", "frequency", "position",
+    "completed", "snoozed_until", "tags", "collapsed"];
+  const data: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (body[key] !== undefined) data[key] = body[key];
+  }
+  const record = await pb.collection("tasks").update(id, data);
+  return c.json({ id: record.id, name: record.name });
+}));
+
+// Complete a task (recurring: sets last_completed; one_shot: sets completed)
 dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
   const pb = c.get("pb");
   const id = c.req.param("id")!;
+  const task = await pb.collection("tasks").getOne(id);
+
+  if (task.task_type === "one_shot") {
+    const record = await pb.collection("tasks").update(id, { completed: !task.completed });
+    return c.json({ id: record.id, completed: record.completed });
+  }
+
   const now = new Date().toISOString();
   const record = await pb.collection("tasks").update(id, {
     last_completed: now,
@@ -746,4 +800,22 @@ dataRoutes.post("/tasks/:id/snooze", handler(async (c) => {
 
   const record = await pb.collection("tasks").update(id, { snoozed_until: until });
   return c.json({ id: record.id, snoozed_until: record.snoozed_until });
+}));
+
+// Delete a task (and all descendants)
+dataRoutes.delete("/tasks/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const task = await pb.collection("tasks").getOne(id);
+
+  // Delete descendants first (deepest first)
+  const descendants = await pb.collection("tasks").getFullList({
+    filter: pb.filter("path ~ {:prefix}", { prefix: `${task.path}/%` }),
+  });
+  descendants.sort((a, b) => b.path.length - a.path.length);
+  for (const d of descendants) {
+    await pb.collection("tasks").delete(d.id);
+  }
+  await pb.collection("tasks").delete(id);
+  return c.json({ deleted: true });
 }));

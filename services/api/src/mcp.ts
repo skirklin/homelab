@@ -148,10 +148,19 @@ server.tool(
 
 server.tool(
   "list_tasks",
-  "List upkeep tasks in a task list",
-  { list: z.string().describe("The task list ID") },
-  async ({ list }) => {
-    const data = await api(`/tasks?list=${list}`);
+  "List tasks in a task list. Supports filtering by parent_id, tag, and task_type.",
+  {
+    list: z.string().describe("The task list ID"),
+    parent_id: z.string().optional().describe("Filter by parent task ID (empty string for root tasks)"),
+    tag: z.string().optional().describe("Filter by tag (e.g. 'travel:tripId123')"),
+    task_type: z.string().optional().describe("Filter by type: 'recurring' or 'one_shot'"),
+  },
+  async ({ list, parent_id, tag, task_type }) => {
+    const params = new URLSearchParams({ list });
+    if (parent_id !== undefined) params.set("parent_id", parent_id);
+    if (tag) params.set("tag", tag);
+    if (task_type) params.set("task_type", task_type);
+    const data = await api(`/tasks?${params}`);
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );
@@ -595,26 +604,58 @@ server.tool(
 
 server.tool(
   "add_task",
-  "Create a new upkeep task in a task list",
+  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), and tags.",
   {
     list: z.string().describe("The task list ID"),
     name: z.string().describe("Task name"),
     description: z.string().optional().describe("Task description"),
-    room_id: z.string().optional().describe("Room ID"),
-    frequency: z.number().optional().describe("Frequency in days (0 = one-time)"),
+    parent_id: z.string().optional().describe("Parent task ID for nesting (omit for root task)"),
+    position: z.number().optional().describe("Sort position among siblings (default 0)"),
+    task_type: z.string().optional().describe("'recurring' (has frequency/due dates) or 'one_shot' (checkbox). Default: one_shot"),
+    frequency: z.object({
+      value: z.number(),
+      unit: z.enum(["days", "weeks", "months"]),
+    }).optional().describe("Recurrence frequency (only for recurring tasks)"),
+    tags: z.array(z.string()).optional().describe("Tags (e.g. ['travel:tripId123'])"),
   },
-  async ({ list, name, description, room_id, frequency }) => {
+  async ({ list, name, description, parent_id, position, task_type, frequency, tags }) => {
     const data = await api("/tasks", {
       method: "POST",
-      body: JSON.stringify({ list, name, description, room_id, frequency }),
+      body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );
 
 server.tool(
+  "update_task",
+  "Update task fields (name, description, task_type, frequency, position, completed, tags, etc.)",
+  {
+    id: z.string().describe("The task record ID"),
+    updates: z.record(z.unknown()).describe("Fields to update (e.g. {name: 'New name', completed: true})"),
+  },
+  async ({ id, updates }) => {
+    const data = await api(`/tasks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_task",
+  "Delete a task and all its children",
+  { id: z.string().describe("The task record ID") },
+  async ({ id }) => {
+    const data = await api(`/tasks/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
   "complete_task",
-  "Mark an upkeep task as completed (sets last_completed to now)",
+  "Toggle task completion. Recurring: sets last_completed to now. One-shot: toggles completed boolean.",
   { id: z.string().describe("The task record ID") },
   async ({ id }) => {
     const data = await api(`/tasks/${id}/complete`, { method: "POST" });
@@ -624,7 +665,7 @@ server.tool(
 
 server.tool(
   "snooze_task",
-  "Snooze an upkeep task until a given date",
+  "Snooze a task until a given date",
   {
     id: z.string().describe("The task record ID"),
     until: z.string().describe("ISO date to snooze until (e.g. 2026-04-20)"),

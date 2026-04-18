@@ -37,8 +37,9 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
 
   console.log(`[upkeep] Starting notification check for ${today}`);
 
-  // Fetch all tasks with their list and list owners expanded
+  // Fetch only recurring tasks (one-shot tasks don't have due dates)
   const tasks = await pb.collection("tasks").getFullList({
+    filter: 'task_type = "recurring"',
     expand: "list,list.owners,notify_users",
     $autoCancel: false,
   });
