@@ -27,14 +27,16 @@ migrate(
     tasks.fields.add(new Field({ type: "bool", name: "collapsed" }));
 
     // Remove room_id
-    tasks.fields.removeById(tasks.fields.getByName("room_id")?.getId());
+    const roomIdField = tasks.fields.getByName("room_id");
+    if (roomIdField) tasks.fields.removeById(roomIdField.id);
 
     app.save(tasks);
     console.log("  tasks: added tree fields, removed room_id");
 
     // --- Remove room_defs from task_lists ---
     const taskLists = app.findCollectionByNameOrId("task_lists");
-    taskLists.fields.removeById(taskLists.fields.getByName("room_defs")?.getId());
+    const roomDefsField = taskLists.fields.getByName("room_defs");
+    if (roomDefsField) taskLists.fields.removeById(roomDefsField.id);
     app.save(taskLists);
     console.log("  task_lists: removed room_defs");
 
@@ -67,7 +69,7 @@ migrate(
 
     for (const name of ["parent_id", "path", "position", "task_type", "completed", "tags", "collapsed"]) {
       const field = tasks.fields.getByName(name);
-      if (field) tasks.fields.removeById(field.getId());
+      if (field) tasks.fields.removeById(field.id);
     }
 
     tasks.fields.add(new Field({ type: "text", name: "room_id" }));
