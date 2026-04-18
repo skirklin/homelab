@@ -53,7 +53,7 @@ migrate(
     for (let i = 0; i < allTasks.length; i++) {
       const t = allTasks[i];
       t.set("parent_id", "");
-      t.set("path", t.getId());
+      t.set("path", t.id);
       t.set("position", i + 1);
       t.set("task_type", "recurring");
       t.set("completed", false);
