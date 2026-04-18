@@ -106,29 +106,7 @@ describe("List Management", () => {
     expect(list).toBeNull();
   });
 
-  it("updates room definitions via updateRooms", async () => {
-    const user = await createTestUser(ctx);
-
-    const listId = await upkeep.createList("Rooms Test", user.id);
-    await userBackend.setSlug(user.id, "household", "rooms", listId);
-
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-    cleanup.track("task_lists", listId);
-
-    const rooms = [
-      { id: "kitchen", name: "Kitchen" },
-      { id: "bathroom", name: "Bathroom" },
-      { id: "bedroom", name: "Bedroom" },
-    ];
-    await upkeep.updateRooms(listId, rooms);
-
-    const record = await ctx.pb.collection("task_lists").getOne(listId);
-    expect(record.room_defs).toHaveLength(3);
-    expect(record.room_defs[0].id).toBe("kitchen");
-
-    await cleanup.cleanup();
-  });
+  // Room definitions test removed — nesting replaces rooms
 
   it("ensureListExists does not throw when user is already an owner", async () => {
     const user = await createTestUser(ctx);
@@ -162,18 +140,23 @@ describe("Task Operations", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Clean counters",
       description: "Wipe down kitchen counters",
-      roomId: "kitchen",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
     const record = await ctx.pb.collection("tasks").getOne(taskId);
     expect(record.name).toBe("Clean counters");
     expect(record.description).toBe("Wipe down kitchen counters");
-    expect(record.room_id).toBe("kitchen");
+    expect(record.task_type).toBe("recurring");
     expect(record.frequency).toEqual({ value: 1, unit: "days" });
     expect(record.list).toBe(listId);
 
@@ -192,11 +175,16 @@ describe("Task Operations", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Original Name",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -224,11 +212,16 @@ describe("Task Operations", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "To be deleted",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
 
     await upkeep.deleteTask(taskId);
@@ -281,11 +274,16 @@ describe("Task Completion", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Clean toilet",
       description: "",
-      roomId: "bathroom",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: twoDaysAgo,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -321,11 +319,16 @@ describe("Task Completion", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Already completed recently",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: yesterday,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -361,11 +364,16 @@ describe("Task Completion", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Mop floor",
       description: "",
-      roomId: "kitchen",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -397,11 +405,16 @@ describe("Task Completion", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Vacuum",
       description: "",
-      roomId: "bedroom",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -431,11 +444,16 @@ describe("Task Completion", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Time traveler task",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 30, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -470,11 +488,16 @@ describe("Snooze Operations", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Snoozeable task",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -576,11 +599,16 @@ describe("Notification Operations", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Notify me task",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -600,84 +628,7 @@ describe("Notification Operations", () => {
   });
 });
 
-// ─── Room Edge Cases ──────────────────────────────────────────────────────────
-
-describe("Room Edge Cases", () => {
-  it("tasks with orphaned roomId still exist after room deletion", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await upkeep.createList("Room Edge Cases", user.id);
-    await userBackend.setSlug(user.id, "household", "roomedge", listId);
-
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-    cleanup.track("task_lists", listId);
-
-    await upkeep.updateRooms(listId, [
-      { id: "kitchen", name: "Kitchen" },
-      { id: "bathroom", name: "Bathroom" },
-    ]);
-
-    const task1Id = await upkeep.addTask(listId, {
-      name: "Clean counters",
-      description: "",
-      roomId: "kitchen",
-      frequency: { value: 7, unit: "days" },
-      lastCompleted: null,
-      snoozedUntil: null,
-      notifyUsers: [],
-    });
-    cleanup.track("tasks", task1Id);
-
-    const task2Id = await upkeep.addTask(listId, {
-      name: "Wash dishes",
-      description: "",
-      roomId: "kitchen",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      snoozedUntil: null,
-      notifyUsers: [],
-    });
-    cleanup.track("tasks", task2Id);
-
-    // Remove kitchen room
-    await upkeep.updateRooms(listId, [{ id: "bathroom", name: "Bathroom" }]);
-
-    // Tasks still exist with orphaned roomId
-    const tasks = await ctx.pb.collection("tasks").getFullList({
-      filter: `list = "${listId}"`,
-    });
-    expect(tasks.length).toBe(2);
-    expect(tasks.every((t) => t.room_id === "kitchen")).toBe(true);
-
-    await cleanup.cleanup();
-  });
-
-  it("tasks can be created with a non-existent roomId", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await upkeep.createList("Ghost Room Test", user.id);
-    await userBackend.setSlug(user.id, "household", "ghostroom", listId);
-
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-    cleanup.track("task_lists", listId);
-
-    const taskId = await upkeep.addTask(listId, {
-      name: "Ghost Room Task",
-      description: "",
-      roomId: "nonexistent-room",
-      frequency: { value: 7, unit: "days" },
-      lastCompleted: null,
-      snoozedUntil: null,
-      notifyUsers: [],
-    });
-    cleanup.track("tasks", taskId);
-
-    const record = await ctx.pb.collection("tasks").getOne(taskId);
-    expect(record.room_id).toBe("nonexistent-room");
-
-    await cleanup.cleanup();
-  });
-});
+// Room Edge Cases removed — rooms replaced by tree nesting
 
 // ─── Multi-user Scenarios ─────────────────────────────────────────────────────
 
@@ -701,11 +652,16 @@ describe("Multi-user Scenarios", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Race condition task",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -751,11 +707,16 @@ describe("Multi-user Scenarios", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Shared task",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -793,11 +754,16 @@ describe("Frequency Edge Cases", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Zero interval",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 0, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -819,11 +785,16 @@ describe("Frequency Edge Cases", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Millennium task",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 999999, unit: "days" },
       lastCompleted: null,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -848,11 +819,16 @@ describe("Frequency Edge Cases", () => {
     const taskId = await upkeep.addTask(listId, {
       name: "Past due task",
       description: "",
-      roomId: "general",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: fiveDaysAgo,
+      completed: false,
       snoozedUntil: null,
       notifyUsers: [],
+      tags: [],
+      collapsed: false,
     });
     cleanup.track("tasks", taskId);
 
