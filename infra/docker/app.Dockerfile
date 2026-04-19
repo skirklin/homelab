@@ -30,10 +30,14 @@ ARG APP_DIR
 
 # Vite env vars (baked into the JS bundle at build time)
 ARG VITE_GOOGLE_MAPS_API_KEY=""
+ARG VITE_DOMAIN=""
 
 # Build the target app
 # APP_DIR is the directory containing the vite project (e.g. apps/recipes/app or apps/money)
-RUN cd ${APP_DIR} && VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY} pnpm run build
+RUN cd ${APP_DIR} && \
+    VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY} \
+    VITE_DOMAIN=${VITE_DOMAIN} \
+    pnpm run build
 
 # Serve with nginx
 FROM nginx:alpine

@@ -23,11 +23,12 @@ import { notificationRoutes } from "./routes/notifications";
 import { startScheduler } from "./lib/notifications/scheduler";
 const app = new Hono<AppEnv>();
 
-// CORS — allow all beta.kirkl.in origins
+// CORS — allow kirkl.in and any subdomain (incl. beta.kirkl.in), plus local dev
 app.use("*", cors({
   origin: (origin) => {
     if (!origin) return origin;
-    if (origin.endsWith(".kirkl.in") || origin.endsWith(".localhost") || origin.includes("localhost:")) {
+    const host = origin.replace(/^https?:\/\//, "").split(":")[0];
+    if (host === "kirkl.in" || host.endsWith(".kirkl.in") || host === "localhost" || host.endsWith(".localhost")) {
       return origin;
     }
     return undefined;

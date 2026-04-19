@@ -4,7 +4,8 @@
  */
 import PocketBase from "pocketbase";
 
-const pbUrl = process.env.PB_URL || "https://api.beta.kirkl.in";
+const domain = process.env.DOMAIN || "kirkl.in";
+const pbUrl = process.env.PB_URL || `https://api.${domain}`;
 console.log(`PB URL: ${pbUrl}`);
 const password = process.env.PB_ADMIN_PASSWORD;
 if (!password) { console.error("PB_ADMIN_PASSWORD not set"); process.exit(1); }

@@ -5,7 +5,7 @@ import { getBackend } from "./backend";
 
 function getApiBase(): string {
   const pbUrl = getBackend().baseURL.replace(/\/$/, "");
-  // In production, PB and API share a host (api.beta.kirkl.in/fn/).
+  // In production, PB and API share a host (api.kirkl.in/fn/).
   // In dev, the vite dev server proxies /fn/ to the local API service.
   const isLocalPb = pbUrl.includes("localhost") || pbUrl.includes("127.0.0.1");
   if (isLocalPb && typeof window !== "undefined") {

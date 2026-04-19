@@ -7,7 +7,7 @@ import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 import { randomBytes } from "crypto";
 
-const RECIPES_BASE_URL = process.env.RECIPES_BASE_URL || "https://recipes.beta.kirkl.in";
+import { RECIPES_BASE_URL } from "../config";
 
 export const sharingRoutes = new Hono<AppEnv>();
 

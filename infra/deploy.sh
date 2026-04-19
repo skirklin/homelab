@@ -122,6 +122,7 @@ if [ "$PUSH_ONLY" = false ]; then
                 --build-arg APP_DIR="${app_dir}" \
                 --build-arg DIST_DIR="${dist_dir}" \
                 --build-arg VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}" \
+                --build-arg VITE_DOMAIN="${DOMAIN:-kirkl.in}" \
                 ${EXTRA_ARGS} \
                 -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
                 echo "[${BUILT}/${TOTAL}] ✓ ${app} ($(elapsed $((SECONDS - APP_START))))"

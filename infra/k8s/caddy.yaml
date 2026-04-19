@@ -5,45 +5,46 @@ metadata:
   namespace: homelab
 data:
   Caddyfile: |
-    # Public apps
+    # Public apps — each site block lists both the production and
+    # beta hostnames. Caddy auto-requests Let's Encrypt certs for all.
 
-    beta.kirkl.in {
+    kirkl.in, beta.kirkl.in {
         reverse_proxy home.homelab.svc.cluster.local:80
     }
 
-    recipes.beta.kirkl.in {
+    recipes.kirkl.in, recipes.beta.kirkl.in {
         reverse_proxy recipes.homelab.svc.cluster.local:80
     }
 
-    shopping.beta.kirkl.in {
+    shopping.kirkl.in, shopping.beta.kirkl.in {
         reverse_proxy shopping.homelab.svc.cluster.local:80
     }
 
     # life is a module in home, not a standalone app
 
-    upkeep.beta.kirkl.in {
+    upkeep.kirkl.in, upkeep.beta.kirkl.in {
         reverse_proxy upkeep.homelab.svc.cluster.local:80
     }
 
-    travel.beta.kirkl.in {
+    travel.kirkl.in, travel.beta.kirkl.in {
         reverse_proxy travel.homelab.svc.cluster.local:80
     }
 
-    me.beta.kirkl.in {
+    me.kirkl.in, me.beta.kirkl.in {
         reverse_proxy homepage.homelab.svc.cluster.local:80
     }
 
     # money app is tailnet-only — no public Caddy route
     # Access via http://<tailscale-ip>:30080/money or direct NodePort
 
-    registry.beta.kirkl.in {
+    registry.kirkl.in, registry.beta.kirkl.in {
         basic_auth {
             deploy {$REGISTRY_HTPASSWD}
         }
         reverse_proxy registry.homelab.svc.cluster.local:5000
     }
 
-    api.beta.kirkl.in {
+    api.kirkl.in, api.beta.kirkl.in {
         handle_path /fn/* {
             reverse_proxy functions.homelab.svc.cluster.local:3000
         }

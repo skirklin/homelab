@@ -10,7 +10,7 @@
  *
  * Options:
  *   --pb-password <password>   PocketBase superuser password (required unless --dry-run)
- *   --pb-url <url>             PocketBase URL (default: https://api.beta.kirkl.in)
+ *   --pb-url <url>             PocketBase URL (default: $PB_URL or https://api.${DOMAIN})
  *   --dry-run                  Read from Firestore, log what would be created
  *   --collection <name>        Only migrate: recipes, shopping, life, upkeep, or travel
  */
@@ -33,7 +33,7 @@ import {
 function parseArgs() {
   const args = process.argv.slice(2);
   let pbPassword = "";
-  let pbUrl = "https://api.beta.kirkl.in";
+  let pbUrl = process.env.PB_URL || `https://api.${process.env.DOMAIN || "kirkl.in"}`;
   let dryRun = false;
   let collection: string | null = null;
 

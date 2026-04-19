@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const API_BASE = process.env.API_BASE || "https://api.beta.kirkl.in/fn";
+import { API_BASE } from "./config";
 const API_TOKEN = process.env.HOMELAB_API_TOKEN || "";
 
 if (!API_TOKEN) {

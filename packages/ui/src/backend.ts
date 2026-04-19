@@ -5,8 +5,10 @@ let pb: PocketBase | null = null;
 export function initializeBackend(pbUrl?: string) {
   if (pb) return pb;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const envUrl = typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_PB_URL;
-  const url = pbUrl || envUrl || "https://api.beta.kirkl.in";
+  const env = typeof import.meta !== "undefined" ? (import.meta as any).env : {};
+  const envUrl = env?.VITE_PB_URL;
+  const domain = env?.VITE_DOMAIN || "kirkl.in";
+  const url = pbUrl || envUrl || `https://api.${domain}`;
   pb = new PocketBase(url);
   return pb;
 }

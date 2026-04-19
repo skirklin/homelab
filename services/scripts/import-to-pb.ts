@@ -26,7 +26,7 @@ import {
 
 const pbUrl = process.argv.includes("--pb-url")
   ? process.argv[process.argv.indexOf("--pb-url") + 1]
-  : (process.env.PB_URL || "https://api.beta.kirkl.in");
+  : (process.env.PB_URL || `https://api.${process.env.DOMAIN || "kirkl.in"}`);
 const password = process.env.PB_ADMIN_PASSWORD;
 if (!password) { console.error("PB_ADMIN_PASSWORD not set"); process.exit(1); }
 
