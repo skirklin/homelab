@@ -17,9 +17,9 @@ type DropZone = "before" | "inside" | "after" | null;
 const Row = styled.div<{ $depth: number; $focused: boolean; $dragging: boolean; $dropZone: DropZone }>`
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px 4px ${(p) => 8 + p.$depth * 24}px;
-  min-height: 32px;
+  gap: 3px;
+  padding: 1px 6px 1px ${(p) => 6 + p.$depth * 20}px;
+  min-height: 22px;
   background: ${(p) => {
     if (p.$dragging) return "#e6f4ff";
     if (p.$dropZone === "inside") return "#e6f4ff";
@@ -106,9 +106,16 @@ const Meta = styled.div`
 const Actions = styled.div`
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   opacity: 0;
   transition: opacity 0.15s;
+
+  & .ant-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    min-width: 20px;
+  }
 
   ${Row}:hover & { opacity: 1; }
 `;
@@ -124,6 +131,8 @@ interface OutlinerRowProps {
   onMoveUp: (id: string) => void;
   onMoveDown: (id: string) => void;
   onSelect: (id: string) => void;
+  onToggleOneShot: (id: string) => void;
+  onCompleteRecurring: (id: string) => void;
 }
 
 export function OutlinerRow({
@@ -137,6 +146,8 @@ export function OutlinerRow({
   onMoveUp,
   onMoveDown,
   onSelect,
+  onToggleOneShot,
+  onCompleteRecurring,
 }: OutlinerRowProps) {
   const { task, children, depth } = node;
   const upkeep = useUpkeepBackend();
@@ -164,12 +175,12 @@ export function OutlinerRow({
   }, [upkeep, task.id]);
 
   const handleToggleComplete = useCallback(() => {
-    upkeep.toggleComplete(task.id);
-  }, [upkeep, task.id]);
+    onToggleOneShot(task.id);
+  }, [onToggleOneShot, task.id]);
 
   const handleCompleteRecurring = useCallback(() => {
-    upkeep.completeTask(task.id, "", {});
-  }, [upkeep, task.id]);
+    onCompleteRecurring(task.id);
+  }, [onCompleteRecurring, task.id]);
 
   const handleSaveName = useCallback(() => {
     const trimmed = editValue.trim();
@@ -372,6 +383,8 @@ export function OutlinerRow({
           onMoveUp={onMoveUp}
           onMoveDown={onMoveDown}
           onSelect={onSelect}
+          onToggleOneShot={onToggleOneShot}
+          onCompleteRecurring={onCompleteRecurring}
         />
       ))}
     </>

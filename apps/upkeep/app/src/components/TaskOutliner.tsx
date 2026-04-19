@@ -210,6 +210,47 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
     await upkeep.updateTask(selectedId, { [field]: value });
   }, [selectedId, upkeep]);
 
+  // Get all descendant IDs of a task (including itself)
+  const getSubtreeIds = useCallback((rootId: string): string[] => {
+    const root = allTasks.find((t) => t.id === rootId);
+    if (!root) return [];
+    const result = [rootId];
+    const stack = [rootId];
+    while (stack.length) {
+      const pid = stack.pop()!;
+      for (const t of allTasks) {
+        if (t.parentId === pid) {
+          result.push(t.id);
+          stack.push(t.id);
+        }
+      }
+    }
+    return result;
+  }, [allTasks]);
+
+  const handleToggleOneShot = useCallback(async (taskId: string) => {
+    const task = allTasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const newState = !task.completed;
+    // Cascade to one-shot descendants
+    const ids = getSubtreeIds(taskId);
+    await Promise.all(ids.map((id) => {
+      const t = allTasks.find((x) => x.id === id);
+      if (!t || t.taskType !== "one_shot") return;
+      if (t.completed === newState) return;
+      return upkeep.updateTask(id, { completed: newState });
+    }));
+  }, [allTasks, getSubtreeIds, upkeep]);
+
+  const handleCompleteRecurring = useCallback(async (taskId: string) => {
+    const ids = getSubtreeIds(taskId);
+    await Promise.all(ids.map((id) => {
+      const t = allTasks.find((x) => x.id === id);
+      if (!t || t.taskType !== "recurring") return;
+      return upkeep.completeTask(id, "", {});
+    }));
+  }, [allTasks, getSubtreeIds, upkeep]);
+
   if (state.loading) {
     return <Container><Spin size="large" /></Container>;
   }
@@ -246,6 +287,8 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
                 onOutdent={handleOutdent}
                 onMoveUp={handleMoveUp}
                 onMoveDown={handleMoveDown}
+                onToggleOneShot={handleToggleOneShot}
+                onCompleteRecurring={handleCompleteRecurring}
                 onSelect={setSelectedId}
               />
             ))}
