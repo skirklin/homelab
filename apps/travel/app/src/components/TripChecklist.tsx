@@ -47,12 +47,15 @@ export function TripChecklist({ trip }: TripChecklistProps) {
   const upkeep = useUpkeepBackend();
   const userBackend = useUserBackend();
   const [listId, setListId] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [listName, setListName] = useState<string>("");
   const [newItemText, setNewItemText] = useState("");
   const [loading, setLoading] = useState(true);
 
   const tripTag = `travel:${trip.id}`;
+  const tripContainerTag = `container:trip:${trip.id}`;
+  const trips = useMemo(() => allTasks, [allTasks]);
+  const tasks = useMemo(() => trips.filter((t) => t.tags?.includes(tripTag)), [trips, tripTag]);
 
   // Get the user's first household task list
   useEffect(() => {
@@ -72,9 +75,9 @@ export function TripChecklist({ trip }: TripChecklistProps) {
     let cancelled = false;
     const unsub = upkeep.subscribeToList(listId, user.uid, {
       onList: (l: TaskList) => { if (!cancelled) setListName(l.name); },
-      onTasks: (allTasks: Task[]) => {
+      onTasks: (all: Task[]) => {
         if (cancelled) return;
-        setTasks(allTasks.filter((t) => t.tags?.includes(tripTag)));
+        setAllTasks(all);
         setLoading(false);
       },
       onCompletions: () => {},
@@ -93,12 +96,68 @@ export function TripChecklist({ trip }: TripChecklistProps) {
     [tasks],
   );
 
+  const ensureTripContainer = async (): Promise<string> => {
+    if (!listId) throw new Error("No list");
+
+    // Find or create "Trips" root container
+    let tripsRoot = allTasks.find(
+      (t) => !t.parentId && t.tags?.includes("container:trips"),
+    );
+    if (!tripsRoot) {
+      const maxRootPos = allTasks
+        .filter((t) => !t.parentId)
+        .reduce((m, t) => Math.max(m, t.position), 0);
+      const id = await upkeep.addTask(listId, {
+        parentId: "",
+        position: maxRootPos + 1,
+        name: "Trips",
+        description: "",
+        taskType: "one_shot",
+        frequency: { value: 1, unit: "days" },
+        lastCompleted: null,
+        completed: false,
+        snoozedUntil: null,
+        notifyUsers: [],
+        tags: ["container:trips"],
+        collapsed: false,
+      });
+      tripsRoot = { id, parentId: "" } as Task;
+    }
+
+    // Find or create this trip's container under Trips
+    let tripContainer = allTasks.find((t) => t.tags?.includes(tripContainerTag));
+    if (!tripContainer) {
+      const childPos = allTasks
+        .filter((t) => t.parentId === tripsRoot!.id)
+        .reduce((m, t) => Math.max(m, t.position), 0);
+      const id = await upkeep.addTask(listId, {
+        parentId: tripsRoot.id,
+        position: childPos + 1,
+        name: trip.destination,
+        description: "",
+        taskType: "one_shot",
+        frequency: { value: 1, unit: "days" },
+        lastCompleted: null,
+        completed: false,
+        snoozedUntil: null,
+        notifyUsers: [],
+        tags: [tripContainerTag],
+        collapsed: false,
+      });
+      tripContainer = { id, parentId: tripsRoot.id } as Task;
+    }
+
+    return tripContainer.id;
+  };
+
   const handleAdd = async () => {
     const text = newItemText.trim();
     if (!text || !listId) return;
-    const maxPos = tasks.reduce((max, t) => Math.max(max, t.position), 0);
+    const containerId = await ensureTripContainer();
+    const siblings = allTasks.filter((t) => t.parentId === containerId);
+    const maxPos = siblings.reduce((m, t) => Math.max(m, t.position), 0);
     await upkeep.addTask(listId, {
-      parentId: "",
+      parentId: containerId,
       position: maxPos + 1,
       name: text,
       description: "",
