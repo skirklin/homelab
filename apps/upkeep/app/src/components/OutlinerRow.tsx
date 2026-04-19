@@ -69,11 +69,6 @@ const CollapseBtn = styled.button`
   flex-shrink: 0;
 `;
 
-const Spacer = styled.div`
-  width: 12px;
-  flex-shrink: 0;
-`;
-
 const Name = styled.span<{ $completed: boolean }>`
   flex: 1;
   min-width: 0;
@@ -308,12 +303,10 @@ export function OutlinerRow({
           onDragEnd={handleDragEnd}
         />
 
-        {hasChildren ? (
+        {hasChildren && (
           <CollapseBtn onClick={handleToggleCollapse}>
             {task.collapsed ? <RightOutlined /> : <DownOutlined />}
           </CollapseBtn>
-        ) : (
-          <Spacer />
         )}
 
         {editing ? (
