@@ -396,7 +396,7 @@ server.tool(
   {
     log: z.string().describe("The travel log ID"),
     destination: z.string().describe("Trip destination"),
-    status: z.enum(["planning", "booked", "completed"]).optional().describe("Trip status (default: planning)"),
+    status: z.enum(["Completed", "Booked", "Researching", "Idea", "Ongoing"]).optional().describe("Trip status (default: Idea)"),
     region: z.string().optional().describe("Geographic region"),
     start_date: z.string().optional().describe("Start date (ISO format)"),
     end_date: z.string().optional().describe("End date (ISO format)"),
@@ -417,7 +417,7 @@ server.tool(
   {
     id: z.string().describe("The trip record ID"),
     destination: z.string().optional().describe("Trip destination"),
-    status: z.enum(["planning", "booked", "completed"]).optional().describe("Trip status"),
+    status: z.enum(["Completed", "Booked", "Researching", "Idea", "Ongoing"]).optional().describe("Trip status"),
     region: z.string().optional().describe("Geographic region"),
     start_date: z.string().optional().describe("Start date (ISO format)"),
     end_date: z.string().optional().describe("End date (ISO format)"),
