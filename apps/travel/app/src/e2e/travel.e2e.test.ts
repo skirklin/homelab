@@ -48,7 +48,6 @@ function makeTrip(overrides: Partial<Omit<Trip, "id">> = {}): Omit<Trip, "id"> {
     sourceRefs: "",
     flaggedForReview: false,
     reviewComment: "",
-    checklistDone: {},
     created: new Date(),
     updated: new Date(),
     ...overrides,
@@ -554,14 +553,12 @@ describe("getUserSlugs / setUserSlug", () => {
     const log1 = await ctx.pb.collection("travel_logs").create({
       name: "Log 1",
       owners: [user.id],
-      checklists: [],
     });
     cleanup.track("travel_logs", log1.id);
 
     const log2 = await ctx.pb.collection("travel_logs").create({
       name: "Log 2",
       owners: [user.id],
-      checklists: [],
     });
     cleanup.track("travel_logs", log2.id);
 
@@ -576,76 +573,4 @@ describe("getUserSlugs / setUserSlug", () => {
   });
 });
 
-// ── Checklist operations ─────────────────────────────────────
-
-describe("toggleChecklistItem", () => {
-  it("marks a checklist item as done on a trip", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const logId = await travel.getOrCreateLog(user.id);
-    cleanup.track("travel_logs", logId);
-
-    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Dubrovnik" })));
-    cleanup.track("travel_trips", tripId);
-
-    await travel.toggleChecklistItem(tripId, "weather", true);
-
-    const record = await ctx.pb.collection("travel_trips").getOne(tripId);
-    expect(record.checklist_done?.weather).toBe(true);
-
-    await cleanup.cleanup();
-  });
-
-  it("unmarks a checklist item", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const logId = await travel.getOrCreateLog(user.id);
-    cleanup.track("travel_logs", logId);
-
-    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Split" })));
-    cleanup.track("travel_trips", tripId);
-
-    await travel.toggleChecklistItem(tripId, "bank", true);
-    await travel.toggleChecklistItem(tripId, "bank", false);
-
-    const record = await ctx.pb.collection("travel_trips").getOne(tripId);
-    expect(record.checklist_done?.bank).toBe(false);
-
-    await cleanup.cleanup();
-  });
-});
-
-describe("updateLogChecklists", () => {
-  it("replaces the checklists on a log", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const logId = await travel.getOrCreateLog(user.id);
-    cleanup.track("travel_logs", logId);
-
-    const checklists = [
-      {
-        id: "camping",
-        name: "Camping Checklist",
-        items: [
-          { id: "tent", text: "Pack tent" },
-          { id: "sleeping-bag", text: "Pack sleeping bag" },
-        ],
-      },
-    ];
-
-    await travel.updateLogChecklists(logId, checklists);
-
-    const record = await ctx.pb.collection("travel_logs").getOne(logId);
-    expect(record.checklists).toHaveLength(1);
-    expect(record.checklists[0].name).toBe("Camping Checklist");
-    expect(record.checklists[0].items).toHaveLength(2);
-
-    await cleanup.cleanup();
-  });
-});
+// Checklist operations removed — travel checklists are now tasks tagged travel:<tripId>

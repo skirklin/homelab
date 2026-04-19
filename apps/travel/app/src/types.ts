@@ -1,19 +1,6 @@
 // Trip status values
 export type TripStatus = "Completed" | "Booked" | "Researching" | "Idea" | "Ongoing";
 
-// Checklist templates (stored on the travel log, shared across trips)
-export interface ChecklistTemplate {
-  id: string;
-  name: string; // "General Trip Prep", "International", "Camping"
-  items: ChecklistTemplateItem[];
-}
-
-export interface ChecklistTemplateItem {
-  id: string;
-  text: string;
-  category: string; // "logistics", "packing", "people", "documents", "prep"
-}
-
 // Booking requirement on an activity
 export interface BookingRequirement {
   daysBefore: number; // days before trip start to take action
@@ -43,29 +30,9 @@ export interface TravelLog {
   id: string;
   name: string;
   owners: string[];
-  checklists: ChecklistTemplate[];
   created: Date;
   updated: Date;
 }
-
-export const DEFAULT_CHECKLIST: ChecklistTemplate = {
-  id: "general",
-  name: "General Trip Prep",
-  items: [
-    { id: "weather", text: "Check weather forecast for trip dates", category: "prep" },
-    { id: "people", text: "Reach out to anyone I know in the area", category: "people" },
-    { id: "maps", text: "Download offline maps for the area", category: "prep" },
-    { id: "bank", text: "Notify bank of travel dates", category: "documents" },
-    { id: "insurance", text: "Check travel insurance coverage", category: "documents" },
-    { id: "mail", text: "Hold mail / arrange package pickup", category: "prep" },
-    { id: "pets", text: "Arrange pet care", category: "prep" },
-    { id: "plants", text: "Arrange plant watering", category: "prep" },
-    { id: "chargers", text: "Charge all devices, pack chargers", category: "packing" },
-    { id: "meds", text: "Pack medications and first aid", category: "packing" },
-    { id: "copies", text: "Save copies of confirmations offline", category: "documents" },
-    { id: "checkin", text: "Check in for flights (24h before)", category: "logistics" },
-  ],
-};
 
 // ==========================================
 // Trip
@@ -82,7 +49,6 @@ export interface Trip {
   sourceRefs: string;
   flaggedForReview: boolean;
   reviewComment: string;
-  checklistDone: Record<string, boolean>; // templateItemId -> done, per trip
   created: Date;
   updated: Date;
 }

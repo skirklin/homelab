@@ -20,7 +20,6 @@ import type {
   TripStatus,
   ActivityCategory,
 } from "./types";
-import { DEFAULT_CHECKLIST } from "./types";
 
 // ==========================================
 // Backend -> App conversions (for subscriptions)
@@ -38,7 +37,6 @@ export function tripFromBackend(bt: BackendTrip): Trip {
     sourceRefs: bt.sourceRefs || "",
     flaggedForReview: bt.flagged || false,
     reviewComment: bt.flagComment || "",
-    checklistDone: bt.checklistDone || {},
     created: new Date(bt.created),
     updated: new Date(bt.updated),
   };
@@ -92,15 +90,6 @@ export function logFromBackend(bl: BackendTravelLog): TravelLog {
     id: bl.id,
     name: bl.name || "",
     owners: bl.owners || [],
-    checklists: bl.checklists?.length ? bl.checklists.map((c) => ({
-      id: c.id,
-      name: c.name,
-      items: c.items.map((i) => ({
-        id: i.id,
-        text: i.text,
-        category: i.category || "",
-      })),
-    })) : [DEFAULT_CHECKLIST],
     created: new Date(bl.created),
     updated: new Date(bl.updated),
   };
@@ -119,7 +108,6 @@ export function tripToBackend(trip: Omit<Trip, "id">): Omit<BackendTrip, "id" | 
     notes: trip.notes || "",
     flagged: trip.flaggedForReview || false,
     flagComment: trip.reviewComment || "",
-    checklistDone: trip.checklistDone || {},
     status: trip.status,
     region: trip.region,
     sourceRefs: trip.sourceRefs,

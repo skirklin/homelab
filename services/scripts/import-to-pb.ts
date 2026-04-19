@@ -535,7 +535,7 @@ async function importTravel() {
       if (owners.length > 1) {
         await pb.collection("travel_logs").update(pbLogId, { owners }, { $autoCancel: false });
       }
-      if (log.checklists) await travel.updateLogChecklists(pbLogId, log.checklists);
+      // checklists removed — now part of unified task system
 
       console.log(`  Travel log -> ${pbLogId}`);
       logStats.created++;
@@ -552,7 +552,6 @@ async function importTravel() {
             notes: trip.notes || "",
             flagged: !!trip.flaggedForReview,
             flagComment: trip.reviewComment || "",
-            checklistDone: trip.checklistDone || {},
             status: trip.status,
             region: trip.region,
             sourceRefs: trip.sourceRefs,

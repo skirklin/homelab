@@ -1,8 +1,10 @@
-import { Checkbox, Typography, Progress } from "antd";
+import { useState, useEffect, useMemo } from "react";
+import { Button, Checkbox, Empty, Input, Progress, Typography, Space } from "antd";
+import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useTravelContext } from "../travel-context";
-import { useTravelBackend } from "@kirkl/shared";
-import type { Trip, ChecklistTemplate } from "../types";
+import { useUpkeepBackend, useAuth, useUserBackend } from "@kirkl/shared";
+import type { Task, TaskList } from "@homelab/backend";
+import type { Trip } from "../types";
 
 const Container = styled.div`
   display: flex;
@@ -10,29 +12,30 @@ const Container = styled.div`
   gap: 8px;
 `;
 
-const Header = styled.div`
+const HeaderRow = styled.div`
   display: flex;
   align-items: center;
-  gap: 10px;
-`;
-
-const CategoryLabel = styled.div`
-  font-size: 10px;
-  font-weight: 600;
-  color: #8c8c8c;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-top: 6px;
-  margin-bottom: 2px;
+  gap: 12px;
 `;
 
 const Item = styled.div<{ $done: boolean }>`
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: ${(p) => (p.$done ? "#bfbfbf" : "#262626")};
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
   text-decoration: ${(p) => (p.$done ? "line-through" : "none")};
+  color: ${(p) => (p.$done ? "#8c8c8c" : "#262626")};
+
+  &:hover .remove-btn {
+    opacity: 1;
+  }
+`;
+
+const AddRow = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 `;
 
 interface TripChecklistProps {
@@ -40,64 +43,152 @@ interface TripChecklistProps {
 }
 
 export function TripChecklist({ trip }: TripChecklistProps) {
-  const { state } = useTravelContext();
-  const checklists = state.log?.checklists || [];
+  const { user } = useAuth();
+  const upkeep = useUpkeepBackend();
+  const userBackend = useUserBackend();
+  const [listId, setListId] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [listName, setListName] = useState<string>("");
+  const [newItemText, setNewItemText] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  if (checklists.length === 0) return null;
+  const tripTag = `travel:${trip.id}`;
 
-  // For now show all templates — could filter by trip type later
-  return (
-    <Container>
-      {checklists.map((template) => (
-        <ChecklistSection key={template.id} template={template} trip={trip} />
-      ))}
-    </Container>
+  // Get the user's first household task list
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const slugs = await userBackend.getSlugs(user.uid, "household");
+      const firstListId = Object.values(slugs)[0];
+      if (!cancelled) setListId(firstListId || null);
+    })();
+    return () => { cancelled = true; };
+  }, [user, userBackend]);
+
+  // Subscribe to the list's tasks
+  useEffect(() => {
+    if (!listId || !user) return;
+    let cancelled = false;
+    const unsub = upkeep.subscribeToList(listId, user.uid, {
+      onList: (l: TaskList) => { if (!cancelled) setListName(l.name); },
+      onTasks: (allTasks: Task[]) => {
+        if (cancelled) return;
+        setTasks(allTasks.filter((t) => t.tags?.includes(tripTag)));
+        setLoading(false);
+      },
+      onCompletions: () => {},
+    });
+    return () => { cancelled = true; unsub(); };
+  }, [listId, user, upkeep, tripTag]);
+
+  const { done, total, pct } = useMemo(() => {
+    const total = tasks.length;
+    const done = tasks.filter((t) => t.completed).length;
+    return { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
+  }, [tasks]);
+
+  const sortedTasks = useMemo(() =>
+    [...tasks].sort((a, b) => a.position - b.position),
+    [tasks],
   );
-}
 
-function ChecklistSection({ template, trip }: { template: ChecklistTemplate; trip: Trip }) {
-  const travel = useTravelBackend();
-  const done = trip.checklistDone || {};
-  const doneCount = template.items.filter((i) => done[i.id]).length;
-  const total = template.items.length;
-  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-
-  const handleToggle = (itemId: string, checked: boolean) => {
-    travel.toggleChecklistItem(trip.id, itemId, checked);
+  const handleAdd = async () => {
+    const text = newItemText.trim();
+    if (!text || !listId) return;
+    const maxPos = tasks.reduce((max, t) => Math.max(max, t.position), 0);
+    await upkeep.addTask(listId, {
+      parentId: "",
+      position: maxPos + 1,
+      name: text,
+      description: "",
+      taskType: "one_shot",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      completed: false,
+      snoozedUntil: null,
+      notifyUsers: [],
+      tags: [tripTag],
+      collapsed: false,
+    });
+    setNewItemText("");
   };
 
-  // Group by category
-  const categories = [...new Set(template.items.map((i) => i.category))];
+  const handleToggle = async (task: Task) => {
+    await upkeep.toggleComplete(task.id);
+  };
+
+  const handleDelete = async (task: Task) => {
+    await upkeep.deleteTask(task.id);
+  };
+
+  if (!user) return null;
+
+  if (loading && listId) {
+    return null;
+  }
+
+  if (!listId) {
+    return (
+      <Empty
+        description="Create a task list first (in the Tasks app)"
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
+  }
 
   return (
-    <div>
-      <Header>
+    <Container>
+      <HeaderRow>
         <Progress
           type="circle"
           percent={pct}
           size={32}
           strokeColor={pct === 100 ? "#52c41a" : "#1677ff"}
-          format={() => <span style={{ fontSize: 10 }}>{doneCount}/{total}</span>}
+          format={() => <span style={{ fontSize: 10 }}>{done}/{total}</span>}
         />
-        <Typography.Text strong style={{ fontSize: 13 }}>{template.name}</Typography.Text>
-      </Header>
+        <Typography.Text strong>Trip Prep</Typography.Text>
+        {listName && (
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            in {listName}
+          </Typography.Text>
+        )}
+      </HeaderRow>
 
-      {categories.map((cat) => (
-        <div key={cat}>
-          <CategoryLabel>{cat}</CategoryLabel>
-          {template.items
-            .filter((i) => i.category === cat)
-            .map((item) => (
-              <Item key={item.id} $done={!!done[item.id]}>
-                <Checkbox
-                  checked={!!done[item.id]}
-                  onChange={(e) => handleToggle(item.id, e.target.checked)}
-                />
-                {item.text}
-              </Item>
-            ))}
-        </div>
+      {sortedTasks.length === 0 && (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          No checklist items yet. Add one below.
+        </Typography.Text>
+      )}
+
+      {sortedTasks.map((task) => (
+        <Item key={task.id} $done={task.completed}>
+          <Checkbox checked={task.completed} onChange={() => handleToggle(task)} />
+          <span style={{ flex: 1 }}>{task.name}</span>
+          <Button
+            type="text"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            className="remove-btn"
+            style={{ opacity: 0, transition: "opacity 0.15s" }}
+            onClick={() => handleDelete(task)}
+          />
+        </Item>
       ))}
-    </div>
+
+      <AddRow>
+        <Space.Compact style={{ width: "100%" }}>
+          <Input
+            size="small"
+            placeholder="Add a prep item..."
+            value={newItemText}
+            onChange={(e) => setNewItemText(e.target.value)}
+            onPressEnter={handleAdd}
+          />
+          <Button size="small" icon={<PlusOutlined />} onClick={handleAdd}>Add</Button>
+        </Space.Compact>
+      </AddRow>
+    </Container>
   );
 }

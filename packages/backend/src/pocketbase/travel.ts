@@ -4,7 +4,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, Itinerary, ItineraryDay, ChecklistTemplate } from "../types/travel";
+import type { TravelLog, Trip, Activity, Itinerary, ItineraryDay } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
 
 function logFromRecord(r: RecordModel): TravelLog {
@@ -12,7 +12,6 @@ function logFromRecord(r: RecordModel): TravelLog {
     id: r.id,
     name: r.name || "",
     owners: Array.isArray(r.owners) ? r.owners : [],
-    checklists: r.checklists || [],
     created: r.created,
     updated: r.updated,
   };
@@ -23,7 +22,6 @@ function tripFromRecord(r: RecordModel): Trip {
     id: r.id, log: r.log, name: r.name || "", destination: r.destination || "",
     startDate: r.start_date || "", endDate: r.end_date || "", notes: r.notes || "",
     flagged: !!r.flagged_for_review, flagComment: r.review_comment || "",
-    checklistDone: r.checklist_done || {},
     status: r.status, region: r.region, sourceRefs: r.source_refs,
     created: r.created, updated: r.updated,
   };
@@ -68,10 +66,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
     return log.id;
   }
 
-  async updateLogChecklists(logId: string, checklists: ChecklistTemplate[]): Promise<void> {
-    await this.pb().collection("travel_logs").update(logId, { checklists });
-  }
-
   async addTrip(logId: string, trip: Omit<Trip, "id" | "log" | "created" | "updated">): Promise<string> {
     const r = await this.pb().collection("travel_trips").create({ log: logId, ...this.tripData(trip) });
     return r.id;
@@ -87,12 +81,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
 
   async flagTrip(tripId: string, flagged: boolean, comment?: string): Promise<void> {
     await this.pb().collection("travel_trips").update(tripId, { flagged_for_review: flagged, review_comment: comment || "" });
-  }
-
-  async toggleChecklistItem(tripId: string, itemId: string, done: boolean): Promise<void> {
-    const trip = await this.pb().collection("travel_trips").getOne(tripId);
-    const checklistDone = { ...(trip.checklist_done || {}), [itemId]: done };
-    await this.pb().collection("travel_trips").update(tripId, { checklist_done: checklistDone });
   }
 
   async addActivity(logId: string, activity: Omit<Activity, "id" | "log" | "created" | "updated">): Promise<string> {
@@ -185,10 +173,9 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (t.notes !== undefined) d.notes = t.notes;
     if (t.flagged !== undefined) d.flagged_for_review = t.flagged;
     if (t.flagComment !== undefined) d.review_comment = t.flagComment;
-    if (t.checklistDone !== undefined) d.checklist_done = t.checklistDone;
     if (t.sourceRefs !== undefined) d.source_refs = t.sourceRefs;
     // Pass through extra fields (status, region, etc.)
-    const mapped = new Set(["id", "log", "name", "destination", "startDate", "endDate", "notes", "flagged", "flagComment", "checklistDone", "sourceRefs", "created", "updated"]);
+    const mapped = new Set(["id", "log", "name", "destination", "startDate", "endDate", "notes", "flagged", "flagComment", "sourceRefs", "created", "updated"]);
     for (const [k, v] of Object.entries(t)) {
       if (!mapped.has(k) && v !== undefined) d[k] = v;
     }

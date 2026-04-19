@@ -890,11 +890,7 @@ if (shouldRun("travel")) {
         }
       }
 
-      // Checklists
-      if (logData.checklists) {
-        await travel.updateLogChecklists(pbLogId, logData.checklists);
-      }
-
+      // checklists removed — now part of unified task system
       console.log(`  Created/found: travel log -> ${pbLogId} for ${userMap.get(primaryOwner)!.email}`);
       logStats.created++;
 
@@ -931,7 +927,6 @@ if (shouldRun("travel")) {
             notes: tData.notes || "",
             flagged: !!tData.flaggedForReview,
             flagComment: tData.reviewComment || "",
-            checklistDone: tData.checklistDone || {},
             status: tData.status,
             region: tData.region,
             source_refs: tData.sourceRefs,

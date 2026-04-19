@@ -4,21 +4,8 @@ export interface TravelLog {
   id: string;
   name: string;
   owners: string[];
-  checklists: ChecklistTemplate[];
   created: string;
   updated: string;
-}
-
-export interface ChecklistTemplate {
-  id: string;
-  name: string;
-  items: ChecklistItem[];
-}
-
-export interface ChecklistItem {
-  id: string;
-  text: string;
-  category?: string;
 }
 
 export interface Trip {
@@ -31,7 +18,6 @@ export interface Trip {
   notes: string;
   flagged: boolean;
   flagComment: string;
-  checklistDone: Record<string, boolean>;
   status: string;
   region: string;
   sourceRefs: string;

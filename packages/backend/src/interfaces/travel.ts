@@ -1,7 +1,7 @@
 /**
  * Travel backend interface.
  *
- * Covers: logs, trips, activities, itineraries, checklists.
+ * Covers: logs, trips, activities, itineraries.
  */
 import type { Unsubscribe } from "../types/common";
 import type {
@@ -10,7 +10,6 @@ import type {
   Activity,
   Itinerary,
   ItineraryDay,
-  ChecklistTemplate,
 } from "../types/travel";
 
 export interface TravelBackend {
@@ -18,7 +17,6 @@ export interface TravelBackend {
 
   /** Get or create the user's travel log. Returns the log ID. */
   getOrCreateLog(userId: string): Promise<string>;
-  updateLogChecklists(logId: string, checklists: ChecklistTemplate[]): Promise<void>;
 
   // --- Trip CRUD ---
 
@@ -26,7 +24,6 @@ export interface TravelBackend {
   updateTrip(tripId: string, updates: Partial<Omit<Trip, "id" | "log" | "created" | "updated">>): Promise<void>;
   deleteTrip(tripId: string): Promise<void>;
   flagTrip(tripId: string, flagged: boolean, comment?: string): Promise<void>;
-  toggleChecklistItem(tripId: string, itemId: string, done: boolean): Promise<void>;
 
   // --- Activity CRUD ---
 

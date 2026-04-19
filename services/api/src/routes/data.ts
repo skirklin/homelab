@@ -244,7 +244,6 @@ dataRoutes.get("/travel/trips/:id", handler(async (c) => {
     notes: t.notes,
     flagged_for_review: t.flagged_for_review,
     review_comment: t.review_comment,
-    checklist_done: t.checklist_done,
   });
 }));
 

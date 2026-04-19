@@ -61,7 +61,6 @@ export function TripForm() {
             sourceRefs: (values.sourceRefs as string) || "",
             flaggedForReview: false,
             reviewComment: "",
-            checklistDone: {},
             created: now,
             updated: now,
           })
