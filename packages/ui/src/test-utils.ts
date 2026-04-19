@@ -11,7 +11,7 @@
  * Start one with: docker compose -f docker-compose.test.yml up -d
  */
 
-import PocketBase from "pocketbase";
+import PocketBase, { LocalAuthStore } from "pocketbase";
 import { initializeBackend } from "./backend";
 
 const PB_TEST_URL = process.env.PB_TEST_URL || "http://127.0.0.1:8091";
@@ -39,7 +39,7 @@ export interface TestUser {
  * Creates the first superuser if none exists, then authenticates as admin.
  */
 export async function initTestPocketBase(): Promise<TestContext> {
-  const pb = new PocketBase(PB_TEST_URL);
+  const pb = new PocketBase(PB_TEST_URL, new LocalAuthStore("pb_test_admin"));
   pb.autoCancellation(false);
 
   // Try to auth as existing superuser first
@@ -62,7 +62,7 @@ export async function initTestPocketBase(): Promise<TestContext> {
     }
   }
 
-  const userPb = new PocketBase(PB_TEST_URL);
+  const userPb = new PocketBase(PB_TEST_URL, new LocalAuthStore("pb_test_user"));
   userPb.autoCancellation(false);
 
   // Initialize the shared backend singleton so app code (getBackend()) works in tests

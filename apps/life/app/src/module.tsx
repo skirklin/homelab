@@ -24,6 +24,12 @@ const LoadingContainer = styled.div`
   min-height: 200px;
 `;
 
+function hasWidgets(manifest: unknown): boolean {
+  if (!manifest || typeof manifest !== "object") return false;
+  const m = manifest as Record<string, unknown>;
+  return Array.isArray(m.widgets) && m.widgets.length > 0;
+}
+
 interface LifeRoutesProps {
   /** When true, hides sign-out and other account actions (handled by parent shell) */
   embedded?: boolean;
@@ -46,7 +52,7 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
         id: backendLog.id,
         name: "",
         owners: [],
-        manifest: (backendLog.manifest as unknown as LifeLog["manifest"]) ?? DEFAULT_MANIFEST,
+        manifest: hasWidgets(backendLog.manifest) ? (backendLog.manifest as unknown as LifeLog["manifest"]) : DEFAULT_MANIFEST,
         sampleSchedule: backendLog.sampleSchedule as LifeLog["sampleSchedule"],
         created: new Date(),
         updated: new Date(),

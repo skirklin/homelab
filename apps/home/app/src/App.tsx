@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect } from "react";
 import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
@@ -26,6 +26,14 @@ function RedirectToLastApp() {
   return <Navigate to={target} replace />;
 }
 
+// Invite links work against either the recipes subdomain (standalone) or the
+// home app (embedded). When they land at /invite/:code here, forward into the
+// recipes module where the redemption UI lives.
+function InviteRedirect() {
+  const { code } = useParams<{ code: string }>();
+  return <Navigate to={`/recipes/invite/${code}`} replace />;
+}
+
 const antTheme = {
   token: {
     colorPrimary: "#7c3aed",
@@ -39,6 +47,7 @@ function AuthenticatedRoutes() {
     <Routes>
       <Route element={<Shell />}>
         <Route path="/" element={<RedirectToLastApp />} />
+        <Route path="/invite/:code" element={<InviteRedirect />} />
         <Route path="/timeline" element={<Timeline />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/life/*" element={<LifeRoutes embedded />} />

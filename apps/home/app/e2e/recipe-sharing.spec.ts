@@ -74,7 +74,7 @@ test.describe("Recipe Box Sharing (Home App)", () => {
     await expect(pageA).toHaveURL(/\/recipes\/boxes\//);
 
     // Click Sharing dropdown, then "Create invite link"
-    await pageA.getByRole("button", { name: /sharing/i }).click();
+    await pageA.getByRole("button", { name: /sharing/i }).first().click();
     const inviteItem = pageA.getByText("Create invite link");
     await expect(inviteItem).toBeVisible({ timeout: 5000 });
 
@@ -106,7 +106,7 @@ test.describe("Recipe Box Sharing (Home App)", () => {
     await pageB.goto(invitePath);
 
     // Should see success and redirect to the box
-    await expect(pageB.getByText(/invite accepted/i)).toBeVisible({ timeout: 10000 });
+    await expect(pageB.getByText(/invite accepted/i).first()).toBeVisible({ timeout: 10000 });
     await expect(pageB).toHaveURL(/\/recipes\/boxes\//, { timeout: 10000 });
 
     // Verify box appears in User B's boxes list

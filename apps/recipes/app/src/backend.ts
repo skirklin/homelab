@@ -4,19 +4,20 @@
  */
 import { getBackend } from "@kirkl/shared";
 
-// API base URL — same domain as PocketBase, under /fn/ path
-function getApiUrl(): string {
-  try {
-    const env = import.meta.env;
-    return env?.VITE_PB_URL || "https://api.beta.kirkl.in";
-  } catch {
-    return "https://api.beta.kirkl.in";
+// API base URL — in dev, route through the vite dev server so proxying works.
+// In production, PB and API share a host (api.beta.kirkl.in/fn/).
+function getApiBase(): string {
+  const pbUrl = getBackend().baseURL.replace(/\/$/, "");
+  const isLocal = pbUrl.includes("localhost") || pbUrl.includes("127.0.0.1");
+  if (isLocal && typeof window !== "undefined") {
+    return window.location.origin + "/fn";
   }
+  return pbUrl + "/fn";
 }
 
 async function apiFetch<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const pb = getBackend();
-  const resp = await fetch(`${getApiUrl()}/fn${path}`, {
+  const resp = await fetch(`${getApiBase()}${path}`, {
     method: options.method || (options.body ? "POST" : "GET"),
     headers: {
       "Content-Type": "application/json",

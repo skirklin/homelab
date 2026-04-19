@@ -6,7 +6,7 @@
   "main": "src/module.tsx",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b tsconfig.app.json && vite build",
+    "build": "tsc -b tsconfig.app.json",
     "typecheck": "tsc -b tsconfig.app.json",
     "lint": "eslint .",
     "preview": "vite preview",
