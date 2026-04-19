@@ -32,7 +32,7 @@ import {
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  let pbPassword = "";
+  let pbPassword = process.env.PB_ADMIN_PASSWORD || "";
   let pbUrl = process.env.PB_URL || `https://api.${process.env.DOMAIN || "kirkl.in"}`;
   let dryRun = false;
   let collection: string | null = null;
@@ -120,10 +120,14 @@ console.log(`  Collection filter: ${config.collection || "all"}`);
 const adminPb = new PocketBase(config.pbUrl);
 adminPb.autoCancellation(false);
 
-if (!config.dryRun) {
+// Authenticate even in dry-run — we need read access to existing PB data
+// to produce an accurate preview (user mapping, idempotent-skip detection).
+if (config.pbPassword) {
   console.log("\n  Authenticating with PocketBase...");
   await adminPb.collection("_superusers").authWithPassword("scott.kirklin@gmail.com", config.pbPassword);
   console.log("  Authenticated.");
+} else if (config.dryRun) {
+  console.log("\n  (No --pb-password given; dry-run will see empty PB and over-report)");
 }
 
 // All backend interfaces share the admin client
@@ -144,8 +148,8 @@ console.log("\n=== Building User Map ===\n");
 // Firebase UID -> PB user ID
 const userMap = new Map<string, { pbId: string; email: string }>();
 
-// Get existing PB users for dedup
-const existingPbUsers = config.dryRun ? [] : await adminPb.collection("users").getFullList();
+// Get existing PB users for dedup (needed even in dry-run for accurate preview)
+const existingPbUsers = await adminPb.collection("users").getFullList();
 const emailToPbId = new Map<string, string>();
 for (const u of existingPbUsers) {
   if (u.email) emailToPbId.set(u.email, u.id);
@@ -183,7 +187,8 @@ do {
       console.log(`  Exists: ${user.email} -> ${pbId}`);
     } else {
       console.log(`  Would create: ${user.email} (dry run)`);
-      continue;
+      // Populate with synthetic ID so downstream preview can map owners
+      pbId = `dryrun-${user.uid}`;
     }
 
     userMap.set(user.uid, { pbId, email: user.email });
