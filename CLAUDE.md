@@ -6,27 +6,29 @@ You are the Architect on this project. Read ARCHITECT.md before doing anything e
 
 Personal web apps monorepo, self-hosted on PocketBase + Caddy on a VPS (Hetzner, 5.78.200.161, user `scott`).
 
-## Current state (2026-04-12)
+## Current state (2026-04-19)
 
-All apps deployed and serving. Backend abstraction layer complete. MCP server connected.
+Production is **`kirkl.in`**. Firebase → PocketBase migration is complete; PB on the VPS is authoritative for all app data. Caddy still serves `beta.kirkl.in` as an alias during the transition window.
 
 ### Architecture
 
 k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxies to app services. Each frontend app is an nginx container serving Vite build output. PocketBase is a StatefulSet with a PVC. API service (Hono/TypeScript) handles recipe scraping, AI, sharing, push notifications, and data endpoints.
 
+**URL config**: single `DOMAIN` env var (default `kirkl.in`) drives everything via `services/api/src/config.ts`. Frontend gets `VITE_DOMAIN` baked in at build time via `deploy.sh`. DNS: Squarespace `@` and `*` both A → 5.78.200.161.
+
 | Subdomain | k8s Service |
 |---|---|
-| `beta.kirkl.in` | home |
-| `recipes.beta.kirkl.in` | recipes |
-| `shopping.beta.kirkl.in` | shopping |
-| `upkeep.beta.kirkl.in` | upkeep |
-| `travel.beta.kirkl.in` | travel |
-| `me.beta.kirkl.in` | homepage |
-| `api.beta.kirkl.in` | pocketbase (direct) + functions (under `/fn/`) |
-| `registry.beta.kirkl.in` | private Docker registry (auth required) |
+| `kirkl.in` | home |
+| `recipes.kirkl.in` | recipes |
+| `shopping.kirkl.in` | shopping |
+| `upkeep.kirkl.in` | upkeep (Kanban view) |
+| `travel.kirkl.in` | travel |
+| `me.kirkl.in` | homepage |
+| `api.kirkl.in` | pocketbase (direct) + functions (under `/fn/`) |
+| `registry.kirkl.in` | private Docker registry (auth required) |
 
+Home app also serves `/tasks/*` (unified task outliner) and `/life/*` (life module).
 Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.net`).
-Life is a module embedded in the home app, not a standalone deployment.
 
 ## MCP Server
 
@@ -57,13 +59,17 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `remove_shopping_item` — delete an item
 - `clear_checked_items` — done shopping, clear checked
 
-**Upkeep (read):**
-- `list_tasks` — list tasks in a task list
+**Tasks (read):**
+- `list_tasks` — list tasks (filter by parent_id, tag, task_type)
 
-**Upkeep (write):**
-- `add_task` — create a task
-- `complete_task` — mark done
-- `snooze_task` — snooze until a date
+**Tasks (write):**
+- `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot)
+- `update_task` — update any fields
+- `delete_task` — delete task and all descendants
+- `complete_task` — toggle completion (recurring sets last_completed; one_shot toggles completed)
+- `snooze_task` — snooze until a date (recurring only)
+
+Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner.
 
 **Travel (read):**
 - `list_travel_trips` — all trips across logs
@@ -94,7 +100,7 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 | Field | Purpose | Examples |
 |---|---|---|
 | `name` | Short name. No "Overnight in" prefix for lodging. | `Desert Botanical Garden`, `SpringHill Suites Phoenix` |
-| `category` | Type of activity | `Attraction`, `Lodging`, `Transport`, `Food`, `Adventure`, `Culture` |
+| `category` | Type of activity | `Transportation`, `Accommodation`, `Hiking`, `Adventure`, `Food & Dining`, `Sightseeing`, `Shopping`, `Nightlife`, `Culture`, `Relaxation`, `Other` |
 | `location` | City or area | `Phoenix, AZ`, `Taos, NM` |
 | `description` | Brief qualifying note only — what makes this specific. NOT costs, durations, or logistics. | `Ancient Puebloan great houses, 650+ rooms. Unpaved road in.` |
 | `duration_estimate` | How long the activity takes (not including travel to/from) | `2h`, `half day`, `1.5h` |
@@ -105,7 +111,7 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 **Do not** put durations in the description. **Do not** prefix lodging names with "Overnight in". Use the actual hotel/property name.
 
 ### MCP auth
-Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (beta.kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.
+Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.
 
 ### MCP config
 `.mcp.json` at project root (gitignored) configures the MCP server for Claude Code. Uses the project's local `tsx` binary to run `services/api/src/mcp.ts`.
@@ -140,7 +146,7 @@ Implementations live in `packages/backend/src/pocketbase/`. Apps get backends vi
 - PocketBase collections use snake_case; TypeScript types use camelCase; PB mappers translate between them
 - Backend types are camelCase only — no snake_case aliases
 - Deploy: `./infra/deploy.sh [apps...]` builds locally, pushes to registry, applies k8s manifests
-- Private Docker registry at `registry.beta.kirkl.in` — deploys take ~30-60s
+- Private Docker registry at `registry.kirkl.in` — deploys take ~30-60s
 - API tokens: `hlk_` prefix, SHA-256 hashed in PocketBase, created via Settings UI
 - `.env` at project root has secrets (gitignored): `PB_ADMIN_PASSWORD`, `HOMELAB_API_TOKEN`, `VITE_GOOGLE_MAPS_API_KEY`
 
