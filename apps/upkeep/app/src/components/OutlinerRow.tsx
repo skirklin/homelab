@@ -17,8 +17,8 @@ type DropZone = "before" | "inside" | "after" | null;
 const Row = styled.div<{ $depth: number; $focused: boolean; $dragging: boolean; $dropZone: DropZone }>`
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 6px 1px ${(p) => 6 + p.$depth * 20}px;
+  gap: 2px;
+  padding: 1px 6px 1px ${(p) => 2 + p.$depth * 16}px;
   min-height: 22px;
   background: ${(p) => {
     if (p.$dragging) return "#e6f4ff";
@@ -38,13 +38,13 @@ const Row = styled.div<{ $depth: number; $focused: boolean; $dragging: boolean; 
 `;
 
 const DragHandle = styled.div`
-  width: 12px;
+  width: 8px;
   height: 16px;
   cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #d9d9d9;
+  color: #e8e8e8;
   font-size: 10px;
   flex-shrink: 0;
   user-select: none;
@@ -53,23 +53,24 @@ const DragHandle = styled.div`
   &::before { content: "\\2807"; }
 `;
 
+
 const CollapseBtn = styled.button`
   border: none;
   background: none;
   cursor: pointer;
   padding: 0;
-  width: 16px;
+  width: 12px;
   height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #8c8c8c;
-  font-size: 10px;
+  font-size: 9px;
   flex-shrink: 0;
 `;
 
 const Spacer = styled.div`
-  width: 16px;
+  width: 12px;
   flex-shrink: 0;
 `;
 

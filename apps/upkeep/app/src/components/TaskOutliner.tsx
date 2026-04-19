@@ -13,9 +13,9 @@ import { OutlinerRow } from "./OutlinerRow";
 const Container = styled.div`
   max-width: 900px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 12px 8px;
   display: flex;
-  gap: 16px;
+  gap: 12px;
 `;
 
 const TreePane = styled.div`
@@ -33,7 +33,7 @@ const Header = styled.div`
 const TreeContainer = styled.div`
   border: 1px solid #f0f0f0;
   border-radius: 8px;
-  padding: 8px 0;
+  padding: 4px 0;
   background: white;
 `;
 
