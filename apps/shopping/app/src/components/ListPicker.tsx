@@ -2,7 +2,7 @@
  * List picker for shopping app - uses shared ListPicker component.
  */
 
-import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations } from "@kirkl/shared";
+import { ListPicker as SharedListPicker, type ListPickerConfig, type ListOperations, joinList } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
@@ -22,7 +22,6 @@ export function ListPicker() {
   const userBackend = useUserBackend();
 
   const operations: ListOperations = {
-    collection: "shopping_lists",
     getUserSlugs: () => state.userSlugs,
     createList: async (name: string, slug: string, userId: string) => {
       const listId = await shopping.createList(name, userId);
@@ -36,6 +35,7 @@ export function ListPicker() {
       const list = await shopping.getList(listId);
       return list ? { name: list.name } : null;
     },
+    joinList: (listId: string) => joinList("shopping_lists", listId).then(() => {}),
   };
 
   return (

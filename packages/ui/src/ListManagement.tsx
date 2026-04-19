@@ -170,8 +170,8 @@ export interface ListOperations {
   setUserSlug: (userId: string, slug: string, listId: string) => Promise<void>;
   /** Get list by ID (returns name or null if not found) */
   getListById: (listId: string) => Promise<{ name: string } | null>;
-  /** PocketBase collection name for this list type (e.g. "shopping_lists") */
-  collection: string;
+  /** Add current user to the list's owners (server-side) */
+  joinList: (listId: string) => Promise<void>;
 }
 
 export interface ListPickerProps {
@@ -296,14 +296,13 @@ export function ListPicker({ config, operations, storage, headerContent }: ListP
     setSubmitting(true);
     try {
       // Verify the list exists and add user to owners (server-side)
-      const { getListInfo, joinList: joinListApi } = await import("./api");
-      const listData = await getListInfo(operations.collection, sharedListId.trim());
+      const listData = await operations.getListById(sharedListId.trim());
       if (!listData) {
         message.error("List not found. Check the ID and try again.");
         setSubmitting(false);
         return;
       }
-      await joinListApi(operations.collection, sharedListId.trim());
+      await operations.joinList(sharedListId.trim());
       await operations.setUserSlug(user.uid, slug, sharedListId.trim());
       setAddModalOpen(false);
       setSharedListSlug("");
@@ -517,8 +516,7 @@ export function JoinList({ config, operations }: JoinListProps) {
     setError(null);
     try {
       // Add user to the list's owners (server-side, bypasses API rules)
-      const { joinList: joinListApi } = await import("./api");
-      await joinListApi(operations.collection, listId);
+      await operations.joinList(listId);
       // Save the user's slug mapping
       await operations.setUserSlug(user.uid, cleanSlug, listId);
       navigate("/" + cleanSlug);

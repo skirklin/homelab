@@ -41,6 +41,9 @@ const mockUserBackend = {
   getProfile: vi.fn().mockResolvedValue({}),
 };
 
+const mockGetListInfo = vi.fn();
+const mockJoinList = vi.fn().mockResolvedValue({ success: true, name: 'test' });
+
 vi.mock('@kirkl/shared', async () => {
   const actual = await vi.importActual('@kirkl/shared');
   return {
@@ -48,6 +51,8 @@ vi.mock('@kirkl/shared', async () => {
     useUpkeepBackend: () => mockUpkeepBackend,
     useUserBackend: () => mockUserBackend,
     BackendProvider: ({ children }: { children: React.ReactNode }) => children,
+    getListInfo: (...args: any[]) => mockGetListInfo(...args),
+    joinList: (...args: any[]) => mockJoinList(...args),
   };
 });
 
@@ -103,7 +108,7 @@ describe('JoinList', () => {
   });
 
   it('shows loading spinner while fetching list', () => {
-    mockUpkeepBackend.getList.mockImplementation(
+    mockGetListInfo.mockImplementation(
       () => new Promise(() => {}) // Never resolves
     );
 
@@ -114,7 +119,7 @@ describe('JoinList', () => {
   });
 
   it('shows list name and join form when list exists', async () => {
-    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
+    mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -126,7 +131,7 @@ describe('JoinList', () => {
   });
 
   it('shows error message when list does not exist', async () => {
-    mockUpkeepBackend.getList.mockResolvedValue(null);
+    mockGetListInfo.mockResolvedValue(null);
 
     renderJoinList('nonexistent');
 
@@ -137,7 +142,7 @@ describe('JoinList', () => {
   });
 
   it('shows error message when loading fails with permission error', async () => {
-    mockUpkeepBackend.getList.mockRejectedValue(new Error('Missing or insufficient permissions'));
+    mockGetListInfo.mockRejectedValue(new Error('Missing or insufficient permissions'));
 
     renderJoinList('list123');
 
@@ -148,7 +153,7 @@ describe('JoinList', () => {
   });
 
   it('suggests slug based on list name', async () => {
-    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
+    mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -162,7 +167,7 @@ describe('JoinList', () => {
 
   it('calls setSlug and navigates on successful join', async () => {
     const user = userEvent.setup();
-    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
+    mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
     mockUserBackend.setSlug.mockResolvedValue(undefined);
 
     renderJoinList('list123');
@@ -177,7 +182,7 @@ describe('JoinList', () => {
     await waitFor(() => {
       expect(mockUserBackend.setSlug).toHaveBeenCalledWith('user123', 'household', 'home', 'list123');
     });
-    expect(mockNavigate).toHaveBeenCalledWith('home');
+    expect(mockNavigate).toHaveBeenCalledWith('/home');
   });
 
   it('shows error when slug already exists', async () => {
@@ -192,7 +197,7 @@ describe('JoinList', () => {
       return () => {};
     });
 
-    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
+    mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -211,7 +216,7 @@ describe('JoinList', () => {
 
   it('allows custom slug input', async () => {
     const user = userEvent.setup();
-    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
+    mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Family Tasks', owners: [], rooms: [] });
     mockUserBackend.setSlug.mockResolvedValue(undefined);
 
     renderJoinList('list123');
@@ -234,7 +239,7 @@ describe('JoinList', () => {
 
   it('navigates to parent route on cancel', async () => {
     const user = userEvent.setup();
-    mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
+    mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
     renderJoinList('list123');
 
@@ -253,7 +258,7 @@ describe('JoinList', () => {
 
   describe('auth check fix', () => {
     it('shows error when user is not authenticated (null user)', async () => {
-      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
+      mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
       renderJoinList('list123', null); // Pass null user (not authenticated)
 
@@ -264,7 +269,7 @@ describe('JoinList', () => {
     });
 
     it('waits while auth is loading (undefined user)', () => {
-      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
+      mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
 
       // Render with undefined user (auth still loading)
       render(
@@ -289,7 +294,7 @@ describe('JoinList', () => {
     it('rejects slugs with only special characters', async () => {
       const user = userEvent.setup();
       const { message } = await import('antd');
-      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
+      mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
 
       renderJoinList('list123');
 
@@ -310,7 +315,7 @@ describe('JoinList', () => {
 
     it('rejects empty slugs', async () => {
       const user = userEvent.setup();
-      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
+      mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
 
       renderJoinList('list123');
 
@@ -331,7 +336,7 @@ describe('JoinList', () => {
 
     it('accepts valid slugs with alphanumeric characters', async () => {
       const user = userEvent.setup();
-      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
+      mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
       mockUserBackend.setSlug.mockResolvedValue(undefined);
 
       renderJoinList('list123');
@@ -354,7 +359,7 @@ describe('JoinList', () => {
 
     it('strips leading and trailing dashes from slugs', async () => {
       const user = userEvent.setup();
-      mockUpkeepBackend.getList.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
+      mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Test List', owners: [], rooms: [] });
       mockUserBackend.setSlug.mockResolvedValue(undefined);
 
       renderJoinList('list123');

@@ -2,7 +2,7 @@
  * Join list page for shopping app - uses shared JoinList component.
  */
 
-import { JoinList as SharedJoinList, type JoinListConfig, type ListOperations, getListInfo } from "@kirkl/shared";
+import { JoinList as SharedJoinList, type JoinListConfig, type ListOperations, getListInfo, joinList } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useUserBackend } from "@kirkl/shared";
 
@@ -17,13 +17,13 @@ export function JoinList() {
   const userBackend = useUserBackend();
 
   const operations: ListOperations = {
-    collection: "shopping_lists",
     getUserSlugs: () => state.userSlugs,
     createList: async () => { throw new Error("Not implemented"); },
     setUserSlug: async (userId: string, slug: string, listId: string) => {
       await userBackend.setSlug(userId, "shopping", slug, listId);
     },
     getListById: (listId: string) => getListInfo("shopping_lists", listId),
+    joinList: (listId: string) => joinList("shopping_lists", listId).then(() => {}),
   };
 
   return (
