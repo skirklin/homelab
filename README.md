@@ -82,6 +82,29 @@ pnpm dev       # starts all apps via Turborepo
 pnpm build     # builds all apps
 ```
 
+## Testing
+
+The vitest e2e suites and Playwright tests hit a real PocketBase instance
+and the Hono API service. Bring them up in Docker before running tests:
+
+```bash
+pnpm test:env:up       # starts PocketBase (:8091) + API (:3001), waits for health
+pnpm test              # turbo run test across the monorepo
+pnpm test:env:down     # stop the containers when done
+```
+
+`pnpm test:env:status` shows container and health status.
+
+Test types:
+
+- **Unit tests** (`*.test.ts{,x}`) — run under vitest with jsdom. No external dependencies.
+- **Vitest e2e** (`src/e2e/*.e2e.test.ts`) — hit the test PocketBase directly via `@kirkl/shared/test-utils`.
+- **Playwright e2e** (`apps/home/app/e2e/`) — drive the home app in a real browser, exercising the full stack (PocketBase + API).
+
+Playwright tests run `pnpm dev --port 5174` via `playwright.config.ts`. The dev server proxies `/fn` to the test API container, so invite creation and other API-dependent flows work end-to-end.
+
+Set `VITE_API_URL` to point the proxy at a different API (the default is `http://127.0.0.1:3001` matching the test compose file).
+
 ## Tooling
 
 - **k3s** — single-node Kubernetes

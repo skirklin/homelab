@@ -8,7 +8,7 @@
  *   await cleanupTestPocketBase(ctx);
  *
  * Requires a PocketBase instance running at PB_TEST_URL (default: http://127.0.0.1:8091).
- * Start one with: docker compose -f docker-compose.test.yml up -d
+ * Start the full test env (PocketBase + API) with: pnpm test:env:up
  */
 
 import PocketBase, { LocalAuthStore } from "pocketbase";
@@ -57,7 +57,7 @@ export async function initTestPocketBase(): Promise<TestContext> {
     } catch (e) {
       throw new Error(
         `Failed to initialize PocketBase test admin at ${PB_TEST_URL}. ` +
-        `Is PocketBase running? (docker compose -f docker-compose.test.yml up -d)\n${e}`
+        `Is the test environment running? (pnpm test:env:up)\n${e}`
       );
     }
   }
