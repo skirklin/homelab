@@ -21,6 +21,7 @@ import {
   SwapOutlined,
   UnorderedListOutlined,
   CarOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useTravelBackend } from "@kirkl/shared";
@@ -29,9 +30,11 @@ import { daysToBackend } from "../adapters";
 import { mapsUrl } from "../utils";
 import {
   calculateDayLoad,
+  validateDay,
   type Activity,
   type Itinerary,
   type DayLoad,
+  type DayIssue,
 } from "../types";
 import type { DayRouteInfo } from "./ItineraryMap";
 import { ItineraryCompare } from "./ItineraryCompare";
@@ -118,6 +121,41 @@ const LoadBadge = styled.span<{ $level: DayLoad["level"] }>`
   padding: 0 4px;
   white-space: nowrap;
 `;
+
+const IssuesBadge = styled.span`
+  font-size: 9px;
+  font-weight: 600;
+  color: #fa8c16;
+  background: #fa8c1615;
+  border-radius: 3px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: help;
+`;
+
+function DayIssuesIndicator({ issues, style }: { issues: DayIssue[]; style?: React.CSSProperties }) {
+  if (issues.length === 0) return null;
+  const tooltip = (
+    <ul style={{ margin: 0, paddingLeft: 16, maxWidth: 320 }}>
+      {issues.map((issue, i) => (
+        <li key={i} style={{ lineHeight: 1.4 }}>{issue.message}</li>
+      ))}
+    </ul>
+  );
+  return (
+    <Popover content={tooltip} trigger={["hover", "focus"]} placement="bottom">
+      <IssuesBadge
+        style={style}
+        tabIndex={0}
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <WarningOutlined /> {issues.length}
+      </IssuesBadge>
+    </Popover>
+  );
+}
 
 const CompactDayTitle = styled.div`
   font-size: 11px;
@@ -317,6 +355,7 @@ function ItineraryTimeline({
       .map((s) => activityMap.get(s.activityId))
       .filter((a): a is Activity => a != null);
     const load = calculateDayLoad(expandedActivities);
+    const issues = validateDay(day.slots, activityMap);
 
     const totalDays = itinerary.days.length;
     const hasPrev = focusDay > 0;
@@ -350,6 +389,7 @@ function ItineraryTimeline({
                   </LoadBadge>
                 );
               })()}
+              <DayIssuesIndicator issues={issues} style={{ fontSize: 11, padding: "1px 6px" }} />
             </div>
             {lodging && (() => {
               const url = mapsUrl(lodging);
@@ -475,6 +515,7 @@ function ItineraryTimeline({
           .map((s) => activityMap.get(s.activityId))
           .filter((a): a is Activity => a != null);
         const load = calculateDayLoad(dayActivities);
+        const issues = validateDay(day.slots, activityMap);
 
         return (
           <CompactDayCard key={i} onClick={() => onDayClick(i)} style={{ cursor: "pointer" }}>
@@ -503,6 +544,7 @@ function ItineraryTimeline({
                   </LoadBadge>
                 );
               })()}
+              <DayIssuesIndicator issues={issues} />
             </CompactDayTitle>
 
             {flights.map((f, j) => (

@@ -231,3 +231,127 @@ export function dayTravelDistance(activities: Activity[]): number {
   }
   return total;
 }
+
+// ==========================================
+// Itinerary day validation
+// ==========================================
+
+export type DayIssueKind = "overlap" | "out-of-order" | "drive-gap";
+
+export interface DayIssue {
+  kind: DayIssueKind;
+  message: string;
+  /** Slot indices involved, in the order they appear in the day's slots array */
+  slotIndices: [number, number];
+}
+
+/** Parse "HH:mm" into minutes from midnight, or null if unparseable. */
+export function parseTimeOfDay(time: string | undefined): number | null {
+  if (!time) return null;
+  const m = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/** Format minutes-from-midnight as "HH:mm" (values past 24h render as e.g. "25:30"). */
+function formatMin(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min - h * 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * Check a day's scheduled slots for issues:
+ *   - overlap: two activities whose [start, start+duration] ranges intersect
+ *   - out-of-order: slots listed in a different order than their start times
+ *   - drive-gap: consecutive scheduled activities in different places where
+ *     the haversine-estimated drive is longer than the scheduled gap
+ *
+ * Activities without a startTime, or that can't be resolved in activityMap,
+ * are skipped. If `durationEstimate` is unparseable (yields 0 hours), the
+ * activity contributes a zero-length point in time — overlap and drive-gap
+ * checks skip it, but it still participates in out-of-order.
+ */
+export function validateDay(
+  slots: ItinerarySlot[],
+  activityMap: Map<string, Activity>,
+): DayIssue[] {
+  interface Scheduled {
+    index: number;
+    startMin: number;
+    endMin: number;
+    activity: Activity;
+  }
+  const scheduled: Scheduled[] = [];
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    const startMin = parseTimeOfDay(slot.startTime);
+    if (startMin == null) continue;
+    const activity = activityMap.get(slot.activityId);
+    if (!activity) continue;
+    const durHours = parseDurationHours(activity.durationEstimate);
+    scheduled.push({ index: i, startMin, endMin: startMin + durHours * 60, activity });
+  }
+
+  const issues: DayIssue[] = [];
+
+  // Out of order: list position disagrees with start-time order.
+  for (let i = 1; i < scheduled.length; i++) {
+    const prev = scheduled[i - 1];
+    const curr = scheduled[i];
+    if (curr.startMin < prev.startMin) {
+      issues.push({
+        kind: "out-of-order",
+        message: `${curr.activity.name} (${formatMin(curr.startMin)}) is listed after ${prev.activity.name} (${formatMin(prev.startMin)})`,
+        slotIndices: [prev.index, curr.index],
+      });
+    }
+  }
+
+  // Overlap: any two scheduled activities with overlapping ranges. Requires
+  // both to have positive duration — without it we can't define an end.
+  for (let i = 0; i < scheduled.length; i++) {
+    for (let j = i + 1; j < scheduled.length; j++) {
+      const a = scheduled[i];
+      const b = scheduled[j];
+      if (a.endMin <= a.startMin || b.endMin <= b.startMin) continue;
+      if (a.startMin < b.endMin && b.startMin < a.endMin) {
+        issues.push({
+          kind: "overlap",
+          message: `${a.activity.name} (${formatMin(a.startMin)}–${formatMin(a.endMin)}) overlaps ${b.activity.name} (${formatMin(b.startMin)}–${formatMin(b.endMin)})`,
+          slotIndices: [a.index, b.index],
+        });
+      }
+    }
+  }
+
+  // Drive gap: consecutive activities (by time) in different places where
+  // estimated travel exceeds the scheduled gap.
+  const byTime = [...scheduled].sort((a, b) => a.startMin - b.startMin);
+  for (let i = 1; i < byTime.length; i++) {
+    const a = byTime[i - 1];
+    const b = byTime[i];
+    if (a.activity.lat == null || a.activity.lng == null) continue;
+    if (b.activity.lat == null || b.activity.lng == null) continue;
+    if (a.endMin <= a.startMin) continue;
+    const miles = haversineDistance(
+      { lat: a.activity.lat, lng: a.activity.lng },
+      { lat: b.activity.lat, lng: b.activity.lng },
+    );
+    const driveMin = estimateDriveHours(miles) * 60;
+    if (driveMin < 5) continue;
+    const gapMin = b.startMin - a.endMin;
+    if (gapMin < driveMin) {
+      issues.push({
+        kind: "drive-gap",
+        message: `${Math.round(driveMin)}min drive from ${a.activity.name} to ${b.activity.name}, but only ${Math.round(gapMin)}min scheduled`,
+        slotIndices: [a.index, b.index],
+      });
+    }
+  }
+
+  return issues;
+}
