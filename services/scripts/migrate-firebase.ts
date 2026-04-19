@@ -476,9 +476,14 @@ if (shouldRun("shopping")) {
         }
       }
 
-      // Set categories (direct admin call since createList doesn't support it)
+      // Set categories — only if PB list doesn't already have them, to avoid
+      // later Firebase lists with the same name overwriting earlier (richer) data
       if (listData.categoryDefs && Array.isArray(listData.categoryDefs)) {
-        await adminPb.collection("shopping_lists").update(pbListId, { category_defs: listData.categoryDefs });
+        const existing = await adminPb.collection("shopping_lists").getOne(pbListId);
+        const existingCats = Array.isArray(existing.category_defs) ? existing.category_defs : [];
+        if (existingCats.length < listData.categoryDefs.length) {
+          await adminPb.collection("shopping_lists").update(pbListId, { category_defs: listData.categoryDefs });
+        }
       }
 
       // Migrate items
