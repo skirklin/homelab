@@ -20,7 +20,7 @@ fi
 
 VPS="${HOMELAB_VPS:-scott@5.78.200.161}"
 # Push to public registry (Caddy with TLS + basic auth)
-PUSH_REGISTRY="registry.beta.kirkl.in"
+PUSH_REGISTRY="${REGISTRY_HOST:-registry.${DOMAIN:-kirkl.in}}"
 # k8s pulls from the NodePort on localhost
 K8S_REGISTRY="localhost:30500/homelab"
 

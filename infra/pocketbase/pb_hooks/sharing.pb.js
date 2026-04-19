@@ -83,10 +83,13 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
   }
 });
 
-// Validate invite creation — ensure the creator owns the target
+// Validate invite creation — ensure the creator owns the target.
+// Works for both user-token requests (auth.id is the user) and superuser
+// requests from the API service (auth.id is empty; trust the server-set
+// created_by field which the API populates from the authenticated user).
 onRecordCreateRequest((e) => {
   const record = e.record;
-  const authId = e.requestInfo()?.auth?.id;
+  const authId = e.requestInfo()?.auth?.id || record.get("created_by");
 
   if (!authId) {
     throw new BadRequestError("Authentication required");
