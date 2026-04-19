@@ -62,7 +62,6 @@ export function userFromBackend(u: RecipesUser): UserEntry {
     new Date(), // RecipesUser doesn't have timestamps
     new Date(),
     u.id,
-    u.cookingModeSeen,
     u.lastSeenUpdateVersion || CURRENT_UPDATE_VERSION,
   );
 }

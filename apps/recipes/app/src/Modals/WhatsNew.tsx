@@ -7,7 +7,7 @@ import { useRecipesBackend } from '@kirkl/shared';
 import { useAuth } from '@kirkl/shared';
 
 // Increment this when adding new updates
-export const CURRENT_UPDATE_VERSION = 1;
+export const CURRENT_UPDATE_VERSION = 2;
 
 const UpdateList = styled.ul`
   padding-left: var(--space-lg);
@@ -53,6 +53,8 @@ function WhatsNew() {
     return null;
   }
 
+  const version = user?.lastSeenUpdateVersion ?? CURRENT_UPDATE_VERSION;
+
   return (
     <Modal
       title="What's New in Recipe Box"
@@ -62,41 +64,56 @@ function WhatsNew() {
       okText="Got it!"
       cancelButtonProps={{ style: { display: 'none' } }}
     >
-      <UpdateTitle>Cooking Log</UpdateTitle>
-      <UpdateList>
-        <UpdateItem>
-          Track when you make recipes with the new "I made it!" button
-        </UpdateItem>
-        <UpdateItem>
-          Add notes about modifications or how it turned out
-        </UpdateItem>
-        <UpdateItem>
-          See your cooking history on each recipe card
-        </UpdateItem>
-      </UpdateList>
+      {version < 2 && (
+        <>
+          <UpdateTitle>Cooking Mode</UpdateTitle>
+          <UpdateList>
+            <UpdateItem>
+              Enable cooking mode to enlarge text and keep your screen on while you cook
+            </UpdateItem>
+          </UpdateList>
+        </>
+      )}
 
-      <UpdateTitle>AI Recipe Generation</UpdateTitle>
-      <UpdateList>
-        <UpdateItem>
-          Generate new recipes from a description or ingredients using AI
-        </UpdateItem>
-        <UpdateItem>
-          AI-powered descriptions and tags for imported recipes
-        </UpdateItem>
-      </UpdateList>
+      {version < 1 && (
+        <>
+          <UpdateTitle>Cooking Log</UpdateTitle>
+          <UpdateList>
+            <UpdateItem>
+              Track when you make recipes with the new "I made it!" button
+            </UpdateItem>
+            <UpdateItem>
+              Add notes about modifications or how it turned out
+            </UpdateItem>
+            <UpdateItem>
+              See your cooking history on each recipe card
+            </UpdateItem>
+          </UpdateList>
 
-      <UpdateTitle>Bug Fixes</UpdateTitle>
-      <UpdateList>
-        <UpdateItem>
-          Fixed apostrophes and special characters not displaying correctly
-        </UpdateItem>
-        <UpdateItem>
-          Fixed recipe links not loading properly when shared
-        </UpdateItem>
-        <UpdateItem>
-          Various UI improvements and polish
-        </UpdateItem>
-      </UpdateList>
+          <UpdateTitle>AI Recipe Generation</UpdateTitle>
+          <UpdateList>
+            <UpdateItem>
+              Generate new recipes from a description or ingredients using AI
+            </UpdateItem>
+            <UpdateItem>
+              AI-powered descriptions and tags for imported recipes
+            </UpdateItem>
+          </UpdateList>
+
+          <UpdateTitle>Bug Fixes</UpdateTitle>
+          <UpdateList>
+            <UpdateItem>
+              Fixed apostrophes and special characters not displaying correctly
+            </UpdateItem>
+            <UpdateItem>
+              Fixed recipe links not loading properly when shared
+            </UpdateItem>
+            <UpdateItem>
+              Various UI improvements and polish
+            </UpdateItem>
+          </UpdateList>
+        </>
+      )}
     </Modal>
   );
 }

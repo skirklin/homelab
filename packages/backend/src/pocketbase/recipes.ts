@@ -13,7 +13,6 @@ function userFromRecord(r: RecordModel): RecipesUser {
   return {
     id: r.id,
     boxes: r.recipe_boxes || [],
-    cookingModeSeen: !!r.cooking_mode_seen,
     lastSeenUpdateVersion: r.last_seen_update_version || 0,
   };
 }
@@ -74,10 +73,6 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
     } catch {
       return null;
     }
-  }
-
-  async setCookingModeSeen(userId: string): Promise<void> {
-    await this.pb().collection("users").update(userId, { cooking_mode_seen: true });
   }
 
   async setLastSeenUpdateVersion(userId: string, version: number): Promise<void> {

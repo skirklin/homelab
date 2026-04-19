@@ -64,17 +64,18 @@ function CookingMode() {
     setIsSupported(true);
   }, []);
 
-  // Show popover for users who haven't seen this feature
+  // Show popover for users who haven't seen this feature (introduced in update version 2)
+  const COOKING_MODE_VERSION = 2;
   useEffect(() => {
-    if (user && !user.cookingModeSeen) {
+    if (user && user.lastSeenUpdateVersion < COOKING_MODE_VERSION) {
       const timer = setTimeout(() => setShowPopover(true), 1000);
       return () => clearTimeout(timer);
     }
   }, [user]);
 
   const markAsSeen = useCallback(() => {
-    if (user && !user.cookingModeSeen) {
-      recipesBackend.setCookingModeSeen(user.id);
+    if (user && user.lastSeenUpdateVersion < COOKING_MODE_VERSION) {
+      recipesBackend.setLastSeenUpdateVersion(user.id, COOKING_MODE_VERSION);
     }
     setShowPopover(false);
   }, [user, recipesBackend]);
@@ -140,7 +141,7 @@ function CookingMode() {
     return null;
   }
 
-  const shouldHighlight = !user?.cookingModeSeen && !isActive;
+  const shouldHighlight = (user && user.lastSeenUpdateVersion < COOKING_MODE_VERSION) && !isActive;
 
   const popoverContent = (
     <PopoverContent>

@@ -153,17 +153,15 @@ export class UserEntry {
     lastSeen: Date
     newSeen: Date
     id: string
-    cookingModeSeen: boolean
     lastSeenUpdateVersion: number
 
-    constructor(name: string, visibility: Visibility, boxes: BoxId[], lastSeen: Date, newSeen: Date, id: string, cookingModeSeen: boolean = false, lastSeenUpdateVersion: number = 0) {
+    constructor(name: string, visibility: Visibility, boxes: BoxId[], lastSeen: Date, newSeen: Date, id: string, lastSeenUpdateVersion: number = 0) {
         this.name = name
         this.visibility = visibility
         this.boxes = boxes
         this.lastSeen = lastSeen
         this.newSeen = newSeen
         this.id = id
-        this.cookingModeSeen = cookingModeSeen
         this.lastSeenUpdateVersion = lastSeenUpdateVersion
     }
 }

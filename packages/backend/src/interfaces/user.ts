@@ -48,7 +48,7 @@ export interface UserBackend {
 
   // --- App-specific profile fields ---
 
-  /** Update arbitrary profile fields (cooking_mode_seen, last_seen_update_version, etc.) */
+  /** Update arbitrary profile fields (last_seen_update_version, etc.) */
   updateProfile(userId: string, fields: Record<string, unknown>): Promise<void>;
 
   /** Read the full user profile. */

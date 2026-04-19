@@ -17,7 +17,6 @@ import type {
 export interface RecipesUser {
   id: string;
   boxes: string[];
-  cookingModeSeen: boolean;
   lastSeenUpdateVersion: number;
 }
 
@@ -25,7 +24,6 @@ export interface RecipesBackend {
   // --- User ---
 
   getUser(userId: string): Promise<RecipesUser | null>;
-  setCookingModeSeen(userId: string): Promise<void>;
   setLastSeenUpdateVersion(userId: string, version: number): Promise<void>;
 
   // --- Box CRUD ---
