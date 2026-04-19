@@ -89,7 +89,20 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
 // created_by field which the API populates from the authenticated user).
 onRecordCreateRequest((e) => {
   const record = e.record;
-  const authId = e.requestInfo()?.auth?.id || record.get("created_by");
+  const authRecord = e.requestInfo()?.auth;
+  const authCollection = authRecord?.collectionName;
+
+  // Identify the ACTING user. For requests authed as a regular user, use
+  // auth.id. For superuser-context requests (API service with admin PB client),
+  // trust record.created_by since the API server sets that from the verified
+  // authenticated user's ID.
+  let authId;
+  if (authCollection === "users") {
+    authId = authRecord.id;
+  } else {
+    // superuser or unauthed — trust server-set created_by
+    authId = record.get("created_by");
+  }
 
   if (!authId) {
     throw new BadRequestError("Authentication required");
