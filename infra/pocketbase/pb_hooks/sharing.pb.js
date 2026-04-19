@@ -52,6 +52,8 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
       collection = "recipe_boxes";
     } else if (targetType === "recipe") {
       collection = "recipes";
+    } else if (targetType === "travel_log") {
+      collection = "travel_logs";
     } else {
       return e.json(400, { error: "Unknown target type" });
     }
@@ -98,6 +100,8 @@ onRecordCreateRequest((e) => {
     collection = "recipe_boxes";
   } else if (targetType === "recipe") {
     collection = "recipes";
+  } else if (targetType === "travel_log") {
+    collection = "travel_logs";
   } else {
     throw new BadRequestError("Invalid target_type");
   }

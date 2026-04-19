@@ -727,10 +727,10 @@ server.tool(
 
 server.tool(
   "create_invite",
-  "Create a sharing invite link for a recipe box or recipe",
+  "Create a sharing invite link for a recipe box, recipe, or travel log",
   {
-    targetType: z.enum(["box", "recipe"]).describe("Type of resource to share"),
-    targetId: z.string().describe("ID of the box or recipe to share"),
+    targetType: z.enum(["box", "recipe", "travel_log"]).describe("Type of resource to share"),
+    targetId: z.string().describe("ID of the box, recipe, or travel log to share"),
   },
   async ({ targetType, targetId }) => {
     const data = await apiRaw("/sharing/invite", {

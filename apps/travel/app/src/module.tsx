@@ -7,6 +7,7 @@ import { TripDetail } from "./components/TripDetail";
 import { TripForm } from "./components/TripForm";
 import { ActivityForm } from "./components/ActivityForm";
 import { LogLoader } from "./components/LogLoader";
+import { InviteRedeem } from "./components/InviteRedeem";
 
 interface TravelRoutesProps {
   embedded?: boolean;
@@ -19,6 +20,7 @@ export function TravelRoutes({ embedded = false }: TravelRoutesProps) {
 
   return (
     <Routes>
+      <Route path="invite/:code" element={<InviteRedeem />} />
       <Route element={<LogLoader />}>
         <Route index element={<TripList embedded={embedded} />} />
         <Route path="new" element={<TripForm />} />

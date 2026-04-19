@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Input, Button, Select, Empty, Spin, Segmented } from "antd";
+import { Input, Button, Select, Empty, Spin, Segmented, Space } from "antd";
 import {
   PlusOutlined,
   SearchOutlined,
@@ -9,6 +9,7 @@ import {
 import styled from "styled-components";
 import { WideContainer } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
+import { ShareLogButton } from "./ShareLogButton";
 import {
   STATUS_COLORS,
   STATUS_ORDER,
@@ -357,9 +358,12 @@ export function TripList({ embedded: _embedded = false }: { embedded?: boolean }
     <WideContainer>
       <PageHeader>
         <PageTitle>Trips ({filtered.length})</PageTitle>
-        <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => navigate("new")}>
-          New Trip
-        </Button>
+        <Space size="small">
+          {state.log && <ShareLogButton logId={state.log.id} />}
+          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => navigate("new")}>
+            New Trip
+          </Button>
+        </Space>
       </PageHeader>
 
       <StatusBar>

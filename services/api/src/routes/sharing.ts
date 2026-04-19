@@ -7,16 +7,22 @@ import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 import { randomBytes } from "crypto";
 
-import { RECIPES_BASE_URL } from "../config";
+import { RECIPES_BASE_URL, TRAVEL_BASE_URL } from "../config";
+
+const TARGET_BASE_URLS: Record<string, string> = {
+  box: RECIPES_BASE_URL,
+  recipe: RECIPES_BASE_URL,
+  travel_log: TRAVEL_BASE_URL,
+};
 
 export const sharingRoutes = new Hono<AppEnv>();
 
-// Create a sharing invite for a box or recipe
+// Create a sharing invite for a box, recipe, or travel log
 sharingRoutes.post("/invite", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const { targetType, targetId } = await c.req.json<{
-    targetType: "box" | "recipe";
+    targetType: "box" | "recipe" | "travel_log";
     targetId: string;
   }>();
 
@@ -24,8 +30,9 @@ sharingRoutes.post("/invite", handler(async (c) => {
     return c.json({ error: "Must provide targetType and targetId" }, 400);
   }
 
-  if (targetType !== "box" && targetType !== "recipe") {
-    return c.json({ error: "targetType must be 'box' or 'recipe'" }, 400);
+  const baseUrl = TARGET_BASE_URLS[targetType];
+  if (!baseUrl) {
+    return c.json({ error: "targetType must be 'box', 'recipe', or 'travel_log'" }, 400);
   }
 
   const code = randomBytes(12).toString("base64url");
@@ -41,7 +48,7 @@ sharingRoutes.post("/invite", handler(async (c) => {
 
   return c.json({
     code: invite.code,
-    url: `${RECIPES_BASE_URL}/invite/${invite.code}`,
+    url: `${baseUrl}/invite/${invite.code}`,
   });
 }));
 
