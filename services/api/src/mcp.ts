@@ -448,6 +448,8 @@ const flightInfoSchema = z.object({
   toLng: z.number().optional().describe("Arrival airport longitude"),
   departsAt: z.string().optional().describe("Departure ISO datetime"),
   arrivesAt: z.string().optional().describe("Arrival ISO datetime"),
+  fromIsHome: z.boolean().optional().describe("Departure is the user's home airport (hides flight from itinerary map)"),
+  toIsHome: z.boolean().optional().describe("Arrival is the user's home airport (hides flight from itinerary map)"),
 }).describe("Structured flight data (category='Flight'). Use geocode_activity to auto-fill coords from airport codes.");
 
 server.tool(

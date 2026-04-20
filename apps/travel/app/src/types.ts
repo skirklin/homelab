@@ -35,6 +35,10 @@ export interface FlightInfo {
   toLng?: number;
   departsAt?: string;     // ISO datetime
   arrivesAt?: string;     // ISO datetime
+  // Mark one end as "home" to keep that bookend leg off the itinerary map —
+  // otherwise the map stretches all the way back to the home airport.
+  fromIsHome?: boolean;
+  toIsHome?: boolean;
 }
 
 // ==========================================

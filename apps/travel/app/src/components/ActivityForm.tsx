@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Form, Input, Select, Button, Space, DatePicker } from "antd";
+import { Form, Input, Select, Button, Space, DatePicker, Checkbox } from "antd";
 import dayjs from "dayjs";
 
 const { TextArea } = Input;
@@ -38,7 +38,17 @@ export function ActivityForm() {
       to: ((values.flightTo as string) || "").toUpperCase() || undefined,
       departsAt: values.flightDeparts ? (values.flightDeparts as dayjs.Dayjs).toISOString() : undefined,
       arrivesAt: values.flightArrives ? (values.flightArrives as dayjs.Dayjs).toISOString() : undefined,
+      fromIsHome: (values.flightFromIsHome as boolean) || undefined,
+      toIsHome: (values.flightToIsHome as boolean) || undefined,
     };
+    // Preserve pre-geocoded coords from the existing record so the user's edit
+    // doesn't clobber them (the form doesn't surface lat/lng directly).
+    if (existing?.flightInfo) {
+      fi.fromLat = existing.flightInfo.fromLat;
+      fi.fromLng = existing.flightInfo.fromLng;
+      fi.toLat = existing.flightInfo.toLat;
+      fi.toLng = existing.flightInfo.toLng;
+    }
     const hasAny = Object.values(fi).some((v) => v !== undefined);
     return hasAny ? fi : undefined;
   };
@@ -132,6 +142,8 @@ export function ActivityForm() {
                 flightTo: existing.flightInfo?.to,
                 flightDeparts: existing.flightInfo?.departsAt ? dayjs(existing.flightInfo.departsAt) : undefined,
                 flightArrives: existing.flightInfo?.arrivesAt ? dayjs(existing.flightInfo.arrivesAt) : undefined,
+                flightFromIsHome: existing.flightInfo?.fromIsHome,
+                flightToIsHome: existing.flightInfo?.toIsHome,
               }
             : { category: "Other" }
         }
@@ -180,6 +192,17 @@ export function ActivityForm() {
                 <DatePicker showTime format="YYYY-MM-DD HH:mm" />
               </Form.Item>
             </Space>
+            <Space size="middle" wrap style={{ marginTop: 8 }}>
+              <Form.Item name="flightFromIsHome" valuePropName="checked" style={{ marginBottom: 0 }}>
+                <Checkbox>Departs from home</Checkbox>
+              </Form.Item>
+              <Form.Item name="flightToIsHome" valuePropName="checked" style={{ marginBottom: 0 }}>
+                <Checkbox>Arrives home</Checkbox>
+              </Form.Item>
+            </Space>
+            <div style={{ fontSize: 11, color: "#8c8c8c", marginTop: 4 }}>
+              Flights with either end at home are hidden from the itinerary map.
+            </div>
           </div>
         )}
 

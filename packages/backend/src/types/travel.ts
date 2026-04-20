@@ -36,6 +36,8 @@ export interface FlightInfo {
   toLng?: number;         // arrival airport lng
   departsAt?: string;     // ISO datetime
   arrivesAt?: string;     // ISO datetime
+  fromIsHome?: boolean;   // departure is the user's home airport
+  toIsHome?: boolean;     // arrival is the user's home airport
 }
 
 export interface Activity {
