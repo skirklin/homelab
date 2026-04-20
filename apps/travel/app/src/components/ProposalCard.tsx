@@ -129,7 +129,7 @@ function getApiBase(): string {
 
 async function patchProposal(id: string, fields: Record<string, unknown>) {
   const pb = getBackend();
-  const res = await fetch(`${getApiBase()}/travel/proposals/${id}`, {
+  const res = await fetch(`${getApiBase()}/data/travel/proposals/${id}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -143,7 +143,7 @@ async function patchProposal(id: string, fields: Record<string, unknown>) {
 
 async function resolveProposalCall(id: string) {
   const pb = getBackend();
-  const res = await fetch(`${getApiBase()}/travel/proposals/${id}/resolve`, {
+  const res = await fetch(`${getApiBase()}/data/travel/proposals/${id}/resolve`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${pb.authStore.token}` },
   });
@@ -153,7 +153,7 @@ async function resolveProposalCall(id: string) {
 
 async function deleteProposalCall(id: string) {
   const pb = getBackend();
-  const res = await fetch(`${getApiBase()}/travel/proposals/${id}`, {
+  const res = await fetch(`${getApiBase()}/data/travel/proposals/${id}`, {
     method: "DELETE",
     headers: { "Authorization": `Bearer ${pb.authStore.token}` },
   });

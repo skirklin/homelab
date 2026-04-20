@@ -69,7 +69,7 @@ export function ProposalsTab({ tripId, activityMap }: ProposalsTabProps) {
         state: "open" | "resolved";
         resolved_at?: string;
         created: string; updated: string;
-      }>>(`/travel/proposals?trip=${tripId}`);
+      }>>(`/data/travel/proposals?trip=${tripId}`);
       setProposals(raw.map((r) => ({
         id: r.id,
         trip: r.trip,
