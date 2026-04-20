@@ -437,24 +437,40 @@ server.tool(
   },
 );
 
+const flightInfoSchema = z.object({
+  airline: z.string().optional().describe("Airline code or name (e.g. 'UA', 'United')"),
+  number: z.string().optional().describe("Flight number (e.g. '1234')"),
+  from: z.string().optional().describe("Departure airport code (e.g. 'SFO')"),
+  to: z.string().optional().describe("Arrival airport code (e.g. 'JFK')"),
+  fromLat: z.number().optional().describe("Departure airport latitude"),
+  fromLng: z.number().optional().describe("Departure airport longitude"),
+  toLat: z.number().optional().describe("Arrival airport latitude"),
+  toLng: z.number().optional().describe("Arrival airport longitude"),
+  departsAt: z.string().optional().describe("Departure ISO datetime"),
+  arrivesAt: z.string().optional().describe("Arrival ISO datetime"),
+}).describe("Structured flight data (category='Flight'). Use geocode_activity to auto-fill coords from airport codes.");
+
 server.tool(
   "add_travel_activity",
-  "Create a new activity in a travel log",
+  "Create a new activity in a travel log. For flights, use category='Flight' and include flight_info.",
   {
     log: z.string().describe("The travel log ID"),
     trip_id: z.string().optional().describe("The trip this activity belongs to"),
     name: z.string().describe("Activity name"),
-    category: z.string().optional().describe("Activity category"),
+    category: z.string().optional().describe("Activity category (Flight, Transportation, Accommodation, etc.)"),
     location: z.string().optional().describe("Location"),
     description: z.string().optional().describe("Description"),
     cost_notes: z.string().optional().describe("Cost notes"),
     duration_estimate: z.string().optional().describe("Duration estimate"),
     setting: z.string().optional().describe("Setting (indoor/outdoor)"),
+    confirmation_code: z.string().optional().describe("Booking confirmation code"),
+    details: z.string().optional().describe("Freeform details text"),
+    flight_info: flightInfoSchema.optional(),
   },
-  async ({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting }) => {
+  async ({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting, confirmation_code, details, flight_info }) => {
     const data = await api("/travel/activities", {
       method: "POST",
-      body: JSON.stringify({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting }),
+      body: JSON.stringify({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting, confirmation_code, details, flight_info }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
@@ -462,7 +478,7 @@ server.tool(
 
 server.tool(
   "update_travel_activity",
-  "Update fields on an existing travel activity",
+  "Update fields on an existing travel activity. For flights, pass flight_info to set airline/codes/times/coords.",
   {
     id: z.string().describe("The activity record ID"),
     name: z.string().optional().describe("Activity name"),
@@ -473,6 +489,9 @@ server.tool(
     duration_estimate: z.string().optional().describe("Duration estimate"),
     setting: z.string().optional().describe("Setting"),
     trip_id: z.string().optional().describe("Trip ID to associate with"),
+    confirmation_code: z.string().optional().describe("Booking confirmation code"),
+    details: z.string().optional().describe("Freeform details text"),
+    flight_info: flightInfoSchema.optional(),
   },
   async ({ id, ...fields }) => {
     const body: Record<string, unknown> = {};

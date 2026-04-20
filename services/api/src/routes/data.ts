@@ -350,6 +350,9 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     cost_notes?: string;
     duration_estimate?: string;
     setting?: string;
+    confirmation_code?: string;
+    details?: string;
+    flight_info?: Record<string, unknown>;
   }>();
   if (!body.log || !body.name) return c.json({ error: "log and name required" }, 400);
 
@@ -363,6 +366,9 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     cost_notes: body.cost_notes || "",
     duration_estimate: body.duration_estimate || "",
     setting: body.setting || "",
+    confirmation_code: body.confirmation_code || "",
+    details: body.details || "",
+    flight_info: body.flight_info || null,
   });
   return c.json({ id: record.id, name: record.name }, 201);
 }));
