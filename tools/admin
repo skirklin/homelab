@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Homelab admin CLI — see tools/admin.ts for commands.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+
+# Load .env if present, exporting vars so the Node process sees them.
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ROOT/.env"
+  set +a
+fi
+
+# Use the tsx from services/api so we don't need a global install.
+TSX="$ROOT/services/api/node_modules/.bin/tsx"
+if [ ! -x "$TSX" ]; then
+  echo "tsx not found at $TSX — run: pnpm install" >&2
+  exit 1
+fi
+
+exec "$TSX" "$HERE/admin.ts" "$@"
