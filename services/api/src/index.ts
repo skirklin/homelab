@@ -33,7 +33,7 @@ app.use("*", cors({
     }
     return undefined;
   },
-  allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
 }));
 
