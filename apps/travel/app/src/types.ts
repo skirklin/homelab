@@ -23,6 +23,28 @@ export type ActivityCategory =
   | "Relaxation"
   | "Other";
 
+// Proposal: Claude's curated comparison for user feedback
+export interface CandidateFeedback {
+  vote?: "up" | "down";
+  picked?: boolean;
+  notes?: string;
+}
+
+export interface TripProposal {
+  id: string;
+  trip: string;
+  question: string;
+  reasoning: string;
+  candidateIds: string[];
+  claudePicks: string[];
+  feedback: Record<string, CandidateFeedback>;
+  overallFeedback: string;
+  state: "open" | "resolved";
+  resolvedAt?: string;
+  created: string;
+  updated: string;
+}
+
 // Structured flight data (only meaningful for category === "Flight")
 export interface FlightInfo {
   airline?: string;       // e.g. "United", "UA"

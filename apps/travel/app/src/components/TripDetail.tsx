@@ -7,7 +7,7 @@ import {
   Spin,
   Space,
   Popconfirm,
-  Collapse,
+  Tabs,
 } from "antd";
 import {
   ArrowLeftOutlined,
@@ -17,6 +17,10 @@ import {
   EditOutlined,
   EnvironmentOutlined,
   CalendarOutlined,
+  InboxOutlined,
+  ScheduleOutlined,
+  UnorderedListOutlined,
+  CheckSquareOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { WideContainer } from "@kirkl/shared";
@@ -33,6 +37,7 @@ import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
+import { ProposalsTab } from "./ProposalsTab";
 
 const TwoColumn = styled.div`
   display: grid;
@@ -175,6 +180,7 @@ export function TripDetail() {
 
   const [focusDay, setFocusDay] = useState<number | null>(null);
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
+  const [activeTabState, setActiveTabState] = useState<string | null>(null);
 
   if (state.loading) {
     return (
@@ -261,106 +267,110 @@ export function TripDetail() {
         </FlagBanner>
       )}
 
-      <TwoColumn>
-        {/* Sticky map on the left */}
-        {hasMapData && activeItin && (
-          <StickyMap>
-            <ItineraryMap
-              itinerary={activeItin}
-              activities={activities}
-              activityMap={activityMap}
-              focusDay={focusDay}
-              onRouteInfo={(info) => setRouteInfo(prev => ({ ...prev, ...info }))}
-            />
-          </StickyMap>
-        )}
+      {(() => {
+        const showReadiness = trip.status === "Booked" || trip.status === "Ongoing" || trip.status === "Researching";
+        const defaultTab = itineraries.length > 0 ? "itinerary" : "proposals";
+        const hasMap = hasMapData && activeItin;
 
-        <div>
-          {/* Itinerary section */}
-          {itineraries.length > 0 && (
-            <ItinerarySection
-              itineraries={itineraries}
-              activityMap={activityMap}
-              focusDay={focusDay}
-              routeInfo={routeInfo}
-              onDayClick={(day) => setFocusDay(focusDay === day ? null : day)}
-              onDayNav={(day) => setFocusDay(day)}
-              navigate={navigate}
-            />
-          )}
-
-          {/* Collapsible sections */}
-          {(() => {
-            const showReadiness = trip.status === "Booked" || trip.status === "Ongoing" || trip.status === "Researching";
-            const panels = [];
-
-            if (showReadiness) {
-              panels.push({
-                key: "readiness",
-                label: "Readiness & Prep",
-                children: (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        const tabItems = [
+          {
+            key: "proposals",
+            label: <span><InboxOutlined /> Proposals</span>,
+            children: <ProposalsTab tripId={trip.id} activityMap={activityMap} />,
+          },
+          {
+            key: "itinerary",
+            label: <span><ScheduleOutlined /> Itinerary</span>,
+            children: itineraries.length > 0 ? (
+              <ItinerarySection
+                itineraries={itineraries}
+                activityMap={activityMap}
+                focusDay={focusDay}
+                routeInfo={routeInfo}
+                onDayClick={(day) => setFocusDay(focusDay === day ? null : day)}
+                onDayNav={(day) => setFocusDay(day)}
+                navigate={navigate}
+              />
+            ) : <Empty description="No itinerary yet" />,
+          },
+          {
+            key: "activities",
+            label: <span><UnorderedListOutlined /> Activities ({activities.length})</span>,
+            children: <ActivityList activities={activities} />,
+          },
+          {
+            key: "prep",
+            label: <span><CheckSquareOutlined /> Prep</span>,
+            children: (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {showReadiness && (
+                  <>
                     <ReadinessDashboard trip={trip} activities={activities} itineraries={itineraries} />
                     <TripChecklist trip={trip} />
+                  </>
+                )}
+                {trip.notes && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#8c8c8c", marginBottom: 4 }}>NOTES</div>
+                    <NotesCard>{trip.notes}</NotesCard>
                   </div>
-                ),
-              });
-            }
-
-            panels.push({
-              key: "activities",
-              label: `Activities (${activities.length})`,
-              children: <ActivityList activities={activities} />,
-            });
-
-            if (trip.notes) {
-              panels.push({
-                key: "notes",
-                label: "Notes",
-                children: <NotesCard>{trip.notes}</NotesCard>,
-              });
-            }
-
-            if (sourceRefLines.length > 0) {
-              panels.push({
-                key: "sources",
-                label: `Sources (${sourceRefLines.length})`,
-                children: (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {sourceRefLines.map((line, i) => {
-                      const type = line.split(":")[0] || "Other";
-                      const refUrl = sourceRefUrl(line);
-                      return (
-                        <SourceRef key={i} $type={type} as={refUrl ? "a" : "div"} href={refUrl || undefined} target="_blank" rel="noopener noreferrer" style={refUrl ? { cursor: "pointer" } : undefined}>
-                          {line}
-                        </SourceRef>
-                      );
-                    })}
+                )}
+                {sourceRefLines.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#8c8c8c", marginBottom: 4 }}>
+                      SOURCES ({sourceRefLines.length})
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {sourceRefLines.map((line, i) => {
+                        const type = line.split(":")[0] || "Other";
+                        const refUrl = sourceRefUrl(line);
+                        return (
+                          <SourceRef key={i} $type={type} as={refUrl ? "a" : "div"} href={refUrl || undefined} target="_blank" rel="noopener noreferrer" style={refUrl ? { cursor: "pointer" } : undefined}>
+                            {line}
+                          </SourceRef>
+                        );
+                      })}
+                    </div>
                   </div>
-                ),
-              });
-            }
+                )}
+                {!showReadiness && !trip.notes && sourceRefLines.length === 0 && (
+                  <Empty description="Nothing to prep yet" />
+                )}
+              </div>
+            ),
+          },
+        ];
 
-            if (panels.length === 0) return null;
+        const activeTab = activeTabState ?? defaultTab;
+        const setActiveTab = setActiveTabState;
 
-            return (
-              <Collapse
+        return (
+          <TwoColumn>
+            {hasMap && activeTab === "itinerary" ? (
+              <StickyMap>
+                <ItineraryMap
+                  itinerary={activeItin}
+                  activities={activities}
+                  activityMap={activityMap}
+                  focusDay={focusDay}
+                  onRouteInfo={(info) => setRouteInfo(prev => ({ ...prev, ...info }))}
+                />
+              </StickyMap>
+            ) : (
+              <div />
+            )}
+            <div>
+              <Tabs
+                activeKey={activeTab}
+                onChange={setActiveTab}
+                items={tabItems}
+                defaultActiveKey={defaultTab}
                 size="small"
-                ghost
-                defaultActiveKey={(() => {
-                  const keys: string[] = [];
-                  if (showReadiness) keys.push("readiness");
-                  // Open the activity list when there's no itinerary yet
-                  if (itineraries.length === 0) keys.push("activities");
-                  return keys;
-                })()}
-                items={panels}
-                style={{ marginTop: 8 }}
               />
-            );
-          })()}
-        </div>
-      </TwoColumn>
+            </div>
+          </TwoColumn>
+        );
+      })()}
     </WideContainer>
   );
 }
