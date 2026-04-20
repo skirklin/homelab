@@ -304,7 +304,7 @@ describe("Task Completion", () => {
     await cleanup.cleanup();
   });
 
-  it("does not update last_completed when completion is older than current", async () => {
+  it("keeps last_completed as the max event timestamp when backfilling older completions", async () => {
     const user = await createTestUser(ctx);
     const listId = await upkeep.createList("Completion Order Test", user.id);
     await userBackend.setSlug(user.id, "household", "completionorder", listId);
@@ -313,17 +313,14 @@ describe("Task Completion", () => {
     cleanup.bind(ctx.pb);
     cleanup.track("task_lists", listId);
 
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-
     const taskId = await upkeep.addTask(listId, {
-      name: "Already completed recently",
+      name: "Wet food",
       description: "",
       parentId: "",
       position: 0,
       taskType: "recurring",
-      frequency: { value: 7, unit: "days" },
-      lastCompleted: yesterday,
+      frequency: { value: 2, unit: "days" },
+      lastCompleted: null,
       completed: false,
       snoozedUntil: null,
       notifyUsers: [],
@@ -332,22 +329,75 @@ describe("Task Completion", () => {
     });
     cleanup.track("tasks", taskId);
 
-    // Complete with a time before yesterday
-    const twoDaysAgo = new Date();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    await upkeep.completeTask(taskId, user.id, {
-      notes: "",
-      completedAt: twoDaysAgo,
-    });
+    // Real completion yesterday
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    await upkeep.completeTask(taskId, user.id, { completedAt: yesterday });
 
-    // The backend always updates last_completed to the provided completedAt;
-    // the old app-level code had conditional logic, but the backend interface doesn't.
-    // The event is still recorded regardless.
+    // Then backfill a forgotten earlier completion — this must NOT rewind
+    // last_completed back to the older date (that was the "13 days overdue"
+    // bug in production).
+    const fiveDaysAgo = new Date();
+    fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+    await upkeep.completeTask(taskId, user.id, { completedAt: fiveDaysAgo });
+
     const events = await ctx.pb.collection("task_events").getFullList({
       filter: `subject_id = "${taskId}"`,
     });
-    expect(events.length).toBe(1);
-    cleanup.track("task_events", events[0].id);
+    expect(events.length).toBe(2);
+    for (const e of events) cleanup.track("task_events", e.id);
+
+    const taskRecord = await ctx.pb.collection("tasks").getOne(taskId);
+    // last_completed should be the most recent event (yesterday), not the
+    // backfilled older one (five days ago).
+    expect(new Date(taskRecord.last_completed).getTime()).toBe(yesterday.getTime());
+
+    await cleanup.cleanup();
+  });
+
+  it("recomputes last_completed when the most recent event is deleted", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await upkeep.createList("Recompute Test", user.id);
+    await userBackend.setSlug(user.id, "household", "recompute", listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await upkeep.addTask(listId, {
+      name: "Task",
+      description: "",
+      parentId: "",
+      position: 0,
+      taskType: "recurring",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      completed: false,
+      snoozedUntil: null,
+      notifyUsers: [],
+      tags: [],
+      collapsed: false,
+    });
+    cleanup.track("tasks", taskId);
+
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const today = new Date();
+    await upkeep.completeTask(taskId, user.id, { completedAt: threeDaysAgo });
+    await upkeep.completeTask(taskId, user.id, { completedAt: today });
+
+    const events = await ctx.pb.collection("task_events").getFullList({
+      filter: `subject_id = "${taskId}"`,
+      sort: "-timestamp",
+    });
+    expect(events.length).toBe(2);
+
+    // Delete the most recent event. last_completed should fall back to the
+    // older one, not stay pointing at a deleted event.
+    await upkeep.deleteCompletion(events[0].id);
+    cleanup.track("task_events", events[1].id);
+
+    const taskRecord = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(new Date(taskRecord.last_completed).getTime()).toBe(threeDaysAgo.getTime());
 
     await cleanup.cleanup();
   });

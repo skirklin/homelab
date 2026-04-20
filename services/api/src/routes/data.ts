@@ -806,9 +806,11 @@ dataRoutes.patch("/tasks/:id", handler(async (c) => {
   return c.json({ id: record.id, name: record.name });
 }));
 
-// Complete a task (recurring: sets last_completed; one_shot: sets completed)
+// Complete a task (recurring: adds a task_events record + refreshes
+// last_completed; one_shot: toggles the completed flag)
 dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const task = await pb.collection("tasks").getOne(id);
 
@@ -818,8 +820,22 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
   }
 
   const now = new Date().toISOString();
+  await pb.collection("task_events").create({
+    list: task.list,
+    subject_id: id,
+    timestamp: now,
+    created_by: userId,
+    data: {},
+  });
+  // Recompute last_completed from the max event timestamp — keeps it honest
+  // when events pre-date this one (backfills) or are later edited/deleted.
+  const latestEvents = await pb.collection("task_events").getList(1, 1, {
+    filter: `subject_id="${id}"`,
+    sort: "-timestamp",
+  });
+  const latest = latestEvents.items[0]?.timestamp ?? now;
   const record = await pb.collection("tasks").update(id, {
-    last_completed: now,
+    last_completed: latest,
     snoozed_until: "",
   });
   return c.json({ id: record.id, last_completed: record.last_completed });

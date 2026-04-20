@@ -189,16 +189,31 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     await this.pb().collection("tasks").update(taskId, { snoozed_until: null });
   }
 
+  /**
+   * Recompute `last_completed` on a task from the max timestamp across its
+   * task_events. Keeps the denormalized field honest after any event change
+   * (create, update, delete). If no events remain, clears the field.
+   */
+  private async recomputeLastCompleted(taskId: string): Promise<void> {
+    const events = await this.pb().collection("task_events").getList(1, 1, {
+      filter: `subject_id="${taskId}"`,
+      sort: "-timestamp",
+    });
+    const latest = events.items[0]?.timestamp ?? null;
+    await this.pb().collection("tasks").update(taskId, { last_completed: latest });
+  }
+
   async completeTask(taskId: string, userId: string, options?: { notes?: string; completedAt?: Date }): Promise<void> {
     const timestamp = (options?.completedAt ?? new Date()).toISOString();
-    await this.pb().collection("tasks").update(taskId, { last_completed: timestamp });
+    const task = await this.pb().collection("tasks").getOne(taskId);
     await this.pb().collection("task_events").create({
-      list: (await this.pb().collection("tasks").getOne(taskId)).list,
+      list: task.list,
       subject_id: taskId,
       timestamp,
       created_by: userId,
       data: options?.notes ? { notes: options.notes } : {},
     });
+    await this.recomputeLastCompleted(taskId);
   }
 
   async toggleComplete(taskId: string): Promise<void> {
@@ -276,10 +291,16 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       data.data = { ...existing, notes: updates.notes.trim() || undefined };
     }
     await this.pb().collection("task_events").update(eventId, data);
+    // Timestamp edit may change which event is "latest" — keep last_completed honest.
+    if (updates.timestamp !== undefined) {
+      await this.recomputeLastCompleted(record.subject_id);
+    }
   }
 
   async deleteCompletion(eventId: string): Promise<void> {
+    const record = await this.pb().collection("task_events").getOne(eventId);
     await this.pb().collection("task_events").delete(eventId);
+    await this.recomputeLastCompleted(record.subject_id);
   }
 
   subscribeToList(
