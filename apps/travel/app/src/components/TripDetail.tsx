@@ -223,7 +223,7 @@ export function TripDetail() {
 
   return (
     <WideContainer>
-      <BackLink onClick={() => navigate(-1)}>
+      <BackLink onClick={() => navigate("..")}>
         <ArrowLeftOutlined /> Back to trips
       </BackLink>
 
