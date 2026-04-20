@@ -383,20 +383,47 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
   // Flights are treated separately — they render as segments with two endpoints
   // (from/to airports) and aren't included in the driving route.
   const dayActivities = useMemo(() => {
+    // Collect all non-flight trip activity coords (including lodging) so we can
+    // drop flight segments whose endpoints are "at home" — far from anywhere on
+    // the trip. Those bookend flights would stretch the map all the way back to
+    // the origin airport and make the interesting part unreadable.
+    const tripPoints: Array<{ lat: number; lng: number }> = [];
+    for (const day of itinerary.days) {
+      for (const slot of day.slots) {
+        const a = activityMap.get(slot.activityId);
+        if (a && a.category !== "Flight" && a.lat != null && a.lng != null) {
+          tripPoints.push({ lat: a.lat, lng: a.lng });
+        }
+      }
+      if (day.lodgingActivityId) {
+        const lodging = activityMap.get(day.lodgingActivityId);
+        if (lodging && lodging.lat != null && lodging.lng != null) {
+          tripPoints.push({ lat: lodging.lat, lng: lodging.lng });
+        }
+      }
+    }
+    // Airports are typically <50mi from trip activities; 100mi keeps mid-trip
+    // flights (e.g. Tokyo ↔ Okinawa) and drops the home-origin leg.
+    const HOME_THRESHOLD_MILES = 100;
+    const isInTrip = (p: { lat: number; lng: number }) =>
+      tripPoints.some((t) => haversineMiles(p, t) <= HOME_THRESHOLD_MILES);
+
     const days = itinerary.days.map((day, i) => {
       const allSlots = [...day.slots, ...(day.flights || [])];
       const slotActivitiesRaw = allSlots
         .map((s) => activityMap.get(s.activityId))
         .filter((a): a is Activity => a != null);
 
-      // Separate flights from other activities
+      // Separate flights from other activities. Drop any flight whose from/to
+      // endpoint isn't near a trip activity — that's the home leg.
       const flightSegments = slotActivitiesRaw
         .filter((a) => a.category === "Flight" && a.flightInfo?.fromLat != null && a.flightInfo?.toLat != null)
         .map((a) => ({
           activity: a,
           from: { lat: a.flightInfo!.fromLat!, lng: a.flightInfo!.fromLng! },
           to: { lat: a.flightInfo!.toLat!, lng: a.flightInfo!.toLng! },
-        }));
+        }))
+        .filter((seg) => isInTrip(seg.from) && isInTrip(seg.to));
 
       const nonFlightActivities = slotActivitiesRaw
         .filter((a) => a.category !== "Flight" && a.lat != null && a.lng != null);
