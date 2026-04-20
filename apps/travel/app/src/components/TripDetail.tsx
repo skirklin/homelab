@@ -30,6 +30,7 @@ import {
 } from "../types";
 import { ItinerarySection } from "./ItinerarySection";
 import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
+import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
 
@@ -306,6 +307,12 @@ export function TripDetail() {
               });
             }
 
+            panels.push({
+              key: "activities",
+              label: `Activities (${activities.length})`,
+              children: <ActivityList activities={activities} />,
+            });
+
             if (trip.notes) {
               panels.push({
                 key: "notes",
@@ -340,7 +347,13 @@ export function TripDetail() {
               <Collapse
                 size="small"
                 ghost
-                defaultActiveKey={showReadiness ? ["readiness"] : []}
+                defaultActiveKey={(() => {
+                  const keys: string[] = [];
+                  if (showReadiness) keys.push("readiness");
+                  // Open the activity list when there's no itinerary yet
+                  if (itineraries.length === 0) keys.push("activities");
+                  return keys;
+                })()}
                 items={panels}
                 style={{ marginTop: 8 }}
               />
