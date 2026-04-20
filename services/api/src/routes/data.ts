@@ -869,3 +869,108 @@ dataRoutes.delete("/tasks/:id", handler(async (c) => {
   await pb.collection("tasks").delete(id);
   return c.json({ deleted: true });
 }));
+
+// ---- Trip Proposals ----
+
+function proposalResponse(r: Record<string, unknown>) {
+  return {
+    id: r.id,
+    trip: r.trip,
+    question: r.question,
+    reasoning: r.reasoning,
+    candidate_ids: r.candidate_ids,
+    claude_picks: r.claude_picks,
+    feedback: r.feedback,
+    overall_feedback: r.overall_feedback,
+    state: r.state,
+    resolved_at: r.resolved_at,
+    created: r.created,
+    updated: r.updated,
+  };
+}
+
+// List proposals for a trip
+dataRoutes.get("/travel/proposals", handler(async (c) => {
+  const pb = c.get("pb");
+  const tripId = c.req.query("trip");
+  if (!tripId) return c.json({ error: "trip query param required" }, 400);
+  const state = c.req.query("state");
+  let filter = pb.filter("trip = {:tripId}", { tripId });
+  if (state) filter += ` && state = "${state}"`;
+  const records = await pb.collection("trip_proposals").getFullList({
+    filter,
+    sort: "-created",
+  });
+  return c.json(records.map(proposalResponse));
+}));
+
+// Get a proposal
+dataRoutes.get("/travel/proposals/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const r = await pb.collection("trip_proposals").getOne(id);
+  return c.json(proposalResponse(r));
+}));
+
+// Create a proposal
+dataRoutes.post("/travel/proposals", handler(async (c) => {
+  const pb = c.get("pb");
+  const body = await c.req.json<{
+    trip: string;
+    question: string;
+    reasoning?: string;
+    candidate_ids?: string[];
+    claude_picks?: string[];
+    feedback?: Record<string, unknown>;
+    overall_feedback?: string;
+  }>();
+  if (!body.trip || !body.question) return c.json({ error: "trip and question required" }, 400);
+
+  const record = await pb.collection("trip_proposals").create({
+    trip: body.trip,
+    question: body.question,
+    reasoning: body.reasoning || "",
+    candidate_ids: body.candidate_ids || [],
+    claude_picks: body.claude_picks || [],
+    feedback: body.feedback || {},
+    overall_feedback: body.overall_feedback || "",
+    state: "open",
+  });
+  return c.json(proposalResponse(record), 201);
+}));
+
+// Update a proposal (Claude can revise reasoning/candidates, user can update feedback)
+dataRoutes.patch("/travel/proposals/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<Record<string, unknown>>();
+  const allowed = [
+    "question", "reasoning", "candidate_ids", "claude_picks",
+    "feedback", "overall_feedback", "state", "resolved_at",
+  ];
+  const data: Record<string, unknown> = {};
+  for (const k of allowed) {
+    if (body[k] !== undefined) data[k] = body[k];
+  }
+  const record = await pb.collection("trip_proposals").update(id, data);
+  return c.json(proposalResponse(record));
+}));
+
+// Resolve a proposal (convenience endpoint — sets state + resolved_at)
+dataRoutes.post("/travel/proposals/:id/resolve", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const record = await pb.collection("trip_proposals").update(id, {
+    state: "resolved",
+    resolved_at: new Date().toISOString(),
+  });
+  return c.json(proposalResponse(record));
+}));
+
+// Delete a proposal
+dataRoutes.delete("/travel/proposals/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("trip_proposals").delete(id);
+  return c.json({ deleted: true });
+}));

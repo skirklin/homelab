@@ -744,6 +744,104 @@ server.tool(
   },
 );
 
+// --- Trip Proposals ---
+
+const candidateFeedbackSchema = z.object({
+  vote: z.enum(["up", "down"]).optional(),
+  picked: z.boolean().optional(),
+  notes: z.string().optional(),
+}).describe("Per-candidate feedback from the user");
+
+server.tool(
+  "list_trip_proposals",
+  "List all planning proposals for a trip (Claude's curated comparisons + user feedback). Filter by state to see only open or resolved.",
+  {
+    trip_id: z.string().describe("The trip record ID"),
+    state: z.enum(["open", "resolved"]).optional().describe("Filter by state"),
+  },
+  async ({ trip_id, state }) => {
+    const params = new URLSearchParams({ trip: trip_id });
+    if (state) params.set("state", state);
+    const data = await api(`/travel/proposals?${params}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "get_trip_proposal",
+  "Get a single proposal including user's picks, per-candidate feedback, and overall comments",
+  { id: z.string().describe("The proposal record ID") },
+  async ({ id }) => {
+    const data = await api(`/travel/proposals/${id}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "create_trip_proposal",
+  "Create a new proposal (curated comparison of options) for the user. Candidate IDs must reference existing activities on the trip — create activities first if needed.",
+  {
+    trip_id: z.string().describe("The trip record ID"),
+    question: z.string().describe("The question being asked (e.g. 'Which Edinburgh hotel should we book?')"),
+    reasoning: z.string().optional().describe("Your overall reasoning/pitch (markdown allowed — links and lists render)"),
+    candidate_ids: z.array(z.string()).describe("Activity IDs being compared (must already exist on the trip)"),
+    claude_picks: z.array(z.string()).optional().describe("Activity IDs you recommend (can be multiple, or empty)"),
+  },
+  async ({ trip_id, question, reasoning, candidate_ids, claude_picks }) => {
+    const data = await api("/travel/proposals", {
+      method: "POST",
+      body: JSON.stringify({ trip: trip_id, question, reasoning, candidate_ids, claude_picks }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_trip_proposal",
+  "Revise a proposal (e.g. add candidates, update reasoning, change claude_picks). For recording user feedback, prefer the dedicated fields — the user sets feedback via the UI, but you can also write to them directly.",
+  {
+    id: z.string().describe("The proposal record ID"),
+    question: z.string().optional(),
+    reasoning: z.string().optional(),
+    candidate_ids: z.array(z.string()).optional(),
+    claude_picks: z.array(z.string()).optional(),
+    feedback: z.record(candidateFeedbackSchema).optional().describe("Per-candidate feedback keyed by activity ID"),
+    overall_feedback: z.string().optional(),
+    state: z.enum(["open", "resolved"]).optional(),
+  },
+  async ({ id, ...fields }) => {
+    const body: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined) body[k] = v;
+    }
+    const data = await api(`/travel/proposals/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "resolve_trip_proposal",
+  "Mark a proposal as resolved — done with this comparison. Usually the user does this via the UI after picking or dismissing.",
+  { id: z.string().describe("The proposal record ID") },
+  async ({ id }) => {
+    const data = await api(`/travel/proposals/${id}/resolve`, { method: "POST" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_trip_proposal",
+  "Delete a proposal entirely",
+  { id: z.string().describe("The proposal record ID") },
+  async ({ id }) => {
+    const data = await api(`/travel/proposals/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Sharing tools ---
 
 server.tool(
