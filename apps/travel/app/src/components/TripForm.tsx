@@ -44,7 +44,7 @@ export function TripForm() {
             sourceRefs: values.sourceRefs as string,
           })
         );
-        navigate(-1);
+        navigate(`../${tripId}`);
       } else {
         const logId = state.log?.id;
         if (!logId) return;

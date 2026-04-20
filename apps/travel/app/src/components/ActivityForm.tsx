@@ -73,7 +73,7 @@ export function ActivityForm() {
           setting: values.setting as string,
           flightInfo,
         }));
-        navigate(-1);
+        navigate(`../${tripId}`);
       } else {
         const logId = state.log?.id;
         if (!logId) return;
@@ -103,7 +103,7 @@ export function ActivityForm() {
             updated: now,
           })
         );
-        navigate(-1);
+        navigate(`../${tripId}`);
       }
     } finally {
       setSaving(false);
@@ -113,7 +113,7 @@ export function ActivityForm() {
   const handleDelete = async () => {
     if (activityId) {
       await travel.deleteActivity(activityId);
-      navigate(-1);
+      navigate(`../${tripId}`);
     }
   };
 

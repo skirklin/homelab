@@ -193,7 +193,7 @@ export function TripDetail() {
   if (!trip) {
     return (
       <WideContainer>
-        <BackLink onClick={() => navigate(-1)}>
+        <BackLink onClick={() => navigate("..")}>
           <ArrowLeftOutlined /> Back
         </BackLink>
         <Empty description="Trip not found" style={{ marginTop: 40 }} />
@@ -207,7 +207,7 @@ export function TripDetail() {
 
   const handleDelete = async () => {
     await travel.deleteTrip(trip.id);
-    navigate(-1);
+    navigate("..");
   };
 
   const handleToggleFlag = () => {
