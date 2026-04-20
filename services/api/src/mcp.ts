@@ -27,20 +27,45 @@ async function apiRaw(path: string, init?: RequestInit): Promise<unknown> {
   return apiFetch(url, init);
 }
 
+/** SQLite can return busy/locked errors under write contention. Retry with
+ * exponential backoff for any 5xx or network error. */
 async function apiFetch(url: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Authorization": `Bearer ${API_TOKEN}`,
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API ${res.status}: ${body}`);
+  const delays = [50, 100, 200, 400, 800]; // ms
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        headers: {
+          "Authorization": `Bearer ${API_TOKEN}`,
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+      });
+      if (res.ok) return res.json();
+
+      const body = await res.text();
+      // Retry on 5xx (incl. SQLite busy), bail on 4xx
+      if (res.status >= 500 && attempt < delays.length) {
+        const isBusy = /busy|locked|SQLITE_BUSY/i.test(body);
+        if (isBusy || res.status === 503) {
+          await new Promise((r) => setTimeout(r, delays[attempt]));
+          continue;
+        }
+      }
+      throw new Error(`API ${res.status}: ${body}`);
+    } catch (err) {
+      lastErr = err;
+      // Network errors retry too
+      if (attempt < delays.length && err instanceof TypeError) {
+        await new Promise((r) => setTimeout(r, delays[attempt]));
+        continue;
+      }
+      throw err;
+    }
   }
-  return res.json();
+  throw lastErr instanceof Error ? lastErr : new Error("apiFetch: exhausted retries");
 }
 
 const server = new McpServer({
