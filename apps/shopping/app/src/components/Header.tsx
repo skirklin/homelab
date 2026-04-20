@@ -45,22 +45,16 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
   const handleDoneShopping = async () => {
     if (checkedCount === 0 || !listId) return;
     try {
-      // Convert local items to the backend's ShoppingItem shape
-      const backendItems = items.map((item) => ({
+      // Backend only needs the identifying + display fields; passing dates
+      // tripped up items whose checkedAt/addedAt Date was invalid.
+      const snapshot = items.map((item) => ({
         id: item.id,
-        list: listId,
         ingredient: item.ingredient,
         note: item.note || "",
         categoryId: item.categoryId,
         checked: item.checked,
-        checkedBy: item.checkedBy,
-        checkedAt: item.checkedAt?.toISOString(),
-        addedBy: item.addedBy,
-        addedAt: item.addedAt?.toISOString() || "",
-        created: "",
-        updated: "",
       }));
-      await shopping.clearCheckedItems(listId, backendItems);
+      await shopping.clearCheckedItems(listId, snapshot);
     } catch (error) {
       console.error("Failed to clear items:", error);
     }

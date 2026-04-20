@@ -207,7 +207,10 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     await this.pb().collection("shopping_items").delete(itemId);
   }
 
-  async clearCheckedItems(listId: string, items: ShoppingItem[]): Promise<void> {
+  async clearCheckedItems(
+    listId: string,
+    items: Pick<ShoppingItem, "id" | "ingredient" | "note" | "categoryId" | "checked">[],
+  ): Promise<void> {
     const checkedItems = items.filter((item) => item.checked);
     if (checkedItems.length === 0) return;
 

@@ -39,8 +39,13 @@ export interface ShoppingBackend {
   toggleItem(itemId: string, checked: boolean, userId: string): Promise<void>;
   deleteItem(itemId: string): Promise<void>;
 
-  /** Remove all checked items and record as a completed shopping trip. */
-  clearCheckedItems(listId: string, items: ShoppingItem[]): Promise<void>;
+  /** Remove all checked items and record as a completed shopping trip.
+   *  Caller passes the current item snapshot so the trip record captures
+   *  ingredient/note/category exactly as they were when checked. */
+  clearCheckedItems(
+    listId: string,
+    items: Pick<ShoppingItem, "id" | "ingredient" | "note" | "categoryId" | "checked">[],
+  ): Promise<void>;
 
   // --- Subscriptions ---
 
