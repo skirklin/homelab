@@ -25,6 +25,15 @@ export interface Trip {
   updated: string;
 }
 
+export interface FlightInfo {
+  airline?: string;       // e.g. "United", "UA", "SW"
+  number?: string;        // e.g. "1234", "2929"
+  from?: string;          // airport code, e.g. "SFO"
+  to?: string;            // airport code, e.g. "JFK"
+  departsAt?: string;     // ISO datetime
+  arrivesAt?: string;     // ISO datetime
+}
+
 export interface Activity {
   id: string;
   log: string;
@@ -46,6 +55,7 @@ export interface Activity {
   bookingReqs?: unknown[];
   ratingCount?: number;
   photoRef?: string;
+  flightInfo?: FlightInfo;
   created: string;
   updated: string;
 }

@@ -78,9 +78,7 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
       : null;
 
     // Flights
-    const flights = activities.filter((a) =>
-      a.category === "Transportation" && (a.name.toLowerCase().includes("flight") || a.name.toLowerCase().includes("✈") || a.name.includes("WN ") || a.name.includes("→"))
-    );
+    const flights = activities.filter((a) => a.category === "Flight");
     if (flights.length > 0) {
       const confirmed = flights.filter((f) => f.confirmationCode);
       const unconfirmed = flights.filter((f) => !f.confirmationCode);

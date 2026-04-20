@@ -36,7 +36,9 @@ function activityFromRecord(r: RecordModel): Activity {
     durationEstimate: r.duration_estimate || "", confirmationCode: r.confirmation_code || "",
     details: r.details, setting: r.setting,
     bookingReqs: r.booking_reqs, ratingCount: r.rating_count,
-    photoRef: r.photo_ref, created: r.created, updated: r.updated,
+    photoRef: r.photo_ref,
+    flightInfo: r.flight_info || undefined,
+    created: r.created, updated: r.updated,
   };
 }
 
@@ -202,6 +204,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (a.bookingReqs !== undefined) d.booking_reqs = a.bookingReqs;
     if (a.ratingCount !== undefined) d.rating_count = a.ratingCount;
     if (a.photoRef !== undefined) d.photo_ref = a.photoRef;
+    if (a.flightInfo !== undefined) d.flight_info = a.flightInfo;
     return d;
   }
 

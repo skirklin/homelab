@@ -8,6 +8,7 @@ import {
   ClockCircleOutlined,
   DollarOutlined,
   HomeOutlined,
+  SendOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useNavigate } from "react-router-dom";
@@ -80,6 +81,7 @@ const Actions = styled.div`
 `;
 
 const CATEGORY_COLORS: Record<string, string> = {
+  Flight: "blue",
   Transportation: "geekblue",
   Accommodation: "orange",
   Hiking: "green",
@@ -93,6 +95,13 @@ const CATEGORY_COLORS: Record<string, string> = {
   Other: "default",
 };
 
+function formatFlightTime(iso?: string): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
 interface ActivityListProps {
   activities: Activity[];
 }
@@ -105,8 +114,16 @@ export function ActivityList({ activities }: ActivityListProps) {
 
   const sorted = useMemo(
     () => [...activities].sort((a, b) => {
-      if (a.category === "Accommodation" && b.category !== "Accommodation") return -1;
-      if (b.category === "Accommodation" && a.category !== "Accommodation") return 1;
+      // Flights first (by departure time), then accommodations, then alphabetical
+      const rank = (c: string) => (c === "Flight" ? 0 : c === "Accommodation" ? 1 : 2);
+      const rankA = rank(a.category);
+      const rankB = rank(b.category);
+      if (rankA !== rankB) return rankA - rankB;
+      if (rankA === 0) {
+        const aT = a.flightInfo?.departsAt || "";
+        const bT = b.flightInfo?.departsAt || "";
+        if (aT && bT) return aT.localeCompare(bT);
+      }
       return a.name.localeCompare(b.name);
     }),
     [activities],
@@ -137,9 +154,15 @@ export function ActivityList({ activities }: ActivityListProps) {
         sorted.map((a) => {
           const url = mapsUrl(a);
           const isAccommodation = a.category === "Accommodation";
+          const isFlight = a.category === "Flight";
+          const fi = a.flightInfo;
+          const flightLabel = fi ? [
+            fi.airline && fi.number ? `${fi.airline}${fi.number}` : (fi.airline || fi.number),
+            fi.from && fi.to ? `${fi.from} → ${fi.to}` : (fi.from || fi.to),
+          ].filter(Boolean).join(" · ") : "";
           return (
             <Row key={a.id}>
-              {a.photoRef && (
+              {a.photoRef && !isFlight && (
                 <Photo
                   src={`https://places.googleapis.com/v1/${a.photoRef}/media?maxWidthPx=120&key=${apiKey}`}
                   alt={a.name}
@@ -147,8 +170,9 @@ export function ActivityList({ activities }: ActivityListProps) {
               )}
               <Body>
                 <Name>
+                  {isFlight && <SendOutlined style={{ color: "#1677ff", marginRight: 4, transform: "rotate(-45deg)" }} />}
                   {isAccommodation && <HomeOutlined style={{ color: "#fa8c16", marginRight: 4 }} />}
-                  {a.name}
+                  {isFlight && flightLabel ? flightLabel : a.name}
                 </Name>
                 <Meta>
                   {a.category && (
@@ -156,8 +180,11 @@ export function ActivityList({ activities }: ActivityListProps) {
                       {a.category}
                     </Tag>
                   )}
-                  {a.rating != null && <span style={{ color: "#fa8c16" }}>&#9733; {a.rating}</span>}
-                  {a.location && (
+                  {isFlight && fi?.departsAt && (
+                    <span><ClockCircleOutlined /> {formatFlightTime(fi.departsAt)}{fi.arrivesAt ? ` → ${formatFlightTime(fi.arrivesAt)}` : ""}</span>
+                  )}
+                  {!isFlight && a.rating != null && <span style={{ color: "#fa8c16" }}>&#9733; {a.rating}</span>}
+                  {!isFlight && a.location && (
                     url ? (
                       <ExternalLink href={url} target="_blank" rel="noopener noreferrer">
                         <EnvironmentOutlined /> {a.location}
@@ -166,8 +193,9 @@ export function ActivityList({ activities }: ActivityListProps) {
                       <span><EnvironmentOutlined /> {a.location}</span>
                     )
                   )}
-                  {a.durationEstimate && <span><ClockCircleOutlined /> {a.durationEstimate}</span>}
+                  {!isFlight && a.durationEstimate && <span><ClockCircleOutlined /> {a.durationEstimate}</span>}
                   {a.costNotes && <span><DollarOutlined /> {a.costNotes}</span>}
+                  {a.confirmationCode && <span>Conf: {a.confirmationCode}</span>}
                 </Meta>
                 {a.description && (
                   <div style={{ fontSize: 11, color: "#595959", marginTop: 3, fontStyle: "italic" }}>

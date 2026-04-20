@@ -61,6 +61,7 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     rating: ba.rating ?? null,
     ratingCount: ba.ratingCount ?? null,
     photoRef: ba.photoRef || "",
+    flightInfo: ba.flightInfo,
     tripId: ba.trip || "",
     created: new Date(ba.created),
     updated: new Date(ba.updated),
@@ -161,6 +162,7 @@ export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendA
     bookingReqs: activity.bookingReqs?.length ? activity.bookingReqs : undefined,
     ratingCount: activity.ratingCount ?? undefined,
     photoRef: activity.photoRef || undefined,
+    flightInfo: activity.flightInfo,
   };
 }
 
@@ -178,6 +180,7 @@ export function activityUpdatesToBackend(fields: {
   details?: string;
   setting?: string;
   tripId?: string;
+  flightInfo?: Activity["flightInfo"];
 }): Partial<Omit<BackendActivity, "id" | "log" | "created" | "updated">> {
   const updates: Record<string, unknown> = {};
   if (fields.name !== undefined) updates.name = fields.name;
@@ -193,6 +196,7 @@ export function activityUpdatesToBackend(fields: {
   if (fields.details !== undefined) updates.details = fields.details;
   if (fields.setting !== undefined) updates.setting = fields.setting;
   if (fields.tripId !== undefined) updates.trip = fields.tripId;
+  if (fields.flightInfo !== undefined) updates.flightInfo = fields.flightInfo;
   return updates as Partial<Omit<BackendActivity, "id" | "log" | "created" | "updated">>;
 }
 

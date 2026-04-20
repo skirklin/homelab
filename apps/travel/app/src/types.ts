@@ -10,6 +10,7 @@ export interface BookingRequirement {
 
 // Activity categories
 export type ActivityCategory =
+  | "Flight"
   | "Transportation"
   | "Accommodation"
   | "Hiking"
@@ -21,6 +22,16 @@ export type ActivityCategory =
   | "Culture"
   | "Relaxation"
   | "Other";
+
+// Structured flight data (only meaningful for category === "Flight")
+export interface FlightInfo {
+  airline?: string;       // e.g. "United", "UA"
+  number?: string;        // e.g. "1234"
+  from?: string;          // airport code, e.g. "SFO"
+  to?: string;            // airport code, e.g. "JFK"
+  departsAt?: string;     // ISO datetime
+  arrivesAt?: string;     // ISO datetime
+}
 
 // ==========================================
 // Travel Log (container)
@@ -75,6 +86,7 @@ export interface Activity {
   rating: number | null;
   ratingCount: number | null;
   photoRef: string;
+  flightInfo?: FlightInfo;
   tripId: string;
   created: Date;
   updated: Date;

@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Form, Input, Select, Button, Space } from "antd";
+import { Form, Input, Select, Button, Space, DatePicker } from "antd";
+import dayjs from "dayjs";
 
 const { TextArea } = Input;
 import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { useTravelBackend } from "@kirkl/shared";
 import { activityToBackend, activityUpdatesToBackend } from "../adapters";
-import type { ActivityCategory, Activity } from "../types";
+import type { ActivityCategory, Activity, FlightInfo } from "../types";
 
 const CATEGORIES: ActivityCategory[] = [
-  "Transportation", "Accommodation", "Hiking", "Adventure",
+  "Flight", "Transportation", "Accommodation", "Hiking", "Adventure",
   "Food & Dining", "Sightseeing", "Shopping", "Nightlife",
   "Culture", "Relaxation", "Other",
 ];
@@ -26,12 +27,29 @@ export function ActivityForm() {
   const isEdit = !!activityId;
   const existing = isEdit ? state.activities.get(activityId) : undefined;
   const [form] = Form.useForm();
+  const category = Form.useWatch("category", form);
+  const isFlight = category === "Flight";
+
+  const buildFlightInfo = (values: Record<string, unknown>): FlightInfo | undefined => {
+    const fi: FlightInfo = {
+      airline: (values.flightAirline as string) || undefined,
+      number: (values.flightNumber as string) || undefined,
+      from: ((values.flightFrom as string) || "").toUpperCase() || undefined,
+      to: ((values.flightTo as string) || "").toUpperCase() || undefined,
+      departsAt: values.flightDeparts ? (values.flightDeparts as dayjs.Dayjs).toISOString() : undefined,
+      arrivesAt: values.flightArrives ? (values.flightArrives as dayjs.Dayjs).toISOString() : undefined,
+    };
+    const hasAny = Object.values(fi).some((v) => v !== undefined);
+    return hasAny ? fi : undefined;
+  };
 
   const handleSubmit = async (values: Record<string, unknown>) => {
     if (!user || !tripId) return;
     setSaving(true);
 
     try {
+      const flightInfo = (values.category === "Flight") ? buildFlightInfo(values) : undefined;
+
       if (isEdit && activityId) {
         await travel.updateActivity(activityId, activityUpdatesToBackend({
           name: values.name as string,
@@ -43,6 +61,7 @@ export function ActivityForm() {
           confirmationCode: values.confirmationCode as string,
           details: values.details as string,
           setting: values.setting as string,
+          flightInfo,
         }));
         navigate(-1);
       } else {
@@ -68,6 +87,7 @@ export function ActivityForm() {
             rating: null,
             ratingCount: null,
             photoRef: "",
+            flightInfo,
             tripId,
             created: now,
             updated: now,
@@ -106,6 +126,12 @@ export function ActivityForm() {
                 confirmationCode: existing.confirmationCode,
                 details: existing.details,
                 setting: existing.setting,
+                flightAirline: existing.flightInfo?.airline,
+                flightNumber: existing.flightInfo?.number,
+                flightFrom: existing.flightInfo?.from,
+                flightTo: existing.flightInfo?.to,
+                flightDeparts: existing.flightInfo?.departsAt ? dayjs(existing.flightInfo.departsAt) : undefined,
+                flightArrives: existing.flightInfo?.arrivesAt ? dayjs(existing.flightInfo.arrivesAt) : undefined,
               }
             : { category: "Other" }
         }
@@ -128,6 +154,34 @@ export function ActivityForm() {
             ]} />
           </Form.Item>
         </Space>
+
+        {isFlight && (
+          <div style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: 12, marginBottom: 16, background: "#fafafa" }}>
+            <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 8, color: "#595959" }}>Flight details</div>
+            <Space size="middle" wrap>
+              <Form.Item name="flightAirline" label="Airline" style={{ marginBottom: 0 }}>
+                <Input placeholder="UA" style={{ width: 80 }} />
+              </Form.Item>
+              <Form.Item name="flightNumber" label="Flight #" style={{ marginBottom: 0 }}>
+                <Input placeholder="1234" style={{ width: 90 }} />
+              </Form.Item>
+              <Form.Item name="flightFrom" label="From" style={{ marginBottom: 0 }}>
+                <Input placeholder="SFO" style={{ width: 70 }} maxLength={4} />
+              </Form.Item>
+              <Form.Item name="flightTo" label="To" style={{ marginBottom: 0 }}>
+                <Input placeholder="JFK" style={{ width: 70 }} maxLength={4} />
+              </Form.Item>
+            </Space>
+            <Space size="middle" wrap style={{ marginTop: 8 }}>
+              <Form.Item name="flightDeparts" label="Departs" style={{ marginBottom: 0 }}>
+                <DatePicker showTime format="YYYY-MM-DD HH:mm" />
+              </Form.Item>
+              <Form.Item name="flightArrives" label="Arrives" style={{ marginBottom: 0 }}>
+                <DatePicker showTime format="YYYY-MM-DD HH:mm" />
+              </Form.Item>
+            </Space>
+          </div>
+        )}
 
         <Form.Item name="location" label="Location">
           <Input placeholder="e.g., Kyoto" />
