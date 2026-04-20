@@ -461,6 +461,59 @@ dataRoutes.post("/travel/activities/:id/geocode", handler(async (c) => {
   const activity = await pb.collection("travel_activities").getOne(id);
   const body: { searchQuery?: string } = await c.req.json<{ searchQuery?: string }>().catch(() => ({}));
 
+  async function searchPlace(q: string) {
+    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey!,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.formattedAddress",
+      },
+      body: JSON.stringify({ textQuery: q }),
+    });
+    if (!res.ok) throw new Error(`Places API ${res.status}: ${await res.text()}`);
+    const data = await res.json() as {
+      places?: Array<{ id: string; displayName?: { text: string }; location?: { latitude: number; longitude: number }; formattedAddress?: string }>;
+    };
+    return data.places?.[0] || null;
+  }
+
+  // Flight: geocode both from and to airports into flight_info
+  if (activity.category === "Flight") {
+    const fi = activity.flight_info || {};
+    const fromCode = fi.from as string | undefined;
+    const toCode = fi.to as string | undefined;
+    if (!fromCode || !toCode) {
+      return c.json({ error: "Flight missing from/to airport codes" }, 400);
+    }
+    const fromPlace = await searchPlace(`${fromCode} airport`);
+    const toPlace = await searchPlace(`${toCode} airport`);
+    if (!fromPlace || !toPlace) {
+      return c.json({ error: `Could not find airports: from=${!!fromPlace} to=${!!toPlace}` }, 404);
+    }
+    const newFi = {
+      ...fi,
+      fromLat: fromPlace.location?.latitude,
+      fromLng: fromPlace.location?.longitude,
+      toLat: toPlace.location?.latitude,
+      toLng: toPlace.location?.longitude,
+    };
+    // Also set the activity's primary lat/lng to the departure airport so
+    // it appears somewhere if flight_info is stripped
+    const updated = await pb.collection("travel_activities").update(id, {
+      flight_info: newFi,
+      lat: fromPlace.location?.latitude,
+      lng: fromPlace.location?.longitude,
+    });
+    return c.json({
+      id: updated.id,
+      name: updated.name,
+      flight_info: updated.flight_info,
+      fromPlace: fromPlace.displayName?.text,
+      toPlace: toPlace.displayName?.text,
+    });
+  }
+
   let searchQuery = body.searchQuery;
   if (!searchQuery) {
     // For Transportation activities with a trip, use trip destination + "airport"
@@ -482,31 +535,7 @@ dataRoutes.post("/travel/activities/:id/geocode", handler(async (c) => {
     return c.json({ error: "Could not construct a search query — activity has no name or location" }, 400);
   }
 
-  const placesRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.formattedAddress",
-    },
-    body: JSON.stringify({ textQuery: searchQuery }),
-  });
-
-  if (!placesRes.ok) {
-    const errBody = await placesRes.text();
-    return c.json({ error: `Google Places API error ${placesRes.status}: ${errBody}` }, 502);
-  }
-
-  const placesData = await placesRes.json() as {
-    places?: Array<{
-      id: string;
-      displayName?: { text: string };
-      location?: { latitude: number; longitude: number };
-      formattedAddress?: string;
-    }>;
-  };
-
-  const place = placesData.places?.[0];
+  const place = await searchPlace(searchQuery);
   if (!place) {
     return c.json({ error: `No places found for query: "${searchQuery}"` }, 404);
   }

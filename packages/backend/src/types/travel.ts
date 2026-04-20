@@ -28,8 +28,12 @@ export interface Trip {
 export interface FlightInfo {
   airline?: string;       // e.g. "United", "UA", "SW"
   number?: string;        // e.g. "1234", "2929"
-  from?: string;          // airport code, e.g. "SFO"
-  to?: string;            // airport code, e.g. "JFK"
+  from?: string;          // departure airport code, e.g. "SFO"
+  to?: string;            // arrival airport code, e.g. "JFK"
+  fromLat?: number;       // departure airport lat
+  fromLng?: number;       // departure airport lng
+  toLat?: number;         // arrival airport lat
+  toLng?: number;         // arrival airport lng
   departsAt?: string;     // ISO datetime
   arrivesAt?: string;     // ISO datetime
 }

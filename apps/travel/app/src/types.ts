@@ -27,8 +27,12 @@ export type ActivityCategory =
 export interface FlightInfo {
   airline?: string;       // e.g. "United", "UA"
   number?: string;        // e.g. "1234"
-  from?: string;          // airport code, e.g. "SFO"
-  to?: string;            // airport code, e.g. "JFK"
+  from?: string;          // departure airport code, e.g. "SFO"
+  to?: string;            // arrival airport code, e.g. "JFK"
+  fromLat?: number;
+  fromLng?: number;
+  toLat?: number;
+  toLng?: number;
   departsAt?: string;     // ISO datetime
   arrivesAt?: string;     // ISO datetime
 }

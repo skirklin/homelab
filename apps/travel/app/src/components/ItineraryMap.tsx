@@ -64,6 +64,61 @@ const InfoRow = styled.div`
   gap: 4px;
 `;
 
+// Dashed flight segment between two airports.
+// Uses a geodesic polyline so it follows the great circle (correct for long flights).
+function FlightSegment({ from, to, color }: {
+  from: { lat: number; lng: number };
+  to: { lat: number; lng: number };
+  color: string;
+}) {
+  const map = useMap(MAP_ID);
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+    polylineRef.current?.setMap(null);
+    const polyline = new google.maps.Polyline({
+      path: [from, to],
+      geodesic: true,
+      strokeColor: color,
+      strokeOpacity: 0,
+      icons: [{
+        icon: { path: "M 0,-1 0,1", strokeOpacity: 0.8, scale: 3 },
+        offset: "0",
+        repeat: "10px",
+      }],
+      strokeWeight: 2,
+      map,
+    });
+    polylineRef.current = polyline;
+    return () => { polyline.setMap(null); };
+  }, [map, from.lat, from.lng, to.lat, to.lng, color]);
+
+  return null;
+}
+
+// Small plane-at-airport marker
+function FlightMarker({ color, label }: { color: string; label: string }) {
+  return (
+    <div style={{
+      width: 14,
+      height: 14,
+      borderRadius: "50%",
+      background: color,
+      border: "2px solid white",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "white",
+      fontSize: 7,
+      fontWeight: 700,
+    }} title={label}>
+      ✈
+    </div>
+  );
+}
+
 // Marker dot component
 function MarkerDot({ color, isAccommodation }: { color: string; isAccommodation: boolean }) {
   return (
@@ -272,28 +327,35 @@ export interface DayRouteInfo { [dayIndex: number]: RouteInfo }
 
 /** Renders inside <GoogleMap> to pan/zoom when the focused day changes */
 function FitBoundsToDay({ visibleDays, selectedDay }: {
-  visibleDays: Array<{ activities: Activity[] }>;
+  visibleDays: Array<{
+    activities: Activity[];
+    flightSegments: Array<{ from: { lat: number; lng: number }; to: { lat: number; lng: number } }>;
+  }>;
   selectedDay: number | "all";
 }) {
   const map = useMap(MAP_ID);
   useEffect(() => {
     if (!map || visibleDays.length === 0) return;
 
-    const coords = visibleDays.flatMap((d) =>
-      d.activities.filter((a) => a.lat != null && a.lng != null)
-    );
-    if (coords.length === 0) return;
+    const points: Array<{ lat: number; lng: number }> = [];
+    for (const d of visibleDays) {
+      for (const a of d.activities) {
+        if (a.lat != null && a.lng != null) points.push({ lat: a.lat, lng: a.lng });
+      }
+      for (const seg of d.flightSegments) {
+        points.push(seg.from, seg.to);
+      }
+    }
+    if (points.length === 0) return;
 
-    if (coords.length === 1) {
-      map.panTo({ lat: coords[0].lat!, lng: coords[0].lng! });
+    if (points.length === 1) {
+      map.panTo(points[0]);
       map.setZoom(14);
       return;
     }
 
     const bounds = new google.maps.LatLngBounds();
-    for (const a of coords) {
-      bounds.extend({ lat: a.lat!, lng: a.lng! });
-    }
+    for (const p of points) bounds.extend(p);
     map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
   }, [map, visibleDays, selectedDay]);
 
@@ -317,26 +379,36 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
   const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || "";
 
   // Build day-to-activity mapping with colors
-  // For each day, find its lodging (Accommodation category) to bookend routes
+  // For each day, find its lodging (Accommodation category) to bookend routes.
+  // Flights are treated separately — they render as segments with two endpoints
+  // (from/to airports) and aren't included in the driving route.
   const dayActivities = useMemo(() => {
     const days = itinerary.days.map((day, i) => {
-      const slotActivities = day.slots
+      const allSlots = [...day.slots, ...(day.flights || [])];
+      const slotActivitiesRaw = allSlots
         .map((s) => activityMap.get(s.activityId))
-        .filter((a): a is Activity => a != null && a.lat != null && a.lng != null);
+        .filter((a): a is Activity => a != null);
 
-      const flightActivities = (day.flights || [])
-        .map((s) => activityMap.get(s.activityId))
-        .filter((a): a is Activity => a != null && a.lat != null && a.lng != null);
+      // Separate flights from other activities
+      const flightSegments = slotActivitiesRaw
+        .filter((a) => a.category === "Flight" && a.flightInfo?.fromLat != null && a.flightInfo?.toLat != null)
+        .map((a) => ({
+          activity: a,
+          from: { lat: a.flightInfo!.fromLat!, lng: a.flightInfo!.fromLng! },
+          to: { lat: a.flightInfo!.toLat!, lng: a.flightInfo!.toLng! },
+        }));
+
+      const nonFlightActivities = slotActivitiesRaw
+        .filter((a) => a.category !== "Flight" && a.lat != null && a.lng != null);
 
       const lodging = day.lodgingActivityId
         ? activityMap.get(day.lodgingActivityId)
-        : slotActivities.find((a) => a.category === "Accommodation"); // fallback for old data
+        : nonFlightActivities.find((a) => a.category === "Accommodation"); // fallback for old data
 
-      const nonLodging = slotActivities.filter((a) => a.id !== lodging?.id);
+      const nonLodging = nonFlightActivities.filter((a) => a.id !== lodging?.id);
       const allDayActivities = [
         ...(lodging && lodging.lat != null ? [lodging] : []),
         ...nonLodging,
-        ...flightActivities,
       ];
 
       return {
@@ -344,6 +416,7 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
         dayIndex: i,
         color: DAY_COLORS[i % DAY_COLORS.length],
         activities: allDayActivities,
+        flightSegments,
         lodging: lodging?.lat != null ? lodging : undefined,
         nonLodging,
       };
@@ -478,6 +551,37 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
                     <MarkerDot color={da.color} isAccommodation={isAccommodation} />
                   </AdvancedMarker>
                 );
+              })
+            )}
+
+            {/* Flight segments: dashed line + markers at both endpoints */}
+            {visibleDays.flatMap((da) =>
+              da.flightSegments.flatMap((seg) => {
+                const fi = seg.activity.flightInfo;
+                const label = [fi?.airline && fi?.number ? `${fi.airline}${fi.number}` : "", fi?.from, fi?.to]
+                  .filter(Boolean).join(" ");
+                return [
+                  <FlightSegment
+                    key={`seg-${seg.activity.id}`}
+                    from={seg.from}
+                    to={seg.to}
+                    color={da.color}
+                  />,
+                  <AdvancedMarker
+                    key={`from-${seg.activity.id}`}
+                    position={seg.from}
+                    onClick={() => handleMarkerClick(seg.activity.id)}
+                  >
+                    <FlightMarker color={da.color} label={`${label} departure`} />
+                  </AdvancedMarker>,
+                  <AdvancedMarker
+                    key={`to-${seg.activity.id}`}
+                    position={seg.to}
+                    onClick={() => handleMarkerClick(seg.activity.id)}
+                  >
+                    <FlightMarker color={da.color} label={`${label} arrival`} />
+                  </AdvancedMarker>,
+                ];
               })
             )}
 
