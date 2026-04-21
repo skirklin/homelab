@@ -68,6 +68,8 @@ export function ProposalsTab({ tripId, activityMap }: ProposalsTabProps) {
         overall_feedback: string;
         state: "open" | "resolved";
         resolved_at?: string;
+        user_responded_at?: string;
+        claude_last_seen_at?: string;
         created: string; updated: string;
       }>>(`/data/travel/proposals?trip=${tripId}`);
       setProposals(raw.map((r) => ({
@@ -81,6 +83,8 @@ export function ProposalsTab({ tripId, activityMap }: ProposalsTabProps) {
         overallFeedback: r.overall_feedback || "",
         state: r.state,
         resolvedAt: r.resolved_at,
+        userRespondedAt: r.user_responded_at,
+        claudeLastSeenAt: r.claude_last_seen_at,
         created: r.created,
         updated: r.updated,
       })));

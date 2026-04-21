@@ -754,14 +754,16 @@ const candidateFeedbackSchema = z.object({
 
 server.tool(
   "list_trip_proposals",
-  "List all planning proposals for a trip (Claude's curated comparisons + user feedback). Filter by state to see only open or resolved.",
+  "List planning proposals for a trip. Use unread_only=true at the start of a planning session to find proposals with new user feedback since your last view — this is the primary way to see what needs your attention. Calling this auto-marks returned proposals as seen.",
   {
     trip_id: z.string().describe("The trip record ID"),
     state: z.enum(["open", "resolved"]).optional().describe("Filter by state"),
+    unread_only: z.boolean().optional().describe("Only return proposals where the user has responded since you last viewed them"),
   },
-  async ({ trip_id, state }) => {
+  async ({ trip_id, state, unread_only }) => {
     const params = new URLSearchParams({ trip: trip_id });
     if (state) params.set("state", state);
+    if (unread_only) params.set("unread_only", "true");
     const data = await api(`/travel/proposals?${params}`);
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },

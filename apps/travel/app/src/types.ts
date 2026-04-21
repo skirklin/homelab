@@ -41,6 +41,8 @@ export interface TripProposal {
   overallFeedback: string;
   state: "open" | "resolved";
   resolvedAt?: string;
+  userRespondedAt?: string;
+  claudeLastSeenAt?: string;
   created: string;
   updated: string;
 }

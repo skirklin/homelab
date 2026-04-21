@@ -179,6 +179,8 @@ export function ProposalCard({ proposal, activityMap, onChange }: ProposalCardPr
   const [editingNote, setEditingNote] = useState<string | null>(null);
 
   const isResolved = proposal.state === "resolved";
+  const awaitingClaude = !!proposal.userRespondedAt
+    && (!proposal.claudeLastSeenAt || proposal.userRespondedAt > proposal.claudeLastSeenAt);
   const candidates = proposal.candidateIds
     .map((id) => activityMap.get(id))
     .filter((a): a is Activity => a != null);
@@ -262,7 +264,24 @@ export function ProposalCard({ proposal, activityMap, onChange }: ProposalCardPr
     <Card $resolved={isResolved}>
       <CardHeader>
         <Question>{proposal.question}</Question>
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {awaitingClaude && !isResolved && (
+            <span
+              title="Claude hasn't seen your response yet"
+              style={{
+                fontSize: 10,
+                color: "#1677ff",
+                background: "#e6f4ff",
+                border: "1px solid #91caff",
+                borderRadius: 10,
+                padding: "1px 8px",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+              }}
+            >
+              ● awaiting Claude
+            </span>
+          )}
           {isResolved && <ResolvedBadge>Resolved</ResolvedBadge>}
           <Popconfirm title="Delete this proposal?" onConfirm={handleDelete} okButtonProps={{ danger: true }}>
             <Button type="text" size="small" danger icon={<DeleteOutlined />} />

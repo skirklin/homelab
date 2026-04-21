@@ -884,31 +884,71 @@ function proposalResponse(r: Record<string, unknown>) {
     overall_feedback: r.overall_feedback,
     state: r.state,
     resolved_at: r.resolved_at,
+    user_responded_at: r.user_responded_at,
+    claude_last_seen_at: r.claude_last_seen_at,
     created: r.created,
     updated: r.updated,
   };
 }
 
-// List proposals for a trip
+/** Returns true if the caller is an API-token (Claude) request. */
+function isClaude(c: { get(k: string): unknown }): boolean {
+  return !!c.get("isApiKey");
+}
+
+/** A proposal is unread when user has responded since Claude last saw it. */
+function isUnreadByClaude(r: Record<string, unknown>): boolean {
+  const responded = r.user_responded_at as string | undefined;
+  if (!responded) return false;
+  const seen = r.claude_last_seen_at as string | undefined;
+  return !seen || responded > seen;
+}
+
+// List proposals for a trip.
+// When called as Claude (API token) with unread_only=true, only returns
+// proposals where the user has responded since Claude last looked.
+// Claude reads auto-bump claude_last_seen_at on each returned proposal.
 dataRoutes.get("/travel/proposals", handler(async (c) => {
   const pb = c.get("pb");
   const tripId = c.req.query("trip");
   if (!tripId) return c.json({ error: "trip query param required" }, 400);
   const state = c.req.query("state");
+  const unreadOnly = c.req.query("unread_only") === "true";
+
   let filter = pb.filter("trip = {:tripId}", { tripId });
   if (state) filter += ` && state = "${state}"`;
-  const records = await pb.collection("trip_proposals").getFullList({
+  let records = await pb.collection("trip_proposals").getFullList({
     filter,
     sort: "-created",
   });
+
+  if (unreadOnly) {
+    records = records.filter((r) => isUnreadByClaude(r));
+  }
+
+  // If Claude is reading, mark each returned proposal as seen.
+  if (isClaude(c) && records.length > 0) {
+    const now = new Date().toISOString();
+    await Promise.all(records.map((r) =>
+      pb.collection("trip_proposals").update(r.id, { claude_last_seen_at: now })
+    ));
+    // Reflect the bump in the response
+    for (const r of records) (r as { claude_last_seen_at?: string }).claude_last_seen_at = now;
+  }
+
   return c.json(records.map(proposalResponse));
 }));
 
-// Get a proposal
+// Get a proposal. Marks it as seen when Claude reads.
 dataRoutes.get("/travel/proposals/:id", handler(async (c) => {
   const pb = c.get("pb");
   const id = c.req.param("id")!;
   const r = await pb.collection("trip_proposals").getOne(id);
+  if (isClaude(c)) {
+    const now = new Date().toISOString();
+    await pb.collection("trip_proposals").update(id, { claude_last_seen_at: now });
+    (r as { claude_last_seen_at?: string }).claude_last_seen_at = now;
+  }
   return c.json(proposalResponse(r));
 }));
 
@@ -939,7 +979,8 @@ dataRoutes.post("/travel/proposals", handler(async (c) => {
   return c.json(proposalResponse(record), 201);
 }));
 
-// Update a proposal (Claude can revise reasoning/candidates, user can update feedback)
+// Update a proposal. Claude revising (API token) doesn't bump user_responded_at;
+// user edits (feedback/picks/votes/state change) do bump it.
 dataRoutes.patch("/travel/proposals/:id", handler(async (c) => {
   const pb = c.get("pb");
   const id = c.req.param("id")!;
@@ -952,18 +993,30 @@ dataRoutes.patch("/travel/proposals/:id", handler(async (c) => {
   for (const k of allowed) {
     if (body[k] !== undefined) data[k] = body[k];
   }
+
+  // If the user (not Claude) touched any response-related field, bump the
+  // responded timestamp so Claude can detect it.
+  const userResponseFields = new Set(["feedback", "overall_feedback", "state"]);
+  const userResponded = !isClaude(c) && Object.keys(data).some((k) => userResponseFields.has(k));
+  if (userResponded) {
+    data.user_responded_at = new Date().toISOString();
+  }
+
   const record = await pb.collection("trip_proposals").update(id, data);
   return c.json(proposalResponse(record));
 }));
 
-// Resolve a proposal (convenience endpoint — sets state + resolved_at)
+// Resolve a proposal (convenience endpoint — sets state + resolved_at).
+// Always counts as a user response if called by the user.
 dataRoutes.post("/travel/proposals/:id/resolve", handler(async (c) => {
   const pb = c.get("pb");
   const id = c.req.param("id")!;
-  const record = await pb.collection("trip_proposals").update(id, {
+  const patch: Record<string, unknown> = {
     state: "resolved",
     resolved_at: new Date().toISOString(),
-  });
+  };
+  if (!isClaude(c)) patch.user_responded_at = new Date().toISOString();
+  const record = await pb.collection("trip_proposals").update(id, patch);
   return c.json(proposalResponse(record));
 }));
 

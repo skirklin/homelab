@@ -54,6 +54,8 @@ function proposalFromRecord(r: RecordModel): TripProposal {
     overallFeedback: r.overall_feedback || "",
     state: (r.state as "open" | "resolved") || "open",
     resolvedAt: r.resolved_at || undefined,
+    userRespondedAt: r.user_responded_at || undefined,
+    claudeLastSeenAt: r.claude_last_seen_at || undefined,
     created: r.created,
     updated: r.updated,
   };
@@ -163,6 +165,8 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (updates.overallFeedback !== undefined) d.overall_feedback = updates.overallFeedback;
     if (updates.state !== undefined) d.state = updates.state;
     if (updates.resolvedAt !== undefined) d.resolved_at = updates.resolvedAt;
+    if (updates.userRespondedAt !== undefined) d.user_responded_at = updates.userRespondedAt;
+    if (updates.claudeLastSeenAt !== undefined) d.claude_last_seen_at = updates.claudeLastSeenAt;
     await this.pb().collection("trip_proposals").update(proposalId, d);
   }
 
