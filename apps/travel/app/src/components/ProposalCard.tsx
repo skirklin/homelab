@@ -4,6 +4,7 @@
  */
 import { useState, useCallback } from "react";
 import { Typography, Input, Button, message, Tag, Popconfirm } from "antd";
+import ReactMarkdown from "react-markdown";
 import {
   LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled,
   StarFilled, DeleteOutlined, EditOutlined,
@@ -41,12 +42,35 @@ const Question = styled.h3`
 
 const Reasoning = styled.div`
   font-size: 13px;
-  color: #595959;
+  color: #434343;
   margin-bottom: 12px;
-  white-space: pre-wrap;
-  line-height: 1.5;
+  line-height: 1.55;
 
+  p { margin: 0 0 8px; }
+  p:last-child { margin-bottom: 0; }
   a { color: #1677ff; }
+  strong { color: #262626; font-weight: 600; }
+  em { color: #262626; }
+  ul, ol { margin: 0 0 8px; padding-left: 20px; }
+  li { margin-bottom: 2px; }
+  code {
+    background: #f5f5f5;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  blockquote {
+    margin: 0 0 8px;
+    padding-left: 10px;
+    border-left: 3px solid #e8e8e8;
+    color: #8c8c8c;
+  }
+  h1, h2, h3, h4 {
+    margin: 10px 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #262626;
+  }
 `;
 
 const CandidateGrid = styled.div`
@@ -289,7 +313,11 @@ export function ProposalCard({ proposal, activityMap, onChange }: ProposalCardPr
         </div>
       </CardHeader>
 
-      {proposal.reasoning && <Reasoning>{proposal.reasoning}</Reasoning>}
+      {proposal.reasoning && (
+        <Reasoning>
+          <ReactMarkdown>{proposal.reasoning}</ReactMarkdown>
+        </Reasoning>
+      )}
 
       <CandidateGrid>
         {candidates.map((a) => {

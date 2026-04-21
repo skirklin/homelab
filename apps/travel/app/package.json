@@ -28,6 +28,7 @@
     "antd": "^5.29.3",
     "dayjs": "^1.11.0",
     "pocketbase": "^0.25.0",
+    "react-markdown": "^10.1.0",
     "styled-components": "^6.1.19"
   },
   "devDependencies": {
