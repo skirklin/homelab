@@ -399,3 +399,103 @@ export function validateDay(
 
   return issues;
 }
+
+// ==========================================
+// Day-of-trip helpers
+// ==========================================
+
+/** Local-timezone YYYY-MM-DD string for a Date (matches ItineraryDay.date). */
+export function localYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** A trip is "active" if `now` (date portion) falls within [startDate, endDate] inclusive. */
+export function isTripActive(trip: Trip, now: Date): boolean {
+  if (!trip.startDate || !trip.endDate) return false;
+  const today = localYmd(now);
+  return localYmd(trip.startDate) <= today && today <= localYmd(trip.endDate);
+}
+
+/** Find the ItineraryDay whose `date` matches today, with its index. */
+export function findTodayDay(
+  itinerary: Itinerary,
+  now: Date,
+): { day: ItineraryDay; index: number } | null {
+  const today = localYmd(now);
+  for (let i = 0; i < itinerary.days.length; i++) {
+    if (itinerary.days[i].date === today) return { day: itinerary.days[i], index: i };
+  }
+  return null;
+}
+
+export interface ScheduledSlot {
+  slot: ItinerarySlot;
+  activity: Activity;
+  startMin: number;
+  endMin: number; // startMin + duration (= startMin if unparseable)
+  source: "flights" | "slots";
+}
+
+/**
+ * Flatten a day's flights + slots into chronologically-sorted scheduled entries.
+ * Unscheduled slots (no startTime) and slots referencing a missing activity are
+ * dropped — callers who need the raw list should read `day.slots` directly.
+ */
+export function scheduledEntriesForDay(
+  day: ItineraryDay,
+  activityMap: Map<string, Activity>,
+): ScheduledSlot[] {
+  const out: ScheduledSlot[] = [];
+  const pushFrom = (list: ItinerarySlot[] | undefined, source: ScheduledSlot["source"]) => {
+    for (const slot of list ?? []) {
+      const startMin = parseTimeOfDay(slot.startTime);
+      if (startMin == null) continue;
+      const activity = activityMap.get(slot.activityId);
+      if (!activity) continue;
+      const durHours = parseDurationHours(activity.durationEstimate);
+      out.push({ slot, activity, startMin, endMin: startMin + durHours * 60, source });
+    }
+  };
+  pushFrom(day.flights, "flights");
+  pushFrom(day.slots, "slots");
+  out.sort((a, b) => a.startMin - b.startMin);
+  return out;
+}
+
+/** The scheduled entry whose [startMin, endMin) covers `now`, or null. */
+export function findCurrentEntry(
+  entries: ScheduledSlot[],
+  now: Date,
+): ScheduledSlot | null {
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  for (const e of entries) {
+    if (e.endMin <= e.startMin) continue; // no known duration, can't define "covers"
+    if (nowMin >= e.startMin && nowMin < e.endMin) return e;
+  }
+  return null;
+}
+
+/** The next scheduled entry whose startMin is strictly greater than now. */
+export function findNextEntry(
+  entries: ScheduledSlot[],
+  now: Date,
+): { entry: ScheduledSlot; minutesUntil: number } | null {
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  for (const e of entries) {
+    if (e.startMin > nowMin) return { entry: e, minutesUntil: e.startMin - nowMin };
+  }
+  return null;
+}
+
+/** Format minutes-from-now as "in 35 min" / "in 2h 15m" / "now". */
+export function formatCountdown(minutes: number): string {
+  if (minutes <= 0) return "now";
+  if (minutes < 60) return `in ${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes - h * 60;
+  if (m === 0) return `in ${h}h`;
+  return `in ${h}h ${m}m`;
+}

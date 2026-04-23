@@ -33,6 +33,8 @@ import {
   type Activity,
 } from "../types";
 import { ItinerarySection } from "./ItinerarySection";
+import { TodayCard } from "./TodayCard";
+import { isTripActive } from "../types";
 import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
@@ -265,6 +267,10 @@ export function TripDetail() {
         <FlagBanner>
           <FlagFilled /> {trip.reviewComment}
         </FlagBanner>
+      )}
+
+      {isTripActive(trip, new Date()) && activeItin && (
+        <TodayCard trip={trip} itinerary={activeItin} activityMap={activityMap} />
       )}
 
       {(() => {
