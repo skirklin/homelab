@@ -13,6 +13,8 @@ import { ShareLogButton } from "./ShareLogButton";
 import {
   STATUS_COLORS,
   STATUS_ORDER,
+  isTripActive,
+  localYmd,
   type Trip,
   type TripStatus,
 } from "../types";
@@ -144,6 +146,81 @@ const SectionLabel = styled.div`
   &:first-child { border-top: none; }
 `;
 
+// ---- Active trip banner ----
+
+const ActiveStrip = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+`;
+
+const ActiveCard = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  border: 1px solid #b7eb8f;
+  background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(22, 119, 255, 0.12);
+  }
+`;
+
+const ActivePulse = styled.span`
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #52c41a;
+  box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.5);
+  animation: pulse 2s infinite;
+
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.5); }
+    70% { box-shadow: 0 0 0 8px rgba(82, 196, 26, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0); }
+  }
+`;
+
+const ActiveLabel = styled.span`
+  font-size: 11px;
+  font-weight: 700;
+  color: #389e0d;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+`;
+
+const ActiveBody = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const ActiveName = styled.div`
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 2px;
+`;
+
+const ActiveMeta = styled.div`
+  font-size: 12px;
+  color: #595959;
+`;
+
+const ActiveCta = styled.span`
+  color: #1677ff;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+`;
+
 // ---- Year timeline view ----
 
 const TimelineContainer = styled.div`
@@ -264,6 +341,15 @@ export function TripList({ embedded: _embedded = false }: { embedded?: boolean }
   const [regionFilter, setRegionFilter] = useState<string>("all");
   const [view, setView] = useState<ViewMode>("table");
 
+  // Trips currently in progress (today falls within their date range). Surfaced
+  // as a banner at the top so the in-progress trip isn't buried in the list.
+  const activeTrips = useMemo(() => {
+    const now = new Date();
+    return Array.from(state.trips.values())
+      .filter((t) => isTripActive(t, now))
+      .sort((a, b) => (a.startDate?.getTime() ?? 0) - (b.startDate?.getTime() ?? 0));
+  }, [state.trips]);
+
   const statusCounts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const t of state.trips.values()) c[t.status] = (c[t.status] || 0) + 1;
@@ -365,6 +451,33 @@ export function TripList({ embedded: _embedded = false }: { embedded?: boolean }
           </Button>
         </Space>
       </PageHeader>
+
+      {activeTrips.length > 0 && (
+        <ActiveStrip>
+          {activeTrips.map((t) => {
+            const totalDays = t.startDate && t.endDate
+              ? Math.round((t.endDate.getTime() - t.startDate.getTime()) / 86400000) + 1
+              : 0;
+            const dayNumber = t.startDate
+              ? Math.round((new Date().setHours(0, 0, 0, 0) - new Date(localYmd(t.startDate)).setHours(0, 0, 0, 0)) / 86400000) + 1
+              : 0;
+            return (
+              <ActiveCard key={t.id} onClick={() => navigate(t.id)}>
+                <ActivePulse />
+                <ActiveBody>
+                  <ActiveLabel>Currently traveling</ActiveLabel>
+                  <ActiveName>{t.destination}</ActiveName>
+                  <ActiveMeta>
+                    Day {dayNumber}{totalDays > 0 ? ` of ${totalDays}` : ""}
+                    {t.region && ` · ${t.region}`}
+                  </ActiveMeta>
+                </ActiveBody>
+                <ActiveCta>Today's plan →</ActiveCta>
+              </ActiveCard>
+            );
+          })}
+        </ActiveStrip>
+      )}
 
       <StatusBar>
         {STATUS_ORDER.map((s) => {
