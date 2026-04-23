@@ -68,6 +68,46 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
       $app.save(target);
     }
 
+    // Wire the shared resource into the redeemer's user record so the app
+    // can discover it (apps read from user.recipe_boxes / user.travel_slugs,
+    // not by querying collections where auth is in owners).
+    const user = $app.findRecordById("users", userId);
+    if (targetType === "box") {
+      const boxes = user.get("recipe_boxes") || [];
+      if (boxes.indexOf(targetId) === -1) {
+        boxes.push(targetId);
+        user.set("recipe_boxes", boxes);
+        $app.save(user);
+      }
+    } else if (targetType === "recipe") {
+      // For recipe-level shares, add the parent box to the user's list
+      const boxId = target.get("box");
+      if (boxId) {
+        const boxes = user.get("recipe_boxes") || [];
+        if (boxes.indexOf(boxId) === -1) {
+          boxes.push(boxId);
+          user.set("recipe_boxes", boxes);
+          $app.save(user);
+        }
+      }
+    } else if (targetType === "travel_log") {
+      const slugs = user.get("travel_slugs") || {};
+      // Already mapped? Skip.
+      let alreadyMapped = false;
+      for (const k in slugs) {
+        if (slugs[k] === targetId) { alreadyMapped = true; break; }
+      }
+      if (!alreadyMapped) {
+        const logName = target.get("name") || "shared";
+        let slug = logName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "shared";
+        // Collision? Append a suffix.
+        if (slugs[slug]) slug = slug + "-" + Date.now().toString(36);
+        slugs[slug] = targetId;
+        user.set("travel_slugs", slugs);
+        $app.save(user);
+      }
+    }
+
     // Mark invite as redeemed
     invite.set("redeemed", true);
     invite.set("redeemed_by", userId);
