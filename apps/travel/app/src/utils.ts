@@ -24,6 +24,19 @@ export function mapsUrl(activity: Activity): string | null {
   return null;
 }
 
+/** Build a Google Maps *directions* URL — user's current location → activity.
+ *  Opens the Maps app with navigation ready to start. */
+export function directionsUrl(activity: Activity): string | null {
+  const base = "https://www.google.com/maps/dir/?api=1";
+  if (activity.lat != null && activity.lng != null) {
+    const dest = `${activity.lat},${activity.lng}`;
+    const qs = activity.placeId ? `&destination_place_id=${activity.placeId}` : "";
+    return `${base}&destination=${dest}${qs}`;
+  }
+  if (activity.location) return `${base}&destination=${encodeURIComponent(activity.location)}`;
+  return null;
+}
+
 /** Build a URL for a source reference line (Gmail, Calendar, Drive) */
 export function sourceRefUrl(line: string): string | null {
   const trimmed = line.trim();

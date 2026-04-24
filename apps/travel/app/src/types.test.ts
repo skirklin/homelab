@@ -90,9 +90,25 @@ describe("parseTimeOfDay", () => {
   it("returns null for missing or bad input", () => {
     expect(parseTimeOfDay(undefined)).toBe(null);
     expect(parseTimeOfDay("")).toBe(null);
-    expect(parseTimeOfDay("9am")).toBe(null);
+    expect(parseTimeOfDay("gibberish")).toBe(null);
     expect(parseTimeOfDay("25:00")).toBe(null);
     expect(parseTimeOfDay("12:70")).toBe(null);
+  });
+
+  it("parses 12-hour meridiem formats (production uses this)", () => {
+    expect(parseTimeOfDay("8:00 AM")).toBe(8 * 60);
+    expect(parseTimeOfDay("1:00 PM")).toBe(13 * 60);
+    expect(parseTimeOfDay("12:00 PM")).toBe(12 * 60); // noon
+    expect(parseTimeOfDay("12:00 AM")).toBe(0); // midnight
+    expect(parseTimeOfDay("12:30am")).toBe(30);
+    expect(parseTimeOfDay("11:59 PM")).toBe(23 * 60 + 59);
+    expect(parseTimeOfDay("9 AM")).toBe(9 * 60); // no minutes
+  });
+
+  it("rejects invalid 12-hour values", () => {
+    expect(parseTimeOfDay("13:00 PM")).toBe(null);
+    expect(parseTimeOfDay("0:00 AM")).toBe(null);
+    expect(parseTimeOfDay("8:70 AM")).toBe(null);
   });
 });
 

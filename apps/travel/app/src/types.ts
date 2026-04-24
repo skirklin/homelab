@@ -289,15 +289,38 @@ export interface DayIssue {
   slotIndices: [number, number];
 }
 
-/** Parse "HH:mm" into minutes from midnight, or null if unparseable. */
+/**
+ * Parse a time-of-day string into minutes from midnight. Accepts 24-hour
+ * "HH:mm" and 12-hour "h:mm AM/PM" (and minor variants); returns null if
+ * the string is unparseable. Production itineraries use the 12-hour form,
+ * but the input is user-editable so we stay permissive.
+ */
 export function parseTimeOfDay(time: string | undefined): number | null {
   if (!time) return null;
-  const m = time.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  const h = parseInt(m[1], 10);
-  const min = parseInt(m[2], 10);
-  if (h > 23 || min > 59) return null;
-  return h * 60 + min;
+  const t = time.trim();
+
+  // 12-hour with meridiem: "8:00 AM", "1:00 PM", "12:30pm", "8 AM"
+  const ampm = t.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM|am|pm)$/);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10);
+    const m = ampm[2] ? parseInt(ampm[2], 10) : 0;
+    const pm = ampm[3].toUpperCase() === "PM";
+    if (h < 1 || h > 12 || m > 59) return null;
+    if (h === 12) h = 0;
+    if (pm) h += 12;
+    return h * 60 + m;
+  }
+
+  // 24-hour: "09:00", "13:45"
+  const hhmm = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (hhmm) {
+    const h = parseInt(hhmm[1], 10);
+    const m = parseInt(hhmm[2], 10);
+    if (h > 23 || m > 59) return null;
+    return h * 60 + m;
+  }
+
+  return null;
 }
 
 /** Format minutes-from-midnight as "HH:mm" (values past 24h render as e.g. "25:30"). */

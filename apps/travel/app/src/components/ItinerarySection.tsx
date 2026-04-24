@@ -276,49 +276,6 @@ const DriveTimeBadge = styled.div`
   padding: 2px 0 2px 60px;
 `;
 
-const HoverTooltip = styled.div`
-  max-width: 250px;
-  font-size: 12px;
-`;
-
-const HoverPhoto = styled.img`
-  width: 100%;
-  height: 80px;
-  object-fit: cover;
-  border-radius: 4px;
-  margin-bottom: 4px;
-`;
-
-const HoverMeta = styled.div`
-  color: #8c8c8c;
-  font-size: 11px;
-  display: flex;
-  gap: 6px;
-  margin-top: 2px;
-`;
-
-function ActivityTooltip({ activity, apiKey }: { activity: Activity; apiKey: string }) {
-  return (
-    <HoverTooltip>
-      {activity.photoRef && (
-        <HoverPhoto
-          src={`https://places.googleapis.com/v1/${activity.photoRef}/media?maxWidthPx=250&key=${apiKey}`}
-          alt={activity.name}
-        />
-      )}
-      <div style={{ fontWeight: 500 }}>{activity.name}</div>
-      <HoverMeta>
-        {activity.rating != null && <span style={{ color: "#fa8c16" }}>&#9733;{activity.rating}</span>}
-        {activity.location && <span><EnvironmentOutlined /> {activity.location}</span>}
-        {activity.durationEstimate && <span><ClockCircleOutlined /> {activity.durationEstimate}</span>}
-        {activity.costNotes && <span><DollarOutlined /> {activity.costNotes}</span>}
-      </HoverMeta>
-      {activity.description && <div style={{ color: "#595959", marginTop: 3, fontStyle: "italic" }}>{activity.description}</div>}
-      {activity.details && <div style={{ color: "#595959", marginTop: 4, fontSize: 11, lineHeight: 1.4, whiteSpace: "pre-wrap" }}>{activity.details}</div>}
-    </HoverTooltip>
-  );
-}
-
 function ItineraryTimeline({
   itinerary,
   activityMap,
@@ -557,17 +514,10 @@ function ItineraryTimeline({
             {day.slots.map((slot, j) => {
               const activity = activityMap.get(slot.activityId);
               return (
-                <Popover
-                  key={j}
-                  trigger="click"
-                  placement="right"
-                  content={activity ? <ActivityTooltip activity={activity} apiKey={apiKey} /> : null}
-                >
-                  <CompactSlot style={{ cursor: "pointer" }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                    {slot.startTime && <CompactTime>{slot.startTime}</CompactTime>}
-                    <CompactName>{activity?.name || slot.activityId}</CompactName>
-                  </CompactSlot>
-                </Popover>
+                <CompactSlot key={j}>
+                  {slot.startTime && <CompactTime>{slot.startTime}</CompactTime>}
+                  <CompactName>{activity?.name || slot.activityId}</CompactName>
+                </CompactSlot>
               );
             })}
 

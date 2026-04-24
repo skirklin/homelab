@@ -10,7 +10,7 @@
  */
 import { useEffect, useState, type ReactElement } from "react";
 import { Tag } from "antd";
-import { EnvironmentOutlined } from "@ant-design/icons";
+import { EnvironmentOutlined, CompassOutlined, HomeOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import {
   findCurrentEntry,
@@ -23,6 +23,7 @@ import {
   type ScheduledSlot,
   type Trip,
 } from "../types";
+import { directionsUrl } from "../utils";
 
 const Card = styled.div`
   background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%);
@@ -88,15 +89,52 @@ const SlotList = styled.div`
 
 const SlotRow = styled.div<{ $active?: boolean; $past?: boolean }>`
   display: grid;
-  grid-template-columns: 52px 1fr auto;
-  align-items: baseline;
+  grid-template-columns: 52px 1fr auto auto;
+  align-items: center;
   gap: 10px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   border-radius: 4px;
   background: ${(p) => (p.$active ? "rgba(22, 119, 255, 0.08)" : "transparent")};
   border-left: 3px solid ${(p) => (p.$active ? "#1677ff" : "transparent")};
   color: ${(p) => (p.$past ? "#bfbfbf" : "inherit")};
   font-size: 13px;
+`;
+
+const DirectionsButton = styled.a`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #1677ff;
+  color: white !important;
+  font-size: 14px;
+  text-decoration: none;
+  flex-shrink: 0;
+
+  &:hover {
+    background: #4096ff;
+    color: white;
+  }
+`;
+
+const DirectionsPlaceholder = styled.span`
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+`;
+
+const LodgingRow = styled.div`
+  display: grid;
+  grid-template-columns: 52px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  border-top: 1px dashed #d9d9d9;
+  font-size: 13px;
+  color: #595959;
 `;
 
 const SlotTime = styled.span`
@@ -178,6 +216,9 @@ export function TodayCard({ trip, itinerary, activityMap, now: nowProp }: TodayC
   const entries = scheduledEntriesForDay(today.day, activityMap);
   const current = findCurrentEntry(entries, now);
   const next = findNextEntry(entries, now);
+  const lodging = today.day.lodgingActivityId
+    ? activityMap.get(today.day.lodgingActivityId)
+    : null;
 
   const totalDays = itinerary.days.length;
   const dayNumber = today.index + 1;
@@ -217,6 +258,35 @@ export function TodayCard({ trip, itinerary, activityMap, now: nowProp }: TodayC
       ) : (
         <SlotList>{renderRowsWithNowMarker(entries, current, nowMin)}</SlotList>
       )}
+
+      {lodging && (
+        <LodgingRow>
+          <SlotTime style={{ color: "#fa8c16" }}>
+            <HomeOutlined />
+          </SlotTime>
+          <span>
+            <strong>Tonight:</strong> {lodging.name}
+          </span>
+          {lodging.location && (
+            <SlotLocation>
+              <EnvironmentOutlined /> {lodging.location}
+            </SlotLocation>
+          )}
+          {directionsUrl(lodging) ? (
+            <DirectionsButton
+              href={directionsUrl(lodging)!}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Directions to ${lodging.name}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <CompassOutlined />
+            </DirectionsButton>
+          ) : (
+            <DirectionsPlaceholder />
+          )}
+        </LodgingRow>
+      )}
     </Card>
   );
 }
@@ -242,14 +312,28 @@ function renderRowsWithNowMarker(
 
     const past = !isActive && e.endMin > e.startMin && nowMin >= e.endMin;
 
+    const dir = directionsUrl(e.activity);
     rows.push(
       <SlotRow key={`${e.source}-${i}`} $active={isActive} $past={past}>
         <SlotTime>{formatTimeHm(e.startMin)}</SlotTime>
         <SlotName>
           {e.source === "flights" ? "✈ " : ""}{e.activity.name}
         </SlotName>
-        {e.activity.location && (
+        {e.activity.location ? (
           <SlotLocation><EnvironmentOutlined /> {e.activity.location}</SlotLocation>
+        ) : <span />}
+        {dir ? (
+          <DirectionsButton
+            href={dir}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Directions to ${e.activity.name}`}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <CompassOutlined />
+          </DirectionsButton>
+        ) : (
+          <DirectionsPlaceholder />
         )}
       </SlotRow>
     );
