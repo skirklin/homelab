@@ -25,13 +25,22 @@ export function mapsUrl(activity: Activity): string | null {
 }
 
 /** Build a Google Maps *directions* URL — user's current location → activity.
- *  Opens the Maps app with navigation ready to start. */
+ *  Opens the Maps app with navigation ready to start.
+ *
+ *  When a placeId exists we prefer it as the sole destination signal — Maps
+ *  routes to the authoritative place. Mixing placeId with lat/lng causes the
+ *  mobile app to route to the (sometimes stale or slightly off) coordinates
+ *  even though the place card looks correct. */
 export function directionsUrl(activity: Activity): string | null {
   const base = "https://www.google.com/maps/dir/?api=1";
+  if (activity.placeId) {
+    // `destination` is required; pass the name as label text so users see
+    // something readable if Maps falls back to a search.
+    const label = encodeURIComponent(activity.name || activity.location || "destination");
+    return `${base}&destination=${label}&destination_place_id=${activity.placeId}`;
+  }
   if (activity.lat != null && activity.lng != null) {
-    const dest = `${activity.lat},${activity.lng}`;
-    const qs = activity.placeId ? `&destination_place_id=${activity.placeId}` : "";
-    return `${base}&destination=${dest}${qs}`;
+    return `${base}&destination=${activity.lat},${activity.lng}`;
   }
   if (activity.location) return `${base}&destination=${encodeURIComponent(activity.location)}`;
   return null;
