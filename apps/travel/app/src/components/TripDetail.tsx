@@ -270,7 +270,15 @@ export function TripDetail() {
       )}
 
       {isTripActive(trip, new Date()) && activeItin && (
-        <TodayCard trip={trip} itinerary={activeItin} activityMap={activityMap} />
+        <TodayCard
+          trip={trip}
+          itinerary={activeItin}
+          activityMap={activityMap}
+          onOpenDay={(idx) => {
+            setFocusDay(idx);
+            setActiveTabState("itinerary");
+          }}
+        />
       )}
 
       {(() => {

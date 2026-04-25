@@ -11,7 +11,9 @@ import {
   Popover,
 } from "antd";
 import {
-  ArrowLeftOutlined,
+  ArrowUpOutlined,
+  LeftOutlined,
+  RightOutlined,
   DeleteOutlined,
   EditOutlined,
   HomeOutlined,
@@ -322,17 +324,32 @@ function ItineraryTimeline({
       <div>
         <ExpandedDay>
           <ExpandedDayHeader>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Button type="text" size="small" icon={<ArrowLeftOutlined />}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Button
+                type="text"
+                size="small"
+                icon={<ArrowUpOutlined />}
                 onClick={() => onDayClick(focusDay)}
-                title="Back to all days" />
-              <Button type="text" size="small"
-                onClick={() => hasPrev ? onDayNav(focusDay - 1) : undefined}
-                disabled={!hasPrev} style={{ fontSize: 11, padding: "0 4px" }}>‹</Button>
+                title="Back to all days"
+                style={{ marginRight: 6, borderRight: "1px solid #d6e4ff", borderRadius: 0, paddingRight: 10 }}
+              />
+              <Button
+                type="text"
+                icon={<LeftOutlined style={{ fontSize: 18 }} />}
+                onClick={() => hasPrev && onDayNav(focusDay - 1)}
+                disabled={!hasPrev}
+                title="Previous day"
+                style={{ height: 32, width: 32 }}
+              />
               <ExpandedDayTitle>Day {focusDay + 1} / {totalDays}</ExpandedDayTitle>
-              <Button type="text" size="small"
-                onClick={() => hasNext ? onDayNav(focusDay + 1) : undefined}
-                disabled={!hasNext} style={{ fontSize: 11, padding: "0 4px" }}>›</Button>
+              <Button
+                type="text"
+                icon={<RightOutlined style={{ fontSize: 18 }} />}
+                onClick={() => hasNext && onDayNav(focusDay + 1)}
+                disabled={!hasNext}
+                title="Next day"
+                style={{ height: 32, width: 32 }}
+              />
               {load.totalHours > 0 && (() => {
                 const ri = routeInfo?.[focusDay];
                 const hasDriving = load.driveMiles > 5;

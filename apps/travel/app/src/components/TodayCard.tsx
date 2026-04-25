@@ -41,6 +41,24 @@ const Header = styled.div`
   flex-wrap: wrap;
 `;
 
+const OpenDayButton = styled.button`
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #1677ff;
+  background: white;
+  color: #1677ff;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    background: #1677ff;
+    color: white;
+  }
+`;
+
 const Title = styled.h3`
   margin: 0;
   font-size: 16px;
@@ -194,11 +212,13 @@ interface TodayCardProps {
   trip: Trip;
   itinerary: Itinerary;
   activityMap: Map<string, Activity>;
+  /** Called when the user wants to drill into the day-detail view (with prev/next nav). */
+  onOpenDay?: (dayIndex: number) => void;
   /** Optional injected "now" for testing; defaults to current time. */
   now?: Date;
 }
 
-export function TodayCard({ trip, itinerary, activityMap, now: nowProp }: TodayCardProps) {
+export function TodayCard({ trip, itinerary, activityMap, onOpenDay, now: nowProp }: TodayCardProps) {
   // Auto-refresh every minute so countdowns / current-slot highlight stay live.
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -230,6 +250,11 @@ export function TodayCard({ trip, itinerary, activityMap, now: nowProp }: TodayC
         <Tag color="green" style={{ margin: 0 }}>In progress</Tag>
         <Title>{trip.destination} — Today</Title>
         <DayBadge>Day {dayNumber} of {totalDays}</DayBadge>
+        {onOpenDay && (
+          <OpenDayButton onClick={() => onOpenDay(today.index)}>
+            Open day →
+          </OpenDayButton>
+        )}
       </Header>
 
       {current ? (
