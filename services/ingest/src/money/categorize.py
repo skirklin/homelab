@@ -29,27 +29,30 @@ This produces rules:
 
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
-from money.config import CONFIG_DIR
+from money.config import resolve_config_path
 from money.db import Database
 from money.models import CategoryRule
 
 log = logging.getLogger(__name__)
 
-RULES_FILE = CONFIG_DIR / "categories.yaml"
+def _rules_file() -> Path:
+    return resolve_config_path("categories.yaml")
 
 
 def load_config() -> dict[str, Any]:
     """Load the categories config from YAML."""
-    if not RULES_FILE.exists():
+    rules_file = _rules_file()
+    if not rules_file.exists():
         raise FileNotFoundError(
-            f"No categories config at {RULES_FILE}. "
+            f"No categories config at {rules_file}. "
             "Create it with categorization rules."
         )
-    data: dict[str, Any] = yaml.safe_load(RULES_FILE.read_text())
+    data: dict[str, Any] = yaml.safe_load(rules_file.read_text())
     return data
 
 
@@ -112,7 +115,7 @@ def apply_rules(db: Database, transaction_ids: list[int] | None = None) -> int:
     """
     rules = load_rules()
     if not rules:
-        log.warning("No rules loaded from %s", RULES_FILE)
+        log.warning("No rules loaded from %s", _rules_file())
         return 0
 
     db.clear_category_paths()

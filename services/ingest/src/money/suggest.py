@@ -9,15 +9,18 @@ import json
 import logging
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from money.categorize import apply_rules, dry_run_pattern, load_rules
-from money.config import CONFIG_DIR
+from money.config import resolve_config_path
 from money.db import Database
 
 log = logging.getLogger(__name__)
 
-RULES_FILE = CONFIG_DIR / "categories.yaml"
+
+def _rules_file() -> Path:
+    return resolve_config_path("categories.yaml")
 
 
 def _get_category_tree() -> str:
@@ -31,9 +34,10 @@ def _get_category_tree() -> str:
 
 def _get_yaml_content() -> str:
     """Read the raw YAML file content."""
-    if not RULES_FILE.exists():
+    rules_file = _rules_file()
+    if not rules_file.exists():
         return ""
-    return RULES_FILE.read_text()
+    return rules_file.read_text()
 
 
 def _get_rejected_feedback(db: Database) -> str:
@@ -356,7 +360,7 @@ def accept_suggestion(db: Database, rule_id: int) -> int:
     category_path: str = row["category_path"]
     yaml_patch: str | None = row["yaml_patch"]
 
-    if RULES_FILE.exists():
+    if _rules_file().exists():
         applied = _apply_rule_change(pattern, category_path, yaml_patch)
         if not applied:
             log.error("Failed to apply rule change for suggestion %d", rule_id)
@@ -384,13 +388,14 @@ def _apply_rule_change(pattern: str, category_path: str, yaml_patch: str | None)
     """
     import yaml as yaml_mod  # type: ignore[import-untyped]
 
-    original = RULES_FILE.read_text()
+    rules_file = _rules_file()
+    original = rules_file.read_text()
 
     # Try AI patch first
     if yaml_patch:
         patched = _try_unified_patch(original, yaml_patch)
         if patched and _validate_yaml(patched):
-            RULES_FILE.write_text(patched)
+            rules_file.write_text(patched)
             log.info("Applied AI patch for %s → %s", pattern, category_path)
             return True
         log.warning("AI patch failed or produced invalid YAML, trying programmatic insert")
@@ -433,17 +438,17 @@ def _apply_rule_change(pattern: str, category_path: str, yaml_patch: str | None)
         result = yaml_mod.dump(config, default_flow_style=False, sort_keys=False)
 
         if _validate_yaml(result):
-            RULES_FILE.write_text(result)
+            rules_file.write_text(result)
             log.info("Programmatic insert for %s → %s", pattern, category_path)
             return True
         else:
             log.error("Programmatic insert produced invalid YAML, rolling back")
-            RULES_FILE.write_text(original)
+            rules_file.write_text(original)
             return False
 
     except Exception:
         log.exception("Failed to programmatically insert rule")
-        RULES_FILE.write_text(original)
+        rules_file.write_text(original)
         return False
 
 

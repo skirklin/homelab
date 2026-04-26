@@ -15,12 +15,23 @@ CONFIG_DIR = Path.home() / ".config" / "money"
 CONFIG_FILE = CONFIG_DIR / "config.json"  # legacy default
 
 
+def resolve_config_path(name: str) -> Path:
+    """Resolve a config file path, preferring the PVC data dir over the user config dir.
+
+    Reads: DATA_DIR/name if it exists, else CONFIG_DIR/name if it exists.
+    First write: DATA_DIR/name if DATA_DIR exists (pod case), else CONFIG_DIR/name (local dev).
+    """
+    data_path = DATA_DIR / name
+    user_path = CONFIG_DIR / name
+    if data_path.exists():
+        return data_path
+    if user_path.exists():
+        return user_path
+    return data_path if DATA_DIR.is_dir() else user_path
+
+
 def _resolve_config_file() -> Path:
-    """Return the config file path, preferring the data dir (PVC-persisted)."""
-    data_config = DATA_DIR / "config.json"
-    if data_config.exists():
-        return data_config
-    return CONFIG_FILE
+    return resolve_config_path("config.json")
 
 
 @dataclass

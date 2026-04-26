@@ -3,6 +3,7 @@
 import logging
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 # Simple in-memory cache for calendar results
@@ -14,20 +15,27 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-from money.config import CONFIG_DIR
+from money.config import resolve_config_path
 
 log = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
-CREDENTIALS_FILE = CONFIG_DIR / "google_credentials.json"
-TOKEN_FILE = CONFIG_DIR / "google_token.json"
 TRAVEL_CALENDAR_ID = "5t30nqbr366g1oekufagg18ugg@group.calendar.google.com"
+
+
+def _credentials_file() -> Path:
+    return resolve_config_path("google_credentials.json")
+
+
+def _token_file() -> Path:
+    return resolve_config_path("google_token.json")
 
 
 def _get_credentials() -> Credentials:
     """Get or refresh Google OAuth credentials."""
-    if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+    token_file = _token_file()
+    if token_file.exists():
+        creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
         if creds.valid:
             return creds
         if creds.expired and creds.refresh_token:
@@ -35,12 +43,13 @@ def _get_credentials() -> Credentials:
             _save_credentials(creds)
             return creds
 
-    if not CREDENTIALS_FILE.exists():
+    credentials_file = _credentials_file()
+    if not credentials_file.exists():
         raise FileNotFoundError(
-            f"No credentials at {CREDENTIALS_FILE}. "
+            f"No credentials at {credentials_file}. "
             "Download OAuth client JSON from Google Cloud Console."
         )
-    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(str(credentials_file), SCOPES)
     result = flow.run_local_server(
         port=8085, open_browser=False, bind_addr="0.0.0.0",
     )
@@ -53,7 +62,7 @@ def _get_credentials() -> Credentials:
 
 def _save_credentials(creds: Credentials) -> None:
     """Persist credentials to disk."""
-    TOKEN_FILE.write_text(str(creds.to_json()))
+    _token_file().write_text(str(creds.to_json()))
 
 
 def _build_service() -> Any:
@@ -65,7 +74,7 @@ def _build_service() -> Any:
 def auth() -> None:
     """Run the OAuth flow interactively and save the token."""
     _get_credentials()
-    log.info("Google Calendar auth complete. Token saved to %s", TOKEN_FILE)
+    log.info("Google Calendar auth complete. Token saved to %s", _token_file())
 
 
 def fetch_events(
