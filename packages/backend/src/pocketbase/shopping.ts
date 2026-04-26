@@ -344,8 +344,8 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
         $autoCancel: false,
       });
       if (!cancelled()) options.onInitial(records);
-    } catch {
-      if (!cancelled()) options.onInitial([]);
+    } catch (e) {
+      if (!cancelled()) console.warn(`[shopping] subCol ${collection} failed`, e);
     }
 
     // Subscribe to changes

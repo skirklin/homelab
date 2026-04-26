@@ -5,7 +5,9 @@
 
 import { getBackend } from "@kirkl/shared";
 
-const SW_PATH = "/push-sw.js";
+// vite-plugin-pwa generates the SW at /sw.js and importScripts() the
+// existing /push-sw.js push handler into it (see vite.config.ts).
+const SW_PATH = "/sw.js";
 const API_BASE = import.meta.env.VITE_API_URL as string | undefined;
 
 function getApiUrl(): string {

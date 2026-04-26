@@ -21,6 +21,7 @@
     "@ant-design/icons": "^5.6.1",
     "@homelab/backend": "workspace:*",
     "@kirkl/shared": "workspace:*",
+    "@kirkl/vite-preset": "workspace:*",
     "antd": "^5.29.3",
     "dayjs": "^1.11.10",
     "pocketbase": "^0.25.0",

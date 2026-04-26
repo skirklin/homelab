@@ -22,6 +22,9 @@ export { getListInfo, joinList } from "./api";
 export { createAppStorage, migrateStorageKey } from "./appStorage";
 export type { AppStorage } from "./appStorage";
 
+// Online/offline
+export { useOnline, OfflineBanner } from "./online-status";
+
 // List Management
 export { ListPicker, JoinList } from "./ListManagement";
 export type {

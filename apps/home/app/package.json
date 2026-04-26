@@ -19,6 +19,7 @@
     "@kirkl/shared": "workspace:*",
     "@kirkl/travel": "workspace:*",
     "@kirkl/upkeep": "workspace:*",
+    "@kirkl/vite-preset": "workspace:*",
     "antd": "^5.29.3",
     "pocketbase": "^0.25.0",
     "react": "^19.2.0",

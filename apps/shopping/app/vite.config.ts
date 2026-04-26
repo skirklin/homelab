@@ -1,13 +1,11 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { kirklPlugins } from '@kirkl/vite-preset'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: kirklPlugins({ name: 'Shopping', shortName: 'Shopping', themeColor: '#52c41a' }),
   server: {
     proxy: {
-      // Proxy /fn/ to the Hono API service (for sharing, push, etc.)
       '/fn': {
         target: process.env.VITE_API_URL || 'http://127.0.0.1:3001',
         changeOrigin: true,
@@ -19,7 +17,7 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/*.spec.ts',  // Exclude Playwright tests
+      '**/*.spec.ts',
       '**/e2e/*.spec.ts',
     ],
   },

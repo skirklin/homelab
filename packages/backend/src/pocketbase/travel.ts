@@ -323,7 +323,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     this.pb().collection(col)
       .getFullList({ filter: opts.filter, $autoCancel: false })
       .then((rs) => { if (!cancelled()) opts.onInitial(rs); })
-      .catch(() => { if (!cancelled()) opts.onInitial([]); });
+      .catch((e) => { if (!cancelled()) console.warn(`[travel] subCol ${col} failed`, e); });
 
     this.pb().collection(col)
       .subscribe("*", (e) => {

@@ -1,10 +1,9 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { kirklPlugins } from '@kirkl/vite-preset'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: kirklPlugins({ name: 'Travel', shortName: 'Travel', themeColor: '#1677ff' }),
   test: {
     globals: true,
     environment: 'jsdom',

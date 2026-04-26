@@ -13,6 +13,10 @@
     "./pocketbase": {
       "types": "./src/pocketbase/index.ts",
       "default": "./src/pocketbase/index.ts"
+    },
+    "./cache": {
+      "types": "./src/cache/index.ts",
+      "default": "./src/cache/index.ts"
     }
   },
   "scripts": {
@@ -22,6 +26,7 @@
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "idb": "^8.0.3",
     "pocketbase": "^0.25.0"
   }
 }

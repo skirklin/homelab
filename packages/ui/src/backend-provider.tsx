@@ -10,9 +10,12 @@
  * home app nests providers from multiple modules).
  */
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { getBackend } from "./backend";
 import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
+import { withCache } from "@homelab/backend/cache";
+import { OfflineBanner } from "./online-status";
+import { registerServiceWorker } from "./sw-register";
 import type {
   ShoppingBackend,
   RecipesBackend,
@@ -22,7 +25,7 @@ import type {
   UserBackend,
 } from "@homelab/backend";
 
-const backends = createPocketBaseBackends(() => getBackend());
+const backends = withCache(createPocketBaseBackends(() => getBackend()));
 
 const ShoppingBackendContext = createContext<ShoppingBackend>(backends.shopping);
 const RecipesBackendContext = createContext<RecipesBackend>(backends.recipes);
@@ -32,6 +35,9 @@ const LifeBackendContext = createContext<LifeBackend>(backends.life);
 const UserBackendContext = createContext<UserBackend>(backends.user);
 
 export function BackendProvider({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
   return (
     <ShoppingBackendContext.Provider value={backends.shopping}>
       <RecipesBackendContext.Provider value={backends.recipes}>
@@ -39,6 +45,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
           <TravelBackendContext.Provider value={backends.travel}>
             <LifeBackendContext.Provider value={backends.life}>
               <UserBackendContext.Provider value={backends.user}>
+                <OfflineBanner />
                 {children}
               </UserBackendContext.Provider>
             </LifeBackendContext.Provider>

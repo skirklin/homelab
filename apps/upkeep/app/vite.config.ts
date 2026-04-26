@@ -1,10 +1,14 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { kirklPlugins } from '@kirkl/vite-preset'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: kirklPlugins({
+    name: 'Upkeep',
+    shortName: 'Upkeep',
+    themeColor: '#722ed1',
+    importScripts: ['/push-sw.js'],
+  }),
   server: {
     proxy: {
       '/fn': {

@@ -1,8 +1,16 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { kirklPlugins } from '@kirkl/vite-preset'
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: kirklPlugins({
+    name: 'RecipeBox',
+    shortName: 'RecipeBox',
+    icons: [
+      { src: '/logo192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml' },
+    ],
+  }),
   server: {
     port: 3000,
     open: true,

@@ -1,8 +1,13 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { kirklPlugins } from '@kirkl/vite-preset'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: kirklPlugins({
+    name: 'kirkl.in',
+    shortName: 'Home',
+    themeColor: '#1677ff',
+    importScripts: ['/push-sw.js'],
+  }),
   build: {
     outDir: 'dist',
   },

@@ -372,7 +372,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
   ) {
     this.pb().collection(col).getFullList({ filter: opts.filter, $autoCancel: false }).then((rs) => {
       if (!cancelled()) opts.onInitial(rs);
-    }).catch(() => { if (!cancelled()) opts.onInitial([]); });
+    }).catch((e) => { if (!cancelled()) console.warn(`[upkeep] subCol ${col} failed`, e); });
     this.pb().collection(col).subscribe("*", (e) => {
       if (cancelled() || !opts.belongsTo(e.record)) return;
       opts.onChange(e.action, e.record);
@@ -386,7 +386,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     const reload = () => {
       this.pb().collection(col).getList(1, opts.perPage, { filter: opts.filter, sort: opts.sort, $autoCancel: false }).then((r) => {
         if (!cancelled()) opts.onData(r.items);
-      }).catch(() => { if (!cancelled()) opts.onData([]); });
+      }).catch((e) => { if (!cancelled()) console.warn(`[upkeep] reload ${col} failed`, e); });
     };
     reload();
     this.pb().collection(col).subscribe("*", (e) => {
