@@ -1753,9 +1753,6 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/suggestions/"):
             self._handle_suggestion_action()
             return
-        if self.path == "/api/config":
-            self._handle_put_config()
-            return
         if self.path == "/capture":
             self._handle_capture()
             return
@@ -1812,7 +1809,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                     return lid
             log.error(
                 "Identity '%s' for %s did not match any configured username. "
-                "Add this username to the login in Settings.",
+                "Add this username to the matching login in /app/.data/config.json.",
                 identity, institution,
             )
             return None
@@ -2306,7 +2303,7 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(500, {"error": str(e)})
 
     def _handle_get_config(self) -> None:
-        """Return the current config.json contents."""
+        """Return the current config.json contents (read-only)."""
         from money.config import _resolve_config_file
 
         config_path = _resolve_config_file()
@@ -2323,32 +2320,6 @@ class IngestHandler(BaseHTTPRequestHandler):
             "path": str(config_path),
             "exists": True,
         })
-
-    def _handle_put_config(self) -> None:
-        """Update config.json. Always writes to the data dir (PVC-persisted)."""
-        from money.config import DATA_DIR
-
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length == 0:
-            self._json_response(400, {"error": "empty request body"})
-            return
-
-        try:
-            data = json.loads(self.rfile.read(content_length))
-        except json.JSONDecodeError as e:
-            self._json_response(400, {"error": f"invalid JSON: {e}"})
-            return
-
-        config = data.get("config")
-        if not isinstance(config, dict):
-            self._json_response(400, {"error": "'config' must be an object"})
-            return
-
-        config_path = DATA_DIR / "config.json"
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(config, indent=2))
-        log.info("Config updated at %s", config_path)
-        self._json_response(200, {"status": "ok", "path": str(config_path)})
 
     @staticmethod
     def _find_extension_files() -> tuple[Path | None, str]:

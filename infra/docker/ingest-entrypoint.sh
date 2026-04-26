@@ -3,7 +3,7 @@
 CONFIG="/app/.data/config.json"
 if [ ! -f "$CONFIG" ]; then
     echo '{"institutions": {}, "logins": {}, "people": {}}' > "$CONFIG"
-    echo "Seeded empty config at $CONFIG — edit via the Settings page."
+    echo "Seeded empty config at $CONFIG — edit in-place (e.g. via kubectl exec)."
 fi
 
 exec uv run money serve
