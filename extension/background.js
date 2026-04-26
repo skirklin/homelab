@@ -162,7 +162,7 @@ function makeContext(institution, tabId) {
     },
 
     /** Inject a function into the page context (fire-and-forget). */
-    async executeInPage(fn, args = undefined) {
+    async executeInPage(fn, args = null) {
       await chrome.scripting.executeScript({
         target: { tabId },
         func: (fnSource, fnArgs) => {

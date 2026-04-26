@@ -555,6 +555,77 @@ class CHCardRewardsResponse(_Base):
     cardRewardsSummary: list[CHCardReward]
 
 
+class CHInvestMoneyField(_Base):
+    """Chase investment money fields wrap the amount in `baseValueAmount`."""
+
+    baseValueAmount: float = 0.0
+
+
+class CHInvestmentPositionsSummary(_Base):
+    """Aggregate fields from positionsSummary. Many optional — Chase omits
+    them for accounts with no activity."""
+
+    asOfDate: str | None = None
+    totalMarketValueAmount: float = 0.0
+    totalCashAndSweepAmount: float = 0.0
+    totalTradedCostAmount: float = 0.0
+    totalUnrealizedGainLossAmount: float = 0.0
+    totalUnrealizedGainLossPercent: float = 0.0
+    investmentAccountTypeNames: list[str] = []
+
+
+class CHInvestmentPosition(_Base):
+    """One holding inside a `positions` response."""
+
+    instrumentShortName: str | None = None
+    instrumentLongName: str | None = None
+    assetCategoryName: str | None = None
+    marketValue: CHInvestMoneyField | None = None
+    tradedUnitQuantity: float = 0.0
+    positionDate: str | None = None
+    securityIdDetail: dict[str, object] | None = None
+
+
+class CHInvestmentPositionsResponse(_Base):
+    """Response body from digital-investment-positions/v2/positions."""
+
+    positionsSummary: CHInvestmentPositionsSummary = CHInvestmentPositionsSummary()
+    positions: list[CHInvestmentPosition] = []
+
+
+class CHInvestmentBalancePoint(_Base):
+    """Balance on a single day or month from the investment balance history."""
+
+    balanceAmount: float = 0.0
+    balanceDate: str
+
+
+class CHInvestmentDailyBalancesResponse(_Base):
+    dailyBalanceDetails: list[CHInvestmentBalancePoint] = []
+
+
+class CHInvestmentMonthlyBalancesResponse(_Base):
+    monthlyBalanceDetails: list[CHInvestmentBalancePoint] = []
+
+
+class CHPortfolioAccountEntry(_Base):
+    """An account entry from portfolio/account/options/list2."""
+
+    accountId: int
+    nickname: str | None = None
+    mask: str | None = None
+    accountCategoryType: str | None = None
+    groupType: str | None = None
+    detailType: str | None = None
+
+
+class CHPortfolioOptionsResponse(_Base):
+    """Response body from /portfolio/account/options/list2."""
+
+    code: str | None = None
+    accounts: list[CHPortfolioAccountEntry] = []
+
+
 # ── Fidelity NetBenefits ─────────────────────────────────────────────
 # planSummary endpoint returns monthly performance data for the 401k plan.
 

@@ -20,8 +20,15 @@
 
     let reqBody = null;
     try {
-      if (args[1] && args[1].body) {
-        reqBody = typeof args[1].body === 'string' ? args[1].body : null;
+      if (args[1] && typeof args[1].body === 'string') {
+        reqBody = args[1].body;
+      } else if (args[0] instanceof Request) {
+        // The caller passed a pre-built Request; clone it so the body can be
+        // read without consuming the original.
+        try {
+          reqBody = await args[0].clone().text();
+          if (!reqBody) reqBody = null;
+        } catch (e) { /* body not readable (GET etc.) */ }
       }
     } catch(e) {}
 

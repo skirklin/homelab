@@ -1,9 +1,12 @@
 """Chase ingester — parses captured network log data."""
 
+import json as _json
 import logging
-from typing import Any
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from money.config import DATA_DIR
 from money.db import Database
@@ -14,11 +17,35 @@ from money.ingest.schemas import (
     CHCardRewardsResponse,
     CHDashboardResponse,
     CHDdaDetailResponse,
+    CHInvestmentBalancePoint,
+    CHInvestmentDailyBalancesResponse,
+    CHInvestmentMonthlyBalancesResponse,
+    CHInvestmentPositionsResponse,
     CHNetworkLog,
+    CHPortfolioAccountEntry,
+    CHPortfolioOptionsResponse,
     CHTransactionsResponse,
 )
-from money.models import AccountType, Balance, IngestionRecord, IngestionStatus, Transaction
+from money.models import (
+    AccountType,
+    Balance,
+    Holding,
+    IngestionRecord,
+    IngestionStatus,
+    Transaction,
+)
 from money.storage import RawStore
+
+
+@dataclass
+class _InvestmentData:
+    """Parsed investment data for one account (keyed by selectorIdentifier)."""
+
+    selector_identifier: str
+    positions: CHInvestmentPositionsResponse | None = None
+    daily_balances: list[CHInvestmentBalancePoint] = field(default_factory=list)
+    monthly_balances: list[CHInvestmentBalancePoint] = field(default_factory=list)
+    account_meta: CHPortfolioAccountEntry | None = None
 
 log = logging.getLogger(__name__)
 
@@ -28,10 +55,11 @@ def _load_network_log() -> tuple[
     list[CHTransactionsResponse],
     list[CHCardRewardsResponse],
     list[CHDashboardResponse],
+    dict[str, _InvestmentData],
 ]:
     """Load the most recent Chase network log and extract API responses by endpoint.
 
-    Returns four lists: dda_details, transactions, card_rewards, dashboard.
+    Returns: dda_details, transactions, card_rewards, dashboard, investments.
     """
     log_dir = DATA_DIR / "network_logs"
     if not log_dir.exists():
@@ -67,6 +95,49 @@ def extract_account_list(
     return []
 
 
+def _selector_from_url(url: str) -> str | None:
+    """Extract the `selector-identifier` query param from an investment URL."""
+    qs = parse_qs(urlparse(url).query)
+    vals = qs.get("selector-identifier", [])
+    return vals[0] if vals else None
+
+
+def _selector_from_request_body(request_body: str | None) -> str | None:
+    """Extract `selectorIdentifier` from a JSON request body string."""
+    if not request_body:
+        return None
+    try:
+        data = _json.loads(request_body)
+    except (ValueError, TypeError):
+        return None
+    val = data.get("selectorIdentifier") if isinstance(data, dict) else None
+    return str(val) if val is not None else None
+
+
+def _selector_from_positions_body(body: dict[str, object]) -> str | None:
+    """Fallback: extract selectorIdentifier from a positions response body
+    (via positionComponents[].digitalAccountIdentifier).
+
+    The page-context fetch interceptor sometimes loses requestBody; the
+    response always identifies the account inside its positionComponents.
+    """
+    positions = body.get("positions")
+    if not isinstance(positions, list):
+        return None
+    for pos in positions:
+        if not isinstance(pos, dict):
+            continue
+        components = pos.get("positionComponents")
+        if not isinstance(components, list):
+            continue
+        for comp in components:
+            if isinstance(comp, dict):
+                val = comp.get("digitalAccountIdentifier")
+                if val is not None:
+                    return str(val)
+    return None
+
+
 def _parse_network_log_entries(
     data: CHNetworkLog,
 ) -> tuple[
@@ -74,12 +145,23 @@ def _parse_network_log_entries(
     list[CHTransactionsResponse],
     list[CHCardRewardsResponse],
     list[CHDashboardResponse],
+    dict[str, _InvestmentData],
 ]:
-    """Parse a raw network log into categorised response lists."""
+    """Parse a raw network log into categorised response lists.
+
+    The fifth element maps selectorIdentifier -> _InvestmentData for Chase
+    brokerage/managed investment accounts.
+    """
     dda_details: list[CHDdaDetailResponse] = []
     transactions: list[CHTransactionsResponse] = []
     card_rewards: list[CHCardRewardsResponse] = []
     dashboard: list[CHDashboardResponse] = []
+    investments: dict[str, _InvestmentData] = {}
+
+    def _get(selector: str) -> _InvestmentData:
+        if selector not in investments:
+            investments[selector] = _InvestmentData(selector_identifier=selector)
+        return investments[selector]
 
     for entry in data.entries:
         url = entry.url or ""
@@ -94,7 +176,38 @@ def _parse_network_log_entries(
             card_rewards.append(CHCardRewardsResponse.model_validate(body))
         elif "dashboard/module" in url:
             dashboard.append(CHDashboardResponse.model_validate(body))
-    return dda_details, transactions, card_rewards, dashboard
+        elif "portfolio/account/options/list2" in url:
+            try:
+                options_resp = CHPortfolioOptionsResponse.model_validate(body)
+            except Exception:
+                continue
+            for acct in options_resp.accounts:
+                is_invest = (
+                    acct.accountCategoryType == "INVESTMENT"
+                    or acct.groupType == "INVESTMENT"
+                )
+                if is_invest and acct.accountId:
+                    _get(str(acct.accountId)).account_meta = acct
+        elif "digital-investment-positions/v2/positions" in url:
+            selector = (
+                _selector_from_request_body(entry.requestBody)
+                or _selector_from_positions_body(body)
+            )
+            if selector:
+                _get(selector).positions = CHInvestmentPositionsResponse.model_validate(body)
+        elif "digital-investment-portfolio/v2/balances/daily-balances" in url:
+            selector = _selector_from_url(url)
+            if selector:
+                _get(selector).daily_balances = (
+                    CHInvestmentDailyBalancesResponse.model_validate(body).dailyBalanceDetails
+                )
+        elif "digital-investment-portfolio/v2/balances/monthly-balances" in url:
+            selector = _selector_from_url(url)
+            if selector:
+                _get(selector).monthly_balances = (
+                    CHInvestmentMonthlyBalancesResponse.model_validate(body).monthlyBalanceDetails
+                )
+    return dda_details, transactions, card_rewards, dashboard, investments
 
 
 def parse_raw_chase(
@@ -115,7 +228,7 @@ def parse_raw_chase(
     raw_key = f"chase/{profile}/{timestamp}_network_log.json"
 
     raw_data = CHNetworkLog.model_validate_json(log_file.read_text())
-    dda_details, transactions, card_rewards, dashboard = _parse_network_log_entries(raw_data)
+    dda_details, transactions, card_rewards, dashboard, investments = _parse_network_log_entries(raw_data)
 
     # Build account map from dashboard activity/options cache
     dda_account_map: dict[int, CHActivityAccount] = {}
@@ -215,8 +328,127 @@ def parse_raw_chase(
             )
             account_count += 1
 
-    log.info("Chase: parsed network log %s", timestamp)
-    return {"accounts": account_count, "transactions": txn_count_total}
+    # Managed brokerage / investment accounts
+    balance_count = 0
+    holding_count = 0
+    for inv in investments.values():
+        ext_id = f"inv:{inv.selector_identifier}"
+        meta = inv.account_meta
+        if meta and meta.nickname and meta.mask:
+            # "MANAGED BROKERAGE ••9983"
+            acct_name = f"{meta.nickname.title()} ••{meta.mask}"
+        elif meta and meta.nickname:
+            acct_name = meta.nickname.title()
+        else:
+            type_label = (
+                inv.positions.positionsSummary.investmentAccountTypeNames[0]
+                if inv.positions and inv.positions.positionsSummary.investmentAccountTypeNames
+                else "Brokerage"
+            ).title()
+            acct_name = f"Chase {type_label} ({inv.selector_identifier})"
+        account = db.get_or_create_account(
+            name=acct_name,
+            account_type=AccountType.BROKERAGE,
+            institution="chase",
+            external_id=ext_id,
+            profile=profile,
+        )
+        account_count += 1
+        log.info(
+            "Chase investment: %s (selector=%s)",
+            account.name, inv.selector_identifier,
+        )
+
+        # Current balance from positionsSummary
+        if inv.positions:
+            summary = inv.positions.positionsSummary
+            summary_date = _parse_iso_date(summary.asOfDate) or as_of
+            db.insert_balance(
+                Balance(
+                    account_id=account.id,
+                    as_of=summary_date,
+                    balance=summary.totalMarketValueAmount,
+                    source="chase_network_log",
+                    raw_file_ref=raw_key,
+                )
+            )
+            balance_count += 1
+
+            # Holdings
+            batch: list[Holding] = []
+            for pos in inv.positions.positions:
+                pos_date = _parse_iso_date(pos.positionDate) or summary_date
+                if pos.marketValue is None:
+                    continue
+                symbol = None
+                if pos.securityIdDetail and isinstance(pos.securityIdDetail, dict):
+                    s = pos.securityIdDetail.get("snapQuoteOptionSymbolCode")
+                    if isinstance(s, str):
+                        symbol = s
+                batch.append(
+                    Holding(
+                        account_id=account.id,
+                        as_of=pos_date,
+                        name=pos.instrumentLongName or pos.instrumentShortName or "unknown",
+                        shares=pos.tradedUnitQuantity,
+                        value=pos.marketValue.baseValueAmount,
+                        source="chase_network_log",
+                        symbol=symbol,
+                        asset_class=pos.assetCategoryName,
+                        raw_file_ref=raw_key,
+                    )
+                )
+            if batch:
+                db.insert_holdings_batch(batch)
+                holding_count += len(batch)
+
+        # Balance history (daily, then monthly for older dates)
+        for point in inv.daily_balances:
+            d = _parse_iso_date(point.balanceDate)
+            if d and point.balanceAmount > 0:
+                db.insert_balance(
+                    Balance(
+                        account_id=account.id,
+                        as_of=d,
+                        balance=point.balanceAmount,
+                        source="chase_network_log_daily",
+                        raw_file_ref=raw_key,
+                    )
+                )
+                balance_count += 1
+        for point in inv.monthly_balances:
+            d = _parse_iso_date(point.balanceDate)
+            if d and point.balanceAmount > 0:
+                db.insert_balance(
+                    Balance(
+                        account_id=account.id,
+                        as_of=d,
+                        balance=point.balanceAmount,
+                        source="chase_network_log_monthly",
+                        raw_file_ref=raw_key,
+                    )
+                )
+                balance_count += 1
+
+    log.info(
+        "Chase: parsed network log %s — %d balances, %d holdings",
+        timestamp, balance_count, holding_count,
+    )
+    return {
+        "accounts": account_count,
+        "transactions": txn_count_total,
+        "balances": balance_count,
+        "holdings": holding_count,
+    }
+
+
+def _parse_iso_date(s: str | None) -> date | None:
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        return None
 
 
 def sync_chase(
