@@ -17,6 +17,7 @@ export const pushRoutes = new Hono<AppEnv>();
 pushRoutes.post("/subscribe", handler(async (c) => {
   const userId = c.get("userId");
   const pb = c.get("pb");
+  const origin = c.req.header("Origin") || "";
   const { endpoint, keys } = await c.req.json<{
     endpoint: string;
     keys: { p256dh: string; auth: string };
@@ -36,6 +37,7 @@ pushRoutes.post("/subscribe", handler(async (c) => {
     // Update existing subscription (keys may have rotated)
     await pb.collection("push_subscriptions").update(existing.items[0].id, {
       keys,
+      origin,
     }, { $autoCancel: false });
     return c.json({ status: "updated", id: existing.items[0].id });
   }
@@ -45,6 +47,7 @@ pushRoutes.post("/subscribe", handler(async (c) => {
     user: userId,
     endpoint,
     keys,
+    origin,
   }, { $autoCancel: false });
 
   return c.json({ status: "created", id: record.id });

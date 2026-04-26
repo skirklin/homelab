@@ -4,6 +4,11 @@
  */
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
+import { DOMAIN } from "../../config";
+
+// Upkeep is reachable at upkeep.<domain> and as a module under <domain>/upkeep.
+// Prefer the standalone subdomain (more recent enable flow); fall back to root.
+const UPKEEP_ORIGINS = [`https://upkeep.${DOMAIN}`, `https://${DOMAIN}`];
 
 interface TaskFrequency {
   value: number;
@@ -149,7 +154,7 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
       title,
       body,
       data: { type: "household_task_due", taskCount: String(userTasks.length) },
-    });
+    }, { preferredOrigins: UPKEEP_ORIGINS });
 
     console.log(`[upkeep] User ${userId}: ${result.sent} sent, ${result.expired} expired`);
 

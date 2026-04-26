@@ -5,6 +5,10 @@
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
+import { DOMAIN } from "../../config";
+
+// Life only lives as a module under <domain>/life — no subdomain.
+const LIFE_ORIGINS = [`https://${DOMAIN}`];
 
 interface SampleQuestion {
   id: string;
@@ -160,7 +164,7 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
             quickRatingMax: String(quickRating.max || 5),
           }),
         },
-      });
+      }, { preferredOrigins: LIFE_ORIGINS });
       console.log(`[life] Log ${logDoc.id} → user ${ownerId}: ${result.sent} sent`);
     }
 

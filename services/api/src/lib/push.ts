@@ -33,21 +33,61 @@ export interface PushResult {
   failed: number;
 }
 
+export interface SendOptions {
+  /**
+   * Origins (e.g. "https://upkeep.kirkl.in") in priority order. Each user
+   * may have subscriptions from multiple origins of the same logical app
+   * (e.g. upkeep.kirkl.in vs kirkl.in/upkeep). To avoid delivering the
+   * notification twice on one device, we send only to subs from the
+   * first origin in this list that has any matches; if none match, we
+   * fall back to legacy subs with no recorded origin.
+   */
+  preferredOrigins?: string[];
+}
+
 /**
- * Send a push notification to all subscriptions for a user.
+ * Send a push notification to a user's subscriptions.
+ * Picks one origin per user via `preferredOrigins` to avoid duplicate
+ * notifications when the same app is reachable at multiple URLs.
  * Automatically cleans up expired subscriptions.
  */
 export async function sendPushToUser(
   pb: PocketBase,
   userId: string,
   payload: PushPayload,
+  options: SendOptions = {},
 ): Promise<PushResult> {
   ensureVapid();
 
-  const subs = await pb.collection("push_subscriptions").getFullList({
+  const allSubs = await pb.collection("push_subscriptions").getFullList({
     filter: pb.filter("user = {:userId}", { userId }),
     $autoCancel: false,
   });
+
+  if (allSubs.length === 0) {
+    return { sent: 0, expired: 0, failed: 0 };
+  }
+
+  // Pick a single origin's subs. Walk preferredOrigins in priority order;
+  // first origin with any matches wins. Fall back to legacy subs (no origin
+  // recorded) only if no preferred origin matched.
+  let subs = allSubs;
+  const preferred = options.preferredOrigins;
+  if (preferred && preferred.length > 0) {
+    let chosen: typeof allSubs | null = null;
+    for (const origin of preferred) {
+      const matches = allSubs.filter((s) => (s.origin || "") === origin);
+      if (matches.length > 0) {
+        chosen = matches;
+        break;
+      }
+    }
+    if (!chosen) {
+      const legacy = allSubs.filter((s) => !s.origin);
+      chosen = legacy.length > 0 ? legacy : [];
+    }
+    subs = chosen;
+  }
 
   if (subs.length === 0) {
     return { sent: 0, expired: 0, failed: 0 };
