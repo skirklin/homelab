@@ -15,7 +15,7 @@ import {
   PlusOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth, getBackend, type NotificationMode, PageContainer, useFeedback } from "@kirkl/shared";
+import { useAuth, getBackend, getApiBase, getAuthHeaders, type NotificationMode, PageContainer, useFeedback } from "@kirkl/shared";
 
 const Content = styled.div`
   padding: var(--space-lg);
@@ -113,19 +113,12 @@ interface CreatedToken {
   expires_at: string | null;
 }
 
-function getApiBase() {
-  return import.meta.env?.VITE_PB_URL || "https://api.beta.kirkl.in";
-}
-
 function authHeaders(): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${getBackend().authStore.token}`,
-  };
+  return { "Content-Type": "application/json", ...getAuthHeaders() };
 }
 
 async function fetchTokens(): Promise<ApiToken[]> {
-  const resp = await fetch(`${getApiBase()}/fn/auth/tokens`, {
+  const resp = await fetch(`${getApiBase()}/auth/tokens`, {
     headers: authHeaders(),
   });
   if (!resp.ok) throw new Error("Failed to load tokens");
@@ -136,7 +129,7 @@ async function createApiToken(
   name: string,
   expiresInDays?: number,
 ): Promise<CreatedToken> {
-  const resp = await fetch(`${getApiBase()}/fn/auth/tokens`, {
+  const resp = await fetch(`${getApiBase()}/auth/tokens`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({ name, expires_in_days: expiresInDays }),
@@ -146,7 +139,7 @@ async function createApiToken(
 }
 
 async function revokeApiToken(id: string): Promise<void> {
-  const resp = await fetch(`${getApiBase()}/fn/auth/tokens/${id}`, {
+  const resp = await fetch(`${getApiBase()}/auth/tokens/${id}`, {
     method: "DELETE",
     headers: authHeaders(),
   });

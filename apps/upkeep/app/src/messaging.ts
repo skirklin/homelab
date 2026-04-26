@@ -3,20 +3,11 @@
  * Uses the standard Push API with VAPID keys (replaces FCM).
  */
 
-import { getBackend } from "@kirkl/shared";
+import { getApiBase, getAuthHeaders } from "@kirkl/shared";
 
 // vite-plugin-pwa generates the SW at /sw.js and importScripts() the
 // existing /push-sw.js push handler into it (see vite.config.ts).
 const SW_PATH = "/sw.js";
-const API_BASE = import.meta.env.VITE_API_URL as string | undefined;
-
-function getApiUrl(): string {
-  return API_BASE || "https://api.beta.kirkl.in";
-}
-
-function getAuthToken(): string {
-  return getBackend().authStore.token;
-}
 
 /** Convert a base64url-encoded VAPID public key to a Uint8Array for subscribe(). */
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -35,7 +26,7 @@ let vapidPublicKey: string | null = null;
 async function getVapidKey(): Promise<string | null> {
   if (vapidPublicKey) return vapidPublicKey;
   try {
-    const res = await fetch(`${getApiUrl()}/push/vapid-key`);
+    const res = await fetch(`${getApiBase()}/push/vapid-key`);
     if (!res.ok) return null;
     const data = await res.json() as { publicKey: string };
     vapidPublicKey = data.publicKey;
@@ -93,11 +84,11 @@ export async function getFcmToken(userId: string): Promise<string | null> {
 
     // Send subscription to API
     const subJson = subscription.toJSON();
-    await fetch(`${getApiUrl()}/push/subscribe`, {
+    await fetch(`${getApiBase()}/push/subscribe`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${getAuthToken()}`,
+        ...getAuthHeaders(),
       },
       body: JSON.stringify({
         endpoint: subJson.endpoint,

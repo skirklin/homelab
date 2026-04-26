@@ -3,7 +3,7 @@
  */
 import { getBackend } from "./backend";
 
-function getApiBase(): string {
+export function getApiBase(): string {
   const pbUrl = getBackend().baseURL.replace(/\/$/, "");
   // In production, PB and API share a host (api.kirkl.in/fn/).
   // In dev, the vite dev server proxies /fn/ to the local API service.
@@ -14,7 +14,7 @@ function getApiBase(): string {
   return pbUrl + "/fn";
 }
 
-function getAuthHeaders(): Record<string, string> {
+export function getAuthHeaders(): Record<string, string> {
   const token = getBackend().authStore.token;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
