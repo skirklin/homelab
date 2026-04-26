@@ -1831,6 +1831,11 @@ class IngestHandler(BaseHTTPRequestHandler):
             "Ensure the institution's extract_identity is working.",
             institution, len(inst_logins),
         )
+        # Debug: dump cookie names and entry URLs so we can see what's available
+        cookie_names = sorted({n for c in (cookies or []) if isinstance(c, dict) and (n := c.get("name"))})
+        entry_urls = [e.get("url", "")[:120] for e in (entries or [])][:30]
+        log.error("  cookie names (%d): %s", len(cookie_names), cookie_names)
+        log.error("  entry urls (%d, first 30): %s", len(entries or []), entry_urls)
         return None
 
     def _trigger_auto_sync(

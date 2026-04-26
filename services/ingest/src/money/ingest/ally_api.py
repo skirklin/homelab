@@ -577,10 +577,30 @@ def sync_ally(db: Database, store: RawStore, profile: str,
 from money.ingest.registry import InstitutionInfo  # noqa: E402
 
 
+def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
+    """Decode the payload of a JWT (no signature verification). Returns None on failure."""
+    import base64
+    parts = token.split(".")
+    if len(parts) < 2:
+        return None
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)  # base64 padding
+    try:
+        decoded = base64.urlsafe_b64decode(payload)
+        claims = json.loads(decoded)
+        return claims if isinstance(claims, dict) else None
+    except Exception:
+        return None
+
+
 def _extract_identity(
     cookies: list[dict[str, Any]], entries: list[dict[str, Any]],
 ) -> str | None:
-    """Extract the Ally username (uid) from login request bodies."""
+    """Extract the Ally username (uid).
+
+    Fresh login: read from /auth/login request body. Already-authenticated session:
+    decode the Ally-CIAM-Token JWT cookie and use its username claim.
+    """
     import re
     for entry in entries:
         url = entry.get("url", "")
@@ -589,10 +609,23 @@ def _extract_identity(
         req = entry.get("requestBody", "")
         if not isinstance(req, str):
             req = json.dumps(req)
-        # Request bodies may be truncated, so use regex instead of parsing
         m = re.search(r'"uid":\s*"([^"]+)"', req)
         if m:
             return m.group(1)
+
+    for c in cookies:
+        if c.get("name") != "Ally-CIAM-Token":
+            continue
+        claims = _decode_jwt_claims(c.get("value", ""))
+        if not claims:
+            continue
+        log.info("Ally-CIAM-Token claim keys: %s", sorted(claims.keys()))
+        for key in ("preferred_username", "username", "uid", "login", "sub"):
+            val = claims.get(key)
+            if isinstance(val, str) and val:
+                return val
+        break
+
     return None
 
 
