@@ -8,9 +8,13 @@ FROM node:22-alpine AS build
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /workspace
 
-# Install deps first (cache layer)
+# Install deps first (cache layer). Every workspace package needs its
+# package.json present here so pnpm can resolve workspace:* deps before
+# we copy the rest of the source.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig.base.json ./
 COPY packages/ui/package.json packages/ui/package.json
+COPY packages/backend/package.json packages/backend/package.json
+COPY packages/vite-preset/package.json packages/vite-preset/package.json
 COPY apps/home/app/package.json apps/home/app/package.json
 COPY apps/recipes/app/package.json apps/recipes/app/package.json
 COPY apps/recipes/package.json apps/recipes/package.json

@@ -1,0 +1,33 @@
+# Don't ship anything build-time — the Dockerfile reinstalls deps and rebuilds.
+# Excluding node_modules also avoids transient "invalid file request" failures
+# when pnpm's symlink farm shifts under us mid-context-transfer.
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/.next
+**/.cache
+**/.vite
+**/coverage
+**/test-results
+**/playwright-report
+
+# Local-only config and state
+.env
+.env.local
+.git
+.github
+.claude
+.data
+backups
+handoff
+ARCHITECT-BRIEF.md
+BUILD-LOG.md
+REVIEW-REQUEST.md
+REVIEW-FEEDBACK.md
+SESSION-CHECKPOINT.md
+
+# Editor / OS junk
+.DS_Store
+*.swp
+*.swo
