@@ -11,6 +11,7 @@ import type {
   Itinerary,
   ItineraryDay,
   TripProposal,
+  DayEntry,
 } from "../types/travel";
 
 export interface TravelBackend {
@@ -48,6 +49,17 @@ export interface TravelBackend {
   getProposal(proposalId: string): Promise<TripProposal | null>;
   listProposals(tripId: string, state?: "open" | "resolved"): Promise<TripProposal[]>;
 
+  // --- Day journal entries ---
+
+  /** Insert if missing, otherwise update the existing entry for (trip, date). */
+  upsertDayEntry(
+    logId: string,
+    tripId: string,
+    date: string,
+    fields: { text?: string; highlight?: string; mood?: number | null },
+  ): Promise<string>;
+  deleteDayEntry(entryId: string): Promise<void>;
+
   // --- Subscriptions ---
 
   /**
@@ -61,6 +73,7 @@ export interface TravelBackend {
       onTrips: (trips: Trip[]) => void;
       onActivities: (activities: Activity[]) => void;
       onItineraries: (itineraries: Itinerary[]) => void;
+      onDayEntries: (entries: DayEntry[]) => void;
       onDeleted?: () => void;
     },
   ): Unsubscribe;

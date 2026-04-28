@@ -11,14 +11,17 @@ import type {
   Itinerary as BackendItinerary,
   TravelLog as BackendTravelLog,
   ItineraryDay as BackendItineraryDay,
+  DayEntry as BackendDayEntry,
 } from "@homelab/backend";
 import type {
   Trip,
   Activity,
+  ActivityVerdict,
   Itinerary,
   TravelLog,
   TripStatus,
   ActivityCategory,
+  DayEntry,
 } from "./types";
 
 // ==========================================
@@ -62,9 +65,25 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     ratingCount: ba.ratingCount ?? null,
     photoRef: ba.photoRef || "",
     flightInfo: ba.flightInfo,
+    verdict: (ba.verdict as ActivityVerdict | undefined) || undefined,
+    personalNotes: ba.personalNotes || undefined,
+    experiencedAt: ba.experiencedAt ? new Date(ba.experiencedAt) : undefined,
     tripId: ba.trip || "",
     created: new Date(ba.created),
     updated: new Date(ba.updated),
+  };
+}
+
+export function dayEntryFromBackend(be: BackendDayEntry): DayEntry {
+  return {
+    id: be.id,
+    tripId: be.trip,
+    date: be.date,
+    text: be.text || "",
+    highlight: be.highlight || "",
+    mood: be.mood ?? null,
+    created: new Date(be.created),
+    updated: new Date(be.updated),
   };
 }
 
@@ -181,6 +200,9 @@ export function activityUpdatesToBackend(fields: {
   setting?: string;
   tripId?: string;
   flightInfo?: Activity["flightInfo"];
+  verdict?: ActivityVerdict | null;
+  personalNotes?: string;
+  experiencedAt?: Date | null;
 }): Partial<Omit<BackendActivity, "id" | "log" | "created" | "updated">> {
   const updates: Record<string, unknown> = {};
   if (fields.name !== undefined) updates.name = fields.name;
@@ -197,6 +219,12 @@ export function activityUpdatesToBackend(fields: {
   if (fields.setting !== undefined) updates.setting = fields.setting;
   if (fields.tripId !== undefined) updates.trip = fields.tripId;
   if (fields.flightInfo !== undefined) updates.flightInfo = fields.flightInfo;
+  // Empty string clears the PB select field — null/empty both mean "no verdict".
+  if (fields.verdict !== undefined) updates.verdict = fields.verdict ?? "";
+  if (fields.personalNotes !== undefined) updates.personalNotes = fields.personalNotes;
+  if (fields.experiencedAt !== undefined) {
+    updates.experiencedAt = fields.experiencedAt ? fields.experiencedAt.toISOString() : "";
+  }
   return updates as Partial<Omit<BackendActivity, "id" | "log" | "created" | "updated">>;
 }
 

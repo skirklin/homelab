@@ -573,4 +573,232 @@ describe("getUserSlugs / setUserSlug", () => {
   });
 });
 
+// ── Activity reflection (verdict / personal notes / experiencedAt) ──
+
+describe("activity reflection fields", () => {
+  it("stores and reads back verdict + personal notes + experiencedAt", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Sedona" })));
+    cleanup.track("travel_trips", tripId);
+
+    const activityId = await travel.addActivity(logId, activityToBackend(makeActivity({ name: "Cathedral Rock", tripId })));
+    cleanup.track("travel_activities", activityId);
+
+    const experienced = new Date("2025-10-12T15:30:00Z");
+    await travel.updateActivity(
+      activityId,
+      activityUpdatesToBackend({
+        verdict: "loved",
+        personalNotes: "Sunset spot was magical. Get there 90min early.",
+        experiencedAt: experienced,
+      }),
+    );
+
+    const record = await ctx.pb.collection("travel_activities").getOne(activityId);
+    expect(record.verdict).toBe("loved");
+    expect(record.personal_notes).toContain("magical");
+    expect(record.experienced_at).toBeTruthy();
+
+    await cleanup.cleanup();
+  });
+
+  it("clears verdict when set to null", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Moab" })));
+    cleanup.track("travel_trips", tripId);
+
+    const activityId = await travel.addActivity(logId, activityToBackend(makeActivity({ name: "Delicate Arch", tripId })));
+    cleanup.track("travel_activities", activityId);
+
+    await travel.updateActivity(activityId, activityUpdatesToBackend({ verdict: "meh" }));
+    let r = await ctx.pb.collection("travel_activities").getOne(activityId);
+    expect(r.verdict).toBe("meh");
+
+    await travel.updateActivity(activityId, activityUpdatesToBackend({ verdict: null }));
+    r = await ctx.pb.collection("travel_activities").getOne(activityId);
+    expect(r.verdict || "").toBe("");
+
+    await cleanup.cleanup();
+  });
+
+  it("does not touch personal_notes when only verdict changes", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Bryce" })));
+    cleanup.track("travel_trips", tripId);
+
+    const activityId = await travel.addActivity(logId, activityToBackend(makeActivity({ name: "Sunrise Point", tripId })));
+    cleanup.track("travel_activities", activityId);
+
+    await travel.updateActivity(activityId, activityUpdatesToBackend({
+      verdict: "liked",
+      personalNotes: "Cold and worth it.",
+    }));
+
+    // Subsequent verdict change without touching notes should leave them intact.
+    await travel.updateActivity(activityId, activityUpdatesToBackend({ verdict: "loved" }));
+
+    const r = await ctx.pb.collection("travel_activities").getOne(activityId);
+    expect(r.verdict).toBe("loved");
+    expect(r.personal_notes).toBe("Cold and worth it.");
+
+    await cleanup.cleanup();
+  });
+});
+
+// ── Day journal entries ──────────────────────────────────────
+
+describe("upsertDayEntry / deleteDayEntry", () => {
+  it("inserts a new entry on first call", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Petrified Forest" })));
+    cleanup.track("travel_trips", tripId);
+
+    const id = await travel.upsertDayEntry(logId, tripId, "2026-04-19", {
+      text: "Painted Desert at golden hour was the best moment.",
+      highlight: "Stopping at Newspaper Rock",
+      mood: 5,
+    });
+    cleanup.track("travel_day_entries", id);
+
+    const r = await ctx.pb.collection("travel_day_entries").getOne(id);
+    expect(r.trip).toBe(tripId);
+    expect(r.log).toBe(logId);
+    expect(r.date).toBe("2026-04-19");
+    expect(r.text).toContain("Painted Desert");
+    expect(r.highlight).toBe("Stopping at Newspaper Rock");
+    expect(r.mood).toBe(5);
+
+    await cleanup.cleanup();
+  });
+
+  it("updates the existing entry on a second call (one entry per trip+date)", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Joshua Tree" })));
+    cleanup.track("travel_trips", tripId);
+
+    const id1 = await travel.upsertDayEntry(logId, tripId, "2026-04-20", { text: "Arrived late." });
+    cleanup.track("travel_day_entries", id1);
+
+    const id2 = await travel.upsertDayEntry(logId, tripId, "2026-04-20", {
+      text: "Arrived late but caught moonrise.",
+      highlight: "Joshua trees by moonlight",
+    });
+
+    expect(id2).toBe(id1);
+
+    const r = await ctx.pb.collection("travel_day_entries").getOne(id1);
+    expect(r.text).toContain("moonrise");
+    expect(r.highlight).toBe("Joshua trees by moonlight");
+
+    // No second row was created.
+    const all = await ctx.pb.collection("travel_day_entries").getFullList({
+      filter: ctx.pb.filter("trip = {:tripId}", { tripId }),
+    });
+    expect(all).toHaveLength(1);
+
+    await cleanup.cleanup();
+  });
+
+  it("keeps separate entries for different dates on the same trip", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Big Bend" })));
+    cleanup.track("travel_trips", tripId);
+
+    const id1 = await travel.upsertDayEntry(logId, tripId, "2026-04-20", { text: "Day 1" });
+    const id2 = await travel.upsertDayEntry(logId, tripId, "2026-04-21", { text: "Day 2" });
+    cleanup.track("travel_day_entries", id1);
+    cleanup.track("travel_day_entries", id2);
+
+    expect(id1).not.toBe(id2);
+
+    await cleanup.cleanup();
+  });
+
+  it("deletes a day entry", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Glacier" })));
+    cleanup.track("travel_trips", tripId);
+
+    const id = await travel.upsertDayEntry(logId, tripId, "2026-04-22", { text: "tmp" });
+
+    await travel.deleteDayEntry(id);
+
+    try {
+      await ctx.pb.collection("travel_day_entries").getOne(id);
+      expect(true).toBe(false); // should not reach
+    } catch (e: any) {
+      expect(e.status).toBe(404);
+    }
+
+    await cleanup.cleanup();
+  });
+
+  it("cascades delete when the parent trip is deleted", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const logId = await travel.getOrCreateLog(user.id);
+    cleanup.track("travel_logs", logId);
+
+    const tripId = await travel.addTrip(logId, tripToBackend(makeTrip({ destination: "Yellowstone" })));
+
+    const entryId = await travel.upsertDayEntry(logId, tripId, "2026-04-25", { text: "Geyser day" });
+    expect(entryId).toBeTruthy();
+
+    await travel.deleteTrip(tripId);
+
+    try {
+      await ctx.pb.collection("travel_day_entries").getOne(entryId);
+      expect(true).toBe(false);
+    } catch (e: any) {
+      expect(e.status).toBe(404);
+    }
+
+    await cleanup.cleanup();
+  });
+});
+
 // Checklist operations removed — travel checklists are now tasks tagged travel:<tripId>

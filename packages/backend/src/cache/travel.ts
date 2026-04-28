@@ -5,7 +5,7 @@
  * pass through to the underlying backend (and will reject when offline).
  */
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, Itinerary, TripProposal } from "../types/travel";
+import type { TravelLog, Trip, Activity, Itinerary, TripProposal, DayEntry } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
 import { cachedRead, cached, hydrateOne } from "./helpers";
 
@@ -33,6 +33,8 @@ export function withTravelCache(inner: TravelBackend): TravelBackend {
     updateProposal: (id, u) => inner.updateProposal(id, u),
     resolveProposal: (id) => inner.resolveProposal(id),
     deleteProposal: (id) => inner.deleteProposal(id),
+    upsertDayEntry: (logId, tripId, date, fields) => inner.upsertDayEntry(logId, tripId, date, fields),
+    deleteDayEntry: (id) => inner.deleteDayEntry(id),
 
     // Subscription — hydrate from cache, then wrap callbacks to auto-persist.
     subscribeToLog(logId, handlers): Unsubscribe {
@@ -40,11 +42,13 @@ export function withTravelCache(inner: TravelBackend): TravelBackend {
       const tripsKey = `travel:trips:${logId}`;
       const activitiesKey = `travel:activities:${logId}`;
       const itinerariesKey = `travel:itineraries:${logId}`;
+      const dayEntriesKey = `travel:dayEntries:${logId}`;
 
       const logHydrate = hydrateOne<TravelLog>(logKey, handlers.onLog);
       const tripsHydrate = hydrateOne<Trip[]>(tripsKey, handlers.onTrips);
       const actsHydrate = hydrateOne<Activity[]>(activitiesKey, handlers.onActivities);
       const itinHydrate = hydrateOne<Itinerary[]>(itinerariesKey, handlers.onItineraries);
+      const dayHydrate = hydrateOne<DayEntry[]>(dayEntriesKey, handlers.onDayEntries);
 
       const unsub = inner.subscribeToLog(logId, {
         onLog: cached(logKey, (log) => {
@@ -62,6 +66,10 @@ export function withTravelCache(inner: TravelBackend): TravelBackend {
         onItineraries: cached(itinerariesKey, (itineraries) => {
           itinHydrate.live();
           handlers.onItineraries(itineraries);
+        }),
+        onDayEntries: cached(dayEntriesKey, (entries) => {
+          dayHydrate.live();
+          handlers.onDayEntries(entries);
         }),
         onDeleted: handlers.onDeleted,
       });

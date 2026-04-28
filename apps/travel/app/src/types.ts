@@ -100,6 +100,8 @@ export interface Trip {
 // Activity
 // ==========================================
 
+export type ActivityVerdict = "loved" | "liked" | "meh" | "skip";
+
 export interface Activity {
   id: string;
   name: string;
@@ -119,7 +121,23 @@ export interface Activity {
   ratingCount: number | null;
   photoRef: string;
   flightInfo?: FlightInfo;
+  // Post-experience reflection (kept distinct from `rating`/`ratingCount`,
+  // which are Google Places aggregates).
+  verdict?: ActivityVerdict;
+  personalNotes?: string;
+  experiencedAt?: Date;
   tripId: string;
+  created: Date;
+  updated: Date;
+}
+
+export interface DayEntry {
+  id: string;
+  tripId: string;
+  date: string; // YYYY-MM-DD
+  text: string;
+  highlight: string;
+  mood: number | null;
   created: Date;
   updated: Date;
 }

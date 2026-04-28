@@ -1,4 +1,4 @@
-import type { Activity, Itinerary } from "./types";
+import type { Activity, Itinerary, DayEntry } from "./types";
 
 /** Get activities for a specific trip */
 export function getActivitiesForTrip(
@@ -14,6 +14,16 @@ export function getItinerariesForTrip(
   tripId: string
 ) {
   return Array.from(itineraries.values()).filter((i) => i.tripId === tripId);
+}
+
+/** Get day journal entries for a specific trip, sorted by date ascending. */
+export function getDayEntriesForTrip(
+  entries: Map<string, DayEntry>,
+  tripId: string,
+) {
+  return Array.from(entries.values())
+    .filter((e) => e.tripId === tripId)
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Build a Google Maps URL for an activity based on available location data */

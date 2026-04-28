@@ -22,9 +22,10 @@ export type {
 } from "./types/recipes";
 export type { TaskList, Task, TaskCompletion, Frequency, TaskType } from "./types/upkeep";
 export type {
-  TravelLog, Trip, Activity, Itinerary, ItineraryDay,
+  TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay,
   ActivitySlot, FlightSlot, FlightInfo,
   TripProposal, CandidateFeedback,
+  DayEntry,
 } from "./types/travel";
 export type { LifeLog, LifeManifest, WidgetConfig, LifeEntry } from "./types/life";
 

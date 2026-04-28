@@ -21,6 +21,7 @@ import {
   ScheduleOutlined,
   UnorderedListOutlined,
   CheckSquareOutlined,
+  BookOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { WideContainer } from "@kirkl/shared";
@@ -40,6 +41,7 @@ import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
 import { ProposalsTab } from "./ProposalsTab";
+import { JournalTab } from "./JournalTab";
 
 const TwoColumn = styled.div`
   display: grid;
@@ -283,7 +285,10 @@ export function TripDetail() {
 
       {(() => {
         const showReadiness = trip.status === "Booked" || trip.status === "Ongoing" || trip.status === "Researching";
-        const defaultTab = itineraries.length > 0 ? "itinerary" : "proposals";
+        const showJournal = trip.status === "Ongoing" || trip.status === "Completed";
+        const defaultTab = showJournal && trip.status === "Completed"
+          ? "journal"
+          : itineraries.length > 0 ? "itinerary" : "proposals";
         const hasMap = hasMapData && activeItin;
 
         const tabItems = [
@@ -310,8 +315,25 @@ export function TripDetail() {
           {
             key: "activities",
             label: <span><UnorderedListOutlined /> Activities ({activities.length})</span>,
-            children: <ActivityList activities={activities} />,
+            children: (
+              <ActivityList
+                activities={activities}
+                showReflection={trip.status === "Ongoing" || trip.status === "Completed"}
+              />
+            ),
           },
+          ...(showJournal ? [{
+            key: "journal",
+            label: <span><BookOutlined /> Journal</span>,
+            children: (
+              <JournalTab
+                trip={trip}
+                logId={state.log?.id ?? ""}
+                activeItinerary={activeItin}
+                activityMap={activityMap}
+              />
+            ),
+          }] : []),
           {
             key: "prep",
             label: <span><CheckSquareOutlined /> Prep</span>,

@@ -9,8 +9,8 @@ import {
 } from "react";
 import { useAuth } from "@kirkl/shared";
 import { useTravelBackend, useUserBackend } from "@kirkl/shared";
-import { tripFromBackend, activityFromBackend, itineraryFromBackend, logFromBackend } from "./adapters";
-import type { Trip, TravelLog, Activity, Itinerary } from "./types";
+import { tripFromBackend, activityFromBackend, itineraryFromBackend, logFromBackend, dayEntryFromBackend } from "./adapters";
+import type { Trip, TravelLog, Activity, Itinerary, DayEntry } from "./types";
 
 export interface TravelState {
   userSlugs: Record<string, string>;
@@ -19,6 +19,7 @@ export interface TravelState {
   trips: Map<string, Trip>;
   activities: Map<string, Activity>;
   itineraries: Map<string, Itinerary>;
+  dayEntries: Map<string, DayEntry>;
   loading: boolean;
 }
 
@@ -28,6 +29,7 @@ export type TravelAction =
   | { type: "SET_TRIPS"; trips: Trip[] }
   | { type: "SET_ACTIVITIES"; activities: Activity[] }
   | { type: "SET_ITINERARIES"; itineraries: Itinerary[] }
+  | { type: "SET_DAY_ENTRIES"; entries: DayEntry[] }
   | { type: "CLEAR_DATA" }
   | { type: "SET_LOADING"; loading: boolean };
 
@@ -57,6 +59,12 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
       return { ...state, itineraries: newItineraries };
     }
 
+    case "SET_DAY_ENTRIES": {
+      const m = new Map<string, DayEntry>();
+      for (const e of action.entries) m.set(e.id, e);
+      return { ...state, dayEntries: m };
+    }
+
     case "CLEAR_DATA":
       return {
         ...state,
@@ -64,6 +72,7 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
         trips: new Map(),
         activities: new Map(),
         itineraries: new Map(),
+        dayEntries: new Map(),
       };
 
     case "SET_LOADING":
@@ -81,6 +90,7 @@ const initialState: TravelState = {
   trips: new Map(),
   activities: new Map(),
   itineraries: new Map(),
+  dayEntries: new Map(),
   loading: true,
 };
 
@@ -150,6 +160,10 @@ export function TravelProvider({ children }: { children: ReactNode }) {
         onItineraries: (itineraries) => {
           if (currentLogIdRef.current !== logId) return;
           dispatch({ type: "SET_ITINERARIES", itineraries: itineraries.map(itineraryFromBackend) });
+        },
+        onDayEntries: (entries) => {
+          if (currentLogIdRef.current !== logId) return;
+          dispatch({ type: "SET_DAY_ENTRIES", entries: entries.map(dayEntryFromBackend) });
         },
         onDeleted: () => {
           if (currentLogIdRef.current !== logId) return;

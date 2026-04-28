@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { useTravelBackend } from "@kirkl/shared";
 import { mapsUrl } from "../utils";
 import type { Activity } from "../types";
+import { VerdictButtons } from "./VerdictButtons";
 
 const Container = styled.div`
   display: flex;
@@ -104,9 +105,11 @@ function formatFlightTime(iso?: string): string {
 
 interface ActivityListProps {
   activities: Activity[];
+  /** When true, render the post-experience verdict row on each activity. */
+  showReflection?: boolean;
 }
 
-export function ActivityList({ activities }: ActivityListProps) {
+export function ActivityList({ activities, showReflection = false }: ActivityListProps) {
   const navigate = useNavigate();
   const travel = useTravelBackend();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -200,6 +203,16 @@ export function ActivityList({ activities }: ActivityListProps) {
                 {a.description && (
                   <div style={{ fontSize: 11, color: "#595959", marginTop: 3, fontStyle: "italic" }}>
                     {a.description}
+                  </div>
+                )}
+                {showReflection && !isFlight && (
+                  <div style={{ marginTop: 4 }}>
+                    <VerdictButtons activityId={a.id} current={a.verdict} />
+                    {a.personalNotes && (
+                      <div style={{ fontSize: 11, color: "#595959", marginTop: 3 }}>
+                        {a.personalNotes}
+                      </div>
+                    )}
                   </div>
                 )}
               </Body>

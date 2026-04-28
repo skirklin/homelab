@@ -4,7 +4,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, Itinerary, ItineraryDay, TripProposal } from "../types/travel";
+import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, TripProposal, DayEntry } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
 
 function logFromRecord(r: RecordModel): TravelLog {
@@ -38,7 +38,24 @@ function activityFromRecord(r: RecordModel): Activity {
     bookingReqs: r.booking_reqs, ratingCount: r.rating_count,
     photoRef: r.photo_ref,
     flightInfo: r.flight_info || undefined,
+    verdict: (r.verdict as ActivityVerdict) || undefined,
+    personalNotes: r.personal_notes || undefined,
+    experiencedAt: r.experienced_at || undefined,
     created: r.created, updated: r.updated,
+  };
+}
+
+function dayEntryFromRecord(r: RecordModel): DayEntry {
+  return {
+    id: r.id,
+    log: r.log,
+    trip: r.trip,
+    date: r.date || "",
+    text: r.text || "",
+    highlight: r.highlight || undefined,
+    mood: typeof r.mood === "number" ? r.mood : undefined,
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -200,6 +217,35 @@ export class PocketBaseTravelBackend implements TravelBackend {
     return records.map(proposalFromRecord);
   }
 
+  // --- Day entries ---
+
+  async upsertDayEntry(
+    logId: string,
+    tripId: string,
+    date: string,
+    fields: { text?: string; highlight?: string; mood?: number | null },
+  ): Promise<string> {
+    const filter = this.pb().filter("trip = {:tripId} && date = {:date}", { tripId, date });
+    const data: Record<string, unknown> = {};
+    if (fields.text !== undefined) data.text = fields.text;
+    if (fields.highlight !== undefined) data.highlight = fields.highlight;
+    if (fields.mood !== undefined) data.mood = fields.mood ?? null;
+    try {
+      const existing = await this.pb().collection("travel_day_entries").getFirstListItem(filter);
+      await this.pb().collection("travel_day_entries").update(existing.id, data);
+      return existing.id;
+    } catch {
+      const r = await this.pb().collection("travel_day_entries").create({
+        log: logId, trip: tripId, date, ...data,
+      });
+      return r.id;
+    }
+  }
+
+  async deleteDayEntry(entryId: string): Promise<void> {
+    await this.pb().collection("travel_day_entries").delete(entryId);
+  }
+
   subscribeToLog(
     logId: string,
     handlers: {
@@ -207,6 +253,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
       onTrips: (trips: Trip[]) => void;
       onActivities: (activities: Activity[]) => void;
       onItineraries: (itineraries: Itinerary[]) => void;
+      onDayEntries: (entries: DayEntry[]) => void;
       onDeleted?: () => void;
     },
   ): Unsubscribe {
@@ -215,6 +262,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     const tripsMap = new Map<string, Trip>();
     const activitiesMap = new Map<string, Activity>();
     const itinerariesMap = new Map<string, Itinerary>();
+    const dayEntriesMap = new Map<string, DayEntry>();
 
     // Log metadata
     this.sub("travel_logs", logId, () => cancelled, unsubs, {
@@ -241,6 +289,13 @@ export class PocketBaseTravelBackend implements TravelBackend {
       filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
       onInitial: (rs) => { for (const r of rs) itinerariesMap.set(r.id, itineraryFromRecord(r)); handlers.onItineraries(Array.from(itinerariesMap.values())); },
       onChange: (a, r) => { if (a === "delete") itinerariesMap.delete(r.id); else itinerariesMap.set(r.id, itineraryFromRecord(r)); handlers.onItineraries(Array.from(itinerariesMap.values())); },
+    });
+
+    // Day entries
+    this.subCol("travel_day_entries", () => cancelled, unsubs, {
+      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
+      onInitial: (rs) => { for (const r of rs) dayEntriesMap.set(r.id, dayEntryFromRecord(r)); handlers.onDayEntries(Array.from(dayEntriesMap.values())); },
+      onChange: (a, r) => { if (a === "delete") dayEntriesMap.delete(r.id); else dayEntriesMap.set(r.id, dayEntryFromRecord(r)); handlers.onDayEntries(Array.from(dayEntriesMap.values())); },
     });
 
     return () => { cancelled = true; unsubs.forEach((u) => u()); };
@@ -285,6 +340,9 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (a.ratingCount !== undefined) d.rating_count = a.ratingCount;
     if (a.photoRef !== undefined) d.photo_ref = a.photoRef;
     if (a.flightInfo !== undefined) d.flight_info = a.flightInfo;
+    if (a.verdict !== undefined) d.verdict = a.verdict ?? "";
+    if (a.personalNotes !== undefined) d.personal_notes = a.personalNotes;
+    if (a.experiencedAt !== undefined) d.experienced_at = a.experiencedAt;
     return d;
   }
 
