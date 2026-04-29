@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Button,
@@ -186,6 +186,29 @@ export function TripDetail() {
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
   const [activeTabState, setActiveTabState] = useState<string | null>(null);
 
+  // Auto-advance status by trip dates: Booked → Ongoing once start date hits,
+  // Ongoing → Completed once end date passes. Only the natural forward path
+  // (no auto-changes from Idea/Researching/Completed). Idempotent: the write
+  // only fires when status actually disagrees with the date-derived state.
+  const flippedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!trip || !trip.startDate) return;
+    const now = new Date();
+    let next: typeof trip.status | null = null;
+    if (trip.status === "Booked" && trip.startDate <= now &&
+        (!trip.endDate || now <= trip.endDate)) {
+      next = "Ongoing";
+    } else if (trip.status === "Ongoing" && trip.endDate && now > trip.endDate) {
+      next = "Completed";
+    }
+    if (!next) return;
+    // Don't repeat for the same trip in this session — guards against the
+    // tiny window between the update firing and the subscription echoing back.
+    if (flippedRef.current === `${trip.id}:${next}`) return;
+    flippedRef.current = `${trip.id}:${next}`;
+    travel.updateTrip(trip.id, { status: next });
+  }, [trip, travel]);
+
   if (state.loading) {
     return (
       <WideContainer>
@@ -285,8 +308,15 @@ export function TripDetail() {
 
       {(() => {
         const showReadiness = trip.status === "Booked" || trip.status === "Ongoing" || trip.status === "Researching";
-        const showJournal = trip.status === "Ongoing" || trip.status === "Completed";
-        const defaultTab = showJournal && trip.status === "Completed"
+        // Show Journal once the trip has actually started, regardless of status.
+        // Most trips never get their status manually flipped to Ongoing/Completed,
+        // so gating on dates catches the "I went and never updated status" case.
+        const tripHasStarted =
+          trip.status === "Ongoing" ||
+          trip.status === "Completed" ||
+          (trip.startDate != null && trip.startDate <= new Date());
+        const showJournal = tripHasStarted;
+        const defaultTab = trip.status === "Completed"
           ? "journal"
           : itineraries.length > 0 ? "itinerary" : "proposals";
         const hasMap = hasMapData && activeItin;
@@ -318,7 +348,7 @@ export function TripDetail() {
             children: (
               <ActivityList
                 activities={activities}
-                showReflection={trip.status === "Ongoing" || trip.status === "Completed"}
+                showReflection={tripHasStarted}
               />
             ),
           },
