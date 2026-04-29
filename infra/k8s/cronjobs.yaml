@@ -27,3 +27,63 @@ spec:
               envFrom:
                 - secretRef:
                     name: api-secrets
+---
+# Travel morning push — 7 AM Mountain (today's plan)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: travel-morning
+  namespace: homelab
+spec:
+  schedule: "0 7 * * *"
+  timeZone: "America/Denver"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  curl -sf -X POST \
+                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
+                    http://functions.homelab.svc.cluster.local:3000/notifications/travel-morning
+              envFrom:
+                - secretRef:
+                    name: api-secrets
+---
+# Travel evening push — 8 PM Mountain (reflect on the day)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: travel-evening
+  namespace: homelab
+spec:
+  schedule: "0 20 * * *"
+  timeZone: "America/Denver"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  curl -sf -X POST \
+                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
+                    http://functions.homelab.svc.cluster.local:3000/notifications/travel-evening
+              envFrom:
+                - secretRef:
+                    name: api-secrets
