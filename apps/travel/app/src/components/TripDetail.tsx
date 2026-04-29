@@ -21,7 +21,6 @@ import {
   ScheduleOutlined,
   UnorderedListOutlined,
   CheckSquareOutlined,
-  BookOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { WideContainer } from "@kirkl/shared";
@@ -41,7 +40,6 @@ import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
 import { ProposalsTab } from "./ProposalsTab";
-import { JournalTab } from "./JournalTab";
 
 const TwoColumn = styled.div`
   display: grid;
@@ -308,17 +306,14 @@ export function TripDetail() {
 
       {(() => {
         const showReadiness = trip.status === "Booked" || trip.status === "Ongoing" || trip.status === "Researching";
-        // Show Journal once the trip has actually started, regardless of status.
-        // Most trips never get their status manually flipped to Ongoing/Completed,
-        // so gating on dates catches the "I went and never updated status" case.
+        // Reflection UI surfaces once the trip has actually started, regardless
+        // of status. Most trips never get their status manually flipped, so
+        // gating on dates catches the "I went and never updated status" case.
         const tripHasStarted =
           trip.status === "Ongoing" ||
           trip.status === "Completed" ||
           (trip.startDate != null && trip.startDate <= new Date());
-        const showJournal = tripHasStarted;
-        const defaultTab = trip.status === "Completed"
-          ? "journal"
-          : itineraries.length > 0 ? "itinerary" : "proposals";
+        const defaultTab = itineraries.length > 0 ? "itinerary" : "proposals";
         const hasMap = hasMapData && activeItin;
 
         const tabItems = [
@@ -339,6 +334,7 @@ export function TripDetail() {
                 onDayClick={(day) => setFocusDay(focusDay === day ? null : day)}
                 onDayNav={(day) => setFocusDay(day)}
                 navigate={navigate}
+                showReflection={tripHasStarted}
               />
             ) : <Empty description="No itinerary yet" />,
           },
@@ -352,18 +348,6 @@ export function TripDetail() {
               />
             ),
           },
-          ...(showJournal ? [{
-            key: "journal",
-            label: <span><BookOutlined /> Journal</span>,
-            children: (
-              <JournalTab
-                trip={trip}
-                logId={state.log?.id ?? ""}
-                activeItinerary={activeItin}
-                activityMap={activityMap}
-              />
-            ),
-          }] : []),
           {
             key: "prep",
             label: <span><CheckSquareOutlined /> Prep</span>,

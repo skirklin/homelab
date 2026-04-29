@@ -32,6 +32,7 @@ import { daysToBackend } from "../adapters";
 import { mapsUrl } from "../utils";
 import {
   calculateDayLoad,
+  localYmd,
   validateDay,
   type Activity,
   type Itinerary,
@@ -40,6 +41,7 @@ import {
 } from "../types";
 import type { DayRouteInfo } from "./ItineraryMap";
 import { ItineraryCompare } from "./ItineraryCompare";
+import { ActivityReflection, DayJournal, isDayReflectable } from "./InlineReflection";
 
 const Section = styled.div`
   margin-bottom: 28px;
@@ -287,6 +289,9 @@ function ItineraryTimeline({
   onDayNav,
   onEditActivity,
   onDeleteActivity,
+  showReflection,
+  tripId,
+  logId,
 }: {
   itinerary: Itinerary;
   activityMap: Map<string, Activity>;
@@ -296,9 +301,13 @@ function ItineraryTimeline({
   onDayNav: (dayIndex: number) => void;
   onEditActivity: (activityId: string) => void;
   onDeleteActivity: (activityId: string) => void;
+  showReflection: boolean;
+  tripId: string;
+  logId: string;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || "";
+  const todayYmd = localYmd(new Date());
 
   if (itinerary.days.length === 0) {
     return <Empty description="No days planned" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
@@ -319,6 +328,9 @@ function ItineraryTimeline({
     const totalDays = itinerary.days.length;
     const hasPrev = focusDay > 0;
     const hasNext = focusDay < totalDays - 1;
+
+    // Reflection is only relevant for days that have already happened.
+    const dayReflectable = showReflection && isDayReflectable(day.date, todayYmd);
 
     return (
       <div>
@@ -441,6 +453,9 @@ function ItineraryTimeline({
                   {activity?.description && <ExpandedSlotDesc style={{ fontStyle: "italic" }}>{activity.description}</ExpandedSlotDesc>}
                   {activity?.details && <ExpandedSlotDesc style={{ whiteSpace: "pre-wrap" }}>{activity.details}</ExpandedSlotDesc>}
                   {slot.notes && <ExpandedSlotDesc style={{ fontStyle: "italic", color: "#8c8c8c" }}>{slot.notes}</ExpandedSlotDesc>}
+                  {dayReflectable && activity && activity.category !== "Flight" && (
+                    <ActivityReflection activity={activity} variant="compact" />
+                  )}
                 </ExpandedSlotBody>
                 <Space size={2} style={{ flexShrink: 0, alignSelf: "flex-start", paddingTop: 2 }}>
                   <Button type="text" size="small" icon={<EditOutlined />}
@@ -469,6 +484,9 @@ function ItineraryTimeline({
               </DriveTimeBadge>
             );
           })()}
+          {dayReflectable && day.date && (
+            <DayJournal tripId={tripId} logId={logId} date={day.date} />
+          )}
         </ExpandedDay>
       </div>
     );
@@ -556,6 +574,7 @@ export function ItinerarySection({
   onDayClick,
   onDayNav,
   navigate,
+  showReflection,
 }: {
   itineraries: Itinerary[];
   activityMap: Map<string, Activity>;
@@ -564,6 +583,7 @@ export function ItinerarySection({
   onDayClick: (dayIndex: number) => void;
   onDayNav: (dayIndex: number) => void;
   navigate: (path: string) => void;
+  showReflection: boolean;
 }) {
   const travel = useTravelBackend();
   const { state } = useTravelContext();
@@ -592,7 +612,10 @@ export function ItinerarySection({
   const timeline = currentItin ? (
     <ItineraryTimeline itinerary={currentItin} activityMap={activityMap} focusDay={focusDay} routeInfo={routeInfo} onDayClick={onDayClick} onDayNav={onDayNav}
       onEditActivity={(id) => navigate(`activities/${id}/edit`)}
-      onDeleteActivity={(id) => travel.deleteActivity(id)} />
+      onDeleteActivity={(id) => travel.deleteActivity(id)}
+      showReflection={showReflection}
+      tripId={currentItin.tripId}
+      logId={state.log?.id ?? ""} />
   ) : null;
 
   const tabItems = itineraries.length > 1 ? [
