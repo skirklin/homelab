@@ -8,6 +8,7 @@ import { Button, Input, List, Modal, Popconfirm, Segmented, Select, Spin, Typogr
 import {
   ApiOutlined,
   BellOutlined,
+  ClockCircleOutlined,
   CopyOutlined,
   DeleteOutlined,
   ExperimentOutlined,
@@ -93,6 +94,15 @@ const LoadingState = styled.div`
 interface UserSettings {
   upkeepNotificationMode?: NotificationMode;
   fcmTokens?: string[];
+  timezone?: string;
+}
+
+function detectBrowserTz(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
 }
 
 // --- API Token types and helpers ---
@@ -237,6 +247,10 @@ function parseUserSettings(data: Record<string, unknown>): UserSettings {
     settings.fcmTokens = data.fcm_tokens;
   }
 
+  if (typeof data.timezone === "string" && data.timezone) {
+    settings.timezone = data.timezone;
+  }
+
   return settings;
 }
 
@@ -285,6 +299,27 @@ export function Settings() {
     } catch (error) {
       console.error("Failed to update notification mode:", error);
       message.error("Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const syncTimezone = async () => {
+    if (!user) return;
+    const tz = detectBrowserTz();
+    if (!tz) {
+      message.error("Couldn't detect your browser timezone");
+      return;
+    }
+    setSaving(true);
+    try {
+      await getBackend().collection("users").update(user.uid, { timezone: tz });
+      setSettings(prev => ({ ...prev, timezone: tz }));
+      try { localStorage.setItem(`kirkl_tz_pushed:${user.uid}`, tz); } catch { /* ignore */ }
+      message.success(`Saved timezone: ${tz}`);
+    } catch (err) {
+      console.error("Failed to save timezone:", err);
+      message.error("Failed to save timezone");
     } finally {
       setSaving(false);
     }
@@ -401,6 +436,38 @@ export function Settings() {
             </SettingRow>
           )}
         </Section>
+
+        {/* Timezone Section */}
+        {(() => {
+          const browserTz = detectBrowserTz();
+          const storedTz = settings.timezone || "";
+          const inSync = !!storedTz && storedTz === browserTz;
+          return (
+            <Section>
+              <SectionHeader>
+                <SectionIcon><ClockCircleOutlined /></SectionIcon>
+                <SectionTitle>Timezone</SectionTitle>
+              </SectionHeader>
+              <SettingRow>
+                <SettingInfo>
+                  <SettingLabel>{storedTz || "(not set)"}</SettingLabel>
+                  <SettingDescription>
+                    {inSync
+                      ? `Auto-syncs from this browser. Travel push notifications fire at your local 7am and 8pm.`
+                      : storedTz
+                        ? `Browser is ${browserTz || "unknown"}. Push to overwrite, or it'll auto-sync next visit.`
+                        : `Browser detected ${browserTz || "unknown"}. Click sync to save.`}
+                  </SettingDescription>
+                </SettingInfo>
+                {!inSync && browserTz && (
+                  <Button size="small" loading={saving} onClick={syncTimezone}>
+                    Sync now
+                  </Button>
+                )}
+              </SettingRow>
+            </Section>
+          );
+        })()}
 
         {/* Upkeep Section */}
         <Section>
