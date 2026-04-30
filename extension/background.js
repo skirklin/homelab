@@ -293,11 +293,20 @@ const lastCapture = {};
 const COOLDOWN_MS = 30_000;
 const activeHandlers = new Set();
 
+// Manual recording mode: when active, the auto handler is suppressed for
+// the chosen tab and recording survives across navigations until the user
+// clicks Stop & upload in the popup.
+let manualRecording = null; // { tabId, institution, startedAt }
+
 async function handleNavigation(details) {
   if (details.frameId !== 0) return;
 
   const institution = getInstitutionForUrl(details.url);
   if (!institution) return;
+
+  // Manual mode owns this tab — keep the buffer growing across navs and
+  // skip the auto handler entirely.
+  if (manualRecording && manualRecording.tabId === details.tabId) return;
 
   const handler = HANDLERS[institution];
   if (!handler) return;
@@ -368,6 +377,72 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     sendResponse({ buffered: true });
+    return true;
+  }
+
+  // ── Manual recording (popup-driven) ────────────────────────────
+  if (message.type === "MANUAL_START") {
+    (async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) return sendResponse({ ok: false, error: "no active tab" });
+      const institution = getInstitutionForUrl(tab.url || "");
+      if (!institution) return sendResponse({ ok: false, error: "not on a supported bank site" });
+      if (manualRecording) return sendResponse({ ok: false, error: `already recording ${manualRecording.institution}` });
+
+      manualRecording = { tabId: tab.id, institution, startedAt: Date.now() };
+      networkBuffer[institution] = [];
+      recordingTabs[tab.id] = institution;
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: "START_RECORDING" });
+      } catch { /* content script will auto-start via CHECK_RECORDING_FOR_TAB */ }
+      setBadge("REC", "#ef4444", { persist: true });
+      logActivity(`Manual recording started: ${institution}`);
+      sendResponse({ ok: true, institution });
+    })();
+    return true;
+  }
+
+  if (message.type === "MANUAL_STATUS") {
+    if (!manualRecording) {
+      sendResponse({ active: false });
+    } else {
+      sendResponse({
+        active: true,
+        institution: manualRecording.institution,
+        entries: (networkBuffer[manualRecording.institution] || []).length,
+        startedAt: manualRecording.startedAt,
+      });
+    }
+    return true;
+  }
+
+  if (message.type === "MANUAL_STOP") {
+    (async () => {
+      if (!manualRecording) return sendResponse({ ok: false, error: "not recording" });
+      const { tabId, institution } = manualRecording;
+      const handler = HANDLERS[institution];
+      const cookies = await getAllCookiesForDomains(handler.domains);
+      const entries = [...(networkBuffer[institution] || [])];
+      networkBuffer[institution] = [];
+      delete recordingTabs[tabId];
+      manualRecording = null;
+      setBadge("");
+
+      const result = await postToServer("/capture", {
+        institution,
+        cookies,
+        entries,
+        captured_at: new Date().toISOString(),
+      });
+      if (result.success) {
+        logActivity(`Manual capture: ${entries.length} entries for ${institution}`);
+        setBadge("✓");
+      } else {
+        logActivity(`Manual capture failed: ${result.error || "unknown"}`);
+        setBadge("!", "#f87171");
+      }
+      sendResponse({ ok: result.success, entries: entries.length, error: result.error });
+    })();
     return true;
   }
 

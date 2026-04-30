@@ -14,6 +14,57 @@ async function init() {
   await checkForUpdate();
   renderDetected();
   renderActivityLog();
+  initManualRecord();
+}
+
+function initManualRecord() {
+  const btn = document.getElementById("manualToggle");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const status = await chrome.runtime.sendMessage({ type: "MANUAL_STATUS" });
+    if (status?.active) {
+      const r = await chrome.runtime.sendMessage({ type: "MANUAL_STOP" });
+      if (!r?.ok) alert(`Stop failed: ${r?.error || "unknown"}`);
+    } else {
+      const r = await chrome.runtime.sendMessage({ type: "MANUAL_START" });
+      if (!r?.ok) alert(`Start failed: ${r?.error || "unknown"}`);
+    }
+    btn.disabled = false;
+    await refreshManualStatus();
+    await renderActivityLog();
+  });
+  refreshManualStatus();
+  setInterval(refreshManualStatus, 1000);
+}
+
+async function refreshManualStatus() {
+  const wrap = document.getElementById("manualRecord");
+  const label = document.getElementById("manualStatus");
+  const btn = document.getElementById("manualToggle");
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const onSupportedSite = !!INSTITUTIONS.find(i => i.patterns.some(p => (tab?.url || "").includes(p)));
+  const status = await chrome.runtime.sendMessage({ type: "MANUAL_STATUS" });
+
+  // Show the panel whenever recording is active (so user can stop) or when
+  // they're on a supported site (so they can start).
+  if (!onSupportedSite && !status?.active) {
+    wrap.style.display = "none";
+    return;
+  }
+  wrap.style.display = "block";
+
+  if (status?.active) {
+    const seconds = Math.floor((Date.now() - status.startedAt) / 1000);
+    label.textContent = `Recording ${status.institution} • ${status.entries} entries • ${seconds}s`;
+    label.style.color = "#dc2626";
+    btn.textContent = "Stop & upload";
+    btn.style.background = "#dc2626";
+  } else {
+    label.textContent = "Idle — click Start, then navigate";
+    label.style.color = "#666";
+    btn.textContent = "Start";
+    btn.style.background = "#1a1a2e";
+  }
 }
 
 async function loadSettings() {
