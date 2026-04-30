@@ -87,6 +87,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/sync-history"):
             self._handle_sync_history()
             return
+        if self.path.startswith("/api/debug/network-log"):
+            self._handle_debug_network_log()
+            return
         if self.path.startswith("/api/sync/"):
             self._handle_get_sync()
             return
@@ -1985,6 +1988,81 @@ class IngestHandler(BaseHTTPRequestHandler):
                 "cookies_stored": len(cookies_raw),
             },
         )
+
+    def _handle_debug_network_log(self) -> None:
+        """List or fetch captured network logs for inspection.
+
+        GET /api/debug/network-log/list?institution=chase
+            → {"institution": "chase", "files": [{name, size, captured_at}, ...]}
+
+        GET /api/debug/network-log/latest?institution=chase
+            → raw JSON body of the most recent log
+
+        GET /api/debug/network-log/get?institution=chase&name=chase_20260429_071500.json
+            → raw JSON body of the named log
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        from money.config import DATA_DIR
+
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        institution = params.get("institution", [None])[0]
+        if not institution:
+            self._json_response(400, {"error": "missing 'institution' parameter"})
+            return
+
+        log_dir = DATA_DIR / "network_logs"
+        if not log_dir.is_dir():
+            self._json_response(404, {"error": "no network logs captured yet"})
+            return
+
+        files = sorted(log_dir.glob(f"{institution}_*.json"))
+        if not files:
+            self._json_response(404, {"error": f"no logs for {institution}"})
+            return
+
+        action = parsed.path.rsplit("/", 1)[-1]
+        if action == "list":
+            entries = []
+            for p in files:
+                stat = p.stat()
+                entries.append({
+                    "name": p.name,
+                    "size": stat.st_size,
+                    "captured_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+            self._json_response(200, {"institution": institution, "files": entries})
+            return
+
+        if action == "latest":
+            target = files[-1]
+        elif action == "get":
+            name = params.get("name", [None])[0]
+            if not name:
+                self._json_response(400, {"error": "missing 'name' parameter"})
+                return
+            # Reject path traversal: name must match the institution prefix
+            # and not contain separators.
+            if "/" in name or ".." in name or not name.startswith(f"{institution}_"):
+                self._json_response(400, {"error": "invalid 'name' parameter"})
+                return
+            target = log_dir / name
+            if not target.is_file():
+                self._json_response(404, {"error": f"log not found: {name}"})
+                return
+        else:
+            self._json_response(404, {"error": "unknown debug action"})
+            return
+
+        body = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Log-Filename", target.name)
+        self._set_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle_network_log(self) -> None:
         content_length = int(self.headers.get("Content-Length", 0))

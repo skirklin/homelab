@@ -12,6 +12,7 @@ from money.config import DATA_DIR
 from money.db import Database
 from money.ingest.common import ts_to_date
 from money.ingest.schemas import (
+    CHAccountTile,
     CHActivityAccount,
     CHActivityOptionsResponse,
     CHCardRewardsResponse,
@@ -24,6 +25,7 @@ from money.ingest.schemas import (
     CHNetworkLog,
     CHPortfolioAccountEntry,
     CHPortfolioOptionsResponse,
+    CHTilesListResponse,
     CHTransactionsResponse,
 )
 from money.models import (
@@ -48,33 +50,6 @@ class _InvestmentData:
     account_meta: CHPortfolioAccountEntry | None = None
 
 log = logging.getLogger(__name__)
-
-
-def _load_network_log() -> tuple[
-    list[CHDdaDetailResponse],
-    list[CHTransactionsResponse],
-    list[CHCardRewardsResponse],
-    list[CHDashboardResponse],
-    dict[str, _InvestmentData],
-]:
-    """Load the most recent Chase network log and extract API responses by endpoint.
-
-    Returns: dda_details, transactions, card_rewards, dashboard, investments.
-    """
-    log_dir = DATA_DIR / "network_logs"
-    if not log_dir.exists():
-        raise FileNotFoundError("No network logs directory found.")
-
-    logs = sorted(log_dir.glob("chase_*.json"))
-    if not logs:
-        raise FileNotFoundError(
-            "No Chase network logs found. Record a session in Chrome first."
-        )
-
-    latest = logs[-1]
-    log.info("Using network log: %s", latest.name)
-    data = CHNetworkLog.model_validate_json(latest.read_text())
-    return _parse_network_log_entries(data)
 
 
 def parse_chase_date(date_str: str) -> date:
@@ -146,17 +121,22 @@ def _parse_network_log_entries(
     list[CHCardRewardsResponse],
     list[CHDashboardResponse],
     dict[str, _InvestmentData],
+    list[CHAccountTile],
 ]:
     """Parse a raw network log into categorised response lists.
 
     The fifth element maps selectorIdentifier -> _InvestmentData for Chase
-    brokerage/managed investment accounts.
+    brokerage/managed investment accounts. The sixth is the flattened
+    accountTiles[] from the dashboard/tiles/list cache embedded inside
+    /app/data/list — the source of truth for credit-card statement balance.
     """
     dda_details: list[CHDdaDetailResponse] = []
     transactions: list[CHTransactionsResponse] = []
     card_rewards: list[CHCardRewardsResponse] = []
     dashboard: list[CHDashboardResponse] = []
     investments: dict[str, _InvestmentData] = {}
+    tiles: list[CHAccountTile] = []
+    seen_tile_masks: set[str] = set()
 
     def _get(selector: str) -> _InvestmentData:
         if selector not in investments:
@@ -207,7 +187,30 @@ def _parse_network_log_entries(
                 _get(selector).monthly_balances = (
                     CHInvestmentMonthlyBalancesResponse.model_validate(body).monthlyBalanceDetails
                 )
-    return dda_details, transactions, card_rewards, dashboard, investments
+        elif "/svc/rl/accounts/l4/v1/app/data/list" in url:
+            # Statement balance / available credit live inside the embedded
+            # dashboard/tiles/list cache entry, not on a top-level URL.
+            cache_entries = body.get("cache")
+            if not isinstance(cache_entries, list):
+                continue
+            for cache_entry in cache_entries:
+                if not isinstance(cache_entry, dict):
+                    continue
+                if cache_entry.get("url") != "/svc/rr/accounts/secure/v4/dashboard/tiles/list":
+                    continue
+                response_obj = cache_entry.get("response")
+                if not isinstance(response_obj, dict):
+                    continue
+                try:
+                    tiles_resp = CHTilesListResponse.model_validate(response_obj)
+                except Exception:
+                    continue
+                for tile in tiles_resp.accountTiles:
+                    if tile.mask in seen_tile_masks:
+                        continue
+                    seen_tile_masks.add(tile.mask)
+                    tiles.append(tile)
+    return dda_details, transactions, card_rewards, dashboard, investments, tiles
 
 
 def parse_raw_chase(
@@ -228,7 +231,7 @@ def parse_raw_chase(
     raw_key = f"chase/{profile}/{timestamp}_network_log.json"
 
     raw_data = CHNetworkLog.model_validate_json(log_file.read_text())
-    dda_details, transactions, card_rewards, dashboard, investments = _parse_network_log_entries(raw_data)
+    dda_details, transactions, card_rewards, dashboard, investments, tiles = _parse_network_log_entries(raw_data)
 
     # Build account map from dashboard activity/options cache
     dda_account_map: dict[int, CHActivityAccount] = {}
@@ -315,11 +318,15 @@ def parse_raw_chase(
         txn_count_total += txn_count
         log.info("  Chase: stored %d transaction(s) for account %s", txn_count, matched_account_id)
 
-    # Credit cards
+    # Credit cards: account info comes from cardRewardsSummary, statement
+    # balance comes from the dashboard tile (the rewards "balance" field is
+    # actually rewards points — same as currentRewardsBalance).
+    balance_count = 0
+    card_tile_by_mask = {t.mask: t for t in tiles if t.accountTileType == "CARD"}
     for rewards_resp in card_rewards:
         for card in rewards_resp.cardRewardsSummary:
             mask = str(card.mask)
-            db.get_or_create_account(
+            account = db.get_or_create_account(
                 name=f"{card.nickname} ({card.cardType.replace('_', ' ').title()})",
                 account_type=AccountType.CREDIT_CARD,
                 institution="chase",
@@ -327,9 +334,28 @@ def parse_raw_chase(
                 profile=profile,
             )
             account_count += 1
+            tile = card_tile_by_mask.get(mask)
+            if tile and tile.tileDetail.currentBalance is not None:
+                db.insert_balance(
+                    Balance(
+                        account_id=account.id,
+                        as_of=as_of,
+                        balance=-tile.tileDetail.currentBalance,
+                        source="chase_account_tile",
+                        raw_file_ref=raw_key,
+                    )
+                )
+                balance_count += 1
+                log.info(
+                    "Chase card: %s ••%s balance=$%.2f available=$%.2f",
+                    card.nickname, mask,
+                    tile.tileDetail.currentBalance,
+                    tile.tileDetail.availableBalance or 0.0,
+                )
+            else:
+                log.warning("Chase card: %s ••%s — no tile balance found", card.nickname, mask)
 
     # Managed brokerage / investment accounts
-    balance_count = 0
     holding_count = 0
     for inv in investments.values():
         ext_id = f"inv:{inv.selector_identifier}"

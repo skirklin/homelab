@@ -608,6 +608,38 @@ class CHInvestmentMonthlyBalancesResponse(_Base):
     monthlyBalanceDetails: list[CHInvestmentBalancePoint] = []
 
 
+class CHAccountTileDetail(_Base):
+    """tileDetail subobject on dashboard accountTiles[]. currentBalance is the
+    statement balance for cards (positive = owed) and present balance for DDA;
+    null on tiles like AUTOLEASE."""
+
+    currentBalance: float | None = None
+    availableBalance: float | None = None
+    closed: bool = False
+    asOf: str | None = None
+
+
+class CHAccountTile(_Base):
+    """One tile from /svc/rr/accounts/secure/v4/dashboard/tiles/list.accountTiles[].
+
+    accountTileType discriminates: "CARD" | "DDA" | "AUTOLEASE" | etc.
+    cardType is only present on CARD tiles."""
+
+    accountId: int
+    mask: str
+    nickname: str
+    accountTileType: str
+    cardType: str | None = None
+    tileDetail: CHAccountTileDetail = CHAccountTileDetail()
+
+
+class CHTilesListResponse(_Base):
+    """Response body from dashboard/tiles/list — embedded in the cache
+    of /svc/rl/accounts/l4/v1/app/data/list."""
+
+    accountTiles: list[CHAccountTile] = []
+
+
 class CHPortfolioAccountEntry(_Base):
     """An account entry from portfolio/account/options/list2."""
 
