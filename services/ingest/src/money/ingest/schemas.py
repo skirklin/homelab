@@ -555,6 +555,48 @@ class CHCardRewardsResponse(_Base):
     cardRewardsSummary: list[CHCardReward]
 
 
+class CHCardEnrichedMerchant(_Base):
+    """Cleaned-up merchant info from Chase's enrichment service."""
+
+    merchantName: str | None = None
+
+
+class CHCardRawMerchantDetails(_Base):
+    """Raw merchant fields direct from the card network."""
+
+    merchantDbaName: str | None = None
+    merchantCategoryName: str | None = None
+
+
+class CHCardMerchantDetails(_Base):
+    rawMerchantDetails: CHCardRawMerchantDetails = CHCardRawMerchantDetails()
+    enrichedMerchants: list[CHCardEnrichedMerchant] = []
+
+
+class CHCardTransaction(_Base):
+    """A credit-card transaction from etu-transactions/v4.
+
+    transactionStatusCode is "Posted" for cleared transactions and "Pending"
+    for authorizations not yet posted (skip these — postDate may be absent).
+    transactionAmount is unsigned; creditDebitCode ("D" debit, "C" credit)
+    determines the sign."""
+
+    transactionStatusCode: str
+    transactionAmount: float
+    transactionDate: str | None = None  # ISO date "YYYY-MM-DD"
+    transactionPostDate: str | None = None  # ISO date "YYYY-MM-DD"
+    creditDebitCode: str  # "D" or "C"
+    last4CardNumber: str
+    digitalAccountIdentifier: int
+    merchantDetails: CHCardMerchantDetails = CHCardMerchantDetails()
+
+
+class CHCardTransactionsResponse(_Base):
+    """Response from /credit-card/transactions/.../etu-transactions/v4/accounts/transactions."""
+
+    activities: list[CHCardTransaction] = []
+
+
 class CHInvestMoneyField(_Base):
     """Chase investment money fields wrap the amount in `baseValueAmount`."""
 

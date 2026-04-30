@@ -16,6 +16,8 @@ from money.ingest.schemas import (
     CHActivityAccount,
     CHActivityOptionsResponse,
     CHCardRewardsResponse,
+    CHCardTransaction,
+    CHCardTransactionsResponse,
     CHDashboardResponse,
     CHDdaDetailResponse,
     CHInvestmentBalancePoint,
@@ -122,14 +124,14 @@ def _parse_network_log_entries(
     list[CHDashboardResponse],
     dict[str, _InvestmentData],
     list[CHAccountTile],
+    dict[int, list[CHCardTransaction]],
 ]:
     """Parse a raw network log into categorised response lists.
 
-    The fifth element maps selectorIdentifier -> _InvestmentData for Chase
-    brokerage/managed investment accounts. The sixth is the flattened
-    accountTiles[] from the dashboard/tiles/list cache embedded inside
-    /app/data/list — the source of truth for credit-card statement balance.
-    """
+    Returns (dda_details, transactions, card_rewards, dashboard, investments,
+    tiles, card_transactions). The last element groups posted credit-card
+    transactions by digitalAccountIdentifier (which equals
+    cardRewardsSummary.accountId, so we can join by accountId)."""
     dda_details: list[CHDdaDetailResponse] = []
     transactions: list[CHTransactionsResponse] = []
     card_rewards: list[CHCardRewardsResponse] = []
@@ -137,6 +139,7 @@ def _parse_network_log_entries(
     investments: dict[str, _InvestmentData] = {}
     tiles: list[CHAccountTile] = []
     seen_tile_masks: set[str] = set()
+    card_transactions: dict[int, list[CHCardTransaction]] = {}
 
     def _get(selector: str) -> _InvestmentData:
         if selector not in investments:
@@ -187,6 +190,17 @@ def _parse_network_log_entries(
                 _get(selector).monthly_balances = (
                     CHInvestmentMonthlyBalancesResponse.model_validate(body).monthlyBalanceDetails
                 )
+        elif "/credit-card/transactions/inquiry-maintenance/etu-transactions/v4" in url:
+            try:
+                card_resp = CHCardTransactionsResponse.model_validate(body)
+            except Exception:
+                continue
+            for activity in card_resp.activities:
+                if activity.transactionStatusCode != "Posted":
+                    continue
+                card_transactions.setdefault(
+                    activity.digitalAccountIdentifier, []
+                ).append(activity)
         elif "/svc/rl/accounts/l4/v1/app/data/list" in url:
             # Statement balance / available credit live inside the embedded
             # dashboard/tiles/list cache entry, not on a top-level URL.
@@ -210,7 +224,10 @@ def _parse_network_log_entries(
                         continue
                     seen_tile_masks.add(tile.mask)
                     tiles.append(tile)
-    return dda_details, transactions, card_rewards, dashboard, investments, tiles
+    return (
+        dda_details, transactions, card_rewards, dashboard,
+        investments, tiles, card_transactions,
+    )
 
 
 def parse_raw_chase(
@@ -231,7 +248,10 @@ def parse_raw_chase(
     raw_key = f"chase/{profile}/{timestamp}_network_log.json"
 
     raw_data = CHNetworkLog.model_validate_json(log_file.read_text())
-    dda_details, transactions, card_rewards, dashboard, investments, tiles = _parse_network_log_entries(raw_data)
+    (
+        dda_details, transactions, card_rewards, dashboard,
+        investments, tiles, card_transactions,
+    ) = _parse_network_log_entries(raw_data)
 
     # Build account map from dashboard activity/options cache
     dda_account_map: dict[int, CHActivityAccount] = {}
@@ -384,6 +404,57 @@ def parse_raw_chase(
                 )
             else:
                 log.warning("Chase card: %s ••%s — no tile balance found", card.nickname, mask)
+
+    # Credit card transactions: keyed by digitalAccountIdentifier, joined to
+    # cards via cardRewardsSummary.accountId == digitalAccountIdentifier.
+    card_account_id_to_mask: dict[int, str] = {}
+    for rewards_resp in card_rewards:
+        for card in rewards_resp.cardRewardsSummary:
+            card_account_id_to_mask[card.accountId] = str(card.mask)
+    for digital_account_id, txns in card_transactions.items():
+        mask = card_account_id_to_mask.get(digital_account_id)
+        if not mask:
+            log.warning(
+                "Chase card transactions: no rewards entry for accountId=%s — skipping %d txns",
+                digital_account_id, len(txns),
+            )
+            continue
+        acct = db.get_account_by_external_id("chase", mask)
+        if not acct:
+            log.warning("Chase card transactions: no account for mask=%s", mask)
+            continue
+        for txn in txns:
+            date_str = txn.transactionPostDate or txn.transactionDate
+            if not date_str:
+                continue
+            try:
+                txn_date = date.fromisoformat(date_str)
+            except ValueError:
+                continue
+            amount = -abs(txn.transactionAmount) if txn.creditDebitCode == "D" else abs(txn.transactionAmount)
+            description = (
+                next(
+                    (m.merchantName for m in txn.merchantDetails.enrichedMerchants if m.merchantName),
+                    None,
+                )
+                or txn.merchantDetails.rawMerchantDetails.merchantDbaName
+                or "(unknown)"
+            )
+            db.insert_transaction(
+                Transaction(
+                    account_id=acct.id,
+                    date=txn_date,
+                    amount=amount,
+                    description=description,
+                    category=txn.merchantDetails.rawMerchantDetails.merchantCategoryName,
+                    raw_file_ref=raw_key,
+                )
+            )
+            txn_count_total += 1
+        log.info(
+            "Chase card transactions: %s ••%s — %d posted",
+            acct.name, mask, len(txns),
+        )
 
     # Managed brokerage / investment accounts
     holding_count = 0
