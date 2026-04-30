@@ -8,13 +8,16 @@ export default {
     // Wait for the DDA detail to arrive (signals authenticated page).
     await ctx.waitForEntries(["account/detail/dda/list"], { timeout: 30000 });
 
-    // Actively force investment API calls from the page context. Chase caches
-    // these aggressively, so we can't rely on natural page loads.
+    // Actively force investment + card-transaction API calls from the page
+    // context. Chase only fires these when the user navigates into the
+    // relevant account, so natural homepage loads miss them.
     await ctx.executeInPage(chaseFetchInvestments, {});
-    const deadline = Date.now() + 30_000;
+    await ctx.executeInPage(chaseFetchCardTransactions, {});
+    const deadline = Date.now() + 45_000;
     while (Date.now() < deadline) {
-      const done = await ctx.scrapeText(() => window.__moneyChaseDone);
-      if (done) break;
+      const investDone = await ctx.scrapeText(() => window.__moneyChaseDone);
+      const cardsDone = await ctx.scrapeText(() => window.__moneyChaseCardsDone);
+      if (investDone && cardsDone) break;
       await ctx.wait(1000);
     }
 
@@ -149,6 +152,67 @@ function chaseFetchInvestments() {
       console.error("[Money] Chase investment fetch error:", err);
     } finally {
       window.__moneyChaseDone = true;
+    }
+  })();
+}
+
+function chaseFetchCardTransactions() {
+  window.__moneyChaseCardsDone = false;
+
+  const csrfHeader = { "x-jpmc-csrf-token": "NONE" };
+  const formHeaders = {
+    ...csrfHeader,
+    "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+  };
+
+  (async () => {
+    let accountIds = [];
+    try {
+      // POST card/rewards/v2/summary/list returns {cardRewardsSummary: [{accountId, ...}, ...]}
+      const resp = await window.fetch(
+        "/svc/rr/accounts/secure/card/rewards/v2/summary/list",
+        { method: "POST", headers: formHeaders, body: "" },
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        for (const card of data.cardRewardsSummary || []) {
+          if (typeof card.accountId === "number") accountIds.push(card.accountId);
+        }
+      }
+    } catch (err) {
+      console.warn("[Money] Chase card list failed", err);
+    }
+
+    if (accountIds.length === 0) {
+      console.warn("[Money] Chase: no credit cards found");
+      window.__moneyChaseCardsDone = true;
+      return;
+    }
+
+    console.log(`[Money] Chase: fetching transactions for ${accountIds.length} card(s)`);
+
+    const fetches = [];
+    for (const id of accountIds) {
+      const url = "/svc/rr/accounts/secure/gateway/credit-card/transactions"
+        + "/inquiry-maintenance/etu-transactions/v4/accounts/transactions"
+        + `?digital-account-identifier=${id}`
+        + "&provide-available-statement-indicator=true"
+        + "&record-count=50"
+        + "&sort-order-code=D"
+        + "&sort-key-code=T";
+      fetches.push(
+        window.fetch(url, { headers: csrfHeader }).catch(err =>
+          console.warn(`[Money] Chase card txns ${id} failed`, err)
+        ),
+      );
+    }
+
+    try {
+      await Promise.all(fetches);
+    } catch (err) {
+      console.error("[Money] Chase card txn fetch error:", err);
+    } finally {
+      window.__moneyChaseCardsDone = true;
     }
   })();
 }

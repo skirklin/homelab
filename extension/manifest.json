@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Money Data Collector",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Collects financial data from supported institution websites",
   "permissions": ["activeTab", "storage", "cookies", "scripting", "webNavigation", "tabs"],
   "host_permissions": [
