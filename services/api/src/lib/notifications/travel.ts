@@ -1,32 +1,29 @@
 /**
  * Travel notifications: morning ("today's plan") + evening ("reflect").
  *
- * Trip-tz aware: each trip's timezone is derived from the first activity
- * with coordinates (lat/lng → IANA tz via tz-lookup). The hourly cron
- * fires both runs every hour; each run sends to a (user, trip) pair only
- * when the local hour in that trip's timezone equals the target hour.
- * Dedup is per (user, trip, date-in-trip-tz), so the same calendar day
- * across two trips in different tzs still fires twice (once per trip).
+ * Trip-tz aware via the user's stored timezone. Each kirkl.in app pushes the
+ * browser's current `Intl.DateTimeFormat().resolvedOptions().timeZone` to
+ * `users.timezone` on every visit (see packages/ui backend-provider). The
+ * cron ticks every hour; this function fires for a (user, trip) pair only
+ * when the local hour in user.timezone equals the target hour.
  *
- *   Morning (07:00 trip-local): pushes the day's plan, taps to open trip.
- *   Evening (20:00 trip-local): pushes a reflect prompt; suppressed when
+ *   Morning (07:00 user-local): pushes the day's plan, taps to open trip.
+ *   Evening (20:00 user-local): pushes a reflect prompt; suppressed when
  *     today's day_entry already has any text or highlight.
  *
  * Activeness is computed from the trip's start/end dates (interpreted in
- * the trip's tz), not the `status` field, since users rarely flip status.
+ * user.timezone), not the `status` field.
  */
 import type PocketBase from "pocketbase";
 import { formatInTimeZone } from "date-fns-tz";
-import tzlookup from "tz-lookup";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 
 const TRAVEL_ORIGINS = [`https://travel.${DOMAIN}`, `https://${DOMAIN}`];
 
-// Used only when a trip has zero activities with coordinates. Matches the
-// home-tz of the system owner so behavior is at least sensible for trips
-// with placeholder data.
+// Used when a user has no timezone field set yet (haven't visited a kirkl.in
+// app since the timezone-push feature shipped). Matches the system owner.
 const FALLBACK_TZ = "America/Denver";
 
 const MORNING_HOUR = 7;
@@ -42,18 +39,15 @@ interface ItineraryDay {
 
 interface ActivitySummary {
   name: string;
-  category: string;
-  lat: number | null;
-  lng: number | null;
 }
 
 interface ActiveContext {
   userId: string;
+  userTz: string;
   tripId: string;
   tripDestination: string;
-  tripTz: string;
-  todayInTz: string;       // YYYY-MM-DD in tripTz
-  hourInTz: number;        // 0..23 in tripTz at the moment this run fires
+  todayInTz: string;
+  hourInTz: number;
   todayDay: ItineraryDay | null;
   activitiesById: Map<string, ActivitySummary>;
 }
@@ -62,49 +56,29 @@ function ymdInTz(d: Date, tz: string): string {
   return formatInTimeZone(d, tz, "yyyy-MM-dd");
 }
 
-function hourInTz(d: Date, tz: string): number {
+function hourInTzOf(d: Date, tz: string): number {
   return parseInt(formatInTimeZone(d, tz, "H"), 10);
 }
 
-function deriveTripTz(
-  todayDay: ItineraryDay | null,
-  activitiesById: Map<string, ActivitySummary>,
-): string {
-  // Prefer something from today's plan (most accurate when crossing tzs
-  // mid-trip), otherwise any activity in the trip with coords.
-  const todayCandidates: string[] = todayDay
-    ? [
-        ...(todayDay.flights ?? []).map((f) => f.activityId),
-        ...(todayDay.lodgingActivityId ? [todayDay.lodgingActivityId] : []),
-        ...(todayDay.slots ?? []).map((s) => s.activityId),
-      ]
-    : [];
-  for (const id of todayCandidates) {
-    const a = activitiesById.get(id);
-    if (a && a.lat != null && a.lng != null) {
-      try { return tzlookup(a.lat, a.lng); } catch { /* fall through */ }
-    }
+function safeTz(tz: unknown): string {
+  if (typeof tz !== "string" || !tz) return FALLBACK_TZ;
+  try {
+    // Validate by attempting a format — invalid tz throws.
+    formatInTimeZone(new Date(), tz, "yyyy");
+    return tz;
+  } catch {
+    return FALLBACK_TZ;
   }
-  for (const a of activitiesById.values()) {
-    if (a.lat != null && a.lng != null) {
-      try { return tzlookup(a.lat, a.lng); } catch { /* fall through */ }
-    }
-  }
-  return FALLBACK_TZ;
 }
 
 /**
- * Find every (user, currently-active trip) pair, with timezone resolved.
- * "Active" is judged in each trip's own timezone — a trip whose start_date
- * is today in Asia/Tokyo is active even if it's still yesterday in UTC.
+ * Find every (user, currently-active trip) pair, with the user's tz applied.
+ * "Active" is judged in the user's tz so a trip whose start_date is today in
+ * user-local is active even if it's still yesterday in UTC.
  */
 async function findActiveContexts(pb: PocketBase, now: Date): Promise<ActiveContext[]> {
   const out: ActiveContext[] = [];
 
-  // Pull a permissive superset of trips first (any trip whose date window
-  // *might* contain "today" in some tz), then filter by tz-aware comparison.
-  // The superset bound is ±1 day in UTC.
-  const utcToday = ymdInTz(now, "UTC");
   const utcYesterday = ymdInTz(new Date(now.getTime() - 24 * 3600 * 1000), "UTC");
   const utcTomorrow = ymdInTz(new Date(now.getTime() + 24 * 3600 * 1000), "UTC");
   const trips = await pb.collection("travel_trips").getFullList({
@@ -124,56 +98,59 @@ async function findActiveContexts(pb: PocketBase, now: Date): Promise<ActiveCont
   const tripIds = trips.map((t) => t.id);
   const tripFilter = tripIds.map((id) => pb.filter("trip_id = {:id}", { id })).join(" || ");
 
-  const activities = await pb.collection("travel_activities").getFullList({
-    filter: tripFilter,
-    fields: "id,trip_id,name,category,lat,lng",
-    $autoCancel: false,
-  });
-  const itineraries = await pb.collection("travel_itineraries").getFullList({
-    filter: tripFilter,
-    $autoCancel: false,
-  });
+  const [activities, itineraries] = await Promise.all([
+    pb.collection("travel_activities").getFullList({
+      filter: tripFilter,
+      fields: "id,trip_id,name",
+      $autoCancel: false,
+    }),
+    pb.collection("travel_itineraries").getFullList({
+      filter: tripFilter,
+      $autoCancel: false,
+    }),
+  ]);
+
+  // Cache user records by id; one user often owns multiple trips.
+  const userTzCache = new Map<string, string>();
+  async function tzForUser(userId: string): Promise<string> {
+    const hit = userTzCache.get(userId);
+    if (hit) return hit;
+    const u = await pb.collection("users").getOne(userId, { $autoCancel: false });
+    const tz = safeTz(u.timezone);
+    userTzCache.set(userId, tz);
+    return tz;
+  }
 
   for (const trip of trips) {
     const tripActivities = activities.filter((a) => a.trip_id === trip.id);
     const activitiesById = new Map<string, ActivitySummary>();
     for (const a of tripActivities) {
-      activitiesById.set(a.id, {
-        name: a.name || "",
-        category: a.category || "",
-        lat: a.lat ?? null,
-        lng: a.lng ?? null,
-      });
+      activitiesById.set(a.id, { name: a.name || "" });
     }
 
     const tripItins = itineraries.filter((i) => i.trip_id === trip.id);
     const active = tripItins.find((i) => i.is_active) ?? tripItins[0];
     const days = (active?.days ?? []) as ItineraryDay[];
-    const tz = deriveTripTz(null, activitiesById);
-    const todayInTz = ymdInTz(now, tz);
-    const todayDay = days.find((d) => d.date === todayInTz) ?? null;
-
-    // Re-derive tz now that we have the day, since today's activities give
-    // a more accurate result than any activity in the trip.
-    const refinedTz = deriveTripTz(todayDay, activitiesById);
-    const refinedToday = ymdInTz(now, refinedTz);
-    const refinedHour = hourInTz(now, refinedTz);
-
-    // Tz-aware activeness: start_date <= today (in tz) <= end_date (or open-ended).
-    const startYmd = (trip.start_date as string || "").slice(0, 10);
-    const endYmd = (trip.end_date as string || "").slice(0, 10);
-    if (!startYmd || refinedToday < startYmd) continue;
-    if (endYmd && refinedToday > endYmd) continue;
 
     const ownerIds: string[] = trip.expand?.log?.owners ?? [];
     for (const userId of ownerIds) {
+      const tz = await tzForUser(userId);
+      const todayInTz = ymdInTz(now, tz);
+      const todayDay = days.find((d) => d.date === todayInTz) ?? null;
+
+      // Tz-aware activeness check.
+      const startYmd = (trip.start_date as string || "").slice(0, 10);
+      const endYmd = (trip.end_date as string || "").slice(0, 10);
+      if (!startYmd || todayInTz < startYmd) continue;
+      if (endYmd && todayInTz > endYmd) continue;
+
       out.push({
         userId,
+        userTz: tz,
         tripId: trip.id,
         tripDestination: trip.destination || trip.name || "your trip",
-        tripTz: refinedTz,
-        todayInTz: refinedToday,
-        hourInTz: refinedHour,
+        todayInTz,
+        hourInTz: hourInTzOf(now, tz),
         todayDay,
         activitiesById,
       });
@@ -200,7 +177,6 @@ function summarizeTodayActivities(ctx: ActiveContext): string {
 }
 
 interface DedupState {
-  // { [tripId]: ymdInTripTz } — last day we sent each kind for this trip.
   morning?: Record<string, string>;
   evening?: Record<string, string>;
 }
@@ -226,7 +202,7 @@ async function writeDedup(
 
 /**
  * Run morning + evening checks against `now`. Designed to be called once
- * per hour by the cron; per-trip-tz hour gating handles the actual timing.
+ * per hour by the cron; per-user-tz hour gating handles the actual timing.
  */
 export async function runTravelNotificationsTick(now: Date = new Date()): Promise<{
   morning: { notified: number; skipped: number };
@@ -239,7 +215,6 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     return { morning: { notified: 0, skipped: 0 }, evening: { notified: 0, skipped: 0 } };
   }
 
-  // Cache user records — multiple contexts may share a user.
   const userCache = new Map<string, Record<string, unknown>>();
   async function loadUser(userId: string): Promise<Record<string, unknown>> {
     const cached = userCache.get(userId);
@@ -249,10 +224,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     return u;
   }
 
-  let mNotified = 0, mSkipped = 0, eNotified = 0, eSkipped = 0;
-
-  // For evening: prefetch today's day_entries so we can suppress the prompt
-  // when the user has already journaled.
+  // For evening: prefetch today's day_entries to suppress if already journaled.
   const tripDateKeys = new Set(contexts.map((c) => `${c.tripId}|${c.todayInTz}`));
   const tripIds = [...new Set(contexts.map((c) => c.tripId))];
   const dateValues = [...new Set(contexts.map((c) => c.todayInTz))];
@@ -272,6 +244,8 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     }
   }
 
+  let mNotified = 0, mSkipped = 0, eNotified = 0, eSkipped = 0;
+
   for (const ctx of contexts) {
     const isMorning = ctx.hourInTz === MORNING_HOUR;
     const isEvening = ctx.hourInTz === EVENING_HOUR;
@@ -289,7 +263,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
         url: tripUrl(ctx.tripId),
         data: { type: "travel_morning", tripId: ctx.tripId },
       }, { preferredOrigins: TRAVEL_ORIGINS });
-      console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.tripTz}): ${result.sent} sent, ${result.expired} expired`);
+      console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);
       await writeDedup(pb, ctx.userId, dedup, "morning", ctx.tripId, ctx.todayInTz);
       mNotified++;
     }
@@ -304,7 +278,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
         url: tripUrl(ctx.tripId),
         data: { type: "travel_evening", tripId: ctx.tripId },
       }, { preferredOrigins: TRAVEL_ORIGINS });
-      console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.tripTz}): ${result.sent} sent, ${result.expired} expired`);
+      console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);
       await writeDedup(pb, ctx.userId, dedup, "evening", ctx.tripId, ctx.todayInTz);
       eNotified++;
     }
