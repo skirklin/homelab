@@ -279,6 +279,36 @@ def parse_raw_chase(
             )
         )
 
+    # DDA accounts not returned by dda/list (e.g. Individual Trust): fall
+    # back to dashboard tile data so they don't silently disappear.
+    for tile in tiles:
+        if tile.accountTileType != "DDA" or tile.mask in seen_dda:
+            continue
+        if tile.tileDetail.currentBalance is None:
+            continue
+        seen_dda.add(tile.mask)
+        account_type = (
+            AccountType.SAVINGS if tile.accountTileDetailType == "SAV" else AccountType.CHECKING
+        )
+        account = db.get_or_create_account(
+            name=tile.nickname,
+            account_type=account_type,
+            institution="chase",
+            external_id=tile.mask,
+            profile=profile,
+        )
+        account_count += 1
+        log.info("Chase DDA (tile): %s ••%s (id=%s)", tile.nickname, tile.mask, account.id)
+        db.insert_balance(
+            Balance(
+                account_id=account.id,
+                as_of=as_of,
+                balance=tile.tileDetail.currentBalance,
+                source="chase_account_tile",
+                raw_file_ref=raw_key,
+            )
+        )
+
     # Transactions
     txn_count_total = 0
     for txn_resp in transactions:

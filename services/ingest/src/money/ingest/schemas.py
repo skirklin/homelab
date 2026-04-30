@@ -623,12 +623,14 @@ class CHAccountTile(_Base):
     """One tile from /svc/rr/accounts/secure/v4/dashboard/tiles/list.accountTiles[].
 
     accountTileType discriminates: "CARD" | "DDA" | "AUTOLEASE" | etc.
+    accountTileDetailType is the sub-type ("CHK", "SAV", "BAC" for cards, ...).
     cardType is only present on CARD tiles."""
 
     accountId: int
     mask: str
     nickname: str
     accountTileType: str
+    accountTileDetailType: str | None = None
     cardType: str | None = None
     tileDetail: CHAccountTileDetail = CHAccountTileDetail()
 
