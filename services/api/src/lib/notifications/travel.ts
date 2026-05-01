@@ -161,7 +161,9 @@ async function findActiveContexts(pb: PocketBase, now: Date): Promise<ActiveCont
 }
 
 function tripUrl(tripId: string): string {
-  return `${TRAVEL_ORIGINS[0]}/trips/${tripId}`;
+  // Travel app routes mount tripId directly at the root (no `/trips/` prefix):
+  //   travel.kirkl.in/{tripId} → TripDetail
+  return `${TRAVEL_ORIGINS[0]}/${tripId}`;
 }
 
 function summarizeTodayActivities(ctx: ActiveContext): string {
