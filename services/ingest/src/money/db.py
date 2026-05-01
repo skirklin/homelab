@@ -80,6 +80,28 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
             """)
 
+        # Enforce one balance row per (account_id, as_of) at the DB level.
+        # The original UNIQUE(account_id, as_of, source) constraint allowed
+        # different sources (e.g. dda/list + tile fallback) to write side-
+        # by-side rows for the same account+date, which inflated SUM-based
+        # net-worth queries. Defensive dedup first, then add the index.
+        has_balances_unique = self.conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='index' AND name='idx_balances_unique_per_date'"
+        ).fetchone()
+        if not has_balances_unique:
+            self.conn.execute("""
+                DELETE FROM balances
+                WHERE id NOT IN (
+                    SELECT MAX(id) FROM balances GROUP BY account_id, as_of
+                )
+            """)
+            self.conn.execute(
+                "CREATE UNIQUE INDEX idx_balances_unique_per_date "
+                "ON balances(account_id, as_of)"
+            )
+            self.conn.commit()
+
         # Add display_category column to transactions if missing
         txn_columns = {
             row["name"] for row in self.conn.execute("PRAGMA table_info(transactions)").fetchall()
@@ -277,8 +299,11 @@ class Database:
     # -- Balances --
 
     def insert_balance(self, balance: Balance) -> None:
+        # OR REPLACE so the latest write wins on (account_id, as_of) collision
+        # — manual overrides update the row, re-syncs refresh recorded_at, and
+        # cross-source duplicates can't accumulate.
         self.conn.execute(
-            """INSERT OR IGNORE INTO balances
+            """INSERT OR REPLACE INTO balances
                (account_id, as_of, balance, source, raw_file_ref, recorded_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (

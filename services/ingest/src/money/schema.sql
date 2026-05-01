@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS balances (
 
 CREATE INDEX IF NOT EXISTS idx_balances_as_of ON balances(as_of);
 CREATE INDEX IF NOT EXISTS idx_balances_account_date ON balances(account_id, as_of);
+-- The UNIQUE INDEX on (account_id, as_of) is added in db._migrate after
+-- dedupe, so existing DBs with duplicates can upgrade cleanly.
 
 CREATE TABLE IF NOT EXISTS transactions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
