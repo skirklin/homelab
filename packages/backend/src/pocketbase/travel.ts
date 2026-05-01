@@ -41,7 +41,8 @@ function activityFromRecord(r: RecordModel): Activity {
     location: r.location || "", lat: r.lat, lng: r.lng, placeId: r.place_id,
     description: r.description || "", rating: r.rating, tags: r.tags || [],
     category: r.category || "", costNotes: r.cost_notes || "",
-    durationEstimate: r.duration_estimate || "", confirmationCode: r.confirmation_code || "",
+    durationEstimate: r.duration_estimate || "", walkMiles: typeof r.walk_miles === "number" ? r.walk_miles : undefined,
+    confirmationCode: r.confirmation_code || "",
     details: r.details, setting: r.setting,
     bookingReqs: r.booking_reqs, ratingCount: r.rating_count,
     photoRef: r.photo_ref,
@@ -357,6 +358,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (a.category !== undefined) d.category = a.category;
     if (a.costNotes !== undefined) d.cost_notes = a.costNotes;
     if (a.durationEstimate !== undefined) d.duration_estimate = a.durationEstimate;
+    if (a.walkMiles !== undefined) d.walk_miles = a.walkMiles;
     if (a.confirmationCode !== undefined) d.confirmation_code = a.confirmationCode;
     if (a.details !== undefined) d.details = a.details;
     if (a.setting !== undefined) d.setting = a.setting;

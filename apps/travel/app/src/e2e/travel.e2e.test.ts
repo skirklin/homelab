@@ -65,6 +65,7 @@ function makeActivity(overrides: Partial<Omit<Activity, "id">> = {}): Omit<Activ
     description: "",
     costNotes: "",
     durationEstimate: "2h",
+    walkMiles: null,
     confirmationCode: "",
     details: "",
     setting: "",

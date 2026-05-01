@@ -82,6 +82,7 @@ export interface Activity {
   category: string;
   costNotes: string;
   durationEstimate: string;
+  walkMiles?: number;
   confirmationCode: string;
   details?: string;
   setting?: string;

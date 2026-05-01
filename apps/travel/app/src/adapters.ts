@@ -57,6 +57,7 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     description: ba.description || "",
     costNotes: ba.costNotes || "",
     durationEstimate: ba.durationEstimate || "",
+    walkMiles: ba.walkMiles ?? null,
     confirmationCode: ba.confirmationCode || "",
     details: ba.details || "",
     setting: (ba.setting as Activity["setting"]) || "",
@@ -175,6 +176,7 @@ export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendA
     category: activity.category,
     costNotes: activity.costNotes,
     durationEstimate: activity.durationEstimate,
+    walkMiles: activity.walkMiles ?? undefined,
     confirmationCode: activity.confirmationCode || "",
     details: activity.details || undefined,
     setting: activity.setting || undefined,
@@ -195,6 +197,7 @@ export function activityUpdatesToBackend(fields: {
   description?: string;
   costNotes?: string;
   durationEstimate?: string;
+  walkMiles?: number | null;
   confirmationCode?: string;
   details?: string;
   setting?: string;
@@ -214,6 +217,7 @@ export function activityUpdatesToBackend(fields: {
   if (fields.description !== undefined) updates.description = fields.description;
   if (fields.costNotes !== undefined) updates.costNotes = fields.costNotes;
   if (fields.durationEstimate !== undefined) updates.durationEstimate = fields.durationEstimate;
+  if (fields.walkMiles !== undefined) updates.walkMiles = fields.walkMiles ?? undefined;
   if (fields.confirmationCode !== undefined) updates.confirmationCode = fields.confirmationCode;
   if (fields.details !== undefined) updates.details = fields.details;
   if (fields.setting !== undefined) updates.setting = fields.setting;

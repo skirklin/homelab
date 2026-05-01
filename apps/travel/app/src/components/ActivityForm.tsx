@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Form, Input, Select, Button, Space, DatePicker, Checkbox } from "antd";
+import { Form, Input, InputNumber, Select, Button, Space, DatePicker, Checkbox } from "antd";
 import dayjs from "dayjs";
 
 const { TextArea } = Input;
@@ -68,6 +68,7 @@ export function ActivityForm() {
           description: values.description as string,
           costNotes: values.costNotes as string,
           durationEstimate: values.durationEstimate as string,
+          walkMiles: (values.walkMiles as number | null | undefined) ?? null,
           confirmationCode: values.confirmationCode as string,
           details: values.details as string,
           setting: values.setting as string,
@@ -90,6 +91,7 @@ export function ActivityForm() {
             description: (values.description as string) || "",
             costNotes: (values.costNotes as string) || "",
             durationEstimate: (values.durationEstimate as string) || "",
+            walkMiles: (values.walkMiles as number | null | undefined) ?? null,
             confirmationCode: (values.confirmationCode as string) || "",
             details: (values.details as string) || "",
             setting: ((values.setting as string) || "") as Activity["setting"],
@@ -133,6 +135,7 @@ export function ActivityForm() {
                 description: existing.description,
                 costNotes: existing.costNotes,
                 durationEstimate: existing.durationEstimate,
+                walkMiles: existing.walkMiles ?? undefined,
                 confirmationCode: existing.confirmationCode,
                 details: existing.details,
                 setting: existing.setting,
@@ -221,6 +224,9 @@ export function ActivityForm() {
         <Space size="middle">
           <Form.Item name="durationEstimate" label="Duration">
             <Input placeholder="e.g., 2-3 hours" />
+          </Form.Item>
+          <Form.Item name="walkMiles" label="Walked (mi)" extra="Distance on foot.">
+            <InputNumber min={0} step={0.1} placeholder="e.g., 5.2" style={{ width: 120 }} />
           </Form.Item>
           <Form.Item name="costNotes" label="Cost">
             <Input placeholder="e.g., $20 pp" />

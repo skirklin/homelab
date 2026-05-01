@@ -197,6 +197,9 @@ export function ActivityList({ activities, showReflection = false }: ActivityLis
                     )
                   )}
                   {!isFlight && a.durationEstimate && <span><ClockCircleOutlined /> {a.durationEstimate}</span>}
+                  {!isFlight && a.walkMiles != null && a.walkMiles > 0 && (
+                    <span>{a.walkMiles} mi</span>
+                  )}
                   {a.costNotes && <span><DollarOutlined /> {a.costNotes}</span>}
                   {a.confirmationCode && <span>Conf: {a.confirmationCode}</span>}
                 </Meta>

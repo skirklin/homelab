@@ -113,6 +113,7 @@ export interface Activity {
   description: string;
   costNotes: string;
   durationEstimate: string;
+  walkMiles: number | null;
   confirmationCode: string;
   details: string;
   setting: "outdoor" | "indoor" | "either" | "";
