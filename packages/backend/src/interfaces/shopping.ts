@@ -27,15 +27,23 @@ export interface ShoppingBackend {
 
   // --- Item CRUD ---
 
+  /** Caller must look up `categoryId` from local history (e.g. via shopping context) — adapter does not fetch from history. */
   addItem(
     listId: string,
     ingredient: string,
     userId: string,
-    options?: { categoryId?: string; note?: string },
+    categoryId: string,
+    note?: string,
   ): Promise<string>;
 
   updateItem(itemId: string, updates: { ingredient?: string; note?: string }): Promise<void>;
-  updateItemCategory(itemId: string, categoryId: string, ingredient: string): Promise<void>;
+  /** `listId` is required so the adapter can upsert history without a server lookup. */
+  updateItemCategory(
+    itemId: string,
+    listId: string,
+    categoryId: string,
+    ingredient: string,
+  ): Promise<void>;
   toggleItem(itemId: string, checked: boolean, userId: string): Promise<void>;
   deleteItem(itemId: string): Promise<void>;
 

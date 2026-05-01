@@ -1,18 +1,20 @@
 /**
- * Lightweight IndexedDB key/value cache for offline reads.
+ * Lightweight IndexedDB cache + mutation-queue persistence.
  *
- * One global object store. Keys are namespaced strings like
- * `travel:trips:<logId>` so each backend can claim its own prefix.
+ * Two object stores in one DB:
+ * - `kv`: key/value snapshots for offline reads. Keys like `travel:trips:<logId>`.
+ * - `mutations`: optimistic-write queue, keyed by mutation id. Drained on ack/reject.
  */
 import { openDB, type IDBPDatabase } from "idb";
 
 const DB_NAME = "kirkl-cache";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "kv";
+export const MUTATIONS_STORE = "mutations";
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
-function getDb(): Promise<IDBPDatabase> {
+export function getDb(): Promise<IDBPDatabase> {
   if (typeof indexedDB === "undefined") {
     return Promise.reject(new Error("IndexedDB unavailable"));
   }
@@ -20,6 +22,9 @@ function getDb(): Promise<IDBPDatabase> {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(db) {
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+        if (!db.objectStoreNames.contains(MUTATIONS_STORE)) {
+          db.createObjectStore(MUTATIONS_STORE, { keyPath: "id" });
+        }
       },
     });
   }

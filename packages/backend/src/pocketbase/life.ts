@@ -1,11 +1,16 @@
 /**
  * PocketBase implementation of LifeBackend.
+ *
+ * Writes route through the optimistic wrapper. Entries subscription uses
+ * wpb so optimistic mutations fan to the right log.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { LifeBackend } from "../interfaces/life";
 import type { LifeLog, LifeManifest, LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
+import { newId } from "../cache/ids";
+import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
 
 function logFromRecord(r: RecordModel): LifeLog {
   return {
@@ -32,7 +37,11 @@ function entryFromRecord(r: RecordModel): LifeEntry {
 }
 
 export class PocketBaseLifeBackend implements LifeBackend {
-  constructor(private pb: () => PocketBase) {}
+  private wpb: WrappedPocketBase;
+
+  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
+    this.wpb = wpb ?? wrapPocketBase(pb);
+  }
 
   async getOrCreateLog(userId: string): Promise<LifeLog> {
     const user = await this.pb().collection("users").getOne(userId);
@@ -47,21 +56,23 @@ export class PocketBaseLifeBackend implements LifeBackend {
       }
     }
 
-    const r = await this.pb().collection("life_logs").create({
+    const id = newId();
+    const r = await this.wpb.collection("life_logs").create({
+      id,
       name: "Life Log",
       owners: [userId],
       manifest: { widgets: [] },
     });
-    await this.pb().collection("users").update(userId, { life_log_id: r.id });
-    return logFromRecord(r);
+    await this.wpb.collection("users").update(userId, { life_log_id: id });
+    return logFromRecord(r as RecordModel);
   }
 
   async updateManifest(logId: string, manifest: LifeManifest): Promise<void> {
-    await this.pb().collection("life_logs").update(logId, { manifest });
+    await this.wpb.collection("life_logs").update(logId, { manifest });
   }
 
   async clearSampleSchedule(logId: string): Promise<void> {
-    await this.pb().collection("life_logs").update(logId, { sample_schedule: null });
+    await this.wpb.collection("life_logs").update(logId, { sample_schedule: null });
   }
 
   async addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string> {
@@ -69,14 +80,16 @@ export class PocketBaseLifeBackend implements LifeBackend {
     if (options?.notes) {
       eventData.notes = options.notes;
     }
-    const r = await this.pb().collection("life_events").create({
+    const id = newId();
+    await this.wpb.collection("life_events").create({
+      id,
       log: logId,
       subject_id: widgetId,
       timestamp: (options?.timestamp ?? new Date()).toISOString(),
       created_by: userId,
       data: eventData,
     });
-    return r.id;
+    return id;
   }
 
   async updateEntry(entryId: string, updates: { timestamp?: Date; data?: Record<string, unknown>; notes?: string }): Promise<void> {
@@ -91,22 +104,24 @@ export class PocketBaseLifeBackend implements LifeBackend {
       // Merge notes into existing data
       patch.data = { ...(record.data || {}), notes: updates.notes };
     }
-    await this.pb().collection("life_events").update(entryId, patch);
+    await this.wpb.collection("life_events").update(entryId, patch);
   }
 
   async deleteEntry(entryId: string): Promise<void> {
-    await this.pb().collection("life_events").delete(entryId);
+    await this.wpb.collection("life_events").delete(entryId);
   }
 
   async addSampleResponse(logId: string, responses: Record<string, unknown>, userId: string): Promise<string> {
-    const r = await this.pb().collection("life_events").create({
+    const id = newId();
+    await this.wpb.collection("life_events").create({
+      id,
       log: logId,
       subject_id: "__sample__",
       timestamp: new Date().toISOString(),
       created_by: userId,
       data: { ...responses, source: "sample" },
     });
-    return r.id;
+    return id;
   }
 
   subscribeToEntries(logId: string, onEntries: (entries: LifeEntry[]) => void): Unsubscribe {
@@ -125,11 +140,11 @@ export class PocketBaseLifeBackend implements LifeBackend {
       if (cancelled) return;
       for (const r of records) entriesMap.set(r.id, entryFromRecord(r));
       emit();
-    }).catch(() => emit());
+    }).catch((e) => { if (!cancelled) console.warn("[life] initial fetch failed", e); });
 
-    // Realtime
+    // Realtime — optimistic-aware via wpb with predicate.
     let unsub: (() => void) | undefined;
-    this.pb().collection("life_events").subscribe("*", (e) => {
+    this.wpb.collection("life_events").subscribe("*", (e) => {
       if (cancelled || e.record.log !== logId) return;
       if (e.action === "delete") {
         entriesMap.delete(e.record.id);
@@ -137,7 +152,7 @@ export class PocketBaseLifeBackend implements LifeBackend {
         entriesMap.set(e.record.id, entryFromRecord(e.record));
       }
       emit();
-    }).then((fn) => { unsub = fn; });
+    }, { local: (r) => r.log === logId }).then((fn) => { unsub = fn; });
 
     return () => {
       cancelled = true;

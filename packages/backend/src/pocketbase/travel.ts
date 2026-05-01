@@ -1,11 +1,19 @@
 /**
  * PocketBase implementation of TravelBackend.
+ *
+ * Writes route through the optimistic wrapper. Trip/activity/itinerary/day-entry
+ * subscriptions use wpb so optimistic mutations fan to the right log. The two
+ * read-then-write spots (`getOrCreateLog`, `upsertDayEntry`) keep their server
+ * lookup since the filter shape (`trip = X && date = Y`) isn't expressible
+ * against the local cache without v2 query-time filtering.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
 import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, TripProposal, DayEntry } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
+import { newId } from "../cache/ids";
+import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
 
 function logFromRecord(r: RecordModel): TravelLog {
   return {
@@ -87,7 +95,11 @@ function itineraryFromRecord(r: RecordModel): Itinerary {
 }
 
 export class PocketBaseTravelBackend implements TravelBackend {
-  constructor(private pb: () => PocketBase) {}
+  private wpb: WrappedPocketBase;
+
+  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
+    this.wpb = wpb ?? wrapPocketBase(pb);
+  }
 
   async getOrCreateLog(userId: string): Promise<string> {
     const user = await this.pb().collection("users").getOne(userId);
@@ -96,70 +108,78 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (firstId) {
       try { await this.pb().collection("travel_logs").getOne(firstId); return firstId; } catch {}
     }
-    const log = await this.pb().collection("travel_logs").create({
-      name: "My Travel Log", owners: [userId],
+    const id = newId();
+    await this.wpb.collection("travel_logs").create({
+      id,
+      name: "My Travel Log",
+      owners: [userId],
     });
-    const newSlugs = { ...slugs, default: log.id };
-    await this.pb().collection("users").update(userId, { travel_slugs: newSlugs });
-    return log.id;
+    const newSlugs = { ...slugs, default: id };
+    await this.wpb.collection("users").update(userId, { travel_slugs: newSlugs });
+    return id;
   }
 
   async addTrip(logId: string, trip: Omit<Trip, "id" | "log" | "created" | "updated">): Promise<string> {
-    const r = await this.pb().collection("travel_trips").create({ log: logId, ...this.tripData(trip) });
-    return r.id;
+    const id = newId();
+    await this.wpb.collection("travel_trips").create({ id, log: logId, ...this.tripData(trip) });
+    return id;
   }
 
   async updateTrip(tripId: string, updates: Partial<Omit<Trip, "id" | "log" | "created" | "updated">>): Promise<void> {
-    await this.pb().collection("travel_trips").update(tripId, this.tripData(updates));
+    await this.wpb.collection("travel_trips").update(tripId, this.tripData(updates));
   }
 
   async deleteTrip(tripId: string): Promise<void> {
-    await this.pb().collection("travel_trips").delete(tripId);
+    await this.wpb.collection("travel_trips").delete(tripId);
   }
 
   async flagTrip(tripId: string, flagged: boolean, comment?: string): Promise<void> {
-    await this.pb().collection("travel_trips").update(tripId, { flagged_for_review: flagged, review_comment: comment || "" });
+    await this.wpb.collection("travel_trips").update(tripId, { flagged_for_review: flagged, review_comment: comment || "" });
   }
 
   async addActivity(logId: string, activity: Omit<Activity, "id" | "log" | "created" | "updated">): Promise<string> {
-    const r = await this.pb().collection("travel_activities").create({ log: logId, ...this.activityData(activity) });
-    return r.id;
+    const id = newId();
+    await this.wpb.collection("travel_activities").create({ id, log: logId, ...this.activityData(activity) });
+    return id;
   }
 
   async updateActivity(activityId: string, updates: Partial<Omit<Activity, "id" | "log" | "created" | "updated">>): Promise<void> {
-    await this.pb().collection("travel_activities").update(activityId, this.activityData(updates));
+    await this.wpb.collection("travel_activities").update(activityId, this.activityData(updates));
   }
 
   async deleteActivity(activityId: string): Promise<void> {
-    await this.pb().collection("travel_activities").delete(activityId);
+    await this.wpb.collection("travel_activities").delete(activityId);
   }
 
   async addItinerary(logId: string, tripId: string, itinerary: Omit<Itinerary, "id" | "log" | "trip" | "created" | "updated">): Promise<string> {
-    const r = await this.pb().collection("travel_itineraries").create({
-      log: logId, trip_id: tripId, name: itinerary.name, days: itinerary.days || [],
+    const id = newId();
+    await this.wpb.collection("travel_itineraries").create({
+      id, log: logId, trip_id: tripId, name: itinerary.name, days: itinerary.days || [],
     });
-    return r.id;
+    return id;
   }
 
   async updateItinerary(itineraryId: string, updates: Partial<Omit<Itinerary, "id" | "log" | "trip" | "created" | "updated">>): Promise<void> {
     const data: Record<string, unknown> = {};
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.days !== undefined) data.days = updates.days;
-    await this.pb().collection("travel_itineraries").update(itineraryId, data);
+    await this.wpb.collection("travel_itineraries").update(itineraryId, data);
   }
 
   async setItineraryDays(itineraryId: string, days: ItineraryDay[]): Promise<void> {
-    await this.pb().collection("travel_itineraries").update(itineraryId, { days });
+    await this.wpb.collection("travel_itineraries").update(itineraryId, { days });
   }
 
   async deleteItinerary(itineraryId: string): Promise<void> {
-    await this.pb().collection("travel_itineraries").delete(itineraryId);
+    await this.wpb.collection("travel_itineraries").delete(itineraryId);
   }
 
   // --- Trip Proposals ---
 
   async addProposal(tripId: string, proposal: Omit<TripProposal, "id" | "trip" | "state" | "resolvedAt" | "created" | "updated">): Promise<string> {
-    const r = await this.pb().collection("trip_proposals").create({
+    const id = newId();
+    await this.wpb.collection("trip_proposals").create({
+      id,
       trip: tripId,
       question: proposal.question || "",
       reasoning: proposal.reasoning || "",
@@ -169,7 +189,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
       overall_feedback: proposal.overallFeedback || "",
       state: "open",
     });
-    return r.id;
+    return id;
   }
 
   async updateProposal(proposalId: string, updates: Partial<Omit<TripProposal, "id" | "trip" | "created" | "updated">>): Promise<void> {
@@ -184,18 +204,18 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (updates.resolvedAt !== undefined) d.resolved_at = updates.resolvedAt;
     if (updates.userRespondedAt !== undefined) d.user_responded_at = updates.userRespondedAt;
     if (updates.claudeLastSeenAt !== undefined) d.claude_last_seen_at = updates.claudeLastSeenAt;
-    await this.pb().collection("trip_proposals").update(proposalId, d);
+    await this.wpb.collection("trip_proposals").update(proposalId, d);
   }
 
   async resolveProposal(proposalId: string): Promise<void> {
-    await this.pb().collection("trip_proposals").update(proposalId, {
+    await this.wpb.collection("trip_proposals").update(proposalId, {
       state: "resolved",
       resolved_at: new Date().toISOString(),
     });
   }
 
   async deleteProposal(proposalId: string): Promise<void> {
-    await this.pb().collection("trip_proposals").delete(proposalId);
+    await this.wpb.collection("trip_proposals").delete(proposalId);
   }
 
   async getProposal(proposalId: string): Promise<TripProposal | null> {
@@ -225,25 +245,29 @@ export class PocketBaseTravelBackend implements TravelBackend {
     date: string,
     fields: { text?: string; highlight?: string; mood?: number | null },
   ): Promise<string> {
+    // Filter-based lookup against (trip, date) — server fetch only, since
+    // local-cache filter evaluation is a v2 concern. After the lookup, the
+    // write goes through wpb so the UI sees the change optimistically.
     const filter = this.pb().filter("trip = {:tripId} && date = {:date}", { tripId, date });
     const data: Record<string, unknown> = {};
     if (fields.text !== undefined) data.text = fields.text;
     if (fields.highlight !== undefined) data.highlight = fields.highlight;
     if (fields.mood !== undefined) data.mood = fields.mood ?? null;
     try {
-      const existing = await this.pb().collection("travel_day_entries").getFirstListItem(filter);
-      await this.pb().collection("travel_day_entries").update(existing.id, data);
+      const existing = await this.pb().collection("travel_day_entries").getFirstListItem(filter, { $autoCancel: false });
+      await this.wpb.collection("travel_day_entries").update(existing.id, data);
       return existing.id;
     } catch {
-      const r = await this.pb().collection("travel_day_entries").create({
-        log: logId, trip: tripId, date, ...data,
+      const id = newId();
+      await this.wpb.collection("travel_day_entries").create({
+        id, log: logId, trip: tripId, date, ...data,
       });
-      return r.id;
+      return id;
     }
   }
 
   async deleteDayEntry(entryId: string): Promise<void> {
-    await this.pb().collection("travel_day_entries").delete(entryId);
+    await this.wpb.collection("travel_day_entries").delete(entryId);
   }
 
   subscribeToLog(
@@ -264,7 +288,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     const itinerariesMap = new Map<string, Itinerary>();
     const dayEntriesMap = new Map<string, DayEntry>();
 
-    // Log metadata
+    // Log metadata — optimistic-aware via wpb.
     this.sub("travel_logs", logId, () => cancelled, unsubs, {
       onData: (r) => handlers.onLog(logFromRecord(r)),
       onDelete: () => handlers.onDeleted?.(),
@@ -346,6 +370,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
     return d;
   }
 
+  /** Subscribe to a single record. Optimistic events for that id are included. */
   private sub(
     col: string,
     id: string,
@@ -358,7 +383,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
       .then((r) => { if (!cancelled()) cb.onData(r); })
       .catch(() => {});
 
-    this.pb().collection(col)
+    this.wpb.collection(col)
       .subscribe(id, (e) => {
         if (cancelled()) return;
         if (e.action === "delete") cb.onDelete?.();
@@ -367,6 +392,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
       .then((unsub) => unsubs.push(unsub));
   }
 
+  /** Subscribe to a filtered collection with optimistic events. */
   private subCol(
     col: string,
     cancelled: () => boolean,
@@ -383,11 +409,11 @@ export class PocketBaseTravelBackend implements TravelBackend {
       .then((rs) => { if (!cancelled()) opts.onInitial(rs); })
       .catch((e) => { if (!cancelled()) console.warn(`[travel] subCol ${col} failed`, e); });
 
-    this.pb().collection(col)
+    this.wpb.collection(col)
       .subscribe("*", (e) => {
-        if (cancelled() || !opts.belongsTo(e.record)) return;
+        if (cancelled() || !opts.belongsTo(e.record as RecordModel)) return;
         opts.onChange(e.action, e.record);
-      })
+      }, { local: (r) => opts.belongsTo(r as RecordModel) })
       .then((unsub) => unsubs.push(unsub));
   }
 }

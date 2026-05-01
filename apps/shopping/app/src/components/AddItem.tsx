@@ -94,7 +94,7 @@ export function AddItem() {
     const trimmedNote = note.trim() || undefined;
     const listId = state.list?.id;
     if (!listId) return;
-    shopping.addItem(listId, trimmedIngredient, user.uid, { categoryId, note: trimmedNote }).catch((error) => {
+    shopping.addItem(listId, trimmedIngredient, user.uid, categoryId, trimmedNote).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };

@@ -1,15 +1,20 @@
 /**
  * PocketBase implementation of UpkeepBackend (unified task system).
+ *
+ * Writes route through the optimistic wrapper. addTask collapses the
+ * old 3-RTT (create → fetch parent → update path) flow into a single
+ * create with a client-computed path — the parent is read from the
+ * wpb's in-memory queue, which the active subscription has already
+ * populated. Falls back to a 1-extra-fetch path if the parent isn't
+ * cached (e.g. deep link), still beating the original 3 RTTs.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { UpkeepBackend } from "../interfaces/upkeep";
 import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
 import type { Unsubscribe } from "../types/common";
-
-// --- Pagination limits ---
-
-const COMPLETIONS_PAGE_SIZE = 100;
+import { newId } from "../cache/ids";
+import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
 
 function listFromRecord(r: RecordModel): TaskList {
   return {
@@ -56,22 +61,28 @@ function completionFromRecord(r: RecordModel): TaskCompletion {
 }
 
 export class PocketBaseUpkeepBackend implements UpkeepBackend {
-  constructor(private pb: () => PocketBase) {}
+  private wpb: WrappedPocketBase;
+
+  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
+    this.wpb = wpb ?? wrapPocketBase(pb);
+  }
 
   async createList(name: string, userId: string): Promise<string> {
-    const list = await this.pb().collection("task_lists").create({
+    const id = newId();
+    await this.wpb.collection("task_lists").create({
+      id,
       name,
       owners: [userId],
     }, { $autoCancel: false });
-    return list.id;
+    return id;
   }
 
   async renameList(listId: string, name: string): Promise<void> {
-    await this.pb().collection("task_lists").update(listId, { name });
+    await this.wpb.collection("task_lists").update(listId, { name });
   }
 
   async deleteList(listId: string): Promise<void> {
-    await this.pb().collection("task_lists").delete(listId);
+    await this.wpb.collection("task_lists").delete(listId);
   }
 
   async getList(listId: string): Promise<TaskList | null> {
@@ -82,15 +93,36 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     }
   }
 
+  /**
+   * Resolve the parent path locally if cached, else fetch it from the server.
+   * Caching gets us the 1-RTT addTask; fallback covers deep-link / fresh-mount cases.
+   */
+  private async resolveParentPath(parentId: string): Promise<string | null> {
+    const cached = this.wpb.collection("tasks").view<RecordModel>(parentId);
+    if (cached && typeof cached.path === "string" && cached.path.length > 0) {
+      return cached.path;
+    }
+    try {
+      const parent = await this.pb().collection("tasks").getOne(parentId, { $autoCancel: false });
+      return parent.path || parent.id;
+    } catch {
+      return null;
+    }
+  }
+
   async addTask(
     listId: string,
     task: Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">,
   ): Promise<string> {
-    // Create the record first to get an ID, then set the path
-    const record = await this.pb().collection("tasks").create({
+    const id = newId();
+    const parentPath = task.parentId ? await this.resolveParentPath(task.parentId) : null;
+    const path = parentPath ? `${parentPath}/${id}` : id;
+
+    await this.wpb.collection("tasks").create({
+      id,
       list: listId,
       parent_id: task.parentId || "",
-      path: "", // placeholder, set below
+      path,
       position: task.position ?? 0,
       name: task.name,
       description: task.description || "",
@@ -102,17 +134,9 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       notify_users: task.notifyUsers || [],
       tags: task.tags || [],
       collapsed: false,
-    });
+    }, { $autoCancel: false });
 
-    // Build path: parent's path + "/" + own ID, or just own ID for root
-    let path = record.id;
-    if (task.parentId) {
-      const parent = await this.pb().collection("tasks").getOne(task.parentId);
-      path = `${parent.path}/${record.id}`;
-    }
-    await this.pb().collection("tasks").update(record.id, { path });
-
-    return record.id;
+    return id;
   }
 
   async updateTask(
@@ -132,106 +156,132 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     if (updates.collapsed !== undefined) data.collapsed = updates.collapsed;
     if (updates.position !== undefined) data.position = updates.position;
     if (updates.parentId !== undefined) data.parent_id = updates.parentId;
-    await this.pb().collection("tasks").update(taskId, data);
+    await this.wpb.collection("tasks").update(taskId, data);
   }
 
   async deleteTask(taskId: string): Promise<void> {
-    // Delete the task and all descendants (by path prefix)
+    // Need the descendant set; query PB once for the path-prefix match.
+    // (Local-cache-based descendant filtering is a v2 query-engine concern.)
     const task = await this.pb().collection("tasks").getOne(taskId);
     const descendants = await this.pb().collection("tasks").getFullList({
       filter: this.pb().filter("path ~ {:prefix}", { prefix: `${task.path}/%` }),
       $autoCancel: false,
     });
-    // Delete children first (deepest first to avoid cascade issues)
+    // Delete deepest first to avoid orphans mid-cascade.
     descendants.sort((a, b) => b.path.length - a.path.length);
     for (const d of descendants) {
-      await this.pb().collection("tasks").delete(d.id);
+      await this.wpb.collection("tasks").delete(d.id);
     }
-    await this.pb().collection("tasks").delete(taskId);
+    await this.wpb.collection("tasks").delete(taskId);
   }
 
   async moveTask(taskId: string, newParentId: string | null, position: number): Promise<void> {
     const task = await this.pb().collection("tasks").getOne(taskId);
     const oldPath = task.path;
 
-    // Compute new path
     let newPath: string;
     if (newParentId) {
-      const parent = await this.pb().collection("tasks").getOne(newParentId);
-      newPath = `${parent.path}/${taskId}`;
+      const parentPath = await this.resolveParentPath(newParentId);
+      newPath = parentPath ? `${parentPath}/${taskId}` : taskId;
     } else {
       newPath = taskId;
     }
 
-    // Update the task itself
-    await this.pb().collection("tasks").update(taskId, {
+    await this.wpb.collection("tasks").update(taskId, {
       parent_id: newParentId || "",
       path: newPath,
       position,
     });
 
-    // Update all descendants' paths (swap prefix)
+    // Rewrite descendants' paths (server-side fetch; predicates against the
+    // local cache aren't available in v1).
     const descendants = await this.pb().collection("tasks").getFullList({
       filter: this.pb().filter("path ~ {:prefix}", { prefix: `${oldPath}/%` }),
       $autoCancel: false,
     });
     for (const d of descendants) {
       const updatedPath = newPath + d.path.slice(oldPath.length);
-      await this.pb().collection("tasks").update(d.id, { path: updatedPath });
+      await this.wpb.collection("tasks").update(d.id, { path: updatedPath });
     }
   }
 
   async snoozeTask(taskId: string, until: Date): Promise<void> {
-    await this.pb().collection("tasks").update(taskId, { snoozed_until: until.toISOString() });
+    await this.wpb.collection("tasks").update(taskId, { snoozed_until: until.toISOString() });
   }
 
   async unsnoozeTask(taskId: string): Promise<void> {
-    await this.pb().collection("tasks").update(taskId, { snoozed_until: null });
+    await this.wpb.collection("tasks").update(taskId, { snoozed_until: null });
   }
 
   /**
-   * Recompute `last_completed` on a task from the max timestamp across its
-   * task_events. Keeps the denormalized field honest after any event change
-   * (create, update, delete). If no events remain, clears the field.
+   * Compute the latest event timestamp for a task from the local wpb queue.
+   * Includes pending mutations (creates/updates/deletes), so the result
+   * reflects the about-to-be-applied state. Returns null if no events.
    */
-  private async recomputeLastCompleted(taskId: string): Promise<void> {
-    const events = await this.pb().collection("task_events").getList(1, 1, {
-      filter: `subject_id="${taskId}"`,
-      sort: "-timestamp",
-    });
-    const latest = events.items[0]?.timestamp ?? null;
-    await this.pb().collection("tasks").update(taskId, { last_completed: latest });
+  private computeLastCompleted(taskId: string): string | null {
+    const events = this.wpb.collection("task_events").viewCollection<RecordModel>(
+      (r) => r.subject_id === taskId,
+    );
+    let max: string | null = null;
+    for (const e of events) {
+      const ts = e.timestamp as string | undefined;
+      if (ts && (!max || ts > max)) max = ts;
+    }
+    return max;
+  }
+
+  /**
+   * Sync `tasks.last_completed` with what the local event view says is latest.
+   * Skips the network write if it would be a no-op. Caller must ensure the
+   * relevant wpb mutation has already been pushed (so its effect is visible
+   * in the local view).
+   */
+  private async syncLastCompleted(taskId: string): Promise<void> {
+    const cached = this.wpb.collection("tasks").view<RecordModel>(taskId);
+    const current = (cached?.last_completed as string | null) ?? null;
+    const next = this.computeLastCompleted(taskId);
+    if (current === next) return;
+    await this.wpb.collection("tasks").update(taskId, { last_completed: next });
   }
 
   async completeTask(taskId: string, userId: string, options?: { notes?: string; completedAt?: Date }): Promise<void> {
     const timestamp = (options?.completedAt ?? new Date()).toISOString();
-    const task = await this.pb().collection("tasks").getOne(taskId);
-    await this.pb().collection("task_events").create({
-      list: task.list,
+    const cached = this.wpb.collection("tasks").view<RecordModel>(taskId);
+    const listId = cached?.list as string | undefined;
+    const list = listId ?? (await this.pb().collection("tasks").getOne(taskId)).list;
+
+    // Push the event into wpb (synchronously visible in the local view).
+    const eventCreate = this.wpb.collection("task_events").create({
+      id: newId(),
+      list,
       subject_id: taskId,
       timestamp,
       created_by: userId,
       data: options?.notes ? { notes: options.notes } : {},
     });
-    await this.recomputeLastCompleted(taskId);
+    // Now syncLastCompleted scans the queue (including the just-pushed event)
+    // and only fires a tasks.update if the value actually changed.
+    await Promise.all([eventCreate, this.syncLastCompleted(taskId)]);
   }
 
   async toggleComplete(taskId: string): Promise<void> {
-    const task = await this.pb().collection("tasks").getOne(taskId);
-    await this.pb().collection("tasks").update(taskId, { completed: !task.completed });
+    const cached = this.wpb.collection("tasks").view<RecordModel>(taskId);
+    const current = cached ? !!cached.completed : (await this.pb().collection("tasks").getOne(taskId)).completed;
+    await this.wpb.collection("tasks").update(taskId, { completed: !current });
   }
 
   async toggleTaskNotification(taskId: string, userId: string, enable: boolean): Promise<void> {
     if (enable) {
-      await this.pb().collection("tasks").update(taskId, { "notify_users+": userId });
+      await this.wpb.collection("tasks").update(taskId, { "notify_users+": userId });
     } else {
-      await this.pb().collection("tasks").update(taskId, { "notify_users-": userId });
+      await this.wpb.collection("tasks").update(taskId, { "notify_users-": userId });
     }
   }
 
   async toggleCollapsed(taskId: string): Promise<void> {
-    const task = await this.pb().collection("tasks").getOne(taskId);
-    await this.pb().collection("tasks").update(taskId, { collapsed: !task.collapsed });
+    const cached = this.wpb.collection("tasks").view<RecordModel>(taskId);
+    const current = cached ? !!cached.collapsed : (await this.pb().collection("tasks").getOne(taskId)).collapsed;
+    await this.wpb.collection("tasks").update(taskId, { collapsed: !current });
   }
 
   async getSubtree(rootTaskId: string): Promise<Task[]> {
@@ -252,12 +302,9 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
   }
 
   async instantiateTemplate(templateRootId: string, tags: string[]): Promise<string> {
-    // Get the full template subtree
     const subtree = await this.getSubtree(templateRootId);
-    // Sort by path length (parents first)
     subtree.sort((a, b) => a.path.length - b.path.length);
 
-    // Map old IDs to new IDs
     const idMap = new Map<string, string>();
 
     for (const task of subtree) {
@@ -273,7 +320,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
         completed: false,
         snoozedUntil: null,
         notifyUsers: [],
-        tags: tags.filter((t) => !t.startsWith("template:")), // apply target tags, strip template tags
+        tags: tags.filter((t) => !t.startsWith("template:")),
         collapsed: task.collapsed,
       });
       idMap.set(task.id, newId);
@@ -283,24 +330,29 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
   }
 
   async updateCompletion(eventId: string, updates: { notes?: string; timestamp?: Date }): Promise<void> {
-    const record = await this.pb().collection("task_events").getOne(eventId);
+    const cached = this.wpb.collection("task_events").view<RecordModel>(eventId);
+    const record: RecordModel = cached ?? await this.pb().collection("task_events").getOne(eventId);
     const data: Record<string, unknown> = {};
     if (updates.timestamp) data.timestamp = updates.timestamp.toISOString();
     if (updates.notes !== undefined) {
-      const existing = record.data || {};
+      const existing = (record.data as Record<string, unknown>) || {};
       data.data = { ...existing, notes: updates.notes.trim() || undefined };
     }
-    await this.pb().collection("task_events").update(eventId, data);
-    // Timestamp edit may change which event is "latest" — keep last_completed honest.
+    const eventUpdate = this.wpb.collection("task_events").update(eventId, data);
     if (updates.timestamp !== undefined) {
-      await this.recomputeLastCompleted(record.subject_id);
+      await Promise.all([eventUpdate, this.syncLastCompleted(record.subject_id as string)]);
+    } else {
+      await eventUpdate;
     }
   }
 
   async deleteCompletion(eventId: string): Promise<void> {
-    const record = await this.pb().collection("task_events").getOne(eventId);
-    await this.pb().collection("task_events").delete(eventId);
-    await this.recomputeLastCompleted(record.subject_id);
+    const cached = this.wpb.collection("task_events").view<RecordModel>(eventId);
+    const record: RecordModel = cached ?? await this.pb().collection("task_events").getOne(eventId);
+    const subjectId = record.subject_id as string;
+    // Push the delete (queue reflects it immediately), then sync.
+    const eventDelete = this.wpb.collection("task_events").delete(eventId);
+    await Promise.all([eventDelete, this.syncLastCompleted(subjectId)]);
   }
 
   subscribeToList(
@@ -317,18 +369,27 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     const isCancelled = () => cancelled;
     const unsubs: Array<() => void> = [];
     const tasksMap = new Map<string, Task>();
+    const completionsMap = new Map<string, TaskCompletion>();
 
     const emitTasks = () => {
       if (!cancelled) handlers.onTasks(Array.from(tasksMap.values()));
     };
+    const emitCompletions = () => {
+      if (cancelled) return;
+      // UI expects newest first, matching the prior `-timestamp` sort.
+      const list = Array.from(completionsMap.values()).sort(
+        (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+      );
+      handlers.onCompletions(list);
+    };
 
-    // List metadata
+    // List metadata — optimistic-aware via wpb.
     this.initSubscribeToRecord("task_lists", listId, isCancelled, unsubs, {
       onData: (r) => handlers.onList(listFromRecord(r)),
       onDelete: () => handlers.onDeleted?.(),
     });
 
-    // Tasks
+    // Tasks — optimistic-aware via wpb with predicate.
     this.initSubscribeToCollection("tasks", isCancelled, unsubs, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       belongsTo: (r) => r.list === listId,
@@ -339,13 +400,16 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       },
     });
 
-    // Completions — reload on any change
-    this.initSubscribeToReload("task_events", isCancelled, unsubs, {
+    // Completions — per-record via wpb so events land in the optimistic queue
+    // (lets `computeLastCompleted` scan locally without a server round-trip).
+    this.initSubscribeToCollection("task_events", isCancelled, unsubs, {
       filter: this.pb().filter("list = {:listId}", { listId }),
-      sort: "-timestamp",
-      perPage: COMPLETIONS_PAGE_SIZE,
       belongsTo: (r) => r.list === listId,
-      onData: (records) => handlers.onCompletions(records.map(completionFromRecord)),
+      onInitial: (records) => { for (const r of records) completionsMap.set(r.id, completionFromRecord(r)); emitCompletions(); },
+      onChange: (action, r) => {
+        if (action === "delete") completionsMap.delete(r.id); else completionsMap.set(r.id, completionFromRecord(r));
+        emitCompletions();
+      },
     });
 
     return () => { cancelled = true; unsubs.forEach((u) => u()); };
@@ -360,7 +424,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     this.pb().collection(col).getOne(id, { $autoCancel: false }).then((r) => {
       if (!cancelled()) cb.onData(r);
     }).catch(() => {});
-    this.pb().collection(col).subscribe(id, (e) => {
+    this.wpb.collection(col).subscribe(id, (e) => {
       if (cancelled()) return;
       if (e.action === "delete") cb.onDelete?.(); else cb.onData(e.record);
     }).then((unsub) => unsubs.push(unsub));
@@ -373,25 +437,10 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     this.pb().collection(col).getFullList({ filter: opts.filter, $autoCancel: false }).then((rs) => {
       if (!cancelled()) opts.onInitial(rs);
     }).catch((e) => { if (!cancelled()) console.warn(`[upkeep] subCol ${col} failed`, e); });
-    this.pb().collection(col).subscribe("*", (e) => {
+    this.wpb.collection(col).subscribe("*", (e) => {
       if (cancelled() || !opts.belongsTo(e.record)) return;
       opts.onChange(e.action, e.record);
-    }).then((unsub) => unsubs.push(unsub));
+    }, { local: (r) => opts.belongsTo(r as RecordModel) }).then((unsub) => unsubs.push(unsub));
   }
 
-  private initSubscribeToReload(
-    col: string, cancelled: () => boolean, unsubs: Array<() => void>,
-    opts: { filter: string; sort: string; perPage: number; belongsTo: (r: RecordModel) => boolean; onData: (rs: RecordModel[]) => void },
-  ) {
-    const reload = () => {
-      this.pb().collection(col).getList(1, opts.perPage, { filter: opts.filter, sort: opts.sort, $autoCancel: false }).then((r) => {
-        if (!cancelled()) opts.onData(r.items);
-      }).catch((e) => { if (!cancelled()) console.warn(`[upkeep] reload ${col} failed`, e); });
-    };
-    reload();
-    this.pb().collection(col).subscribe("*", (e) => {
-      if (cancelled() || !opts.belongsTo(e.record)) return;
-      reload();
-    }).then((unsub) => unsubs.push(unsub));
-  }
 }

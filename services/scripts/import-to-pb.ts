@@ -331,10 +331,13 @@ async function importShopping() {
     for (const item of (list._sub_items || [])) {
       try {
         const addedBy = mapUid(item.addedBy) || primaryOwner;
-        await shopping.addItem(pbListId, item.ingredient || item.name || "", addedBy, {
-          categoryId: item.categoryId,
-          note: item.note || item.notes,
-        });
+        await shopping.addItem(
+          pbListId,
+          item.ingredient || item.name || "",
+          addedBy,
+          item.categoryId || "uncategorized",
+          item.note || item.notes,
+        );
         itemStats.created++;
       } catch { itemStats.errors++; }
     }

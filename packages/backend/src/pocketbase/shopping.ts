@@ -1,11 +1,17 @@
 /**
  * PocketBase implementation of ShoppingBackend.
+ *
+ * Writes route through the optimistic wrapper (wrapPocketBase) so the UI
+ * sees changes within a frame. Reads on history/trips stay direct because
+ * those collections are write-once-read-many and don't need optimistic UI.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { ShoppingBackend } from "../interfaces/shopping";
 import type { ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTrip } from "../types/shopping";
 import type { Unsubscribe } from "../types/common";
+import { newId } from "../cache/ids";
+import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
 
 // --- Pagination limits ---
 
@@ -69,23 +75,29 @@ function normalizeIngredient(ingredient: string): string {
 }
 
 export class PocketBaseShoppingBackend implements ShoppingBackend {
-  constructor(private pb: () => PocketBase) {}
+  private wpb: WrappedPocketBase;
+
+  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
+    this.wpb = wpb ?? wrapPocketBase(pb);
+  }
 
   async createList(name: string, userId: string): Promise<string> {
-    const list = await this.pb().collection("shopping_lists").create({
+    const id = newId();
+    await this.wpb.collection("shopping_lists").create({
+      id,
       name,
       owners: [userId],
       category_defs: [],
     }, { $autoCancel: false });
-    return list.id;
+    return id;
   }
 
   async renameList(listId: string, name: string): Promise<void> {
-    await this.pb().collection("shopping_lists").update(listId, { name });
+    await this.wpb.collection("shopping_lists").update(listId, { name });
   }
 
   async deleteList(listId: string): Promise<void> {
-    await this.pb().collection("shopping_lists").delete(listId);
+    await this.wpb.collection("shopping_lists").delete(listId);
   }
 
   async getList(listId: string): Promise<ShoppingList | null> {
@@ -98,7 +110,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
   }
 
   async updateCategories(listId: string, categories: CategoryDef[]): Promise<void> {
-    await this.pb().collection("shopping_lists").update(listId, {
+    await this.wpb.collection("shopping_lists").update(listId, {
       category_defs: categories,
     });
   }
@@ -107,95 +119,54 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     listId: string,
     ingredient: string,
     userId: string,
-    options?: { categoryId?: string; note?: string },
+    categoryId: string,
+    note?: string,
   ): Promise<string> {
-    const opts = { $autoCancel: false };
-    let categoryId = options?.categoryId || "uncategorized";
-
-    if (!options?.categoryId) {
-      try {
-        const history = await this.pb().collection("shopping_history").getFirstListItem(
-          this.pb().filter("list = {:listId} && ingredient = {:ingredient}", { listId, ingredient: normalizeIngredient(ingredient) }),
-          opts,
-        );
-        categoryId = history.category_id || "uncategorized";
-      } catch {
-        // No history found
-      }
-    }
-
-    const item = await this.pb().collection("shopping_items").create({
-      list: listId,
-      ingredient,
-      note: options?.note || "",
-      category_id: categoryId,
-      checked: false,
-      added_by: userId,
-    }, opts);
-
-    // Save to history
-    try {
-      const existing = await this.pb().collection("shopping_history").getFirstListItem(
-        this.pb().filter("list = {:listId} && ingredient = {:ingredient}", { listId, ingredient: normalizeIngredient(ingredient) }),
-        opts,
-      );
-      await this.pb().collection("shopping_history").update(existing.id, {
-        category_id: categoryId,
-        last_added: new Date().toISOString(),
-      }, opts);
-    } catch {
-      await this.pb().collection("shopping_history").create({
+    const itemId = newId();
+    // Both writes go optimistic via wpb; awaiting both ensures sequencing for
+    // callers (e.g. updateItemCategory immediately after addItem) sees the
+    // history row already in place.
+    await Promise.all([
+      this.wpb.collection("shopping_items").create({
+        id: itemId,
         list: listId,
-        ingredient: normalizeIngredient(ingredient),
+        ingredient,
+        note: note || "",
         category_id: categoryId,
-        last_added: new Date().toISOString(),
-      }, opts);
-    }
-
-    return item.id;
+        checked: false,
+        added_by: userId,
+      }, { $autoCancel: false }),
+      this.upsertHistory(listId, ingredient, categoryId),
+    ]);
+    return itemId;
   }
 
   async updateItem(itemId: string, updates: { ingredient?: string; note?: string }): Promise<void> {
     const data: Record<string, string> = {};
     if (updates.ingredient !== undefined) data.ingredient = updates.ingredient;
     if (updates.note !== undefined) data.note = updates.note || "";
-    await this.pb().collection("shopping_items").update(itemId, data);
+    await this.wpb.collection("shopping_items").update(itemId, data);
   }
 
-  async updateItemCategory(itemId: string, categoryId: string, ingredient: string): Promise<void> {
-    await this.pb().collection("shopping_items").update(itemId, { category_id: categoryId });
-
-    // Update history
-    // We need the list ID — get it from the item record
-    const item = await this.pb().collection("shopping_items").getOne(itemId);
-    const listId = item.list;
-    try {
-      const existing = await this.pb().collection("shopping_history").getFirstListItem(
-        this.pb().filter("list = {:listId} && ingredient = {:ingredient}", { listId, ingredient: normalizeIngredient(ingredient) }),
-      );
-      await this.pb().collection("shopping_history").update(existing.id, {
-        category_id: categoryId,
-        last_added: new Date().toISOString(),
-      });
-    } catch {
-      await this.pb().collection("shopping_history").create({
-        list: listId,
-        ingredient: normalizeIngredient(ingredient),
-        category_id: categoryId,
-        last_added: new Date().toISOString(),
-      });
-    }
+  async updateItemCategory(
+    itemId: string,
+    listId: string,
+    categoryId: string,
+    ingredient: string,
+  ): Promise<void> {
+    await this.wpb.collection("shopping_items").update(itemId, { category_id: categoryId });
+    await this.upsertHistory(listId, ingredient, categoryId);
   }
 
   async toggleItem(itemId: string, checked: boolean, userId: string): Promise<void> {
     if (checked) {
-      await this.pb().collection("shopping_items").update(itemId, {
+      await this.wpb.collection("shopping_items").update(itemId, {
         checked: true,
         checked_by: userId,
         checked_at: new Date().toISOString(),
       });
     } else {
-      await this.pb().collection("shopping_items").update(itemId, {
+      await this.wpb.collection("shopping_items").update(itemId, {
         checked: false,
         checked_by: "",
         checked_at: "",
@@ -204,7 +175,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
   }
 
   async deleteItem(itemId: string): Promise<void> {
-    await this.pb().collection("shopping_items").delete(itemId);
+    await this.wpb.collection("shopping_items").delete(itemId);
   }
 
   async clearCheckedItems(
@@ -214,7 +185,8 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     const checkedItems = items.filter((item) => item.checked);
     if (checkedItems.length === 0) return;
 
-    await this.pb().collection("shopping_trips").create({
+    await this.wpb.collection("shopping_trips").create({
+      id: newId(),
       list: listId,
       completed_at: new Date().toISOString(),
       items: checkedItems.map((item) => ({
@@ -225,8 +197,39 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     });
 
     await Promise.all(
-      checkedItems.map((item) => this.pb().collection("shopping_items").delete(item.id)),
+      checkedItems.map((item) => this.wpb.collection("shopping_items").delete(item.id)),
     );
+  }
+
+  /** Upsert a history entry — find existing by (list, ingredient) and update, else create. */
+  private async upsertHistory(
+    listId: string,
+    ingredient: string,
+    categoryId: string,
+  ): Promise<void> {
+    const normalized = normalizeIngredient(ingredient);
+    const filter = this.pb().filter(
+      "list = {:listId} && ingredient = {:ingredient}",
+      { listId, ingredient: normalized },
+    );
+    try {
+      const existing = await this.pb().collection("shopping_history").getFirstListItem(
+        filter,
+        { $autoCancel: false },
+      );
+      await this.wpb.collection("shopping_history").update(existing.id, {
+        category_id: categoryId,
+        last_added: new Date().toISOString(),
+      });
+    } catch {
+      await this.wpb.collection("shopping_history").create({
+        id: newId(),
+        list: listId,
+        ingredient: normalized,
+        category_id: categoryId,
+        last_added: new Date().toISOString(),
+      });
+    }
   }
 
   subscribeToList(
@@ -243,20 +246,20 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     const unsubs: Array<() => void> = [];
     const isCancelled = () => cancelled;
 
-    // We track items in a map so we can deliver full state on each change
+    // We track items in a map so we can deliver full state on each change.
     const itemsMap = new Map<string, ShoppingItem>();
 
     const emitItems = () => {
       if (!cancelled) handlers.onItems(Array.from(itemsMap.values()));
     };
 
-    // List metadata
+    // List metadata — optimistic-aware via wpb.
     this.subscribeToRecord("shopping_lists", listId, isCancelled, {
       onData: (r) => handlers.onList(listFromRecord(r)),
       onDelete: () => handlers.onDeleted?.(),
     }).then((u) => unsubs.push(u));
 
-    // Items — track in map, emit full state
+    // Items — optimistic-aware via wpb with predicate.
     this.subscribeToCollection("shopping_items", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       belongsTo: (r) => r.list === listId,
@@ -274,7 +277,8 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       },
     }).then((u) => unsubs.push(u));
 
-    // History — full reload on any change
+    // History — full reload on any change. Stays on raw pb subscribe; writes
+    // still go through wpb so persistence + replay-on-reload work.
     this.subscribeToCollectionReload("shopping_history", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-last_added",
@@ -283,7 +287,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       onData: (records) => handlers.onHistory(records.map(historyFromRecord)),
     }).then((u) => unsubs.push(u));
 
-    // Trips — full reload on any change
+    // Trips — full reload on any change.
     this.subscribeToCollectionReload("shopping_trips", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-completed_at",
@@ -298,24 +302,23 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     };
   }
 
-  // --- Internal subscription helpers (wrapping PocketBase realtime) ---
+  // --- Internal subscription helpers ---
 
+  /** Subscribe to a single record. Optimistic events for that id are included. */
   private async subscribeToRecord(
     collection: string,
     id: string,
     cancelled: () => boolean,
     callbacks: { onData: (r: RecordModel) => void; onDelete?: () => void },
   ): Promise<() => void> {
-    // Fetch initial
     try {
       const record = await this.pb().collection(collection).getOne(id, { $autoCancel: false });
       if (!cancelled()) callbacks.onData(record);
     } catch {
-      // Record not found
+      // Record not found; subscriber will receive any optimistic create via wpb.
     }
 
-    // Subscribe to changes
-    const unsub = await this.pb().collection(collection).subscribe(id, (e) => {
+    const unsub = await this.wpb.collection(collection).subscribe(id, (e) => {
       if (cancelled()) return;
       if (e.action === "delete") {
         callbacks.onDelete?.();
@@ -327,6 +330,10 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     return unsub;
   }
 
+  /**
+   * Subscribe to a filtered collection. Server initial seed via getFullList,
+   * then live updates (server + optimistic) via wpb.subscribe with predicate.
+   */
   private async subscribeToCollection(
     collection: string,
     cancelled: () => boolean,
@@ -337,7 +344,6 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       onChange: (action: "create" | "update" | "delete", r: RecordModel) => void;
     },
   ): Promise<() => void> {
-    // Fetch initial
     try {
       const records = await this.pb().collection(collection).getFullList({
         filter: options.filter,
@@ -345,18 +351,23 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       });
       if (!cancelled()) options.onInitial(records);
     } catch (e) {
-      if (!cancelled()) console.warn(`[shopping] subCol ${collection} failed`, e);
+      if (!cancelled()) console.warn(`[shopping] initial load ${collection} failed`, e);
     }
 
-    // Subscribe to changes
-    const unsub = await this.pb().collection(collection).subscribe("*", (e) => {
-      if (cancelled() || !options.belongsTo(e.record)) return;
+    const unsub = await this.wpb.collection(collection).subscribe("*", (e) => {
+      if (cancelled() || !options.belongsTo(e.record as RecordModel)) return;
       options.onChange(e.action as "create" | "update" | "delete", e.record);
-    });
+    }, { local: (r) => options.belongsTo(r as RecordModel) });
 
     return unsub;
   }
 
+  /**
+   * Subscribe to a collection that fully reloads on any change. Used for
+   * history/trips where ordering and pagination matter more than per-record
+   * deltas. Stays on raw pb.subscribe — writes go through wpb so the server
+   * event we receive already reflects ack'd state.
+   */
   private async subscribeToCollectionReload(
     collection: string,
     cancelled: () => boolean,
@@ -381,10 +392,8 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       }
     };
 
-    // Initial load
     await reload();
 
-    // Reload on any change
     const unsub = await this.pb().collection(collection).subscribe("*", (e) => {
       if (cancelled() || !options.belongsTo(e.record)) return;
       reload();

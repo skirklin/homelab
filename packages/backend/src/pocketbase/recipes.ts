@@ -1,11 +1,17 @@
 /**
  * PocketBase implementation of RecipesBackend.
+ *
+ * Writes route through the optimistic wrapper. Per-box subscriptions
+ * (recipe_boxes record + recipes filtered by box) use wpb so optimistic
+ * mutations fan to the right box.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { RecipesBackend, RecipesUser } from "../interfaces/recipes";
 import type { RecipeBox, Recipe, RecipeData, PendingChanges, CookingLogEvent } from "../types/recipes";
 import type { Visibility, Unsubscribe, Event } from "../types/common";
+import { newId } from "../cache/ids";
+import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
 
 // --- Record → domain type mappers ---
 
@@ -62,7 +68,11 @@ function eventFromRecord(r: RecordModel): CookingLogEvent {
 }
 
 export class PocketBaseRecipesBackend implements RecipesBackend {
-  constructor(private pb: () => PocketBase) {}
+  private wpb: WrappedPocketBase;
+
+  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
+    this.wpb = wpb ?? wrapPocketBase(pb);
+  }
 
   // --- User ---
 
@@ -76,60 +86,70 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
   }
 
   async setLastSeenUpdateVersion(userId: string, version: number): Promise<void> {
-    await this.pb().collection("users").update(userId, { last_seen_update_version: version });
+    await this.wpb.collection("users").update(userId, { last_seen_update_version: version });
   }
 
   // --- Box CRUD ---
 
   async createBox(userId: string, name: string): Promise<string> {
-    const record = await this.pb().collection("recipe_boxes").create({
-      name,
-      owners: [userId],
-      visibility: "private",
-      creator: userId,
-      last_updated_by: userId,
-    });
-    // Add to user's recipe_boxes list
-    const userRecord = await this.pb().collection("users").getOne(userId);
-    const boxes: string[] = userRecord.recipe_boxes || [];
-    if (!boxes.includes(record.id)) {
-      await this.pb().collection("users").update(userId, {
-        recipe_boxes: [...boxes, record.id],
-      });
-    }
-    return record.id;
+    const id = newId();
+    const boxes = await this.readUserBoxes(userId);
+    // Box create + user-list append fire in parallel.
+    await Promise.all([
+      this.wpb.collection("recipe_boxes").create({
+        id,
+        name,
+        owners: [userId],
+        visibility: "private",
+        creator: userId,
+        last_updated_by: userId,
+      }),
+      boxes.includes(id)
+        ? Promise.resolve()
+        : this.wpb.collection("users").update(userId, { recipe_boxes: [...boxes, id] }),
+    ]);
+    return id;
+  }
+
+  /**
+   * Read the user's `recipe_boxes` JSON field. Prefer the wpb cache (already
+   * populated by an active user subscription) to avoid a network round-trip;
+   * fall back to a fresh getOne if not cached.
+   */
+  private async readUserBoxes(userId: string): Promise<string[]> {
+    const cached = this.wpb.collection("users").view<{ recipe_boxes?: string[] }>(userId);
+    if (cached) return cached.recipe_boxes || [];
+    const user = await this.pb().collection("users").getOne(userId);
+    return user.recipe_boxes || [];
   }
 
   async deleteBox(boxId: string): Promise<void> {
-    await this.pb().collection("recipe_boxes").delete(boxId);
+    await this.wpb.collection("recipe_boxes").delete(boxId);
   }
 
   async setBoxVisibility(boxId: string, visibility: Visibility): Promise<void> {
-    await this.pb().collection("recipe_boxes").update(boxId, { visibility });
+    await this.wpb.collection("recipe_boxes").update(boxId, { visibility });
   }
 
   async subscribeToBox(userId: string, boxId: string): Promise<void> {
-    const userRecord = await this.pb().collection("users").getOne(userId);
-    const boxes: string[] = userRecord.recipe_boxes || [];
-    if (!boxes.includes(boxId)) {
-      await this.pb().collection("users").update(userId, {
-        recipe_boxes: [...boxes, boxId],
-      });
-    }
-    await this.pb().collection("recipe_boxes").update(boxId, {
-      "subscribers+": userId,
-    });
+    const boxes = await this.readUserBoxes(userId);
+    await Promise.all([
+      boxes.includes(boxId)
+        ? Promise.resolve()
+        : this.wpb.collection("users").update(userId, { recipe_boxes: [...boxes, boxId] }),
+      // `subscribers` is a real relation field — atomic `+=` works.
+      this.wpb.collection("recipe_boxes").update(boxId, { "subscribers+": userId }),
+    ]);
   }
 
   async unsubscribeFromBox(userId: string, boxId: string): Promise<void> {
-    const userRecord = await this.pb().collection("users").getOne(userId);
-    const boxes: string[] = userRecord.recipe_boxes || [];
-    await this.pb().collection("users").update(userId, {
-      recipe_boxes: boxes.filter((b: string) => b !== boxId),
-    });
-    await this.pb().collection("recipe_boxes").update(boxId, {
-      "subscribers-": userId,
-    });
+    const boxes = await this.readUserBoxes(userId);
+    await Promise.all([
+      this.wpb.collection("users").update(userId, {
+        recipe_boxes: boxes.filter((b) => b !== boxId),
+      }),
+      this.wpb.collection("recipe_boxes").update(boxId, { "subscribers-": userId }),
+    ]);
   }
 
   // --- Recipe CRUD ---
@@ -152,7 +172,9 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
   }
 
   async addRecipe(boxId: string, data: RecipeData, userId: string): Promise<string> {
-    const record = await this.pb().collection("recipes").create({
+    const id = newId();
+    await this.wpb.collection("recipes").create({
+      id,
       box: boxId,
       data,
       owners: [userId],
@@ -161,11 +183,11 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
       last_updated_by: userId,
       enrichment_status: "needed",
     });
-    return record.id;
+    return id;
   }
 
   async saveRecipe(recipeId: string, data: RecipeData, userId: string): Promise<void> {
-    await this.pb().collection("recipes").update(recipeId, {
+    await this.wpb.collection("recipes").update(recipeId, {
       data,
       last_updated_by: userId,
       enrichment_status: "needed",
@@ -174,11 +196,11 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
   }
 
   async deleteRecipe(recipeId: string): Promise<void> {
-    await this.pb().collection("recipes").delete(recipeId);
+    await this.wpb.collection("recipes").delete(recipeId);
   }
 
   async setRecipeVisibility(recipeId: string, visibility: Visibility): Promise<void> {
-    await this.pb().collection("recipes").update(recipeId, { visibility });
+    await this.wpb.collection("recipes").update(recipeId, { visibility });
   }
 
   // --- Enrichment ---
@@ -213,13 +235,13 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
     }
     updates.enrichment_status = changes.source === "enrichment" ? "done" : "needed";
 
-    await this.pb().collection("recipes").update(recipeId, updates);
+    await this.wpb.collection("recipes").update(recipeId, updates);
   }
 
   async rejectChanges(recipeId: string, source?: string): Promise<void> {
     const updates: Record<string, unknown> = { pending_changes: null };
     if (source === "enrichment") updates.enrichment_status = "skipped";
-    await this.pb().collection("recipes").update(recipeId, updates);
+    await this.wpb.collection("recipes").update(recipeId, updates);
   }
 
   // --- Cooking log ---
@@ -237,14 +259,16 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
   }
 
   async addCookingLogEvent(boxId: string, recipeId: string, userId: string, options?: { notes?: string; timestamp?: Date }): Promise<string> {
-    const record = await this.pb().collection("recipe_events").create({
+    const id = newId();
+    await this.wpb.collection("recipe_events").create({
+      id,
       box: boxId,
       subject_id: recipeId,
       timestamp: (options?.timestamp ?? new Date()).toISOString(),
       created_by: userId,
       data: options?.notes ? { notes: options.notes } : {},
     });
-    return record.id;
+    return id;
   }
 
   async updateCookingLogEvent(eventId: string, notes: string): Promise<void> {
@@ -256,11 +280,11 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
     } else {
       delete data.notes;
     }
-    await this.pb().collection("recipe_events").update(eventId, { data });
+    await this.wpb.collection("recipe_events").update(eventId, { data });
   }
 
   async deleteCookingLogEvent(eventId: string): Promise<void> {
-    await this.pb().collection("recipe_events").delete(eventId);
+    await this.wpb.collection("recipe_events").delete(eventId);
   }
 
   // --- Subscriptions ---
@@ -303,8 +327,8 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
         return;
       }
 
-      // Box realtime
-      this.pb().collection("recipe_boxes").subscribe(boxId, (e) => {
+      // Box realtime — optimistic-aware via wpb.
+      this.wpb.collection("recipe_boxes").subscribe(boxId, (e) => {
         if (cancelled) return;
         if (e.action === "delete") {
           handlers.onBoxRemoved(boxId);
@@ -314,16 +338,16 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
         }
       }).then((unsub) => unsubs.push(unsub));
 
-      // Recipes realtime for this box
-      const subKey = `box_${boxId}`;
-      this.pb().collection("recipes").subscribe(subKey, (e) => {
+      // Recipes realtime for this box — wpb routes both server + optimistic
+      // events through the local predicate.
+      this.wpb.collection("recipes").subscribe("*", (e) => {
         if (cancelled || e.record.box !== boxId) return;
         if (e.action === "delete") {
           handlers.onRecipeRemoved(boxId, e.record.id);
         } else {
           handlers.onRecipeChanged(boxId, recipeFromRecord(e.record));
         }
-      }).then((unsub) => unsubs.push(unsub));
+      }, { local: (r) => r.box === boxId }).then((unsub) => unsubs.push(unsub));
     };
 
     // Subscribe to user record for box list changes
@@ -343,7 +367,7 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
         // User not found
       }
 
-      this.pb().collection("users").subscribe(userId, (e) => {
+      this.wpb.collection("users").subscribe(userId, (e) => {
         if (cancelled) return;
         const user = userFromRecord(e.record);
         handlers.onUser(user);

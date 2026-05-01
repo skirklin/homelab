@@ -17,13 +17,19 @@
     "./cache": {
       "types": "./src/cache/index.ts",
       "default": "./src/cache/index.ts"
+    },
+    "./wrapped-pb": {
+      "types": "./src/wrapped-pb/index.ts",
+      "default": "./src/wrapped-pb/index.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "idb": "^8.0.3",

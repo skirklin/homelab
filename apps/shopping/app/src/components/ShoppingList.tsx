@@ -172,8 +172,8 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
     const item = active.data.current?.item as ShoppingItem;
     const newCategoryId = over.id as CategoryId;
 
-    if (item && newCategoryId && item.categoryId !== newCategoryId) {
-      shopping.updateItemCategory(item.id, newCategoryId, item.ingredient);
+    if (item && newCategoryId && item.categoryId !== newCategoryId && listId) {
+      shopping.updateItemCategory(item.id, listId, newCategoryId, item.ingredient);
     }
   };
 

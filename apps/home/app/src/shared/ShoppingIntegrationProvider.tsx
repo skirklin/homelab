@@ -20,7 +20,10 @@ export function ShoppingIntegrationProvider({ children }: ShoppingIntegrationPro
     if (!user) {
       throw new Error("User must be authenticated to add items");
     }
-    await shopping.addItem(listId, ingredient, user.uid, { note });
+    const normalized = ingredient.toLowerCase().trim();
+    const historyEntry = state.history.find((h) => h.ingredient.toLowerCase() === normalized);
+    const categoryId = historyEntry?.categoryId || "uncategorized";
+    await shopping.addItem(listId, ingredient, user.uid, categoryId, note);
   };
 
   const integration = {

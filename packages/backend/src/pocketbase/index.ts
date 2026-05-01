@@ -13,15 +13,19 @@ import { PocketBaseRecipesBackend } from "./recipes";
 import { PocketBaseUpkeepBackend } from "./upkeep";
 import { PocketBaseTravelBackend } from "./travel";
 import { PocketBaseLifeBackend } from "./life";
+import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
 
 export function createPocketBaseBackends(getPb: () => PocketBase) {
+  const wpb: WrappedPocketBase = wrapPocketBase(getPb);
   return {
-    shopping: new PocketBaseShoppingBackend(getPb) as import("../interfaces/shopping").ShoppingBackend,
-    user: new PocketBaseUserBackend(getPb) as import("../interfaces/user").UserBackend,
-    recipes: new PocketBaseRecipesBackend(getPb) as import("../interfaces/recipes").RecipesBackend,
-    upkeep: new PocketBaseUpkeepBackend(getPb) as import("../interfaces/upkeep").UpkeepBackend,
-    travel: new PocketBaseTravelBackend(getPb) as import("../interfaces/travel").TravelBackend,
-    life: new PocketBaseLifeBackend(getPb) as import("../interfaces/life").LifeBackend,
+    shopping: new PocketBaseShoppingBackend(getPb, wpb) as import("../interfaces/shopping").ShoppingBackend,
+    user: new PocketBaseUserBackend(getPb, wpb) as import("../interfaces/user").UserBackend,
+    recipes: new PocketBaseRecipesBackend(getPb, wpb) as import("../interfaces/recipes").RecipesBackend,
+    upkeep: new PocketBaseUpkeepBackend(getPb, wpb) as import("../interfaces/upkeep").UpkeepBackend,
+    travel: new PocketBaseTravelBackend(getPb, wpb) as import("../interfaces/travel").TravelBackend,
+    life: new PocketBaseLifeBackend(getPb, wpb) as import("../interfaces/life").LifeBackend,
+    /** Shared optimistic-write wrapper. Call replayPending() once after auth ready. */
+    wpb,
   };
 }
 

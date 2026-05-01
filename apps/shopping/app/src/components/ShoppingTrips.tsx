@@ -145,7 +145,10 @@ export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
   const handleAddItem = (ingredient: string, note?: string) => {
     const listId = state.list?.id;
     if (!listId) return;
-    shopping.addItem(listId, ingredient, userId, { note }).catch((error) => {
+    const normalized = ingredient.toLowerCase().trim();
+    const historyEntry = state.history.find((h) => h.ingredient.toLowerCase() === normalized);
+    const categoryId = historyEntry?.categoryId || "uncategorized";
+    shopping.addItem(listId, ingredient, userId, categoryId, note).catch((error) => {
       console.error("Failed to add item:", error);
     });
   };
