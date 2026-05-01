@@ -6,6 +6,7 @@ import { TripList } from "./components/TripList";
 import { TripDetail } from "./components/TripDetail";
 import { TripForm } from "./components/TripForm";
 import { ActivityForm } from "./components/ActivityForm";
+import { DayView } from "./components/DayView";
 import { LogLoader } from "./components/LogLoader";
 import { InviteRedeem } from "./components/InviteRedeem";
 
@@ -26,6 +27,7 @@ export function TravelRoutes({ embedded = false }: TravelRoutesProps) {
         <Route path="new" element={<TripForm />} />
         <Route path=":tripId" element={<TripDetail />} />
         <Route path=":tripId/edit" element={<TripForm />} />
+        <Route path=":tripId/day/:date" element={<DayView />} />
         <Route path=":tripId/activities/new" element={<ActivityForm />} />
         <Route path=":tripId/activities/:activityId/edit" element={<ActivityForm />} />
       </Route>

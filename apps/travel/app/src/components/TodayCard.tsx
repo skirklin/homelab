@@ -212,8 +212,8 @@ interface TodayCardProps {
   trip: Trip;
   itinerary: Itinerary;
   activityMap: Map<string, Activity>;
-  /** Called when the user wants to drill into the day-detail view (with prev/next nav). */
-  onOpenDay?: (dayIndex: number) => void;
+  /** Called when the user wants to drill into the day-detail view. */
+  onOpenDay?: (day: { index: number; date?: string }) => void;
   /** Optional injected "now" for testing; defaults to current time. */
   now?: Date;
 }
@@ -251,7 +251,7 @@ export function TodayCard({ trip, itinerary, activityMap, onOpenDay, now: nowPro
         <Title>{trip.destination} — Today</Title>
         <DayBadge>Day {dayNumber} of {totalDays}</DayBadge>
         {onOpenDay && (
-          <OpenDayButton onClick={() => onOpenDay(today.index)}>
+          <OpenDayButton onClick={() => onOpenDay({ index: today.index, date: today.day.date })}>
             Open day →
           </OpenDayButton>
         )}

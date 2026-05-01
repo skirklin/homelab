@@ -166,6 +166,11 @@ function tripUrl(tripId: string): string {
   return `${TRAVEL_ORIGINS[0]}/${tripId}`;
 }
 
+function dayUrl(tripId: string, date: string): string {
+  // Day route: travel.kirkl.in/{tripId}/day/{YYYY-MM-DD} → DayView
+  return `${TRAVEL_ORIGINS[0]}/${tripId}/day/${date}`;
+}
+
 function summarizeTodayActivities(ctx: ActiveContext): string {
   const day = ctx.todayDay;
   if (!day) return "Open the app to see your plan";
@@ -259,11 +264,14 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     if (isMorning) {
       const last = dedup.morning?.[ctx.tripId];
       if (last === ctx.todayInTz) { mSkipped++; continue; }
+      const url = ctx.todayDay
+        ? dayUrl(ctx.tripId, ctx.todayInTz)
+        : tripUrl(ctx.tripId);
       const result = await sendPushToUser(pb, ctx.userId, {
         title: `Today in ${ctx.tripDestination}`,
         body: summarizeTodayActivities(ctx),
-        url: tripUrl(ctx.tripId),
-        data: { type: "travel_morning", tripId: ctx.tripId },
+        url,
+        data: { type: "travel_morning", tripId: ctx.tripId, date: ctx.todayInTz },
       }, { preferredOrigins: TRAVEL_ORIGINS });
       console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);
       await writeDedup(pb, ctx.userId, dedup, "morning", ctx.tripId, ctx.todayInTz);
@@ -274,11 +282,14 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
       if (journaled.has(`${ctx.tripId}|${ctx.todayInTz}`)) { eSkipped++; continue; }
       const last = dedup.evening?.[ctx.tripId];
       if (last === ctx.todayInTz) { eSkipped++; continue; }
+      const url = ctx.todayDay
+        ? dayUrl(ctx.tripId, ctx.todayInTz)
+        : tripUrl(ctx.tripId);
       const result = await sendPushToUser(pb, ctx.userId, {
         title: `How was today in ${ctx.tripDestination}?`,
         body: "Tap to record what you'll want to remember.",
-        url: tripUrl(ctx.tripId),
-        data: { type: "travel_evening", tripId: ctx.tripId },
+        url,
+        data: { type: "travel_evening", tripId: ctx.tripId, date: ctx.todayInTz },
       }, { preferredOrigins: TRAVEL_ORIGINS });
       console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);
       await writeDedup(pb, ctx.userId, dedup, "evening", ctx.tripId, ctx.todayInTz);

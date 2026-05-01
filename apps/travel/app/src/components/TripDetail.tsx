@@ -180,7 +180,6 @@ export function TripDetail() {
     return map;
   }, [activities]);
 
-  const [focusDay, setFocusDay] = useState<number | null>(null);
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
   const [activeTabState, setActiveTabState] = useState<string | null>(null);
 
@@ -297,9 +296,8 @@ export function TripDetail() {
           trip={trip}
           itinerary={activeItin}
           activityMap={activityMap}
-          onOpenDay={(idx) => {
-            setFocusDay(idx);
-            setActiveTabState("itinerary");
+          onOpenDay={(day) => {
+            if (day.date) navigate(`day/${day.date}`);
           }}
         />
       )}
@@ -329,12 +327,8 @@ export function TripDetail() {
               <ItinerarySection
                 itineraries={itineraries}
                 activityMap={activityMap}
-                focusDay={focusDay}
                 routeInfo={routeInfo}
-                onDayClick={(day) => setFocusDay(focusDay === day ? null : day)}
-                onDayNav={(day) => setFocusDay(day)}
                 navigate={navigate}
-                showReflection={tripHasStarted}
               />
             ) : <Empty description="No itinerary yet" />,
           },
@@ -402,7 +396,7 @@ export function TripDetail() {
                   itinerary={activeItin}
                   activities={activities}
                   activityMap={activityMap}
-                  focusDay={focusDay}
+                  focusDay={null}
                   onRouteInfo={(info) => setRouteInfo(prev => ({ ...prev, ...info }))}
                 />
               </StickyMap>
