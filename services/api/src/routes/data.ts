@@ -126,13 +126,95 @@ dataRoutes.delete("/shopping/items/:id", handler(async (c) => {
   return c.json({ success: true });
 }));
 
-// Toggle checked status on a shopping item
+// Update a shopping item — checked toggle, note, or category
 dataRoutes.patch("/shopping/items/:id", handler(async (c) => {
   const pb = c.get("pb");
   const id = c.req.param("id")!;
-  const body = await c.req.json<{ checked?: boolean }>();
-  const record = await pb.collection("shopping_items").update(id, body);
-  return c.json({ id: record.id, checked: record.checked });
+  const body = await c.req.json<{
+    checked?: boolean;
+    note?: string;
+    category_id?: string;
+    ingredient?: string;
+  }>();
+  const updates: Record<string, unknown> = {};
+  if (body.checked !== undefined) updates.checked = body.checked;
+  if (body.note !== undefined) updates.note = body.note;
+  if (body.category_id !== undefined) updates.category_id = body.category_id;
+  if (body.ingredient !== undefined) updates.ingredient = body.ingredient;
+  if (Object.keys(updates).length === 0) return c.json({ error: "no fields provided" }, 400);
+
+  const record = await pb.collection("shopping_items").update(id, updates);
+  return c.json({
+    id: record.id,
+    ingredient: record.ingredient,
+    note: record.note,
+    category_id: record.category_id,
+    checked: record.checked,
+  });
+}));
+
+// Create a shopping list. Stores its slug in the user's shopping_slugs map
+// so it shows up in their list inventory.
+dataRoutes.post("/shopping/lists", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const { name, slug } = await c.req.json<{ name: string; slug?: string }>();
+  if (!name) return c.json({ error: "name required" }, 400);
+  const finalSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "list";
+
+  const record = await pb.collection("shopping_lists").create({
+    name,
+    owners: [userId],
+  });
+
+  const user = await pb.collection("users").getOne(userId);
+  const slugs = { ...((user.shopping_slugs || {}) as Record<string, string>), [finalSlug]: record.id };
+  await pb.collection("users").update(userId, { shopping_slugs: slugs });
+
+  return c.json({ id: record.id, name: record.name, slug: finalSlug }, 201);
+}));
+
+// Update a shopping list — rename or change its slug in the user's map
+dataRoutes.patch("/shopping/lists/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{ name?: string; slug?: string }>();
+
+  if (body.name !== undefined) {
+    await pb.collection("shopping_lists").update(id, { name: body.name });
+  }
+
+  if (body.slug !== undefined) {
+    const user = await pb.collection("users").getOne(userId);
+    const slugs = { ...((user.shopping_slugs || {}) as Record<string, string>) };
+    for (const [s, listId] of Object.entries(slugs)) {
+      if (listId === id) delete slugs[s];
+    }
+    slugs[body.slug] = id;
+    await pb.collection("users").update(userId, { shopping_slugs: slugs });
+  }
+
+  const record = await pb.collection("shopping_lists").getOne(id);
+  return c.json({ id: record.id, name: record.name });
+}));
+
+// Delete a shopping list (and remove from user's slug map)
+dataRoutes.delete("/shopping/lists/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  await pb.collection("shopping_lists").delete(id);
+  try {
+    const user = await pb.collection("users").getOne(userId);
+    const slugs = { ...((user.shopping_slugs || {}) as Record<string, string>) };
+    let changed = false;
+    for (const [s, listId] of Object.entries(slugs)) {
+      if (listId === id) { delete slugs[s]; changed = true; }
+    }
+    if (changed) await pb.collection("users").update(userId, { shopping_slugs: slugs });
+  } catch {}
+  return c.json({ success: true });
 }));
 
 // Clear all checked items from a shopping list
@@ -181,6 +263,168 @@ dataRoutes.post("/recipes", handler(async (c) => {
     enrichment_status: "needed",
   });
   return c.json({ id: record.id, name: (record.data as Record<string, unknown>)?.name }, 201);
+}));
+
+// Update a recipe box (name, description, visibility)
+dataRoutes.patch("/boxes/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{
+    name?: string;
+    description?: string;
+    visibility?: "private" | "public" | "unlisted";
+  }>();
+  const updates: Record<string, unknown> = {};
+  if (body.name !== undefined) updates.name = body.name;
+  if (body.description !== undefined) updates.description = body.description;
+  if (body.visibility !== undefined) updates.visibility = body.visibility;
+  if (Object.keys(updates).length === 0) return c.json({ error: "no fields provided" }, 400);
+
+  const record = await pb.collection("recipe_boxes").update(id, updates);
+  return c.json({ id: record.id, name: record.name, visibility: record.visibility });
+}));
+
+// Delete a recipe box (cascades to recipes + events)
+dataRoutes.delete("/boxes/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  await pb.collection("recipe_boxes").delete(id);
+  try {
+    const user = await pb.collection("users").getOne(userId);
+    const boxes = (user.recipe_boxes || []) as string[];
+    if (boxes.includes(id)) {
+      await pb.collection("users").update(userId, { recipe_boxes: boxes.filter((b) => b !== id) });
+    }
+  } catch {}
+  return c.json({ success: true });
+}));
+
+// Subscribe authenticated user to a box
+dataRoutes.post("/boxes/:id/subscribe", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const user = await pb.collection("users").getOne(userId);
+  const boxes = (user.recipe_boxes || []) as string[];
+  await Promise.all([
+    boxes.includes(id)
+      ? Promise.resolve()
+      : pb.collection("users").update(userId, { recipe_boxes: [...boxes, id] }),
+    pb.collection("recipe_boxes").update(id, { "subscribers+": userId }),
+  ]);
+  return c.json({ success: true });
+}));
+
+// Unsubscribe authenticated user from a box
+dataRoutes.post("/boxes/:id/unsubscribe", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const user = await pb.collection("users").getOne(userId);
+  const boxes = (user.recipe_boxes || []) as string[];
+  await Promise.all([
+    pb.collection("users").update(userId, { recipe_boxes: boxes.filter((b) => b !== id) }),
+    pb.collection("recipe_boxes").update(id, { "subscribers-": userId }),
+  ]);
+  return c.json({ success: true });
+}));
+
+// Update a recipe (data and/or visibility)
+dataRoutes.patch("/recipes/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{
+    data?: Record<string, unknown>;
+    visibility?: "private" | "public" | "unlisted";
+  }>();
+  const updates: Record<string, unknown> = {};
+  if (body.data !== undefined) {
+    updates.data = body.data;
+    updates.last_updated_by = userId;
+    updates.enrichment_status = "needed";
+    updates.pending_changes = null;
+  }
+  if (body.visibility !== undefined) updates.visibility = body.visibility;
+  if (Object.keys(updates).length === 0) return c.json({ error: "no fields provided" }, 400);
+
+  const record = await pb.collection("recipes").update(id, updates);
+  return c.json({
+    id: record.id,
+    name: (record.data as Record<string, unknown>)?.name,
+    visibility: record.visibility,
+  });
+}));
+
+// Delete a recipe
+dataRoutes.delete("/recipes/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("recipes").delete(id);
+  return c.json({ success: true });
+}));
+
+// List cooking log events for a recipe
+dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const recipe = await pb.collection("recipes").getOne(id);
+  const events = await pb.collection("recipe_events").getFullList({
+    filter: pb.filter("box = {:boxId} && subject_id = {:recipeId}", { boxId: recipe.box, recipeId: id }),
+    sort: "-timestamp",
+  });
+  return c.json(events.map((e) => ({
+    id: e.id,
+    timestamp: e.timestamp,
+    notes: (e.data as Record<string, unknown> | undefined)?.notes,
+    created_by: e.created_by,
+    created: e.created,
+  })));
+}));
+
+// Add a cooking log entry for a recipe
+dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{ notes?: string; timestamp?: string }>().catch(
+    () => ({} as { notes?: string; timestamp?: string }),
+  );
+  const recipe = await pb.collection("recipes").getOne(id);
+  const record = await pb.collection("recipe_events").create({
+    box: recipe.box,
+    subject_id: id,
+    timestamp: body.timestamp ?? new Date().toISOString(),
+    created_by: userId,
+    data: body.notes ? { notes: body.notes } : {},
+  });
+  return c.json({ id: record.id, timestamp: record.timestamp }, 201);
+}));
+
+// Update notes on a cooking log entry (empty string clears notes)
+dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
+  const pb = c.get("pb");
+  const eventId = c.req.param("eventId")!;
+  const { notes } = await c.req.json<{ notes: string }>();
+  const record = await pb.collection("recipe_events").getOne(eventId);
+  const data = { ...((record.data as Record<string, unknown>) || {}) };
+  const trimmed = (notes ?? "").trim();
+  if (trimmed) data.notes = trimmed;
+  else delete data.notes;
+  const updated = await pb.collection("recipe_events").update(eventId, { data });
+  return c.json({
+    id: updated.id,
+    notes: (updated.data as Record<string, unknown> | undefined)?.notes,
+  });
+}));
+
+// Delete a cooking log entry
+dataRoutes.delete("/cooking-log/:eventId", handler(async (c) => {
+  const pb = c.get("pb");
+  const eventId = c.req.param("eventId")!;
+  await pb.collection("recipe_events").delete(eventId);
+  return c.json({ success: true });
 }));
 
 // ---- Travel ----
@@ -247,6 +491,37 @@ dataRoutes.get("/travel/trips/:id", handler(async (c) => {
   });
 }));
 
+// Shape every activity response identically — write-side and read-side stay
+// in sync so a fetched activity round-trips losslessly.
+function activityResponse(a: Record<string, unknown>) {
+  return {
+    id: a.id,
+    log: a.log,
+    name: a.name,
+    category: a.category,
+    location: a.location,
+    place_id: a.place_id,
+    lat: a.lat,
+    lng: a.lng,
+    description: a.description,
+    cost_notes: a.cost_notes,
+    duration_estimate: a.duration_estimate,
+    walk_miles: a.walk_miles,
+    confirmation_code: a.confirmation_code,
+    details: a.details,
+    setting: a.setting,
+    booking_reqs: a.booking_reqs,
+    rating: a.rating,
+    rating_count: a.rating_count,
+    photo_ref: a.photo_ref,
+    flight_info: a.flight_info,
+    verdict: a.verdict,
+    personal_notes: a.personal_notes,
+    experienced_at: a.experienced_at,
+    trip_id: a.trip_id,
+  };
+}
+
 // List activities in a travel log (optionally filtered by trip_id)
 dataRoutes.get("/travel/activities", handler(async (c) => {
   const pb = c.get("pb");
@@ -258,19 +533,15 @@ dataRoutes.get("/travel/activities", handler(async (c) => {
   if (tripId) filter += " && " + pb.filter("trip_id = {:tripId}", { tripId });
 
   const activities = await pb.collection("travel_activities").getFullList({ filter });
-  return c.json(activities.map((a) => ({
-    id: a.id,
-    log: a.log,
-    name: a.name,
-    category: a.category,
-    location: a.location,
-    description: a.description,
-    cost_notes: a.cost_notes,
-    duration_estimate: a.duration_estimate,
-    setting: a.setting,
-    rating: a.rating,
-    trip_id: a.trip_id,
-  })));
+  return c.json(activities.map((a) => activityResponse(a)));
+}));
+
+// Get a single travel activity with full data
+dataRoutes.get("/travel/activities/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const a = await pb.collection("travel_activities").getOne(id);
+  return c.json(activityResponse(a));
 }));
 
 // List itineraries in a travel log (optionally filtered by trip_id)
@@ -342,17 +613,22 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
   const pb = c.get("pb");
   const body = await c.req.json<{
     log: string;
-    trip_id: string;
+    trip_id?: string;
     name: string;
     category?: string;
     location?: string;
     description?: string;
     cost_notes?: string;
     duration_estimate?: string;
+    walk_miles?: number;
     setting?: string;
     confirmation_code?: string;
     details?: string;
-    flight_info?: Record<string, unknown>;
+    flight_info?: Record<string, unknown> | null;
+    booking_reqs?: Record<string, unknown> | null;
+    verdict?: string;
+    personal_notes?: string;
+    experienced_at?: string;
   }>();
   if (!body.log || !body.name) return c.json({ error: "log and name required" }, 400);
 
@@ -365,32 +641,38 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     description: body.description || "",
     cost_notes: body.cost_notes || "",
     duration_estimate: body.duration_estimate || "",
+    walk_miles: body.walk_miles ?? null,
     setting: body.setting || "",
     confirmation_code: body.confirmation_code || "",
     details: body.details || "",
-    flight_info: body.flight_info || null,
+    flight_info: body.flight_info ?? null,
+    booking_reqs: body.booking_reqs ?? null,
+    verdict: body.verdict || "",
+    personal_notes: body.personal_notes || "",
+    experienced_at: body.experienced_at || "",
   });
-  return c.json({ id: record.id, name: record.name }, 201);
+  return c.json(activityResponse(record), 201);
 }));
 
-// Update a travel activity
+// Update a travel activity. Whitelisted to schema fields so callers can't
+// accidentally write arbitrary keys.
 dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
   const pb = c.get("pb");
   const id = c.req.param("id")!;
   const body = await c.req.json<Record<string, unknown>>();
-  const record = await pb.collection("travel_activities").update(id, body);
-  return c.json({
-    id: record.id,
-    name: record.name,
-    category: record.category,
-    location: record.location,
-    description: record.description,
-    cost_notes: record.cost_notes,
-    duration_estimate: record.duration_estimate,
-    setting: record.setting,
-    rating: record.rating,
-    trip_id: record.trip_id,
-  });
+  const allowed = [
+    "name", "category", "location", "place_id", "lat", "lng",
+    "description", "cost_notes", "duration_estimate", "walk_miles", "confirmation_code",
+    "details", "setting", "booking_reqs", "rating", "rating_count",
+    "photo_ref", "flight_info", "verdict", "personal_notes", "experienced_at",
+    "trip_id",
+  ];
+  const updates: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (body[key] !== undefined) updates[key] = body[key];
+  }
+  const record = await pb.collection("travel_activities").update(id, updates);
+  return c.json(activityResponse(record));
 }));
 
 // Create a travel itinerary
@@ -717,6 +999,65 @@ dataRoutes.get("/life/entries", handler(async (c) => {
   })));
 }));
 
+// Add a life log entry. Mirrors LifeBackend.addEntry: notes (if given) merge
+// into the data JSON under `notes`.
+dataRoutes.post("/life/entries", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{
+    log: string;
+    widget_id: string;
+    data?: Record<string, unknown>;
+    timestamp?: string;
+    notes?: string;
+  }>();
+  if (!body.log || !body.widget_id) return c.json({ error: "log and widget_id required" }, 400);
+
+  const eventData: Record<string, unknown> = { ...(body.data || {}) };
+  if (body.notes) eventData.notes = body.notes;
+
+  const record = await pb.collection("life_events").create({
+    log: body.log,
+    subject_id: body.widget_id,
+    timestamp: body.timestamp || new Date().toISOString(),
+    created_by: userId,
+    data: eventData,
+  });
+  return c.json({ id: record.id, timestamp: record.timestamp }, 201);
+}));
+
+// Update a life log entry — timestamp, data (merged), or notes
+dataRoutes.patch("/life/entries/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{
+    timestamp?: string;
+    data?: Record<string, unknown>;
+    notes?: string;
+  }>();
+  const record = await pb.collection("life_events").getOne(id);
+  const patch: Record<string, unknown> = {};
+  if (body.timestamp) patch.timestamp = body.timestamp;
+  const existingData = (record.data || {}) as Record<string, unknown>;
+  if (body.data || body.notes !== undefined) {
+    const merged = body.data ? { ...existingData, ...body.data } : { ...existingData };
+    if (body.notes !== undefined) merged.notes = body.notes;
+    patch.data = merged;
+  }
+  if (Object.keys(patch).length === 0) return c.json({ error: "no fields provided" }, 400);
+
+  const updated = await pb.collection("life_events").update(id, patch);
+  return c.json({ id: updated.id, timestamp: updated.timestamp, data: updated.data });
+}));
+
+// Delete a life log entry
+dataRoutes.delete("/life/entries/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("life_events").delete(id);
+  return c.json({ success: true });
+}));
+
 // ---- Upkeep ----
 
 // List tasks (supports filtering by parent_id, tag, task_type)
@@ -797,7 +1138,7 @@ dataRoutes.patch("/tasks/:id", handler(async (c) => {
   const id = c.req.param("id")!;
   const body = await c.req.json<Record<string, unknown>>();
   const allowed = ["name", "description", "task_type", "frequency", "position",
-    "completed", "snoozed_until", "tags", "collapsed"];
+    "completed", "snoozed_until", "tags", "collapsed", "notify_users", "parent_id"];
   const data: Record<string, unknown> = {};
   for (const key of allowed) {
     if (body[key] !== undefined) data[key] = body[key];
@@ -849,6 +1190,14 @@ dataRoutes.post("/tasks/:id/snooze", handler(async (c) => {
   if (!until) return c.json({ error: "until (ISO date) required" }, 400);
 
   const record = await pb.collection("tasks").update(id, { snoozed_until: until });
+  return c.json({ id: record.id, snoozed_until: record.snoozed_until });
+}));
+
+// Unsnooze a task (clear snoozed_until)
+dataRoutes.post("/tasks/:id/unsnooze", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const record = await pb.collection("tasks").update(id, { snoozed_until: "" });
   return c.json({ id: record.id, snoozed_until: record.snoozed_until });
 }));
 
@@ -1027,3 +1376,4 @@ dataRoutes.delete("/travel/proposals/:id", handler(async (c) => {
   await pb.collection("trip_proposals").delete(id);
   return c.json({ deleted: true });
 }));
+

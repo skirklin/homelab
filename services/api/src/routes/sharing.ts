@@ -21,9 +21,10 @@ export const sharingRoutes = new Hono<AppEnv>();
 sharingRoutes.post("/invite", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
-  const { targetType, targetId } = await c.req.json<{
+  const { targetType, targetId, expiresAt } = await c.req.json<{
     targetType: "box" | "recipe" | "travel_log";
     targetId: string;
+    expiresAt?: string;
   }>();
 
   if (!targetType || !targetId) {
@@ -44,12 +45,59 @@ sharingRoutes.post("/invite", handler(async (c) => {
     target_id: targetId,
     created_by: userId,
     redeemed: false,
+    expires_at: expiresAt || "",
   });
 
   return c.json({
+    id: invite.id,
     code: invite.code,
     url: `${baseUrl}/invite/${invite.code}`,
+    expires_at: invite.expires_at,
   });
+}));
+
+// List invites the authenticated user has created
+sharingRoutes.get("/invites", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const invites = await pb.collection("sharing_invites").getFullList({
+    filter: pb.filter("created_by = {:userId}", { userId }),
+    sort: "-created",
+  });
+  return c.json(invites.map((i) => ({
+    id: i.id,
+    code: i.code,
+    target_type: i.target_type,
+    target_id: i.target_id,
+    redeemed: i.redeemed,
+    redeemed_by: i.redeemed_by,
+    expires_at: i.expires_at,
+    created: i.created,
+    url: TARGET_BASE_URLS[i.target_type as string]
+      ? `${TARGET_BASE_URLS[i.target_type as string]}/invite/${i.code}`
+      : null,
+  })));
+}));
+
+// Update an invite (currently just expires_at)
+sharingRoutes.patch("/invite/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const { expiresAt } = await c.req.json<{ expiresAt?: string }>();
+  const updates: Record<string, unknown> = {};
+  if (expiresAt !== undefined) updates.expires_at = expiresAt;
+  if (Object.keys(updates).length === 0) return c.json({ error: "no fields provided" }, 400);
+
+  const record = await pb.collection("sharing_invites").update(id, updates);
+  return c.json({ id: record.id, expires_at: record.expires_at });
+}));
+
+// Revoke (delete) an invite
+sharingRoutes.delete("/invite/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("sharing_invites").delete(id);
+  return c.json({ success: true });
 }));
 
 // GET /sharing/list-info is handled in index.ts (before auth middleware)

@@ -42,7 +42,6 @@ export interface RecipeData {
   recipeYield?: string;
   prepTime?: string;
   cookTime?: string;
-  notes?: string;
   [key: string]: unknown;
 }
 

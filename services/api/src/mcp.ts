@@ -144,6 +144,68 @@ server.tool(
   },
 );
 
+server.tool(
+  "update_shopping_item",
+  "Update fields on a shopping item (note, category, ingredient name, or checked state)",
+  {
+    id: z.string().describe("The shopping item ID"),
+    ingredient: z.string().optional(),
+    note: z.string().optional(),
+    category_id: z.string().optional(),
+    checked: z.boolean().optional(),
+  },
+  async ({ id, ...body }) => {
+    const data = await api(`/shopping/items/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "create_shopping_list",
+  "Create a new shopping list. Adds the list to the authenticated user's shopping_slugs map.",
+  {
+    name: z.string().describe("Display name of the list"),
+    slug: z.string().optional().describe("URL slug (auto-derived from name if omitted)"),
+  },
+  async ({ name, slug }) => {
+    const data = await api("/shopping/lists", {
+      method: "POST",
+      body: JSON.stringify({ name, slug }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_shopping_list",
+  "Rename a shopping list or change its slug",
+  {
+    id: z.string().describe("The shopping list ID"),
+    name: z.string().optional(),
+    slug: z.string().optional(),
+  },
+  async ({ id, ...body }) => {
+    const data = await api(`/shopping/lists/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_shopping_list",
+  "Delete a shopping list. WARNING: cascades to all items in the list.",
+  { id: z.string().describe("The shopping list ID") },
+  async ({ id }) => {
+    const data = await api(`/shopping/lists/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Upkeep tools ---
 
 server.tool(
@@ -281,6 +343,53 @@ server.tool(
   },
 );
 
+server.tool(
+  "add_life_entry",
+  "Record a life log entry. Each entry tracks one widget (subject_id) at a point in time. Data shape depends on widget type (e.g. {checked: true}, {value: 5}, {rating: 3}).",
+  {
+    log: z.string().describe("The life log ID"),
+    widget_id: z.string().describe("The widget ID this entry is for (subject_id in PB)"),
+    data: z.record(z.unknown()).optional().describe("Widget-specific payload (defaults to {})"),
+    timestamp: z.string().optional().describe("ISO timestamp (defaults to now)"),
+    notes: z.string().optional().describe("Free-form notes — merged into data.notes"),
+  },
+  async ({ log, widget_id, data, timestamp, notes }) => {
+    const result = await api("/life/entries", {
+      method: "POST",
+      body: JSON.stringify({ log, widget_id, data, timestamp, notes }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_life_entry",
+  "Update a life log entry — change timestamp, merge new data, or set notes",
+  {
+    id: z.string().describe("The life entry ID"),
+    timestamp: z.string().optional().describe("New ISO timestamp"),
+    data: z.record(z.unknown()).optional().describe("Fields to merge into existing data"),
+    notes: z.string().optional().describe("Set/replace notes (empty string clears)"),
+  },
+  async ({ id, ...body }) => {
+    const result = await api(`/life/entries/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_life_entry",
+  "Delete a life log entry",
+  { id: z.string().describe("The life entry ID") },
+  async ({ id }) => {
+    const result = await api(`/life/entries/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
 // --- Shopping write tools ---
 
 server.tool(
@@ -366,24 +475,194 @@ server.tool(
   },
 );
 
+// Recipe data follows schema.org Recipe shape. Explicit fields cover what the
+// webapp edits; .passthrough() keeps any extra schema.org fields (image,
+// datePublished, recipeCuisine, totalTime, nutrition, keywords, …) intact.
+const recipeAuthorSchema = z.union([
+  z.object({ "@type": z.literal("Person").optional(), name: z.string() }).passthrough(),
+  z.array(z.object({ "@type": z.literal("Person").optional(), name: z.string() }).passthrough()),
+  z.string(),
+]);
+
+const recipeDataSchema = z.object({
+  "@type": z.literal("Recipe").optional().describe("Schema.org type marker — usually \"Recipe\""),
+  name: z.string().optional().describe("Recipe name"),
+  description: z.string().optional().describe("Short summary of the recipe"),
+  url: z.string().optional().describe("Source URL (for scraped recipes)"),
+  author: recipeAuthorSchema.optional().describe("Recipe author. Object form: {\"@type\":\"Person\",\"name\":\"Julia Child\"}"),
+  recipeIngredient: z.array(z.string()).optional().describe("List of ingredient strings, e.g. [\"2 cups flour\", \"1 tsp salt\"]"),
+  recipeInstructions: z.array(z.object({
+    "@type": z.literal("HowToStep").optional(),
+    text: z.string().describe("Instruction text for this step"),
+    ingredients: z.array(z.string()).optional().describe("Ingredients used in this specific step (optional)"),
+  })).optional().describe("Ordered list of instruction steps"),
+  recipeCategory: z.array(z.string()).optional().describe("Tags/categories, e.g. [\"dessert\", \"quick\"]"),
+  recipeYield: z.string().optional().describe("Servings/yield, e.g. \"4 servings\" or \"12 cookies\""),
+  prepTime: z.string().optional().describe("Prep duration in ISO 8601 format, e.g. \"PT15M\""),
+  cookTime: z.string().optional().describe("Cook duration in ISO 8601 format, e.g. \"PT45M\""),
+  totalTime: z.string().optional().describe("Total duration in ISO 8601 format, e.g. \"PT1H\""),
+  recipeCuisine: z.string().optional().describe("Cuisine type, e.g. \"Italian\""),
+  comment: z.object({
+    "@type": z.literal("Comment").optional(),
+    text: z.string(),
+  }).passthrough().optional().describe("Recipe notes. THIS is the field the webapp's 'Notes' panel reads and writes — pass {\"@type\":\"Comment\",\"text\":\"...\"}. Do not put notes anywhere else."),
+}).passthrough();
+
 server.tool(
   "add_recipe_to_box",
-  "Create a recipe in a recipe box",
+  "Create a recipe in a recipe box. Recipe data follows schema.org Recipe shape; pass any sensible fields (extra fields beyond the explicit ones are preserved).",
   {
     boxId: z.string().describe("The recipe box ID"),
-    data: z.object({
-      name: z.string().describe("Recipe name"),
-      description: z.string().optional().describe("Recipe description"),
-      recipeIngredient: z.array(z.string()).optional().describe("List of ingredients"),
-      recipeInstructions: z.array(z.object({ text: z.string() })).optional().describe("List of instruction steps"),
-      recipeCategory: z.array(z.string()).optional().describe("Recipe tags/categories"),
-    }).describe("Recipe data object"),
+    data: recipeDataSchema.describe("Recipe data object"),
   },
   async ({ boxId, data }) => {
     const result = await api("/recipes", {
       method: "POST",
       body: JSON.stringify({ boxId, data }),
     });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_recipe",
+  "Update a recipe's structured data. Replaces the entire data object — pass the full recipe (use get_recipe first to fetch current data, modify, and pass back). Clears any pending AI enrichment changes.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    data: recipeDataSchema.describe("Full recipe data object — replaces existing data"),
+  },
+  async ({ id, data }) => {
+    const result = await api(`/recipes/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ data }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_recipe",
+  "Permanently delete a recipe and its cooking log entries",
+  { id: z.string().describe("The recipe record ID") },
+  async ({ id }) => {
+    const result = await api(`/recipes/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "set_recipe_visibility",
+  "Set a recipe's visibility (private, public, or unlisted)",
+  {
+    id: z.string().describe("The recipe record ID"),
+    visibility: z.enum(["private", "public", "unlisted"]),
+  },
+  async ({ id, visibility }) => {
+    const result = await api(`/recipes/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ visibility }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_recipe_box",
+  "Update a recipe box's name, description, or visibility",
+  {
+    id: z.string().describe("The recipe box record ID"),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    visibility: z.enum(["private", "public", "unlisted"]).optional(),
+  },
+  async ({ id, ...body }) => {
+    const result = await api(`/boxes/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_recipe_box",
+  "Permanently delete a recipe box. WARNING: cascades to all recipes and cooking log entries in the box.",
+  { id: z.string().describe("The recipe box record ID") },
+  async ({ id }) => {
+    const result = await api(`/boxes/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "subscribe_to_box",
+  "Subscribe the authenticated user to a recipe box (adds it to their box list)",
+  { boxId: z.string().describe("The recipe box record ID") },
+  async ({ boxId }) => {
+    const result = await api(`/boxes/${boxId}/subscribe`, { method: "POST" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "unsubscribe_from_box",
+  "Unsubscribe the authenticated user from a recipe box",
+  { boxId: z.string().describe("The recipe box record ID") },
+  async ({ boxId }) => {
+    const result = await api(`/boxes/${boxId}/unsubscribe`, { method: "POST" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_cooking_log",
+  "List cooking log entries (notes, timestamps) for a recipe, newest first",
+  { recipeId: z.string().describe("The recipe record ID") },
+  async ({ recipeId }) => {
+    const result = await api(`/recipes/${recipeId}/cooking-log`);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_cooking_log_entry",
+  "Record that a recipe was cooked, optionally with notes. Defaults timestamp to now.",
+  {
+    recipeId: z.string().describe("The recipe record ID"),
+    notes: z.string().optional().describe("Optional notes about this cooking session"),
+    timestamp: z.string().optional().describe("ISO timestamp (defaults to now)"),
+  },
+  async ({ recipeId, notes, timestamp }) => {
+    const result = await api(`/recipes/${recipeId}/cooking-log`, {
+      method: "POST",
+      body: JSON.stringify({ notes, timestamp }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_cooking_log_entry",
+  "Edit the notes on a cooking log entry. Pass an empty string to clear notes.",
+  {
+    eventId: z.string().describe("The cooking log event ID"),
+    notes: z.string(),
+  },
+  async ({ eventId, notes }) => {
+    const result = await api(`/cooking-log/${eventId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_cooking_log_entry",
+  "Delete a cooking log entry",
+  { eventId: z.string().describe("The cooking log event ID") },
+  async ({ eventId }) => {
+    const result = await api(`/cooking-log/${eventId}`, { method: "DELETE" });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
 );
@@ -452,27 +731,54 @@ const flightInfoSchema = z.object({
   toIsHome: z.boolean().optional().describe("Arrival is the user's home airport (hides flight from itinerary map)"),
 }).describe("Structured flight data (category='Flight'). Use geocode_activity to auto-fill coords from airport codes.");
 
+// Activity field set covers everything the route accepts. add_/update_ share
+// the same fields so callers get a consistent surface; only `id` vs `log+name`
+// requirements differ.
+const activityFields = {
+  name: z.string().optional().describe("Activity name"),
+  category: z.string().optional().describe("Activity category (Flight, Transportation, Accommodation, Hiking, etc.)"),
+  location: z.string().optional().describe("Location (e.g. 'Phoenix, AZ')"),
+  description: z.string().optional().describe("Brief qualifying note. NOT costs/durations/logistics."),
+  cost_notes: z.string().optional().describe("Cost notes (e.g. '$25/person')"),
+  duration_estimate: z.string().optional().describe("Duration (e.g. '2h', 'half day')"),
+  walk_miles: z.number().optional().describe("Distance walked or hiked in miles (e.g. trail length)"),
+  setting: z.enum(["outdoor", "indoor", "either"]).optional(),
+  trip_id: z.string().optional().describe("Trip this activity belongs to"),
+  confirmation_code: z.string().optional().describe("Booking confirmation code"),
+  details: z.string().optional().describe("Freeform details text"),
+  flight_info: flightInfoSchema.optional(),
+  booking_reqs: z.record(z.unknown()).optional().describe("Booking requirements (JSON)"),
+  verdict: z.enum(["loved", "liked", "meh", "skip", ""]).optional().describe("Post-experience reflection"),
+  personal_notes: z.string().optional().describe("Private notes about this activity (post-trip journal)"),
+  experienced_at: z.string().optional().describe("ISO date when the activity was actually done"),
+};
+
+server.tool(
+  "get_travel_activity",
+  "Get full details for a single travel activity, including geocoding (lat/lng/place_id), flight info, verdict/notes, and all metadata fields.",
+  { id: z.string().describe("The activity record ID") },
+  async ({ id }) => {
+    const data = await api(`/travel/activities/${id}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 server.tool(
   "add_travel_activity",
   "Create a new activity in a travel log. For flights, use category='Flight' and include flight_info.",
   {
     log: z.string().describe("The travel log ID"),
-    trip_id: z.string().optional().describe("The trip this activity belongs to"),
-    name: z.string().describe("Activity name"),
-    category: z.string().optional().describe("Activity category (Flight, Transportation, Accommodation, etc.)"),
-    location: z.string().optional().describe("Location"),
-    description: z.string().optional().describe("Description"),
-    cost_notes: z.string().optional().describe("Cost notes"),
-    duration_estimate: z.string().optional().describe("Duration estimate"),
-    setting: z.string().optional().describe("Setting (indoor/outdoor)"),
-    confirmation_code: z.string().optional().describe("Booking confirmation code"),
-    details: z.string().optional().describe("Freeform details text"),
-    flight_info: flightInfoSchema.optional(),
+    ...activityFields,
+    name: z.string().describe("Activity name (required for create)"),
   },
-  async ({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting, confirmation_code, details, flight_info }) => {
+  async ({ log, ...fields }) => {
+    const body: Record<string, unknown> = { log };
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined) body[k] = v;
+    }
     const data = await api("/travel/activities", {
       method: "POST",
-      body: JSON.stringify({ log, trip_id, name, category, location, description, cost_notes, duration_estimate, setting, confirmation_code, details, flight_info }),
+      body: JSON.stringify(body),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
@@ -480,20 +786,10 @@ server.tool(
 
 server.tool(
   "update_travel_activity",
-  "Update fields on an existing travel activity. For flights, pass flight_info to set airline/codes/times/coords.",
+  "Update fields on an existing travel activity. Only provided fields change. Use for post-trip reflection (verdict/personal_notes/experienced_at) too.",
   {
     id: z.string().describe("The activity record ID"),
-    name: z.string().optional().describe("Activity name"),
-    category: z.string().optional().describe("Activity category"),
-    location: z.string().optional().describe("Location"),
-    description: z.string().optional().describe("Description"),
-    cost_notes: z.string().optional().describe("Cost notes"),
-    duration_estimate: z.string().optional().describe("Duration estimate"),
-    setting: z.string().optional().describe("Setting"),
-    trip_id: z.string().optional().describe("Trip ID to associate with"),
-    confirmation_code: z.string().optional().describe("Booking confirmation code"),
-    details: z.string().optional().describe("Freeform details text"),
-    flight_info: flightInfoSchema.optional(),
+    ...activityFields,
   },
   async ({ id, ...fields }) => {
     const body: Record<string, unknown> = {};
@@ -623,26 +919,29 @@ server.tool(
 
 // --- Upkeep write tools ---
 
+const taskFrequencySchema = z.object({
+  value: z.number(),
+  unit: z.enum(["days", "weeks", "months"]),
+});
+
 server.tool(
   "add_task",
-  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), and tags.",
+  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), tags, and notification subscribers.",
   {
     list: z.string().describe("The task list ID"),
     name: z.string().describe("Task name"),
     description: z.string().optional().describe("Task description"),
     parent_id: z.string().optional().describe("Parent task ID for nesting (omit for root task)"),
     position: z.number().optional().describe("Sort position among siblings (default 0)"),
-    task_type: z.string().optional().describe("'recurring' (has frequency/due dates) or 'one_shot' (checkbox). Default: one_shot"),
-    frequency: z.object({
-      value: z.number(),
-      unit: z.enum(["days", "weeks", "months"]),
-    }).optional().describe("Recurrence frequency (only for recurring tasks)"),
+    task_type: z.enum(["recurring", "one_shot"]).optional().describe("'recurring' (has frequency/due dates) or 'one_shot' (checkbox). Default: one_shot"),
+    frequency: taskFrequencySchema.optional().describe("Recurrence frequency (only for recurring tasks)"),
     tags: z.array(z.string()).optional().describe("Tags (e.g. ['travel:tripId123'])"),
+    notify_users: z.array(z.string()).optional().describe("User IDs to notify on completion/due"),
   },
-  async ({ list, name, description, parent_id, position, task_type, frequency, tags }) => {
+  async ({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users }) => {
     const data = await api("/tasks", {
       method: "POST",
-      body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags }),
+      body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
@@ -650,15 +949,25 @@ server.tool(
 
 server.tool(
   "update_task",
-  "Update task fields (name, description, task_type, frequency, position, completed, tags, etc.)",
+  "Update fields on an existing task. Only provided fields are changed.",
   {
     id: z.string().describe("The task record ID"),
-    updates: z.record(z.unknown()).describe("Fields to update (e.g. {name: 'New name', completed: true})"),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    parent_id: z.string().optional().describe("Move under a different parent (empty string for root)"),
+    position: z.number().optional(),
+    task_type: z.enum(["recurring", "one_shot"]).optional(),
+    frequency: taskFrequencySchema.optional(),
+    completed: z.boolean().optional().describe("One-shot tasks only — for recurring use complete_task instead"),
+    snoozed_until: z.string().optional().describe("ISO date — empty string clears snooze"),
+    tags: z.array(z.string()).optional(),
+    notify_users: z.array(z.string()).optional(),
+    collapsed: z.boolean().optional(),
   },
-  async ({ id, updates }) => {
+  async ({ id, ...body }) => {
     const data = await api(`/tasks/${id}`, {
       method: "PATCH",
-      body: JSON.stringify(updates),
+      body: JSON.stringify(body),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
@@ -696,6 +1005,16 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ until }),
     });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "unsnooze_task",
+  "Clear a task's snooze (makes it visible again immediately)",
+  { id: z.string().describe("The task record ID") },
+  async ({ id }) => {
+    const data = await api(`/tasks/${id}/unsnooze`, { method: "POST" });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );
@@ -852,12 +1171,49 @@ server.tool(
   {
     targetType: z.enum(["box", "recipe", "travel_log"]).describe("Type of resource to share"),
     targetId: z.string().describe("ID of the box, recipe, or travel log to share"),
+    expiresAt: z.string().optional().describe("Optional ISO date for invite expiry"),
   },
-  async ({ targetType, targetId }) => {
+  async ({ targetType, targetId, expiresAt }) => {
     const data = await apiRaw("/sharing/invite", {
       method: "POST",
-      body: JSON.stringify({ targetType, targetId }),
+      body: JSON.stringify({ targetType, targetId, expiresAt }),
     });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_invites",
+  "List sharing invites the authenticated user has created (newest first), including redemption status and expiry.",
+  {},
+  async () => {
+    const data = await apiRaw("/sharing/invites");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_invite",
+  "Update an existing invite (currently just expires_at)",
+  {
+    id: z.string().describe("The invite record ID"),
+    expiresAt: z.string().optional().describe("ISO date for new expiry (empty string to remove)"),
+  },
+  async ({ id, expiresAt }) => {
+    const data = await apiRaw(`/sharing/invite/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ expiresAt }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_invite",
+  "Revoke (delete) a sharing invite",
+  { id: z.string().describe("The invite record ID") },
+  async ({ id }) => {
+    const data = await apiRaw(`/sharing/invite/${id}`, { method: "DELETE" });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );

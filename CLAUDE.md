@@ -36,25 +36,37 @@ Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.
 
 The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the user asks about their recipes, shopping lists, travel plans, tasks, or life data.
 
-### Available tools (31 total):
+### Available tools (64 total):
 
 **Recipes (read):**
 - `list_boxes` — list all recipe boxes
 - `search_recipes` — search by name across all boxes
 - `get_recipe` — full recipe details by ID
+- `list_cooking_log` — cooking log entries for a recipe (newest first)
 
 **Recipes (write):**
 - `scrape_recipe` — scrape a recipe from a URL
 - `generate_recipe` — AI recipe generation from a text prompt
 - `create_recipe_box` — create a new box
+- `update_recipe_box` — rename, change description, or set visibility
+- `delete_recipe_box` — delete a box (cascades to recipes + cooking log)
+- `subscribe_to_box` / `unsubscribe_from_box` — manage the authenticated user's box subscriptions
 - `add_recipe_to_box` — add a recipe with structured data
+- `update_recipe` — replace a recipe's data (use after `get_recipe` to fetch + modify)
+- `delete_recipe` — delete a recipe
+- `set_recipe_visibility` — set per-recipe visibility
+- `add_cooking_log_entry` — log a cooking session (optional notes/timestamp)
+- `update_cooking_log_entry` — edit cooking log notes
+- `delete_cooking_log_entry` — delete a cooking log entry
 
 **Shopping (read):**
 - `list_shopping_lists` — list all lists
 - `list_shopping_items` — items in a list
 
 **Shopping (write):**
+- `create_shopping_list` / `update_shopping_list` / `delete_shopping_list` — manage lists
 - `add_shopping_item` — add item to a list
+- `update_shopping_item` — edit ingredient/note/category/checked
 - `check_shopping_item` — toggle checked status
 - `remove_shopping_item` — delete an item
 - `clear_checked_items` — done shopping, clear checked
@@ -63,24 +75,25 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `list_tasks` — list tasks (filter by parent_id, tag, task_type)
 
 **Tasks (write):**
-- `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot)
-- `update_task` — update any fields
+- `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot, notify_users)
+- `update_task` — update fields (typed schema; pass only the fields to change)
 - `delete_task` — delete task and all descendants
 - `complete_task` — toggle completion (recurring sets last_completed; one_shot toggles completed)
-- `snooze_task` — snooze until a date (recurring only)
+- `snooze_task` / `unsnooze_task` — snooze until a date or clear snooze
 
 Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner.
 
 **Travel (read):**
 - `list_travel_trips` — all trips across logs
 - `get_travel_trip` — single trip with activities + itineraries
+- `get_travel_activity` — full activity details (geocoding, flight info, verdict/notes)
 - `search_travel` — search trips/activities by destination/name
 
 **Travel (write):**
 - `add_travel_trip` — create a trip
 - `update_travel_trip` — update trip fields
 - `add_travel_activity` — create an activity
-- `update_travel_activity` — update activity fields (including trip_id reassignment)
+- `update_travel_activity` — update activity fields (including verdict, personal_notes, experienced_at for post-trip reflection)
 - `add_travel_itinerary` — create an itinerary
 - `update_travel_itinerary` — update itinerary fields or replace days array
 - `delete_travel_trip` — delete a trip
@@ -90,8 +103,16 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 **Life (read):**
 - `list_life_entries` — recent entries (optional days filter)
 
+**Life (write):**
+- `add_life_entry` — log a widget event (data shape varies per widget type)
+- `update_life_entry` — change timestamp, merge data, or set notes
+- `delete_life_entry` — delete an entry
+
 **Sharing:**
-- `create_invite` — generate a sharing invite link
+- `create_invite` — generate a sharing invite link (optional expiry)
+- `list_invites` — list invites the user created (newest first)
+- `update_invite` — change expiry on an existing invite
+- `delete_invite` — revoke an invite
 
 ### Activity field guide
 
