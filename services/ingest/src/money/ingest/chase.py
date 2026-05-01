@@ -319,12 +319,15 @@ def parse_raw_chase(
         )
         account_count += 1
         log.info("Chase DDA (tile): %s ••%s (id=%s)", tile.nickname, tile.mask, account.id)
+        # Use the same source as dda/list-driven writes so the UNIQUE
+        # (account_id, as_of, source) constraint dedupes if the two paths
+        # ever land on the same date for the same account.
         db.insert_balance(
             Balance(
                 account_id=account.id,
                 as_of=as_of,
                 balance=tile.tileDetail.currentBalance,
-                source="chase_account_tile",
+                source="chase_network_log",
                 raw_file_ref=raw_key,
             )
         )

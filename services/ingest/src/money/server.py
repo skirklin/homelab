@@ -811,14 +811,20 @@ class IngestHandler(BaseHTTPRequestHandler):
 
     def _handle_net_worth_summary(self) -> None:
         """Return net worth broken into liquid, +vested equity, +all equity."""
-        # Liquid net worth: all accounts except stock_options
+        # Liquid net worth: pick exactly one most-recent balance row per account
+        # (multiple sources can produce duplicate (account_id, as_of) pairs;
+        # naively summing those double-counts the account).
         liquid_row = self.db.conn.execute("""
             SELECT COALESCE(SUM(b.balance), 0)
             FROM balances b
             JOIN accounts a ON b.account_id = a.id
             WHERE a.account_type != 'stock_options'
-              AND b.as_of = (SELECT MAX(b2.as_of) FROM balances b2
-                             WHERE b2.account_id = b.account_id)
+              AND b.id = (
+                SELECT b2.id FROM balances b2
+                WHERE b2.account_id = b.account_id
+                ORDER BY b2.as_of DESC, b2.recorded_at DESC, b2.id DESC
+                LIMIT 1
+              )
         """).fetchone()
         liquid = float(liquid_row[0]) if liquid_row else 0.0
 
