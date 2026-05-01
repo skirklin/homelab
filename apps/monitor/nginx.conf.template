@@ -1,0 +1,41 @@
+# Monitor app nginx config — bake-into-image template processed by nginx:alpine's
+# built-in envsubst at startup. $HOMELAB_API_TOKEN is injected from the api-secrets
+# k8s Secret so the SPA never sees the token.
+
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Deployment history — proxied to api.kirkl.in/fn/data/* with auth injected.
+    location /api/deployments {
+        proxy_pass https://api.kirkl.in/fn/data/deployments;
+        proxy_set_header Authorization "Bearer ${HOMELAB_API_TOKEN}";
+        proxy_set_header Host api.kirkl.in;
+        proxy_ssl_server_name on;
+    }
+
+    # Gatus uptime checks — internal cluster Service, no auth.
+    location /api/gatus/ {
+        proxy_pass http://gatus.homelab.svc.cluster.local:8080/;
+        proxy_set_header Host $host;
+    }
+
+    # Beszel hub PocketBase — internal cluster Service. Reads only.
+    # (Auth scaffolding for read access is a follow-up; for now this is here so
+    # the path resolves and we can iterate on auth next phase.)
+    location /api/beszel/ {
+        proxy_pass http://beszel.homelab.svc.cluster.local:8090/;
+        proxy_set_header Host $host;
+    }
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}

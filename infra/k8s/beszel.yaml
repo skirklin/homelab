@@ -1,0 +1,153 @@
+# Beszel — system metrics collector. Internal only (ClusterIP); the monitor
+# app reads its PocketBase to surface metrics.
+#
+# Hub UI is exposed on tailnet via tailscale serve on the VPS:
+#   https://homelab-0.tail56ca88.ts.net:9443/
+# (Backed by the beszel-portforward.service systemd unit on the VPS.)
+#
+# Agent connects to the hub via WebSocket using a universal token. The agent
+# also requires the hub's SSH public key (KEY env), which the agent process
+# fails to start without even when WebSocket-only. Both go into the same
+# Secret (created out-of-band):
+#   kubectl create secret generic beszel-agent-token -n homelab \
+#     --from-literal=token='<universal token from hub UI>' \
+#     --from-literal=key='ssh-ed25519 AAAA... (from hub UI Add System)'
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: beszel-data
+  namespace: homelab
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# --- hub ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beszel
+  namespace: homelab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: beszel
+  template:
+    metadata:
+      labels:
+        app: beszel
+    spec:
+      containers:
+        - name: beszel
+          image: henrygd/beszel:latest
+          ports:
+            - containerPort: 8090
+          volumeMounts:
+            - name: data
+              mountPath: /beszel_data
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { memory: 64Mi, cpu: 20m }
+            limits: { memory: 256Mi, cpu: 500m }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: beszel-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: beszel
+  namespace: homelab
+spec:
+  selector:
+    app: beszel
+  ports:
+    - port: 8090
+      targetPort: 8090
+
+---
+# --- agent (host metrics via gopsutil) ---
+# DaemonSet so it scales naturally if you add nodes later. hostPID + bind
+# mounts of /proc, /sys, /etc at /host/* let gopsutil read host stats via the
+# HOST_PROC/HOST_SYS/HOST_ETC env vars. Agent push-connects to the hub over
+# WebSocket using TOKEN, so no inbound port or Service is needed.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: beszel-agent
+  namespace: homelab
+spec:
+  selector:
+    matchLabels:
+      app: beszel-agent
+  template:
+    metadata:
+      labels:
+        app: beszel-agent
+    spec:
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: agent
+          image: henrygd/beszel-agent:latest
+          env:
+            - name: HUB_URL
+              value: http://beszel.homelab.svc.cluster.local:8090
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: beszel-agent-token
+                  key: token
+            - name: KEY
+              valueFrom:
+                secretKeyRef:
+                  name: beszel-agent-token
+                  key: key
+            - name: HOST_PROC
+              value: /host/proc
+            - name: HOST_SYS
+              value: /host/sys
+            - name: HOST_ETC
+              value: /host/etc
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: etc
+              mountPath: /host/etc
+              readOnly: true
+            - name: rootfs
+              mountPath: /host/rootfs
+              readOnly: true
+              mountPropagation: HostToContainer
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 128Mi, cpu: 200m }
+      volumes:
+        - name: proc
+          hostPath: { path: /proc }
+        - name: sys
+          hostPath: { path: /sys }
+        - name: etc
+          hostPath: { path: /etc }
+        - name: rootfs
+          hostPath: { path: / }

@@ -23,6 +23,7 @@ COPY apps/life/app/package.json apps/life/app/package.json
 COPY apps/upkeep/app/package.json apps/upkeep/app/package.json
 COPY apps/travel/app/package.json apps/travel/app/package.json
 COPY apps/money/package.json apps/money/package.json
+COPY apps/monitor/app/package.json apps/monitor/app/package.json
 RUN pnpm install --frozen-lockfile || pnpm install
 
 # Copy full source (needed for workspace deps like @kirkl/shared)
@@ -50,8 +51,12 @@ ARG APP_DIR
 ARG DIST_DIR=dist
 
 ARG NGINX_CONF=infra/docker/nginx-spa.conf
+# Where the conf lands in the image. Default is conf.d/ for static SPA configs;
+# override to /etc/nginx/templates/default.conf.template for env-var substitution
+# at container startup (nginx:alpine processes templates/* via envsubst).
+ARG NGINX_CONF_DEST=/etc/nginx/conf.d/default.conf
 
 COPY --from=build /workspace/${APP_DIR}/${DIST_DIR} /usr/share/nginx/html
-COPY ${NGINX_CONF} /etc/nginx/conf.d/default.conf
+COPY ${NGINX_CONF} ${NGINX_CONF_DEST}
 
 EXPOSE 80

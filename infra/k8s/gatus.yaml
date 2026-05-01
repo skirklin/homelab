@@ -1,0 +1,184 @@
+# Gatus — uptime / synthetic checks. Internal only (ClusterIP); the monitor
+# app reads its REST API to surface status alongside Beszel metrics.
+#
+# UI exposed on tailnet via tailscale serve on the VPS (mirroring Beszel):
+#   https://homelab-0.tail56ca88.ts.net:9444/
+# Backed by gatus-portforward.service systemd unit.
+#
+# Edit checks: update the gatus-config ConfigMap below, then
+# `kubectl rollout restart -n homelab deploy/gatus` to pick up changes.
+#
+# WHEN ADDING A NEW APP/SERVICE: also add a check entry below. See the
+# "Adding a new app" checklist in CLAUDE.md.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gatus-data
+  namespace: homelab
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gatus-config
+  namespace: homelab
+data:
+  config.yaml: |
+    storage:
+      type: sqlite
+      path: /data/gatus.db
+
+    ui:
+      title: kirkl.in status
+      header: kirkl.in homelab
+
+    endpoints:
+      # --- public frontends ---
+      - name: home
+        group: frontends
+        url: https://kirkl.in
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 2000"
+
+      - name: recipes
+        group: frontends
+        url: https://recipes.kirkl.in
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 2000"
+
+      - name: shopping
+        group: frontends
+        url: https://shopping.kirkl.in
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 2000"
+
+      - name: upkeep
+        group: frontends
+        url: https://upkeep.kirkl.in
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 2000"
+
+      - name: travel
+        group: frontends
+        url: https://travel.kirkl.in
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 2000"
+
+      - name: homepage
+        group: frontends
+        url: https://me.kirkl.in
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 2000"
+
+      # --- api / data layer ---
+      - name: api-health
+        group: api
+        url: https://api.kirkl.in/fn/health
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY].status == ok"
+
+      - name: pocketbase-health
+        group: api
+        url: https://api.kirkl.in/api/health
+        interval: 30s
+        conditions:
+          - "[STATUS] == 200"
+
+      # --- internal (cluster-only) ---
+      - name: beszel-hub
+        group: monitor
+        url: http://beszel.homelab.svc.cluster.local:8090/api/health
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+
+      - name: ingest
+        group: internal
+        url: http://ingest.homelab.svc.cluster.local:5555/health
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gatus
+  namespace: homelab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gatus
+  template:
+    metadata:
+      labels:
+        app: gatus
+      annotations:
+        # Bounce the pod when the ConfigMap changes
+        configHash: "v1"
+    spec:
+      containers:
+        - name: gatus
+          image: twinproduction/gatus:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: GATUS_CONFIG_PATH
+              value: /config/config.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 128Mi, cpu: 200m }
+      volumes:
+        - name: config
+          configMap:
+            name: gatus-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: gatus-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gatus
+  namespace: homelab
+spec:
+  selector:
+    app: gatus
+  ports:
+    - port: 8080
+      targetPort: 8080
