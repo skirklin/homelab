@@ -249,7 +249,7 @@ export function DayView() {
   if (!trip) {
     return (
       <WideContainer>
-        <BackLink onClick={() => navigate("..")}>
+        <BackLink onClick={() => navigate("../..", { relative: "path" })}>
           <ArrowLeftOutlined /> Back
         </BackLink>
         <Empty description="Trip not found" style={{ marginTop: 40 }} />
@@ -260,7 +260,7 @@ export function DayView() {
   if (!itinerary) {
     return (
       <WideContainer>
-        <BackLink onClick={() => navigate("..")}>
+        <BackLink onClick={() => navigate("../..", { relative: "path" })}>
           <ArrowLeftOutlined /> Back to {trip.destination}
         </BackLink>
         <Empty description="No itinerary on this trip" style={{ marginTop: 40 }} />
@@ -272,7 +272,7 @@ export function DayView() {
   if (dayIndex < 0) {
     return (
       <WideContainer>
-        <BackLink onClick={() => navigate("..")}>
+        <BackLink onClick={() => navigate("../..", { relative: "path" })}>
           <ArrowLeftOutlined /> Back to {trip.destination}
         </BackLink>
         <Empty description={`No day "${date}" on this itinerary`} style={{ marginTop: 40 }} />
@@ -286,9 +286,13 @@ export function DayView() {
   const hasNext = dayIndex < totalDays - 1;
   const prevDate = hasPrev ? itinerary.days[dayIndex - 1].date : null;
   const nextDate = hasNext ? itinerary.days[dayIndex + 1].date : null;
+  // URL-relative ("../{d}") because we're already at /{tripId}/day/{date} —
+  // `..` strips the date segment, then `{d}` puts us at /{tripId}/day/{d}.
+  // Default route-relative resolution would walk up matched routes instead
+  // and produce the wrong path for these flat routes.
   const goToDay = (d?: string) => {
     if (!d) return;
-    navigate(`../day/${d}`);
+    navigate(`../${d}`, { relative: "path" });
   };
 
   const lodging = day.lodgingActivityId ? activityMap.get(day.lodgingActivityId) : null;
@@ -464,7 +468,7 @@ export function DayView() {
                 </SlotBody>
                 <Space size={2} style={{ flexShrink: 0, alignSelf: "flex-start", paddingTop: 2 }}>
                   <Button type="text" size="small" icon={<EditOutlined />}
-                    onClick={() => activity && navigate(`../activities/${activity.id}/edit`)} />
+                    onClick={() => activity && navigate(`../../activities/${activity.id}/edit`, { relative: "path" })} />
                   <Popconfirm title="Remove from this day?" onConfirm={() => removeSlot(j)}>
                     <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                   </Popconfirm>
