@@ -23,6 +23,30 @@ export { newId } from "../cache/ids";
 
 // ---- Types ----
 
+/**
+ * Error thrown by the wrapper when an optimistic write is rejected by PB.
+ * Carries the operation context so a global `unhandledrejection` handler
+ * can show a meaningful toast for un-awaited write failures.
+ */
+export class WrappedPbError extends Error {
+  readonly op: { kind: "create" | "update" | "delete"; collection: string; recordId: string };
+  readonly originalError: unknown;
+
+  constructor(op: WrappedPbError["op"], originalError: unknown) {
+    const message = (() => {
+      if (originalError && typeof originalError === "object") {
+        const msg = (originalError as { message?: unknown }).message;
+        if (typeof msg === "string") return msg;
+      }
+      return "Optimistic write rejected";
+    })();
+    super(message);
+    this.name = "WrappedPbError";
+    this.op = op;
+    this.originalError = originalError;
+  }
+}
+
 export interface WrappedSubscribeOptions {
   /** PB-side filter string (sent to server). */
   filter?: string;
@@ -145,6 +169,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     recordId: string,
     mutationId: string,
     fire: () => Promise<RawRecord | null>,
+    kind: "create" | "update" | "delete",
   ): Promise<RawRecord | null> {
     try {
       const result = await fire();
@@ -161,17 +186,21 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       }
       return result;
     } catch (err) {
-      // Drop mutation, emit current view, re-throw. Replay-specific errors
-      // (idempotent dup/404) are handled by replayPending, not here.
+      // Drop mutation, emit current view, re-throw wrapped with op context so
+      // un-awaited rejections can be toasted by a global handler. Replay-specific
+      // errors (idempotent dup/404) are handled by replayPending, not here.
       const drainResult = queue.drainPending(collection, recordId, mutationId);
       void unpersistMutation(mutationId);
       const view = drainResult.after;
       if (view === null) {
-        notifySubscribers(collection, "delete", { id: recordId });
+        // Use the pre-drain view so subscriber predicates (e.g. r.list === X)
+        // can match. Falls back to the id-only synthesizable record if neither
+        // server snapshot nor any pending mutation existed before the drain.
+        notifySubscribers(collection, "delete", drainResult.before ?? { id: recordId });
       } else {
         notifySubscribers(collection, "update", view);
       }
-      throw err;
+      throw new WrappedPbError({ kind, collection, recordId }, err);
     }
   }
 
@@ -220,7 +249,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const ack = await dispatchMutation(name, id, mutationId, async () => {
           const r = await pb().collection(name).create({ ...body, id }, opts);
           return r as RawRecord;
-        });
+        }, "create");
         return (ack ?? record) as T;
       },
 
@@ -243,7 +272,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const ack = await dispatchMutation(name, id, mutationId, async () => {
           const r = await pb().collection(name).update(id, body, opts);
           return r as RawRecord;
-        });
+        }, "update");
         return (ack ?? after) as T;
       },
 
@@ -252,8 +281,11 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const mutationId = newId();
         const mutation: Mutation = { kind: "delete" };
 
-        queue.pushPending(name, id, mutation, mutationId);
-        notifySubscribers(name, "delete", { id });
+        // Capture the prior view BEFORE adding the delete mutation so we can
+        // emit it as the event record — predicates need the full record (with
+        // the list/log/parent fields) to match, not just the id.
+        const { before } = queue.pushPending(name, id, mutation, mutationId);
+        notifySubscribers(name, "delete", before ?? { id });
         void persistMutation({
           id: mutationId,
           collection: name,
@@ -266,7 +298,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         await dispatchMutation(name, id, mutationId, async () => {
           await pb().collection(name).delete(id, opts);
           return null;
-        });
+        }, "delete");
         return true;
       },
 
@@ -327,8 +359,13 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
             return null;
           }
         };
-        void dispatchMutation(m.collection, m.recordId, m.id, fire).catch((err) => {
-          if (isIdempotentReplayError(err)) return; // expected on retry
+        const kind: "create" | "update" | "delete" =
+          m.mutation.kind === "set" ? "create" : m.mutation.kind === "update" ? "update" : "delete";
+        void dispatchMutation(m.collection, m.recordId, m.id, fire, kind).catch((err) => {
+          // Replay swallows idempotent errors (404 / 409) — those mean PB
+          // already converged with our intent.
+          const inner = err instanceof WrappedPbError ? err.originalError : err;
+          if (isIdempotentReplayError(inner)) return;
           console.warn("[wpb] replay failed for", m.collection, m.recordId, err);
         });
       }

@@ -11,9 +11,11 @@
  */
 
 import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { message } from "antd";
 import { getBackend } from "./backend";
 import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
 import { withCache } from "@homelab/backend/cache";
+import { WrappedPbError } from "@homelab/backend/wrapped-pb";
 import { OfflineBanner } from "./online-status";
 import { registerServiceWorker } from "./sw-register";
 import { useAuth } from "./auth";
@@ -62,6 +64,27 @@ function useTimezoneSync() {
   }, [user?.uid]);
 }
 
+/**
+ * Catch un-awaited optimistic-write rejections and surface a generic toast.
+ * Call sites that want custom messaging should `await` and toast themselves;
+ * this is the safety net for fire-and-forget writes.
+ */
+function useOptimisticErrorToast() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (event: PromiseRejectionEvent) => {
+      if (!(event.reason instanceof WrappedPbError)) return;
+      const { kind } = event.reason.op;
+      const verb = kind === "create" ? "save" : kind === "update" ? "update" : "remove";
+      message.error(`Couldn't ${verb} — please try again`);
+      // Don't preventDefault — keep the original PB error in the console for
+      // debugging. The user already gets feedback via the toast.
+    };
+    window.addEventListener("unhandledrejection", handler);
+    return () => window.removeEventListener("unhandledrejection", handler);
+  }, []);
+}
+
 export function BackendProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     registerServiceWorker();
@@ -71,6 +94,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
     void wpb.replayPending();
   }, []);
   useTimezoneSync();
+  useOptimisticErrorToast();
   return (
     <ShoppingBackendContext.Provider value={backends.shopping}>
       <RecipesBackendContext.Provider value={backends.recipes}>

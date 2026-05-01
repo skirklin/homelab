@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type PocketBase from "pocketbase";
 import type { RecordModel, RecordSubscription, UnsubscribeFunc } from "pocketbase";
-import { wrapPocketBase } from "./index";
+import { wrapPocketBase, WrappedPbError } from "./index";
 import { clearAllMutations } from "./persistence";
 
 type RealtimeCb = (e: { action: string; record: RecordModel }) => void;
@@ -191,14 +191,19 @@ describe("wrapPocketBase rejection", () => {
 
     stub.col("items").rejectNext.create = Object.assign(new Error("forbidden"), { status: 403 });
 
-    let rejected = false;
+    let caught: unknown = null;
     try {
       await wpb.collection("items").create({ id: "a", list: "L1" });
-    } catch {
-      rejected = true;
+    } catch (err) {
+      caught = err;
     }
 
-    expect(rejected).toBe(true);
+    // Wrapped error carries op metadata so a global handler can toast.
+    expect(caught).toBeInstanceOf(WrappedPbError);
+    const wrapped = caught as WrappedPbError;
+    expect(wrapped.op).toEqual({ kind: "create", collection: "items", recordId: "a" });
+    expect((wrapped.originalError as { status?: number }).status).toBe(403);
+
     const itemEvents = events.filter((e) => e.id === "a");
     expect(itemEvents.length).toBeGreaterThanOrEqual(2);
     expect(itemEvents[0].action).toBe("create");
