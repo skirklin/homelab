@@ -171,5 +171,25 @@ Implementations live in `packages/backend/src/pocketbase/`. Apps get backends vi
 - API tokens: `hlk_` prefix, SHA-256 hashed in PocketBase, created via Settings UI
 - `.env` at project root has secrets (gitignored): `PB_ADMIN_PASSWORD`, `HOMELAB_API_TOKEN`, `VITE_GOOGLE_MAPS_API_KEY`
 
+## Adding a new app
+
+Whenever you add a new public-facing app or internal service, touch every file in this checklist — partial wiring is the most common source of "why isn't this routing / monitored / deployed":
+
+1. `apps/<name>/` (or service equivalent) — code
+2. `infra/deploy.sh` — add to the `APP_BUILDS` map (or as a special case if it has its own Dockerfile, like `homepage`/`pocketbase`/`ingest`/`functions`)
+3. `infra/k8s/apps.yaml` — `Deployment` + `Service` (skip if it's not a frontend; backend services get their own manifest)
+4. `infra/k8s/caddy.yaml` — public Caddy site block, OR for tailnet-only: `kubectl port-forward` systemd unit + `tailscale serve` rule on the VPS (matches `money`/`ingest`/`beszel`/`gatus` pattern)
+5. `infra/k8s/gatus.yaml` — add a check entry to the `gatus-config` ConfigMap so uptime is monitored from day one
+
+Health endpoints to expose so Gatus has something to hit:
+- Frontend nginx pods: `GET /` returning 200 is enough
+- Backend services: a `/health` (or `/api/health` for PB-style services) returning 200 + a known body shape
+
+## Monitoring stack
+
+- **Beszel** (system metrics) — hub at `https://homelab-0.tail56ca88.ts.net:9443/`. Agent connects via WebSocket using `TOKEN`+`KEY` from the `beszel-agent-token` k8s Secret (gitignored, created out-of-band).
+- **Gatus** (uptime checks) — UI at `https://homelab-0.tail56ca88.ts.net:9444/`. Edit checks in `infra/k8s/gatus.yaml`'s `gatus-config` ConfigMap, then `./infra/deploy.sh --push-only` (or `kubectl rollout restart -n homelab deploy/gatus`) to pick up changes.
+- **Deployment history** — `deployments` PB collection. Written automatically by `infra/deploy.sh`'s exit trap. Read via `GET /fn/data/deployments`.
+
 ## Three Man Team
 Available agents: Alice (Architect), Bob (Builder), Robert (Reviewer)

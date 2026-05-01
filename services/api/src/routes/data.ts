@@ -1377,3 +1377,75 @@ dataRoutes.delete("/travel/proposals/:id", handler(async (c) => {
   return c.json({ deleted: true });
 }));
 
+// =============================================================================
+// Monitor — deployment history
+// =============================================================================
+
+// Record a deployment. Called by infra/deploy.sh after each run.
+dataRoutes.post("/deployments", handler(async (c) => {
+  const pb = c.get("pb");
+  const body = await c.req.json<{
+    git_sha: string;
+    git_branch?: string;
+    git_subject?: string;
+    apps?: string[];
+    duration_seconds?: number;
+    status: "success" | "failure" | "partial";
+    deployer?: string;
+    host?: string;
+    notes?: string;
+    failed_apps?: string[];
+  }>();
+
+  if (!body.git_sha || !body.status) {
+    return c.json({ error: "git_sha and status required" }, 400);
+  }
+  if (!["success", "failure", "partial"].includes(body.status)) {
+    return c.json({ error: "invalid status" }, 400);
+  }
+
+  const record = await pb.collection("deployments").create({
+    git_sha: body.git_sha,
+    git_branch: body.git_branch ?? "",
+    git_subject: body.git_subject ?? "",
+    apps: body.apps ?? [],
+    duration_seconds: body.duration_seconds ?? 0,
+    status: body.status,
+    deployer: body.deployer ?? "",
+    host: body.host ?? "",
+    notes: body.notes ?? "",
+    failed_apps: body.failed_apps ?? [],
+  });
+  return c.json({ id: record.id }, 201);
+}));
+
+// List recent deployments (newest first).
+dataRoutes.get("/deployments", handler(async (c) => {
+  const pb = c.get("pb");
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "50", 10) || 50, 500);
+  const records = await pb.collection("deployments").getList(1, limit, {
+    sort: "-created",
+  });
+  return c.json(records.items.map((r) => ({
+    id: r.id,
+    created: r.created,
+    git_sha: r.git_sha,
+    git_branch: r.git_branch,
+    git_subject: r.git_subject,
+    apps: r.apps,
+    duration_seconds: r.duration_seconds,
+    status: r.status,
+    deployer: r.deployer,
+    host: r.host,
+    notes: r.notes,
+    failed_apps: r.failed_apps,
+  })));
+}));
+
+// Delete a deployment record (for cleaning up stray entries).
+dataRoutes.delete("/deployments/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  await pb.collection("deployments").delete(id);
+  return c.json({ deleted: true });
+}));
