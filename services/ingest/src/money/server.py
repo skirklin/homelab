@@ -1765,9 +1765,6 @@ class IngestHandler(BaseHTTPRequestHandler):
         if self.path == "/capture":
             self._handle_capture()
             return
-        if self.path.startswith("/api/admin/dedupe-balances"):
-            self._handle_dedupe_balances()
-            return
         self._json_response(404, {"error": "not found"})
 
     def do_OPTIONS(self) -> None:
@@ -2251,74 +2248,6 @@ class IngestHandler(BaseHTTPRequestHandler):
             "name": account.name,
             "account_type": account.account_type.value,
             "latest_balance": float(initial_value) if initial_value is not None else None,
-        })
-
-    def _handle_dedupe_balances(self) -> None:
-        """One-shot cleanup: collapse duplicate balance rows that share
-        (account_id, as_of) but have different `source` values, keeping
-        the most-recently-inserted row (max id) per group.
-
-        ?dry_run=1 reports counts without deleting.
-        """
-        from urllib.parse import parse_qs, urlparse
-
-        params = parse_qs(urlparse(self.path).query)
-        dry_run = params.get("dry_run", ["0"])[0] == "1"
-
-        before_total = self.db.conn.execute(
-            "SELECT COUNT(*) FROM balances"
-        ).fetchone()[0]
-
-        # Sample of what would be deleted (top by absolute balance, for visibility).
-        sample_rows = self.db.conn.execute("""
-            SELECT b.id, a.name, b.as_of, b.balance, b.source
-            FROM balances b
-            JOIN accounts a ON b.account_id = a.id
-            WHERE b.id NOT IN (
-                SELECT MAX(id) FROM balances GROUP BY account_id, as_of
-            )
-            ORDER BY ABS(b.balance) DESC
-            LIMIT 20
-        """).fetchall()
-        sample = [
-            {"id": r["id"], "account": r["name"], "as_of": r["as_of"],
-             "balance": r["balance"], "source": r["source"]}
-            for r in sample_rows
-        ]
-
-        to_delete = self.db.conn.execute("""
-            SELECT COUNT(*) FROM balances
-            WHERE id NOT IN (
-                SELECT MAX(id) FROM balances GROUP BY account_id, as_of
-            )
-        """).fetchone()[0]
-
-        if dry_run:
-            self._json_response(200, {
-                "dry_run": True,
-                "total_rows": before_total,
-                "would_delete": to_delete,
-                "sample": sample,
-            })
-            return
-
-        self.db.conn.execute("""
-            DELETE FROM balances
-            WHERE id NOT IN (
-                SELECT MAX(id) FROM balances GROUP BY account_id, as_of
-            )
-        """)
-        self.db.conn.commit()
-        after_total = self.db.conn.execute(
-            "SELECT COUNT(*) FROM balances"
-        ).fetchone()[0]
-
-        self._json_response(200, {
-            "dry_run": False,
-            "deleted": before_total - after_total,
-            "total_rows_before": before_total,
-            "total_rows_after": after_total,
-            "sample_of_deleted": sample,
         })
 
     def _handle_update_balance(self) -> None:
