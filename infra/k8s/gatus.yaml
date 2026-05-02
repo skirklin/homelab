@@ -1,9 +1,8 @@
 # Gatus — uptime / synthetic checks. Internal only (ClusterIP); the monitor
 # app reads its REST API to surface status alongside Beszel metrics.
 #
-# UI exposed on tailnet via tailscale serve on the VPS (mirroring Beszel):
-#   https://homelab-0.tail56ca88.ts.net:9444/
-# Backed by gatus-portforward.service systemd unit.
+# UI exposed on tailnet via the Tailscale Kubernetes operator (Ingress below):
+#   https://gatus.tail56ca88.ts.net/
 #
 # Edit checks: update the gatus-config ConfigMap below, then
 # `kubectl rollout restart -n homelab deploy/gatus` to pick up changes.
@@ -112,6 +111,20 @@ data:
         conditions:
           - "[STATUS] == 200"
 
+      - name: monitor
+        group: monitor
+        url: http://monitor.homelab.svc.cluster.local/
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+
+      - name: money
+        group: internal
+        url: http://money.homelab.svc.cluster.local/
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+
       - name: ingest
         group: internal
         url: http://ingest.homelab.svc.cluster.local:5555/health
@@ -182,3 +195,19 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gatus
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: gatus
+      port:
+        number: 8080
+  tls:
+    - hosts:
+        - gatus

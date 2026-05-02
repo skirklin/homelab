@@ -1,9 +1,8 @@
 # Beszel — system metrics collector. Internal only (ClusterIP); the monitor
 # app reads its PocketBase to surface metrics.
 #
-# Hub UI is exposed on tailnet via tailscale serve on the VPS:
-#   https://homelab-0.tail56ca88.ts.net:9443/
-# (Backed by the beszel-portforward.service systemd unit on the VPS.)
+# Hub UI is exposed on tailnet via the Tailscale Kubernetes operator (Ingress below):
+#   https://beszel.tail56ca88.ts.net/
 #
 # Agent connects to the hub via WebSocket using a universal token. The agent
 # also requires the hub's SSH public key (KEY env), which the agent process
@@ -77,6 +76,23 @@ spec:
   ports:
     - port: 8090
       targetPort: 8090
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: beszel
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: beszel
+      port:
+        number: 8090
+  tls:
+    - hosts:
+        - beszel
 
 ---
 # --- agent (host metrics via gopsutil) ---

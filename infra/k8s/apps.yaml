@@ -302,6 +302,22 @@ spec:
   ports:
     - port: 80
       targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: money
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: money
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - money
 
 ---
 # --- monitor (tailnet-only) ---
@@ -360,6 +376,23 @@ spec:
   ports:
     - port: 80
       targetPort: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitor
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: monitor
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - monitor
 
 ---
 # --- homepage (static) ---

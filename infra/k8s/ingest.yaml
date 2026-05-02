@@ -68,3 +68,19 @@ spec:
   ports:
     - port: 5555
       targetPort: 5555
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingest
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: ingest
+      port:
+        number: 5555
+  tls:
+    - hosts:
+        - ingest

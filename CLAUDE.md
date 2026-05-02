@@ -187,9 +187,11 @@ Health endpoints to expose so Gatus has something to hit:
 
 ## Monitoring stack
 
-- **Beszel** (system metrics) — hub at `https://homelab-0.tail56ca88.ts.net:9443/`. Agent connects via WebSocket using `TOKEN`+`KEY` from the `beszel-agent-token` k8s Secret (gitignored, created out-of-band).
-- **Gatus** (uptime checks) — UI at `https://homelab-0.tail56ca88.ts.net:9444/`. Edit checks in `infra/k8s/gatus.yaml`'s `gatus-config` ConfigMap, then `./infra/deploy.sh --push-only` (or `kubectl rollout restart -n homelab deploy/gatus`) to pick up changes.
+- **Beszel** (system metrics) — hub at `https://beszel.tail56ca88.ts.net/`. Agent connects via WebSocket using `TOKEN`+`KEY` from the `beszel-agent-token` k8s Secret (gitignored, created out-of-band).
+- **Gatus** (uptime checks) — UI at `https://gatus.tail56ca88.ts.net/`. Edit checks in `infra/k8s/gatus.yaml`'s `gatus-config` ConfigMap, then `./infra/deploy.sh --push-only` (or `kubectl rollout restart -n homelab deploy/gatus`) to pick up changes.
+- **Monitor frontend** — `https://monitor.tail56ca88.ts.net/` (tailnet-only, surfaces deployments + uptime).
 - **Deployment history** — `deployments` PB collection. Written automatically by `infra/deploy.sh`'s exit trap. Read via `GET /fn/data/deployments`.
+- **Tailscale operator** — All tailnet apps use the Tailscale Kubernetes operator (Ingress with `ingressClassName: tailscale`), which auto-provisions per-app tailnet devices and HTTPS certs. Operator config in `infra/k8s/tailscale-operator.yaml` (vendored upstream + env overrides for `OPERATOR_INITIAL_TAGS`/`PROXY_TAGS=tag:k8s`). OAuth client + ACL `tagOwners` use a single `tag:k8s` — Tailscale enforces *exact-match* between OAuth `authTags` and the tags requested at mint time, so single-tag is simpler. To expose a new app: add an `Ingress` with `ingressClassName: tailscale` and `tls.hosts: [<name>]`.
 
 ## Three Man Team
 Available agents: Alice (Architect), Bob (Builder), Robert (Reviewer)
