@@ -193,5 +193,14 @@ Health endpoints to expose so Gatus has something to hit:
 - **Deployment history** — `deployments` PB collection. Written automatically by `infra/deploy.sh`'s exit trap. Read via `GET /fn/data/deployments`.
 - **Tailscale operator** — All tailnet apps use the Tailscale Kubernetes operator (Ingress with `ingressClassName: tailscale`), which auto-provisions per-app tailnet devices and HTTPS certs. Operator config in `infra/k8s/tailscale-operator.yaml` (vendored upstream + env overrides for `OPERATOR_INITIAL_TAGS`/`PROXY_TAGS=tag:k8s`). OAuth client + ACL `tagOwners` use a single `tag:k8s` — Tailscale enforces *exact-match* between OAuth `authTags` and the tags requested at mint time, so single-tag is simpler. To expose a new app: add an `Ingress` with `ingressClassName: tailscale` and `tls.hosts: [<name>]`.
 
+### Possible future work
+
+Deferred but worth picking up if a need surfaces:
+
+- **App error reporting** — `error_events` PB collection + `/fn/data/errors` endpoint, plus a global error handler in `@kirkl/shared` that POSTs uncaught frontend errors and a wrapped `handler()` in the api service that does the same for backend ones. Surface in the monitor frontend as a "Recent errors" pane. (Original Phase 2 of the monitoring buildout, deferred because the data sink alone gives no value until something writes to it.)
+- **Push notifications on Gatus failures** — wire Gatus's webhook alerts into the existing VAPID push setup (`api-secrets` already has the keys). Converts uptime monitoring from "you check the dashboard" to "your phone buzzes when something dies."
+- **Native Beszel charts in the monitor frontend** — query Beszel's PocketBase API directly and render CPU/memory/disk/network charts natively, instead of linking out to the Beszel UI. Needs a read-only auth path into Beszel's PB (separate user with read-only API token, stored in a k8s Secret, injected at the monitor's nginx layer like `HOMELAB_API_TOKEN` is). Couple hours of work.
+- **Gatus tailnet-end checks** — current Gatus checks hit cluster-internal Service IPs, which prove the pod is healthy but don't catch a broken Tailscale operator proxy. To check the tailnet-edge URL end-to-end, Gatus would need to be tailnet-attached itself (e.g., a tailscale sidecar in its pod). Low priority since the operator's stable.
+
 ## Three Man Team
 Available agents: Alice (Architect), Bob (Builder), Robert (Reviewer)
