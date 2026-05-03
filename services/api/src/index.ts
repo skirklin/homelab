@@ -12,7 +12,10 @@ export type AppEnv = {
     pb: import("pocketbase").default;
   };
 };
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+
 import { authMiddleware } from "./middleware/auth";
+import { buildMcpServer } from "./mcp";
 import { recipesRoutes } from "./routes/recipes";
 import { aiRoutes } from "./routes/ai";
 import { sharingRoutes } from "./routes/sharing";
@@ -71,6 +74,31 @@ app.route("/data", dataRoutes);
 app.route("/push", pushRoutes);
 app.route("/auth", authRoutes);
 app.route("/notifications", notificationRoutes);
+
+// MCP Streamable HTTP endpoint. Tailnet-only by default: MCP_ALLOWED_HOSTS gates
+// which Host headers are allowed (set to "mcp.tail56ca88.ts.net" in k8s).
+// Empty value = unrestricted (dev only).
+const mcpAllowedHosts = (process.env.MCP_ALLOWED_HOSTS || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+app.all("/mcp", async (c) => {
+  if (mcpAllowedHosts.length > 0) {
+    const host = (c.req.header("host") ?? "").toLowerCase().split(":")[0];
+    if (!mcpAllowedHosts.includes(host)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+  }
+  const userToken = c.get("userToken");
+  const server = buildMcpServer(userToken);
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  await server.connect(transport);
+  return transport.handleRequest(c.req.raw);
+});
 
 const port = parseInt(process.env.PORT || "3000");
 

@@ -4,17 +4,19 @@
  *
  * Run with: pnpm mcp
  */
+import { fileURLToPath } from "node:url";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
 import { API_BASE } from "./config";
-const API_TOKEN = process.env.HOMELAB_API_TOKEN || "";
 
-if (!API_TOKEN) {
-  console.error("HOMELAB_API_TOKEN env var is required. Generate one in Settings → API Tokens.");
-  process.exit(1);
-}
+// Builds a configured MCP server bound to a specific API token. Inner closures
+// capture `apiToken`, so each caller (stdio bootstrap, per-request HTTP handler)
+// gets its own server scoped to the right user identity. The body is left at
+// module-level indentation to keep this refactor a thin wrapper, not a rewrite.
+export function buildMcpServer(apiToken: string): McpServer {
 
 async function api(path: string, init?: RequestInit): Promise<unknown> {
   const url = `${API_BASE}/data${path}`;
@@ -31,7 +33,7 @@ async function apiFetch(url: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(url, {
     ...init,
     headers: {
-      "Authorization": `Bearer ${API_TOKEN}`,
+      "Authorization": `Bearer ${apiToken}`,
       "Content-Type": "application/json",
       ...init?.headers,
     },
@@ -742,6 +744,8 @@ const activityFields = {
   cost_notes: z.string().optional().describe("Cost notes (e.g. '$25/person')"),
   duration_estimate: z.string().optional().describe("Duration (e.g. '2h', 'half day')"),
   walk_miles: z.number().optional().describe("Distance walked or hiked in miles (e.g. trail length)"),
+  elevation_gain_feet: z.number().optional().describe("Elevation gain in feet (Hiking activities)"),
+  difficulty: z.enum(["easy", "moderate", "hard", "strenuous", ""]).optional().describe("Hike difficulty rating"),
   setting: z.enum(["outdoor", "indoor", "either"]).optional(),
   trip_id: z.string().optional().describe("Trip this activity belongs to"),
   confirmation_code: z.string().optional().describe("Booking confirmation code"),
@@ -1218,15 +1222,28 @@ server.tool(
   },
 );
 
-// --- Start ---
+  return server;
+}
+
+// --- Start (stdio bootstrap, used by `pnpm mcp` and the local .mcp.json) ---
 
 async function main() {
+  const apiToken = process.env.HOMELAB_API_TOKEN || "";
+  if (!apiToken) {
+    console.error("HOMELAB_API_TOKEN env var is required. Generate one in Settings → API Tokens.");
+    process.exit(1);
+  }
+  const server = buildMcpServer(apiToken);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Homelab MCP server running on stdio");
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+// Only run the stdio bootstrap when this file is invoked directly (e.g. `pnpm mcp`).
+// When imported by index.ts to mount the HTTP transport, skip main().
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}

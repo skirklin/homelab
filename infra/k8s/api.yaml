@@ -36,6 +36,8 @@ spec:
               value: "http://pocketbase:8090"
             - name: DOMAIN
               value: "kirkl.in"
+            - name: MCP_ALLOWED_HOSTS
+              value: "mcp.tail56ca88.ts.net"
           envFrom:
             - secretRef:
                 name: api-secrets
@@ -59,3 +61,19 @@ spec:
   ports:
     - port: 3000
       targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcp
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: functions
+      port:
+        number: 3000
+  tls:
+    - hosts:
+        - mcp
