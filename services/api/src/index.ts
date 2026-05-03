@@ -23,7 +23,9 @@ import { dataRoutes } from "./routes/data";
 import { pushRoutes } from "./routes/push";
 import { authRoutes } from "./routes/auth";
 import { notificationRoutes } from "./routes/notifications";
+import { oauthRoutes } from "./routes/oauth";
 import { startScheduler } from "./lib/notifications/scheduler";
+import { SUPPORTED_SCOPES } from "./lib/oauth";
 const app = new Hono<AppEnv>();
 
 // CORS — allow kirkl.in and any subdomain (incl. beta.kirkl.in), plus local dev
@@ -39,6 +41,51 @@ app.use("*", cors({
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
 }));
+
+// MCP-related endpoints (oauth + discovery + the /mcp route itself) live behind a
+// host allowlist so they're tailnet-only. Empty list = unrestricted (dev). Set
+// MCP_ALLOWED_HOSTS=mcp.tail56ca88.ts.net in k8s. The middleware short-circuits
+// non-allowed hosts with a 404 to avoid leaking the endpoint's existence.
+const mcpAllowedHosts = (process.env.MCP_ALLOWED_HOSTS || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+const mcpHostGate = async (c: import("hono").Context, next: import("hono").Next) => {
+  if (mcpAllowedHosts.length > 0) {
+    const host = (c.req.header("host") ?? "").toLowerCase().split(":")[0];
+    if (!mcpAllowedHosts.includes(host)) return c.json({ error: "Not found" }, 404);
+  }
+  return next();
+};
+
+const MCP_ISSUER = process.env.MCP_ISSUER || "https://mcp.tail56ca88.ts.net";
+const MCP_RESOURCE = `${MCP_ISSUER}/mcp`;
+
+// OAuth discovery + endpoints (public, tailnet-only). Mounted before authMiddleware
+// so unauthenticated clients can complete the OAuth flow that issues the access
+// tokens authMiddleware will then validate.
+app.get("/.well-known/oauth-authorization-server", mcpHostGate, (c) => c.json({
+  issuer: MCP_ISSUER,
+  authorization_endpoint: `${MCP_ISSUER}/oauth/authorize`,
+  token_endpoint: `${MCP_ISSUER}/oauth/token`,
+  registration_endpoint: `${MCP_ISSUER}/oauth/register`,
+  revocation_endpoint: `${MCP_ISSUER}/oauth/revoke`,
+  response_types_supported: ["code"],
+  grant_types_supported: ["authorization_code", "refresh_token"],
+  token_endpoint_auth_methods_supported: ["none", "client_secret_basic", "client_secret_post"],
+  code_challenge_methods_supported: ["S256"],
+  scopes_supported: SUPPORTED_SCOPES,
+}));
+app.get("/.well-known/oauth-protected-resource/mcp", mcpHostGate, (c) => c.json({
+  resource: MCP_RESOURCE,
+  authorization_servers: [MCP_ISSUER],
+  scopes_supported: SUPPORTED_SCOPES,
+  bearer_methods_supported: ["header"],
+}));
+app.use("/oauth/*", mcpHostGate);
+app.use("/mcp", mcpHostGate);
+app.route("/oauth", oauthRoutes);
 
 // Public endpoints (no auth)
 app.get("/health", (c) => c.json({ status: "ok" }));
@@ -75,21 +122,10 @@ app.route("/push", pushRoutes);
 app.route("/auth", authRoutes);
 app.route("/notifications", notificationRoutes);
 
-// MCP Streamable HTTP endpoint. Tailnet-only by default: MCP_ALLOWED_HOSTS gates
-// which Host headers are allowed (set to "mcp.tail56ca88.ts.net" in k8s).
-// Empty value = unrestricted (dev only).
-const mcpAllowedHosts = (process.env.MCP_ALLOWED_HOSTS || "")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
-
+// MCP Streamable HTTP endpoint. Host allowlist enforced by mcpHostGate (mounted
+// above before authMiddleware so non-tailnet probes get 404 without revealing
+// the auth challenge); the global authMiddleware then validates the token.
 app.all("/mcp", async (c) => {
-  if (mcpAllowedHosts.length > 0) {
-    const host = (c.req.header("host") ?? "").toLowerCase().split(":")[0];
-    if (!mcpAllowedHosts.includes(host)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-  }
   const userToken = c.get("userToken");
   const server = buildMcpServer(userToken);
   const transport = new WebStandardStreamableHTTPServerTransport({

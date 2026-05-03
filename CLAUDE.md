@@ -141,7 +141,11 @@ Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are crea
 `.mcp.json` at project root (gitignored) configures the MCP server for Claude Code. Uses the project's local `tsx` binary to run `services/api/src/mcp.ts` over stdio.
 
 ### Remote MCP (tailnet)
-Same tools also exposed over Streamable HTTP at `https://mcp.tail56ca88.ts.net/mcp` for the Claude mobile app and other remote clients. Mounted on the Hono API service ([services/api/src/index.ts](services/api/src/index.ts)) behind `authMiddleware`, gated by `MCP_ALLOWED_HOSTS` to refuse requests on any other Host header. Each connection's caller-supplied `hlk_` token becomes the MCP server's identity for that session, so multi-user works without code changes — every user just needs their own token from Settings → API Tokens.
+Same tools also exposed over Streamable HTTP at `https://mcp.tail56ca88.ts.net/mcp` for the Claude mobile app and other remote clients. Mounted on the Hono API service ([services/api/src/index.ts](services/api/src/index.ts)) behind `authMiddleware`, gated by `MCP_ALLOWED_HOSTS` to refuse requests on any other Host header. Each connection's caller-supplied token becomes the MCP server's identity for that session, so multi-user works without code changes.
+
+Two ways to authenticate:
+- **Static `hlk_` API tokens** — used by Claude Code's `.mcp.json` (`type: "http"`, `headers.Authorization: "Bearer hlk_..."`). Tokens are minted in Settings → API Tokens.
+- **OAuth 2.1 + PKCE** — used by Claude mobile/desktop, which reject static Bearer headers in their connector UI. The MCP server is its own OAuth authorization server: discovery at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource/mcp`, dynamic client registration at `/oauth/register`, and the standard `/oauth/authorize` (login + consent) → `/oauth/token` flow. Issued tokens are `mcpat_`-prefixed, stored hashed in PB collections (`oauth_clients`/`oauth_codes`/`oauth_access_tokens`/`oauth_refresh_tokens`, migration 0022). Auth middleware accepts both `hlk_` and `mcpat_` Bearer tokens transparently.
 
 ## Repo layout
 
