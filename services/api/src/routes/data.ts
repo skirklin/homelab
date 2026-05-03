@@ -507,6 +507,8 @@ function activityResponse(a: Record<string, unknown>) {
     cost_notes: a.cost_notes,
     duration_estimate: a.duration_estimate,
     walk_miles: a.walk_miles,
+    elevation_gain_feet: a.elevation_gain_feet,
+    difficulty: a.difficulty,
     confirmation_code: a.confirmation_code,
     details: a.details,
     setting: a.setting,
@@ -621,6 +623,8 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     cost_notes?: string;
     duration_estimate?: string;
     walk_miles?: number;
+    elevation_gain_feet?: number;
+    difficulty?: string;
     setting?: string;
     confirmation_code?: string;
     details?: string;
@@ -642,6 +646,8 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     cost_notes: body.cost_notes || "",
     duration_estimate: body.duration_estimate || "",
     walk_miles: body.walk_miles ?? null,
+    elevation_gain_feet: body.elevation_gain_feet ?? null,
+    difficulty: body.difficulty || "",
     setting: body.setting || "",
     confirmation_code: body.confirmation_code || "",
     details: body.details || "",
@@ -662,7 +668,8 @@ dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
   const allowed = [
     "name", "category", "location", "place_id", "lat", "lng",
-    "description", "cost_notes", "duration_estimate", "walk_miles", "confirmation_code",
+    "description", "cost_notes", "duration_estimate", "walk_miles",
+    "elevation_gain_feet", "difficulty", "confirmation_code",
     "details", "setting", "booking_reqs", "rating", "rating_count",
     "photo_ref", "flight_info", "verdict", "personal_notes", "experienced_at",
     "trip_id",

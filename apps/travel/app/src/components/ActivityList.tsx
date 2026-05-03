@@ -103,6 +103,18 @@ function formatFlightTime(iso?: string): string {
   });
 }
 
+/** Build the "🥾 3.2 mi · ↑ 1,400 ft · Moderate" summary for hike activities.
+ *  Returns null if none of the hike fields are set. */
+export function hikeSummary(a: Activity): string | null {
+  const parts: string[] = [];
+  if (a.walkMiles != null && a.walkMiles > 0) parts.push(`${a.walkMiles} mi`);
+  if (a.elevationGainFeet != null && a.elevationGainFeet > 0) {
+    parts.push(`↑ ${a.elevationGainFeet.toLocaleString()} ft`);
+  }
+  if (a.difficulty) parts.push(a.difficulty.charAt(0).toUpperCase() + a.difficulty.slice(1));
+  return parts.length ? `🥾 ${parts.join(" · ")}` : null;
+}
+
 interface ActivityListProps {
   activities: Activity[];
   /** When true, render the post-experience verdict row on each activity. */
@@ -158,6 +170,8 @@ export function ActivityList({ activities, showReflection = false }: ActivityLis
           const url = mapsUrl(a);
           const isAccommodation = a.category === "Accommodation";
           const isFlight = a.category === "Flight";
+          const isHike = a.category === "Hiking";
+          const hikeLine = isHike ? hikeSummary(a) : null;
           const fi = a.flightInfo;
           const flightLabel = fi ? [
             fi.airline && fi.number ? `${fi.airline}${fi.number}` : (fi.airline || fi.number),
@@ -175,6 +189,7 @@ export function ActivityList({ activities, showReflection = false }: ActivityLis
                 <Name>
                   {isFlight && <SendOutlined style={{ color: "#1677ff", marginRight: 4, transform: "rotate(-45deg)" }} />}
                   {isAccommodation && <HomeOutlined style={{ color: "#fa8c16", marginRight: 4 }} />}
+                  {isHike && <span style={{ marginRight: 4 }}>🥾</span>}
                   {isFlight && flightLabel ? flightLabel : a.name}
                 </Name>
                 <Meta>
@@ -197,12 +212,17 @@ export function ActivityList({ activities, showReflection = false }: ActivityLis
                     )
                   )}
                   {!isFlight && a.durationEstimate && <span><ClockCircleOutlined /> {a.durationEstimate}</span>}
-                  {!isFlight && a.walkMiles != null && a.walkMiles > 0 && (
+                  {!isFlight && !isHike && a.walkMiles != null && a.walkMiles > 0 && (
                     <span>{a.walkMiles} mi</span>
                   )}
                   {a.costNotes && <span><DollarOutlined /> {a.costNotes}</span>}
                   {a.confirmationCode && <span>Conf: {a.confirmationCode}</span>}
                 </Meta>
+                {hikeLine && (
+                  <div style={{ fontSize: 11, color: "#595959", marginTop: 3, fontWeight: 500 }}>
+                    {hikeLine}
+                  </div>
+                )}
                 {a.description && (
                   <div style={{ fontSize: 11, color: "#595959", marginTop: 3, fontStyle: "italic" }}>
                     {a.description}

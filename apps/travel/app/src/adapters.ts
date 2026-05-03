@@ -58,6 +58,8 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     costNotes: ba.costNotes || "",
     durationEstimate: ba.durationEstimate || "",
     walkMiles: ba.walkMiles ?? null,
+    elevationGainFeet: ba.elevationGainFeet ?? null,
+    difficulty: (ba.difficulty as Activity["difficulty"]) || "",
     confirmationCode: ba.confirmationCode || "",
     details: ba.details || "",
     setting: (ba.setting as Activity["setting"]) || "",
@@ -177,6 +179,8 @@ export function activityToBackend(activity: Omit<Activity, "id">): Omit<BackendA
     costNotes: activity.costNotes,
     durationEstimate: activity.durationEstimate,
     walkMiles: activity.walkMiles ?? undefined,
+    elevationGainFeet: activity.elevationGainFeet ?? undefined,
+    difficulty: activity.difficulty || undefined,
     confirmationCode: activity.confirmationCode || "",
     details: activity.details || undefined,
     setting: activity.setting || undefined,
@@ -198,6 +202,8 @@ export function activityUpdatesToBackend(fields: {
   costNotes?: string;
   durationEstimate?: string;
   walkMiles?: number | null;
+  elevationGainFeet?: number | null;
+  difficulty?: string;
   confirmationCode?: string;
   details?: string;
   setting?: string;
@@ -218,6 +224,8 @@ export function activityUpdatesToBackend(fields: {
   if (fields.costNotes !== undefined) updates.costNotes = fields.costNotes;
   if (fields.durationEstimate !== undefined) updates.durationEstimate = fields.durationEstimate;
   if (fields.walkMiles !== undefined) updates.walkMiles = fields.walkMiles ?? undefined;
+  if (fields.elevationGainFeet !== undefined) updates.elevationGainFeet = fields.elevationGainFeet ?? undefined;
+  if (fields.difficulty !== undefined) updates.difficulty = fields.difficulty;
   if (fields.confirmationCode !== undefined) updates.confirmationCode = fields.confirmationCode;
   if (fields.details !== undefined) updates.details = fields.details;
   if (fields.setting !== undefined) updates.setting = fields.setting;

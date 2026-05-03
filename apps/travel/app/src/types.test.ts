@@ -63,6 +63,8 @@ function mkActivity(id: string, overrides: Partial<Activity> = {}): Activity {
     costNotes: "",
     durationEstimate: "",
     walkMiles: null,
+    elevationGainFeet: null,
+    difficulty: "",
     confirmationCode: "",
     details: "",
     setting: "",

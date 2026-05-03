@@ -35,6 +35,7 @@ import {
 } from "../types";
 import { ActivityReflection, DayJournal, isDayReflectable } from "./InlineReflection";
 import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
+import { hikeSummary } from "./ActivityList";
 
 // ── Layout ──────────────────────────────────────────────────────
 
@@ -442,6 +443,7 @@ export function DayView() {
                 )}
                 <SlotBody>
                   <SlotName>
+                    {activity?.category === "Hiking" && <span style={{ marginRight: 4 }}>🥾</span>}
                     {activity?.name || slot.activityId}
                     {actUrl && (
                       <ExternalLink href={actUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#8c8c8c", marginLeft: 4, fontSize: 11 }}>
@@ -459,6 +461,10 @@ export function DayView() {
                     {activity?.durationEstimate && <span><ClockCircleOutlined /> {activity.durationEstimate}</span>}
                     {activity?.costNotes && <span><DollarOutlined /> {activity.costNotes}</span>}
                   </SlotMeta>
+                  {activity?.category === "Hiking" && (() => {
+                    const line = hikeSummary(activity);
+                    return line ? <SlotDesc style={{ fontWeight: 500 }}>{line}</SlotDesc> : null;
+                  })()}
                   {activity?.description && <SlotDesc style={{ fontStyle: "italic" }}>{activity.description}</SlotDesc>}
                   {activity?.details && <SlotDesc style={{ whiteSpace: "pre-wrap" }}>{activity.details}</SlotDesc>}
                   {slot.notes && <SlotDesc style={{ fontStyle: "italic", color: "#8c8c8c" }}>{slot.notes}</SlotDesc>}

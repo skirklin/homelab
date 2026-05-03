@@ -102,6 +102,10 @@ export interface Trip {
 
 export type ActivityVerdict = "loved" | "liked" | "meh" | "skip";
 
+export type HikeDifficulty = "easy" | "moderate" | "hard" | "strenuous";
+
+export const HIKE_DIFFICULTIES: HikeDifficulty[] = ["easy", "moderate", "hard", "strenuous"];
+
 export interface Activity {
   id: string;
   name: string;
@@ -114,6 +118,8 @@ export interface Activity {
   costNotes: string;
   durationEstimate: string;
   walkMiles: number | null;
+  elevationGainFeet: number | null;
+  difficulty: HikeDifficulty | "";
   confirmationCode: string;
   details: string;
   setting: "outdoor" | "indoor" | "either" | "";

@@ -8,7 +8,8 @@ import { PageContainer, useAuth } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { useTravelBackend } from "@kirkl/shared";
 import { activityToBackend, activityUpdatesToBackend } from "../adapters";
-import type { ActivityCategory, Activity, FlightInfo } from "../types";
+import type { ActivityCategory, Activity, FlightInfo, HikeDifficulty } from "../types";
+import { HIKE_DIFFICULTIES } from "../types";
 
 const CATEGORIES: ActivityCategory[] = [
   "Flight", "Transportation", "Accommodation", "Hiking", "Adventure",
@@ -29,6 +30,7 @@ export function ActivityForm() {
   const [form] = Form.useForm();
   const category = Form.useWatch("category", form);
   const isFlight = category === "Flight";
+  const isHike = category === "Hiking";
 
   const buildFlightInfo = (values: Record<string, unknown>): FlightInfo | undefined => {
     const fi: FlightInfo = {
@@ -69,6 +71,8 @@ export function ActivityForm() {
           costNotes: values.costNotes as string,
           durationEstimate: values.durationEstimate as string,
           walkMiles: (values.walkMiles as number | null | undefined) ?? null,
+          elevationGainFeet: (values.elevationGainFeet as number | null | undefined) ?? null,
+          difficulty: ((values.difficulty as string) || "") as HikeDifficulty | "",
           confirmationCode: values.confirmationCode as string,
           details: values.details as string,
           setting: values.setting as string,
@@ -92,6 +96,8 @@ export function ActivityForm() {
             costNotes: (values.costNotes as string) || "",
             durationEstimate: (values.durationEstimate as string) || "",
             walkMiles: (values.walkMiles as number | null | undefined) ?? null,
+            elevationGainFeet: (values.elevationGainFeet as number | null | undefined) ?? null,
+            difficulty: ((values.difficulty as string) || "") as HikeDifficulty | "",
             confirmationCode: (values.confirmationCode as string) || "",
             details: (values.details as string) || "",
             setting: ((values.setting as string) || "") as Activity["setting"],
@@ -136,6 +142,8 @@ export function ActivityForm() {
                 costNotes: existing.costNotes,
                 durationEstimate: existing.durationEstimate,
                 walkMiles: existing.walkMiles ?? undefined,
+                elevationGainFeet: existing.elevationGainFeet ?? undefined,
+                difficulty: existing.difficulty || undefined,
                 confirmationCode: existing.confirmationCode,
                 details: existing.details,
                 setting: existing.setting,
@@ -205,6 +213,29 @@ export function ActivityForm() {
             </Space>
             <div style={{ fontSize: 11, color: "#8c8c8c", marginTop: 4 }}>
               Flights with either end at home are hidden from the itinerary map.
+            </div>
+          </div>
+        )}
+
+        {isHike && (
+          <div style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: 12, marginBottom: 16, background: "#fafafa" }}>
+            <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 8, color: "#595959" }}>🥾 Hike details</div>
+            <Space size="middle" wrap>
+              <Form.Item name="elevationGainFeet" label="Elevation gain (ft)" style={{ marginBottom: 0 }}>
+                <InputNumber min={0} step={50} placeholder="e.g., 1400" style={{ width: 140 }} />
+              </Form.Item>
+              <Form.Item name="difficulty" label="Difficulty" style={{ marginBottom: 0 }}>
+                <Select allowClear style={{ minWidth: 140 }} options={[
+                  { label: "—", value: "" },
+                  ...HIKE_DIFFICULTIES.map((d) => ({
+                    label: d.charAt(0).toUpperCase() + d.slice(1),
+                    value: d,
+                  })),
+                ]} />
+              </Form.Item>
+            </Space>
+            <div style={{ fontSize: 11, color: "#8c8c8c", marginTop: 4 }}>
+              Trail distance lives in &ldquo;Walked (mi)&rdquo; below.
             </div>
           </div>
         )}

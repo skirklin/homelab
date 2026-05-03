@@ -125,6 +125,9 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 | `location` | City or area | `Phoenix, AZ`, `Taos, NM` |
 | `description` | Brief qualifying note only — what makes this specific. NOT costs, durations, or logistics. | `Ancient Puebloan great houses, 650+ rooms. Unpaved road in.` |
 | `duration_estimate` | How long the activity takes (not including travel to/from) | `2h`, `half day`, `1.5h` |
+| `walk_miles` | Distance on foot — for hikes, the trail length | `3.2`, `5.5` |
+| `elevation_gain_feet` | Elevation gain (Hiking only) | `1400`, `3200` |
+| `difficulty` | Hike difficulty (Hiking only) | `easy`, `moderate`, `hard`, `strenuous` |
 | `cost_notes` | Price info | `$25/person`, `Free`, `$15 parking` |
 | `setting` | Indoor/outdoor/both | `outdoor`, `indoor`, `both` |
 | `trip_id` | Which trip this belongs to | (record ID) |
@@ -135,7 +138,10 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.
 
 ### MCP config
-`.mcp.json` at project root (gitignored) configures the MCP server for Claude Code. Uses the project's local `tsx` binary to run `services/api/src/mcp.ts`.
+`.mcp.json` at project root (gitignored) configures the MCP server for Claude Code. Uses the project's local `tsx` binary to run `services/api/src/mcp.ts` over stdio.
+
+### Remote MCP (tailnet)
+Same tools also exposed over Streamable HTTP at `https://mcp.tail56ca88.ts.net/mcp` for the Claude mobile app and other remote clients. Mounted on the Hono API service ([services/api/src/index.ts](services/api/src/index.ts)) behind `authMiddleware`, gated by `MCP_ALLOWED_HOSTS` to refuse requests on any other Host header. Each connection's caller-supplied `hlk_` token becomes the MCP server's identity for that session, so multi-user works without code changes — every user just needs their own token from Settings → API Tokens.
 
 ## Repo layout
 
