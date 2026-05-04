@@ -1,3 +1,8 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
@@ -25,6 +30,22 @@ import {
 const oauth = new Hono();
 
 const PB_URL = () => process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
+
+// Self-hosted PocketBase JS SDK + SRI hash. Loaded once at startup so the
+// integrity attribute on the consent page's <script> matches the bytes we
+// actually serve. Beats pulling from a CDN: a jsdelivr/npm supply-chain
+// compromise would otherwise let attacker-controlled JS run on the page where
+// users type their PB credentials.
+const PB_SDK_BUFFER = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "static", "pocketbase.umd.js"),
+);
+const PB_SDK_SRI = "sha384-" + createHash("sha384").update(PB_SDK_BUFFER).digest("base64");
+
+oauth.get("/static/pocketbase.umd.js", (c) => {
+  c.header("Content-Type", "application/javascript; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=31536000, immutable");
+  return c.body(new Uint8Array(PB_SDK_BUFFER));
+});
 
 // ---------- Dynamic Client Registration (RFC 7591) ----------
 
@@ -236,7 +257,7 @@ oauth.get("/authorize", async (c) => {
         <input name="password" type="password" placeholder="password" autocomplete="current-password" required>
         <button type="submit" class="primary">Sign in</button>
       </form>
-      <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.25.0/dist/pocketbase.umd.js"></script>
+      <script src="/oauth/static/pocketbase.umd.js" integrity="${PB_SDK_SRI}"></script>
       <script>
       (function() {
         const btn = document.getElementById("google-signin");
@@ -248,7 +269,8 @@ oauth.get("/authorize", async (c) => {
           try {
             // Use the same PB instance the home app uses; PB orchestrates the popup
             // and returns the session token.
-            const pb = new PocketBase(${JSON.stringify(pbUrl)});
+            // \\u003C escaping defends against any pbUrl that contains </script>.
+            const pb = new PocketBase(${JSON.stringify(pbUrl).replace(/</g, "\\u003c")});
             const authData = await pb.collection("users").authWithOAuth2({ provider: "google" });
             // Hand the token to our server, which validates it and sets the session cookie.
             const resp = await fetch("/oauth/cookie-set", {
@@ -277,6 +299,9 @@ oauth.get("/authorize", async (c) => {
     <div class="box">
       <p><strong>${clientName}</strong> is requesting:</p>
       <ul>${scopeList}</ul>
+      <p class="muted" style="margin-top:.75rem">After you approve, the auth code will be sent to:</p>
+      <p style="word-break:break-all"><code>${escapeHtml(parsed.redirect_uri)}</code></p>
+      <p class="muted" style="margin-top:.5rem;font-size:.8rem">⚠️ Only approve if this URL belongs to the app you're connecting. Loopback (<code>localhost</code>) is normal for desktop apps; <code>https://claude.ai/...</code> is normal for Claude mobile/web.</p>
     </div>
     <form method="POST" action="/oauth/authorize">
       ${hidden}
@@ -410,11 +435,27 @@ async function loadClientForToken(clientId: string, providedSecret: string | und
   const method = record.token_endpoint_auth_method as string;
   if (method !== "none") {
     const expected = (record.client_secret_hash as string) ?? "";
-    if (!providedSecret || sha256Hex(providedSecret) !== expected) {
+    if (!providedSecret || !expected || !constantTimeHexEq(sha256Hex(providedSecret), expected)) {
       return { ok: false, error: "invalid_client" };
     }
   }
   return { ok: true, client: record as Record<string, unknown> & { id: string }, adminPb };
+}
+
+/**
+ * Constant-time comparison of two hex strings of the same length. Used for
+ * client_secret hash comparison so that a remote caller can't recover the
+ * stored hash byte-by-byte through response-time differences. A naive `===`
+ * compare bails on the first mismatched byte; this one always reads both
+ * buffers fully.
+ */
+function constantTimeHexEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+  } catch {
+    return false;
+  }
 }
 
 oauth.post("/token", async (c) => {
@@ -462,7 +503,6 @@ oauth.post("/token", async (c) => {
     } catch {
       return c.json({ error: "invalid_grant", error_description: "code not found" }, 400);
     }
-    if (codeRec.consumed) return c.json({ error: "invalid_grant", error_description: "code already used" }, 400);
     if (new Date(codeRec.expires_at as string) < new Date()) return c.json({ error: "invalid_grant", error_description: "code expired" }, 400);
     if (codeRec.client !== client.id) return c.json({ error: "invalid_grant", error_description: "code/client mismatch" }, 400);
     if (codeRec.redirect_uri !== redirectUri) return c.json({ error: "invalid_grant", error_description: "redirect_uri mismatch" }, 400);
@@ -470,13 +510,25 @@ oauth.post("/token", async (c) => {
       return c.json({ error: "invalid_grant", error_description: "PKCE verification failed" }, 400);
     }
 
-    // Single-use: mark consumed before issuing tokens.
-    await adminPb.collection("oauth_codes").update(codeRec.id, { consumed: true });
+    // Atomic single-use: try to delete the code record. If two concurrent
+    // requests race past the lookup with the same code, only one DELETE
+    // succeeds — the other gets PB's 404 and we return invalid_grant. (PB JS
+    // SDK throws ClientResponseError on missing-id deletes.) Beats the prior
+    // lookup-then-set-consumed=true pattern, which had a real race window.
+    try {
+      await adminPb.collection("oauth_codes").delete(codeRec.id);
+    } catch {
+      return c.json({ error: "invalid_grant", error_description: "code already used" }, 400);
+    }
 
+    // New family per authorization — refresh-token rotation will keep the
+    // family_id stable across rotations and revoke the whole set on reuse
+    // detection.
     return issueTokens(c, adminPb, {
       clientPk: client.id,
       userPk: codeRec.user as string,
       scope: (codeRec.scope as string) ?? SUPPORTED_SCOPES.join(" "),
+      familyId: generateOpaqueToken("fam_", 16),
     });
   }
 
@@ -492,24 +544,61 @@ oauth.post("/token", async (c) => {
     } catch {
       return c.json({ error: "invalid_grant", error_description: "refresh token not found" }, 400);
     }
-    if (rec.revoked) return c.json({ error: "invalid_grant", error_description: "refresh token revoked" }, 400);
     if (new Date(rec.expires_at as string) < new Date()) return c.json({ error: "invalid_grant", error_description: "refresh token expired" }, 400);
     if (rec.client !== client.id) return c.json({ error: "invalid_grant", error_description: "client mismatch" }, 400);
+
+    // Reuse detection: a refresh token presented after it's already been
+    // rotated is a signal that an attacker captured it. Revoke the entire
+    // family (all access + refresh tokens issued from the same auth code) so
+    // the legitimate client is forced to re-authorize and the attacker's
+    // copies are useless.
+    if (rec.revoked) {
+      const familyId = (rec.family_id as string | undefined) ?? "";
+      if (familyId) await revokeFamily(adminPb, familyId);
+      return c.json({ error: "invalid_grant", error_description: "refresh token revoked (reuse detected — family revoked)" }, 400);
+    }
+
+    // Rotate: revoke this refresh token (mark, don't delete — we need it for
+    // future reuse-detection if leaked) and mint a new pair under the same
+    // family_id.
+    await adminPb.collection("oauth_refresh_tokens").update(rec.id, { revoked: true });
 
     return issueTokens(c, adminPb, {
       clientPk: client.id,
       userPk: rec.user as string,
       scope: (rec.scope as string) ?? SUPPORTED_SCOPES.join(" "),
+      familyId: (rec.family_id as string | undefined) ?? generateOpaqueToken("fam_", 16),
     });
   }
 
   return c.json({ error: "unsupported_grant_type" }, 400);
 });
 
+/**
+ * Revoke every access + refresh token sharing a family_id. Called when we
+ * detect that a revoked refresh token has been re-presented (RFC 6749 §10.4 /
+ * OAuth 2.1 §6.1 — refresh-token-reuse-as-leak-signal).
+ */
+async function revokeFamily(adminPb: Awaited<ReturnType<typeof getAdminPb>>, familyId: string) {
+  const filter = adminPb.filter("family_id = {:fid}", { fid: familyId });
+  const accessTokens = await adminPb.collection("oauth_access_tokens").getFullList({ filter, $autoCancel: false });
+  const refreshTokens = await adminPb.collection("oauth_refresh_tokens").getFullList({ filter, $autoCancel: false });
+  // Access tokens: hard delete (no value in keeping them once revoked).
+  for (const t of accessTokens) {
+    await adminPb.collection("oauth_access_tokens").delete(t.id).catch(() => {});
+  }
+  // Refresh tokens: mark revoked (we need them around so that a subsequent
+  // re-use of any other refresh token in the family also trips the trap).
+  for (const t of refreshTokens) {
+    if (!t.revoked) await adminPb.collection("oauth_refresh_tokens").update(t.id, { revoked: true }).catch(() => {});
+  }
+  console.warn(`[oauth] family revoked (${accessTokens.length} access + ${refreshTokens.length} refresh): ${familyId}`);
+}
+
 async function issueTokens(
   c: Context,
   adminPb: Awaited<ReturnType<typeof getAdminPb>>,
-  ctx: { clientPk: string; userPk: string; scope: string },
+  ctx: { clientPk: string; userPk: string; scope: string; familyId: string },
 ) {
   const accessToken = generateOpaqueToken("mcpat_", 32);
   const refreshToken = generateOpaqueToken("mcprt_", 48);
@@ -523,6 +612,7 @@ async function issueTokens(
     user: ctx.userPk,
     scope: ctx.scope,
     expires_at: accessExp,
+    family_id: ctx.familyId,
   });
   await adminPb.collection("oauth_refresh_tokens").create({
     token_hash: sha256Hex(refreshToken),
@@ -532,6 +622,7 @@ async function issueTokens(
     scope: ctx.scope,
     expires_at: refreshExp,
     revoked: false,
+    family_id: ctx.familyId,
   });
 
   return c.json({

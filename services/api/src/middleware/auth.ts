@@ -15,7 +15,10 @@ export function userClient(token: string): PocketBase {
   return pb;
 }
 
-// Token validation cache — exported so revoke can invalidate
+// Token validation cache — keyed by SHA-256 hash of the raw token, NOT the
+// raw token itself. Heap dumps (crash dump → log aggregator, gdb attach,
+// process snapshot) shouldn't surface live bearer tokens. Revocation paths
+// invalidate by hash via `tokenCache.delete(hashToken(rawToken))`.
 export const tokenCache = new Map<string, { userId: string; email: string; isApiKey: boolean; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
 
@@ -26,7 +29,7 @@ function cleanCache() {
   }
 }
 
-function hashToken(token: string): string {
+export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
@@ -55,10 +58,11 @@ export async function authMiddleware(c: Context, next: Next) {
   }
 
   const token = authHeader.slice(7);
+  const tokenKey = hashToken(token);
 
   // Check cache first
   cleanCache();
-  const cached = tokenCache.get(token);
+  const cached = tokenCache.get(tokenKey);
   if (cached && cached.expiresAt > Date.now()) {
     c.set("userId", cached.userId);
     c.set("userEmail", cached.email);
@@ -96,7 +100,7 @@ export async function authMiddleware(c: Context, next: Next) {
       const userId = user.id;
       const email = user.email as string;
 
-      tokenCache.set(token, {
+      tokenCache.set(tokenKey, {
         userId,
         email,
         isApiKey: true,
@@ -138,7 +142,7 @@ export async function authMiddleware(c: Context, next: Next) {
       const userId = user.id;
       const email = user.email as string;
 
-      tokenCache.set(token, {
+      tokenCache.set(tokenKey, {
         userId,
         email,
         isApiKey: true,
@@ -165,7 +169,7 @@ export async function authMiddleware(c: Context, next: Next) {
     const userId = result.record.id;
     const email = result.record.email as string;
 
-    tokenCache.set(token, {
+    tokenCache.set(tokenKey, {
       userId,
       email,
       isApiKey: false,

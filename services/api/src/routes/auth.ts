@@ -99,15 +99,10 @@ authRoutes.delete("/tokens/:id", handler(async (c) => {
 
   await adminPb.collection("api_tokens").delete(id);
 
-  // Invalidate any cached auth for this token hash
-  for (const [cachedToken, entry] of tokenCache) {
-    if (cachedToken.startsWith("hlk_") && entry.userId === userId) {
-      const cachedHash = hashToken(cachedToken);
-      if (cachedHash === token.token_hash) {
-        tokenCache.delete(cachedToken);
-      }
-    }
-  }
+  // Invalidate any cached auth for this token. tokenCache is now keyed by
+  // sha256(rawToken), which matches `api_tokens.token_hash` directly — no
+  // need to scan + recompute as we did before.
+  tokenCache.delete(token.token_hash);
 
   return c.json({ deleted: true });
 }));

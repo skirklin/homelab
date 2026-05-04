@@ -56,8 +56,16 @@ data:
     # MCP server — public so Anthropic-hosted clients (Claude Desktop / mobile)
     # can reach it. Auth is OAuth 2.1; no path stripping so /mcp, /oauth/*,
     # and /.well-known/* hit the functions service unchanged.
+    # Overwrite X-Forwarded-For and set X-Real-IP from the actual TCP peer so
+    # the rate limiter on /oauth/login and /oauth/token can't be bypassed by a
+    # client-supplied X-Forwarded-For header (default Caddy behavior is to
+    # *append* to inbound XFF, which would let any caller spoof the leftmost
+    # entry that the rate limiter keys off).
     mcp.kirkl.in {
-        reverse_proxy functions.homelab.svc.cluster.local:3000
+        reverse_proxy functions.homelab.svc.cluster.local:3000 {
+            header_up X-Forwarded-For {http.request.remote.host}
+            header_up X-Real-IP {http.request.remote.host}
+        }
     }
 ---
 apiVersion: apps/v1

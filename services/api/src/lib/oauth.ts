@@ -58,23 +58,32 @@ export function buildSuccessRedirect(
 }
 
 /**
- * DCR is publicly callable. Restrict redirect URIs to known-good patterns so
- * a stranger can't register a client that redirects auth codes to their server:
- *  - http://localhost:* and http://127.0.0.1:* — RFC 8252 native-app loopback
- *  - https://claude.ai/* — Anthropic's hosted MCP callback
- *  - https://*.anthropic.com/* — Anthropic-owned domains
+ * Public-internet DCR exfiltration risk: a stranger can `POST /oauth/register`
+ * with `client_name: "Claude Desktop"` and `redirect_uri: <attacker-controlled>`,
+ * then social-engineer a victim into starting an authorize flow. The victim
+ * sees "Authorize Claude Desktop" and approves; the auth code goes to the
+ * attacker. Mitigations:
+ *  1. The consent screen displays the actual redirect_uri (see /authorize GET).
+ *  2. This allowlist accepts ONLY:
+ *       - http://localhost / http://127.0.0.1 on any port (RFC 8252 loopback
+ *         for native apps — Claude Desktop uses 33418 today, may rotate)
+ *       - https://claude.ai/api/mcp/auth_callback (the exact Anthropic-hosted
+ *         callback URL we've observed in the wild)
+ *     Wildcards like `*.claude.ai` were tempting but any user-content host
+ *     under that domain (artifact previews, embedded iframes) becomes an
+ *     exfiltration vector.
  */
+const ALLOWED_NON_LOOPBACK_REDIRECT_URIS = new Set<string>([
+  "https://claude.ai/api/mcp/auth_callback",
+]);
+
 export function isAllowedRedirectUri(uri: string): boolean {
   try {
     const u = new URL(uri);
     if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) {
       return true;
     }
-    if (u.protocol === "https:") {
-      if (u.hostname === "claude.ai" || u.hostname.endsWith(".claude.ai")) return true;
-      if (u.hostname === "anthropic.com" || u.hostname.endsWith(".anthropic.com")) return true;
-    }
-    return false;
+    return ALLOWED_NON_LOOPBACK_REDIRECT_URIS.has(uri);
   } catch {
     return false;
   }
@@ -100,18 +109,27 @@ export function checkRateLimit(key: string, max: number, windowMs: number): bool
 }
 
 /**
- * Best-effort caller IP. We sit behind Caddy → functions Service, so the raw
- * socket peer is always the cluster-internal IP. The real client IP arrives in
- * X-Forwarded-For (left-most entry); fall back to remote address if that's
- * absent (dev/local tests).
+ * Best-effort caller IP for rate-limit keying.
+ *
+ * Caddy's `mcp.kirkl.in` block overwrites both `X-Forwarded-For` and
+ * `X-Real-IP` with the actual TCP peer (`{http.request.remote.host}`), so
+ * either header is trustworthy in production. We prefer X-Real-IP (single
+ * value, never a chain — harder to misread) and fall back to the *rightmost*
+ * XFF entry (the closest hop, which a public-facing Caddy will have
+ * authoritatively set even if it appends rather than overwrites in some
+ * future edit).
+ *
+ * Reading the leftmost XFF entry would be wrong here: it's whatever the
+ * external client *said* it was, which lets any caller pick its own
+ * rate-limit bucket. That bypass is what motivated this helper.
  */
 export function getClientIp(headerLookup: (name: string) => string | undefined): string {
+  const real = headerLookup("x-real-ip");
+  if (real && real.trim()) return real.trim();
   const xff = headerLookup("x-forwarded-for");
   if (xff) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
+    const parts = xff.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1]; // rightmost = closest trusted hop
   }
-  const real = headerLookup("x-real-ip");
-  if (real) return real;
   return "unknown";
 }
