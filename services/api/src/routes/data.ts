@@ -967,6 +967,193 @@ dataRoutes.put("/travel/itineraries/:id/days", handler(async (c) => {
   });
 }));
 
+// ── Targeted itinerary patch ops ────────────────────────────────
+// All ops below read days, mutate the named locality, and write back.
+// Concurrent callers race at the days-array level — last write wins.
+// (Optimistic locking would need a `version` column on travel_itineraries.)
+//
+// Each op returns the affected day(s) only — clients can splice into local
+// state without re-fetching the whole itinerary.
+
+interface ItinerarySlot {
+  activityId: string;
+  startTime?: string;
+  notes?: string;
+}
+interface ItineraryDay {
+  date?: string;
+  label: string;
+  lodgingActivityId?: string;
+  flights?: ItinerarySlot[];
+  slots: ItinerarySlot[];
+}
+
+type PB = import("pocketbase").default;
+
+async function mutateDays<T>(
+  pb: PB,
+  id: string,
+  fn: (days: ItineraryDay[]) => T | { error: string; status?: number },
+): Promise<{ days: ItineraryDay[]; result: T } | { error: string; status: number }> {
+  const record = await pb.collection("travel_itineraries").getOne(id);
+  const days = ((record.days || []) as ItineraryDay[]).map((d) => ({ ...d, slots: [...(d.slots || [])] }));
+  const result = fn(days);
+  if (result && typeof result === "object" && "error" in result) {
+    return { error: (result as { error: string }).error, status: (result as { status?: number }).status ?? 400 };
+  }
+  await pb.collection("travel_itineraries").update(id, { days });
+  return { days, result: result as T };
+}
+
+function parseIdx(s: string | undefined, label: string): number | { error: string } {
+  if (s === undefined) return { error: `${label} required` };
+  const n = parseInt(s, 10);
+  if (!Number.isFinite(n) || n < 0) return { error: `${label} must be a non-negative integer` };
+  return n;
+}
+
+// Add a slot to a day's slots array (default: append to end).
+dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/slots", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  const body = await c.req.json<{
+    activity_id: string;
+    start_time?: string;
+    notes?: string;
+    position?: number;
+  }>();
+  if (!body.activity_id) return c.json({ error: "activity_id required" }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range (have ${days.length})` };
+    const slot: ItinerarySlot = { activityId: body.activity_id };
+    if (body.start_time) slot.startTime = body.start_time;
+    if (body.notes) slot.notes = body.notes;
+    const slots = days[dayIdx].slots;
+    const pos = body.position ?? slots.length;
+    const clamped = Math.max(0, Math.min(slots.length, pos));
+    slots.splice(clamped, 0, slot);
+    return { day_index: dayIdx, position: clamped, day: days[dayIdx] };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Remove a slot from a day.
+dataRoutes.delete("/travel/itineraries/:id/days/:dayIndex/slots/:slotIndex", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  const slotIdx = parseIdx(c.req.param("slotIndex"), "slot index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  if (typeof slotIdx === "object") return c.json({ error: slotIdx.error }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const slots = days[dayIdx].slots;
+    if (slotIdx >= slots.length) return { error: `slot index ${slotIdx} out of range` };
+    const removed = slots.splice(slotIdx, 1)[0];
+    return { day_index: dayIdx, removed, day: days[dayIdx] };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Update a slot's fields (startTime, notes, activityId).
+dataRoutes.patch("/travel/itineraries/:id/days/:dayIndex/slots/:slotIndex", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  const slotIdx = parseIdx(c.req.param("slotIndex"), "slot index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  if (typeof slotIdx === "object") return c.json({ error: slotIdx.error }, 400);
+  const body = await c.req.json<{
+    activity_id?: string;
+    start_time?: string | null;
+    notes?: string | null;
+  }>();
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const slots = days[dayIdx].slots;
+    if (slotIdx >= slots.length) return { error: `slot index ${slotIdx} out of range` };
+    const slot = slots[slotIdx];
+    if (body.activity_id !== undefined) slot.activityId = body.activity_id;
+    // null clears the optional field; undefined leaves it alone.
+    if (body.start_time === null) delete slot.startTime;
+    else if (body.start_time !== undefined) slot.startTime = body.start_time;
+    if (body.notes === null) delete slot.notes;
+    else if (body.notes !== undefined) slot.notes = body.notes;
+    return { day_index: dayIdx, slot_index: slotIdx, day: days[dayIdx] };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Update a day's metadata (label, date, lodging).
+dataRoutes.patch("/travel/itineraries/:id/days/:dayIndex", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  const body = await c.req.json<{
+    label?: string;
+    date?: string | null;
+    lodging_activity_id?: string | null;
+  }>();
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const day = days[dayIdx];
+    if (body.label !== undefined) day.label = body.label;
+    if (body.date === null) delete day.date;
+    else if (body.date !== undefined) day.date = body.date;
+    if (body.lodging_activity_id === null) delete day.lodgingActivityId;
+    else if (body.lodging_activity_id !== undefined) day.lodgingActivityId = body.lodging_activity_id;
+    return { day_index: dayIdx, day };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Move a slot — within a day (reorder) or to a different day (transfer).
+dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/slots/:slotIndex/move", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const fromDay = parseIdx(c.req.param("dayIndex"), "day index");
+  const fromSlot = parseIdx(c.req.param("slotIndex"), "slot index");
+  if (typeof fromDay === "object") return c.json({ error: fromDay.error }, 400);
+  if (typeof fromSlot === "object") return c.json({ error: fromSlot.error }, 400);
+  const body = await c.req.json<{ to_day_index: number; to_position?: number }>();
+  if (typeof body.to_day_index !== "number") return c.json({ error: "to_day_index required" }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (fromDay >= days.length) return { error: `from day_index ${fromDay} out of range` };
+    if (body.to_day_index >= days.length) return { error: `to_day_index ${body.to_day_index} out of range` };
+    const fromSlots = days[fromDay].slots;
+    if (fromSlot >= fromSlots.length) return { error: `slot index ${fromSlot} out of range` };
+    const slot = fromSlots.splice(fromSlot, 1)[0];
+    const toSlots = days[body.to_day_index].slots;
+    // If reordering within the same day after splice, the target indices have shifted —
+    // but because we removed first and `splice` mutates in place, toSlots reflects the
+    // post-removal state, so to_position is interpreted against that.
+    const pos = body.to_position ?? toSlots.length;
+    const clamped = Math.max(0, Math.min(toSlots.length, pos));
+    toSlots.splice(clamped, 0, slot);
+    return {
+      from_day_index: fromDay,
+      to_day_index: body.to_day_index,
+      to_position: clamped,
+      from_day: days[fromDay],
+      to_day: days[body.to_day_index],
+    };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
 // ---- Life ----
 
 // Get the user's life log

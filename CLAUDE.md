@@ -96,7 +96,9 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 - `add_travel_activity` — create an activity
 - `update_travel_activity` — update activity fields (including verdict, personal_notes, experienced_at for post-trip reflection)
 - `add_travel_itinerary` — create an itinerary
-- `update_travel_itinerary` — update itinerary fields or replace days array
+- `update_travel_itinerary` — update itinerary fields or replace days array (whole-replace; for small edits prefer the surgical ops below)
+- `add_itinerary_slot` / `remove_itinerary_slot` / `update_itinerary_slot` / `move_itinerary_slot` — surgical slot ops by `(itinerary_id, day_index, slot_index)` so callers don't round-trip the whole days array
+- `update_itinerary_day` — patch a day's `label` / `date` / `lodging_activity_id`
 - `delete_travel_trip` — delete a trip
 - `delete_travel_activity` — delete an activity
 - `delete_travel_itinerary` — delete an itinerary

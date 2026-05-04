@@ -931,6 +931,106 @@ server.tool(
   },
 );
 
+// --- Itinerary surgical patch tools ---
+// Each operates on (itinerary_id, day_index, [slot_index]) and mutates only
+// that locality on the server, so callers don't need to round-trip the entire
+// days array for a small change. Prefer these over update_travel_itinerary
+// when adjusting individual slots.
+
+server.tool(
+  "add_itinerary_slot",
+  "Add an activity slot to a specific day in an itinerary. Position defaults to end of the day.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative().describe("0-based index of the day"),
+    activity_id: z.string().describe("The activity record ID to slot in"),
+    start_time: z.string().optional().describe("Time of day (e.g. '9:00 AM')"),
+    notes: z.string().optional().describe("Slot-specific notes"),
+    position: z.number().int().nonnegative().optional().describe("0-based insertion position; defaults to end"),
+  },
+  async ({ itinerary_id, day_index, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/slots`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_itinerary_slot",
+  "Remove a slot from a day in an itinerary by index.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative(),
+    slot_index: z.number().int().nonnegative().describe("0-based slot index within the day"),
+  },
+  async ({ itinerary_id, day_index, slot_index }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/slots/${slot_index}`, {
+      method: "DELETE",
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_itinerary_slot",
+  "Update fields on a single slot (start_time, notes, or activity_id). Pass null to clear an optional field.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative(),
+    slot_index: z.number().int().nonnegative(),
+    activity_id: z.string().optional().describe("Replace the activity reference"),
+    start_time: z.string().nullable().optional().describe("Time of day, or null to clear"),
+    notes: z.string().nullable().optional().describe("Slot notes, or null to clear"),
+  },
+  async ({ itinerary_id, day_index, slot_index, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/slots/${slot_index}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "move_itinerary_slot",
+  "Move a slot to a different position within the same day, or transfer it to a different day.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative().describe("Source day index"),
+    slot_index: z.number().int().nonnegative().describe("Source slot index"),
+    to_day_index: z.number().int().nonnegative().describe("Target day index (can be same as source)"),
+    to_position: z.number().int().nonnegative().optional().describe("Target position; defaults to end of target day"),
+  },
+  async ({ itinerary_id, day_index, slot_index, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/slots/${slot_index}/move`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_itinerary_day",
+  "Update a day's metadata (label, date, lodging). Pass null to clear date or lodging.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative(),
+    label: z.string().optional().describe("Day label, e.g. 'Day 2 — Sedona'"),
+    date: z.string().nullable().optional().describe("ISO date for completed/scheduled days, or null to clear"),
+    lodging_activity_id: z.string().nullable().optional().describe("Activity ID for that night's lodging, or null to clear"),
+  },
+  async ({ itinerary_id, day_index, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Upkeep write tools ---
 
 const taskFrequencySchema = z.object({

@@ -640,6 +640,84 @@ describe("Travel", () => {
     expect(data.name).toBe("3-Day Tokyo Plan");
     cleanupIds.push({ collection: "travel_itineraries", id: data.id });
   });
+
+  it("itinerary surgical ops — add/update/move/remove a slot round-trip", async () => {
+    // Fresh itinerary with two empty days, so we can test cross-day moves too.
+    const create = await apiReq("/data/travel/itineraries", {
+      method: "POST",
+      token: userToken,
+      body: {
+        log: travelLogId,
+        trip_id: travelTripId,
+        name: "Surgical-ops test",
+        days: [
+          { label: "Day 1", slots: [] },
+          { label: "Day 2", slots: [] },
+        ],
+      },
+    });
+    expect(create.status).toBe(201);
+    const itinId = create.data.id as string;
+    cleanupIds.push({ collection: "travel_itineraries", id: itinId });
+
+    // Add slot to day 0
+    const added = await apiReq(`/data/travel/itineraries/${itinId}/days/0/slots`, {
+      method: "POST",
+      token: userToken,
+      body: { activity_id: travelActivityId, start_time: "9:00 AM" },
+    });
+    expect(added.status).toBe(200);
+    expect(added.data.day_index).toBe(0);
+    expect(added.data.day.slots).toHaveLength(1);
+    expect(added.data.day.slots[0].activityId).toBe(travelActivityId);
+    expect(added.data.day.slots[0].startTime).toBe("9:00 AM");
+
+    // Patch the slot's notes; clear startTime via null
+    const patched = await apiReq(`/data/travel/itineraries/${itinId}/days/0/slots/0`, {
+      method: "PATCH",
+      token: userToken,
+      body: { notes: "Arrive early", start_time: null },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.data.day.slots[0].notes).toBe("Arrive early");
+    expect(patched.data.day.slots[0].startTime).toBeUndefined();
+
+    // Move the slot from day 0 to day 1
+    const moved = await apiReq(`/data/travel/itineraries/${itinId}/days/0/slots/0/move`, {
+      method: "POST",
+      token: userToken,
+      body: { to_day_index: 1 },
+    });
+    expect(moved.status).toBe(200);
+    expect(moved.data.from_day.slots).toHaveLength(0);
+    expect(moved.data.to_day.slots).toHaveLength(1);
+    expect(moved.data.to_day.slots[0].activityId).toBe(travelActivityId);
+
+    // Patch day 1's label
+    const dayPatch = await apiReq(`/data/travel/itineraries/${itinId}/days/1`, {
+      method: "PATCH",
+      token: userToken,
+      body: { label: "Day 2 — Senso-ji" },
+    });
+    expect(dayPatch.status).toBe(200);
+    expect(dayPatch.data.day.label).toBe("Day 2 — Senso-ji");
+
+    // Remove the slot
+    const removed = await apiReq(`/data/travel/itineraries/${itinId}/days/1/slots/0`, {
+      method: "DELETE",
+      token: userToken,
+    });
+    expect(removed.status).toBe(200);
+    expect(removed.data.day.slots).toHaveLength(0);
+
+    // Out-of-range day_index returns 400
+    const bad = await apiReq(`/data/travel/itineraries/${itinId}/days/99/slots`, {
+      method: "POST",
+      token: userToken,
+      body: { activity_id: travelActivityId },
+    });
+    expect(bad.status).toBe(400);
+  });
 });
 
 // ==========================================
