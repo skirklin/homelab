@@ -14,7 +14,10 @@ import {
   SUPPORTED_SCOPES,
   buildErrorRedirect,
   buildSuccessRedirect,
+  checkRateLimit,
   generateOpaqueToken,
+  getClientIp,
+  isAllowedRedirectUri,
   sha256Hex,
   verifyPkceS256,
 } from "../lib/oauth";
@@ -35,10 +38,22 @@ const RegisterReq = z.object({
 });
 
 oauth.post("/register", async (c) => {
+  const ip = getClientIp((n) => c.req.header(n));
+  if (!checkRateLimit(`register:${ip}`, 10, 60_000)) {
+    return c.json({ error: "rate_limited" }, 429);
+  }
   const body = await c.req.json().catch(() => null);
   const parsed = RegisterReq.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: "invalid_client_metadata", error_description: parsed.error.message }, 400);
+  }
+
+  const disallowed = parsed.data.redirect_uris.filter((u) => !isAllowedRedirectUri(u));
+  if (disallowed.length > 0) {
+    return c.json({
+      error: "invalid_redirect_uri",
+      error_description: `redirect_uri must be loopback (http://localhost or http://127.0.0.1) or an Anthropic-owned host (claude.ai, *.anthropic.com); rejected: ${disallowed.join(", ")}`,
+    }, 400);
   }
 
   const adminPb = await getAdminPb();
@@ -233,6 +248,10 @@ oauth.get("/authorize", async (c) => {
 });
 
 oauth.post("/login", async (c) => {
+  const ip = getClientIp((n) => c.req.header(n));
+  if (!checkRateLimit(`login:${ip}`, 5, 60_000)) {
+    return c.html(htmlPage(`<h1>Too many attempts</h1><p class="err">Slow down — try again in a minute.</p>`), 429);
+  }
   const form = await c.req.parseBody();
   const email = String(form.email ?? "");
   const password = String(form.password ?? "");
@@ -333,6 +352,10 @@ async function loadClientForToken(clientId: string, providedSecret: string | und
 }
 
 oauth.post("/token", async (c) => {
+  const ip = getClientIp((n) => c.req.header(n));
+  if (!checkRateLimit(`token:${ip}`, 30, 60_000)) {
+    return c.json({ error: "rate_limited" }, 429);
+  }
   const form = await c.req.parseBody();
 
   // Client auth: prefer Authorization: Basic, fall back to form params.

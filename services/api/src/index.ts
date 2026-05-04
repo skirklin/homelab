@@ -28,6 +28,22 @@ import { startScheduler } from "./lib/notifications/scheduler";
 import { SUPPORTED_SCOPES } from "./lib/oauth";
 const app = new Hono<AppEnv>();
 
+// Temporary debug logger for the OAuth/MCP surface — strip after the public
+// MCP flow is verified working from Claude Desktop.
+app.use("*", async (c, next) => {
+  const path = c.req.path;
+  if (path.startsWith("/oauth") || path.startsWith("/.well-known") || path === "/mcp") {
+    const ua = (c.req.header("user-agent") ?? "").slice(0, 80);
+    const auth = c.req.header("authorization");
+    const authShape = !auth ? "none" : auth.startsWith("Bearer ") ? "Bearer" : auth.startsWith("Basic ") ? "Basic" : "other";
+    console.log(`[oauth-debug] ${c.req.method} ${path} auth=${authShape} ua="${ua}"`);
+  }
+  await next();
+  if (path.startsWith("/oauth") || path.startsWith("/.well-known") || path === "/mcp") {
+    console.log(`[oauth-debug] -> ${c.req.method} ${path} status=${c.res.status}`);
+  }
+});
+
 // CORS — allow kirkl.in and any subdomain (incl. beta.kirkl.in), plus local dev
 app.use("*", cors({
   origin: (origin) => {

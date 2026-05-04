@@ -37,7 +37,9 @@ spec:
             - name: DOMAIN
               value: "kirkl.in"
             - name: MCP_ALLOWED_HOSTS
-              value: "mcp.tail56ca88.ts.net"
+              value: "mcp.kirkl.in,mcp.tail56ca88.ts.net"
+            - name: MCP_ISSUER
+              value: "https://mcp.kirkl.in"
           envFrom:
             - secretRef:
                 name: api-secrets

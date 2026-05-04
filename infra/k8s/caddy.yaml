@@ -52,6 +52,13 @@ data:
             reverse_proxy pocketbase.homelab.svc.cluster.local:8090
         }
     }
+
+    # MCP server — public so Anthropic-hosted clients (Claude Desktop / mobile)
+    # can reach it. Auth is OAuth 2.1; no path stripping so /mcp, /oauth/*,
+    # and /.well-known/* hit the functions service unchanged.
+    mcp.kirkl.in {
+        reverse_proxy functions.homelab.svc.cluster.local:3000
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
