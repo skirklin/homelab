@@ -158,7 +158,7 @@ async function userFromSessionCookie(token: string | undefined): Promise<{ id: s
   }
 }
 
-function htmlPage(body: string): string {
+function htmlPage(body: string, extraHead = ""): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>homelab — authorize</title><style>
 :root { color-scheme: light dark; }
 body { font: 16px system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem; }
@@ -168,12 +168,15 @@ input, button { font: inherit; padding: .6rem .75rem; border: 1px solid #888; bo
 button { cursor: pointer; }
 button.primary { background: #2563eb; color: white; border-color: #2563eb; }
 button.danger { background: transparent; color: #b91c1c; border-color: #b91c1c; }
+button.google { background: white; color: #1f2937; border-color: #d1d5db; }
 .row { display: flex; gap: .5rem; }
 .row > * { flex: 1; }
 .muted { color: #666; font-size: .875rem; }
 .err { color: #b91c1c; margin: .5rem 0; }
 .box { padding: 1rem; border: 1px solid #888; border-radius: .5rem; margin: 1rem 0; }
-</style></head><body>${body}</body></html>`;
+.divider { display: flex; align-items: center; gap: .5rem; margin: 1rem 0; color: #888; font-size: .875rem; }
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: #ccc; }
+</style>${extraHead}</head><body>${body}</body></html>`;
 }
 
 function escapeHtml(s: string): string {
@@ -218,15 +221,53 @@ oauth.get("/authorize", async (c) => {
   const scopeList = requestedScopes.map((s) => `<li><code>${escapeHtml(s)}</code></li>`).join("");
 
   if (!user) {
+    const pbUrl = process.env.PB_PUBLIC_URL || "https://api.kirkl.in";
     return c.html(htmlPage(`
       <h1>Sign in to homelab</h1>
       <p class="muted"><strong>${clientName}</strong> wants to access your homelab data.</p>
+      <button id="google-signin" class="google" type="button">
+        <span style="font-weight:500">Sign in with Google</span>
+      </button>
+      <p id="google-err" class="err" style="display:none"></p>
+      <div class="divider">or with email</div>
       <form method="POST" action="/oauth/login">
         ${hidden}
         <input name="email" type="email" placeholder="email" autocomplete="email" required>
         <input name="password" type="password" placeholder="password" autocomplete="current-password" required>
         <button type="submit" class="primary">Sign in</button>
       </form>
+      <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.25.0/dist/pocketbase.umd.js"></script>
+      <script>
+      (function() {
+        const btn = document.getElementById("google-signin");
+        const err = document.getElementById("google-err");
+        btn.addEventListener("click", async () => {
+          err.style.display = "none";
+          btn.disabled = true;
+          btn.textContent = "Opening Google...";
+          try {
+            // Use the same PB instance the home app uses; PB orchestrates the popup
+            // and returns the session token.
+            const pb = new PocketBase(${JSON.stringify(pbUrl)});
+            const authData = await pb.collection("users").authWithOAuth2({ provider: "google" });
+            // Hand the token to our server, which validates it and sets the session cookie.
+            const resp = await fetch("/oauth/cookie-set", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: authData.token }),
+            });
+            if (!resp.ok) throw new Error("server rejected token (" + resp.status + ")");
+            // Reload to re-render the consent screen with the new cookie.
+            window.location.reload();
+          } catch (e) {
+            err.textContent = (e && e.message) || "Google sign-in failed";
+            err.style.display = "block";
+            btn.disabled = false;
+            btn.textContent = "Sign in with Google";
+          }
+        });
+      })();
+      </script>
     `));
   }
 
@@ -245,6 +286,31 @@ oauth.get("/authorize", async (c) => {
       </div>
     </form>
   `));
+});
+
+// Bridge endpoint used by the Google sign-in script on /oauth/authorize:
+// the page completes PocketBase's popup-based OAuth flow client-side, then
+// POSTs the resulting PB session token here so we can set the session cookie
+// for the /oauth/* path. Lets users sign in with Google without us having to
+// register a new redirect URL with Google or proxy the OAuth code exchange.
+oauth.post("/cookie-set", async (c) => {
+  const ip = getClientIp((n) => c.req.header(n));
+  if (!checkRateLimit(`cookie-set:${ip}`, 10, 60_000)) return c.json({ error: "rate_limited" }, 429);
+  const body = await c.req.json().catch(() => null);
+  const token = (body && typeof body === "object" && typeof (body as { token?: unknown }).token === "string")
+    ? (body as { token: string }).token
+    : "";
+  if (!token) return c.json({ error: "missing token" }, 400);
+  const user = await userFromSessionCookie(token);
+  if (!user) return c.json({ error: "invalid token" }, 401);
+  setCookie(c, SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    path: "/oauth",
+    maxAge: SESSION_COOKIE_TTL_SEC,
+  });
+  return c.body(null, 204);
 });
 
 oauth.post("/login", async (c) => {
