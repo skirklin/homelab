@@ -221,6 +221,9 @@ export function ActivityForm() {
           <div style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: 12, marginBottom: 16, background: "#fafafa" }}>
             <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 8, color: "#595959" }}>🥾 Hike details</div>
             <Space size="middle" wrap>
+              <Form.Item name="walkMiles" label="Trail distance (mi)" style={{ marginBottom: 0 }}>
+                <InputNumber min={0} step={0.1} placeholder="e.g., 3.2" style={{ width: 140 }} />
+              </Form.Item>
               <Form.Item name="elevationGainFeet" label="Elevation gain (ft)" style={{ marginBottom: 0 }}>
                 <InputNumber min={0} step={50} placeholder="e.g., 1400" style={{ width: 140 }} />
               </Form.Item>
@@ -234,9 +237,6 @@ export function ActivityForm() {
                 ]} />
               </Form.Item>
             </Space>
-            <div style={{ fontSize: 11, color: "#8c8c8c", marginTop: 4 }}>
-              Trail distance lives in &ldquo;Walked (mi)&rdquo; below.
-            </div>
           </div>
         )}
 
@@ -256,9 +256,11 @@ export function ActivityForm() {
           <Form.Item name="durationEstimate" label="Duration">
             <Input placeholder="e.g., 2-3 hours" />
           </Form.Item>
-          <Form.Item name="walkMiles" label="Walked (mi)" extra="Distance on foot.">
-            <InputNumber min={0} step={0.1} placeholder="e.g., 5.2" style={{ width: 120 }} />
-          </Form.Item>
+          {!isHike && (
+            <Form.Item name="walkMiles" label="Walked (mi)" extra="Distance on foot.">
+              <InputNumber min={0} step={0.1} placeholder="e.g., 5.2" style={{ width: 120 }} />
+            </Form.Item>
+          )}
           <Form.Item name="costNotes" label="Cost">
             <Input placeholder="e.g., $20 pp" />
           </Form.Item>
