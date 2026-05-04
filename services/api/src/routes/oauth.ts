@@ -73,7 +73,7 @@ oauth.post("/register", async (c) => {
   if (disallowed.length > 0) {
     return c.json({
       error: "invalid_redirect_uri",
-      error_description: `redirect_uri must be loopback (http://localhost or http://127.0.0.1) or an Anthropic-owned host (claude.ai, *.anthropic.com); rejected: ${disallowed.join(", ")}`,
+      error_description: `redirect_uri must be loopback (http://localhost or http://127.0.0.1 on any port) or the exact Anthropic callback https://claude.ai/api/mcp/auth_callback; rejected: ${disallowed.join(", ")}`,
     }, 400);
   }
 
