@@ -1067,6 +1067,19 @@ dataRoutes.delete("/life/entries/:id", handler(async (c) => {
 
 // ---- Upkeep ----
 
+// List task lists owned by the authenticated user. Tasks are scoped to a
+// list, so callers (especially MCP clients) need this to discover list IDs
+// before calling /tasks?list=…
+dataRoutes.get("/task-lists", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const lists = await pb.collection("task_lists").getFullList({
+    filter: pb.filter("owners ~ {:userId}", { userId }),
+    sort: "name",
+  });
+  return c.json(lists.map((l) => ({ id: l.id, name: l.name })));
+}));
+
 // List tasks (supports filtering by parent_id, tag, task_type)
 dataRoutes.get("/tasks", handler(async (c) => {
   const pb = c.get("pb");

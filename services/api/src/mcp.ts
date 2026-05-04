@@ -211,6 +211,16 @@ server.tool(
 // --- Upkeep tools ---
 
 server.tool(
+  "list_task_lists",
+  "List all task lists owned by the authenticated user. Call this first to discover list IDs before using list_tasks. Recurring tasks (litter box, watering plants, etc.) live inside one of these.",
+  {},
+  async () => {
+    const data = await api("/task-lists");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
   "list_tasks",
   "List tasks in a task list. Supports filtering by parent_id, tag, and task_type.",
   {

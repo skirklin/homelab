@@ -72,6 +72,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `clear_checked_items` — done shopping, clear checked
 
 **Tasks (read):**
+- `list_task_lists` — list the user's task lists (call first to discover list IDs)
 - `list_tasks` — list tasks (filter by parent_id, tag, task_type)
 
 **Tasks (write):**
