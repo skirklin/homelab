@@ -666,6 +666,42 @@ describe("Upkeep", () => {
     expect(data.snoozed_until).toBeDefined();
   });
 
+  it("POST /data/tasks/:id/tags — atomic add/remove without get-then-set", async () => {
+    // Seed a task with two tags.
+    const t = await apiReq("/data/tasks", {
+      method: "POST",
+      token: userToken,
+      body: { list: taskListId, name: "Tag victim", tags: ["alpha", "beta"] },
+    });
+    cleanupIds.push({ collection: "tasks", id: t.data.id });
+
+    // Add gamma, remove beta.
+    const r1 = await apiReq(`/data/tasks/${t.data.id}/tags`, {
+      method: "POST",
+      token: userToken,
+      body: { add: ["gamma"], remove: ["beta"] },
+    });
+    expect(r1.status).toBe(200);
+    expect(r1.data.tags.sort()).toEqual(["alpha", "gamma"]);
+
+    // Adding an existing tag is a no-op (deduped).
+    const r2 = await apiReq(`/data/tasks/${t.data.id}/tags`, {
+      method: "POST",
+      token: userToken,
+      body: { add: ["alpha"] },
+    });
+    expect(r2.status).toBe(200);
+    expect(r2.data.tags.sort()).toEqual(["alpha", "gamma"]);
+
+    // Empty body returns 400.
+    const r3 = await apiReq(`/data/tasks/${t.data.id}/tags`, {
+      method: "POST",
+      token: userToken,
+      body: {},
+    });
+    expect(r3.status).toBe(400);
+  });
+
   it("POST /data/tasks/:id/move — reparents and recomputes descendant paths", async () => {
     // Build: parent A → child B → grandchild C, plus uncle D (root, sibling of A).
     const a = await apiReq("/data/tasks", {
@@ -941,6 +977,87 @@ describe("Travel", () => {
       body: { label: "x" },
     });
     expect(missing.status).toBe(404);
+  });
+
+  it("itinerary day-level + flight ops round-trip", async () => {
+    const create = await apiReq("/data/travel/itineraries", {
+      method: "POST",
+      token: userToken,
+      body: {
+        log: travelLogId,
+        trip_id: travelTripId,
+        name: "Day-ops test",
+        days: [
+          { label: "Day 1", slots: [] },
+          { label: "Day 2", slots: [] },
+        ],
+      },
+    });
+    expect(create.status).toBe(201);
+    const itinId = create.data.id as string;
+    cleanupIds.push({ collection: "travel_itineraries", id: itinId });
+
+    // Insert a new day at position 1 (between the two existing).
+    const added = await apiReq(`/data/travel/itineraries/${itinId}/days`, {
+      method: "POST",
+      token: userToken,
+      body: { label: "Day 1.5", position: 1 },
+    });
+    expect(added.status).toBe(200);
+    expect(added.data.day_index).toBe(1);
+    expect(added.data.days_count).toBe(3);
+
+    // Move the new middle day to the end.
+    const moved = await apiReq(`/data/travel/itineraries/${itinId}/days/1/move`, {
+      method: "POST",
+      token: userToken,
+      body: { to_position: 2 },
+    });
+    expect(moved.status).toBe(200);
+    expect(moved.data.from_day_index).toBe(1);
+    expect(moved.data.to_day_index).toBe(2);
+
+    // Add a flight to day 0, then remove it.
+    const flightAdd = await apiReq(`/data/travel/itineraries/${itinId}/days/0/flights`, {
+      method: "POST",
+      token: userToken,
+      body: { activity_id: travelActivityId, start_time: "8:00 AM" },
+    });
+    expect(flightAdd.status).toBe(200);
+    expect((flightAdd.data.day.flights ?? []).length).toBe(1);
+
+    const flightPatch = await apiReq(`/data/travel/itineraries/${itinId}/days/0/flights/0`, {
+      method: "PATCH",
+      token: userToken,
+      body: { notes: "early arrival" },
+    });
+    expect(flightPatch.status).toBe(200);
+    expect(flightPatch.data.day.flights[0].notes).toBe("early arrival");
+
+    // Move flight from day 0 to day 1.
+    const flightMove = await apiReq(`/data/travel/itineraries/${itinId}/days/0/flights/0/move`, {
+      method: "POST",
+      token: userToken,
+      body: { to_day_index: 1 },
+    });
+    expect(flightMove.status).toBe(200);
+    expect((flightMove.data.from_day.flights ?? []).length).toBe(0);
+    expect(flightMove.data.to_day.flights.length).toBe(1);
+
+    const flightRm = await apiReq(`/data/travel/itineraries/${itinId}/days/1/flights/0`, {
+      method: "DELETE",
+      token: userToken,
+    });
+    expect(flightRm.status).toBe(200);
+    expect((flightRm.data.day.flights ?? []).length).toBe(0);
+
+    // Remove a day.
+    const dayRm = await apiReq(`/data/travel/itineraries/${itinId}/days/2`, {
+      method: "DELETE",
+      token: userToken,
+    });
+    expect(dayRm.status).toBe(200);
+    expect(dayRm.data.days_count).toBe(2);
   });
 });
 

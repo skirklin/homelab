@@ -1414,6 +1414,190 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/slots/:slotIndex/move", 
   return c.json(out.result);
 }));
 
+// ── Day-level ops (add / remove / move whole days) ──────────────
+
+// Insert a new day. Position defaults to end of the days array.
+dataRoutes.post("/travel/itineraries/:id/days", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{
+    label: string;
+    date?: string;
+    lodging_activity_id?: string;
+    position?: number;
+  }>();
+  if (!body.label) return c.json({ error: "label required" }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    const day: ItineraryDay = { label: body.label, slots: [] };
+    if (body.date) day.date = body.date;
+    if (body.lodging_activity_id) day.lodgingActivityId = body.lodging_activity_id;
+    const pos = body.position ?? days.length;
+    const clamped = Math.max(0, Math.min(days.length, pos));
+    days.splice(clamped, 0, day);
+    return { day_index: clamped, day, days_count: days.length };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Remove a day (cascades any slots/flights it contained).
+dataRoutes.delete("/travel/itineraries/:id/days/:dayIndex", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const removed = days.splice(dayIdx, 1)[0];
+    return { day_index: dayIdx, removed, days_count: days.length };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Move a whole day to a different position (reordering).
+dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/move", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  const body = await c.req.json<{ to_position: number }>();
+  if (typeof body.to_position !== "number") return c.json({ error: "to_position required" }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const [day] = days.splice(dayIdx, 1);
+    const clamped = Math.max(0, Math.min(days.length, body.to_position));
+    days.splice(clamped, 0, day);
+    return { from_day_index: dayIdx, to_day_index: clamped, days_count: days.length };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// ── Flight-slot ops (parity with regular slot ops) ──────────────
+// Days have a separate `flights[]` array for major transport. These ops
+// mirror the slot ops exactly but operate on day.flights.
+
+function getFlights(day: ItineraryDay): ItinerarySlot[] {
+  if (!day.flights) day.flights = [];
+  return day.flights;
+}
+
+// Add a flight to a day's flights (default: append to end).
+dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/flights", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  const body = await c.req.json<{
+    activity_id: string;
+    start_time?: string;
+    notes?: string;
+    position?: number;
+  }>();
+  if (!body.activity_id) return c.json({ error: "activity_id required" }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const flight: ItinerarySlot = { activityId: body.activity_id };
+    if (body.start_time) flight.startTime = body.start_time;
+    if (body.notes) flight.notes = body.notes;
+    const flights = getFlights(days[dayIdx]);
+    const pos = body.position ?? flights.length;
+    const clamped = Math.max(0, Math.min(flights.length, pos));
+    flights.splice(clamped, 0, flight);
+    return { day_index: dayIdx, position: clamped, day: days[dayIdx] };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Remove a flight by index.
+dataRoutes.delete("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  const flightIdx = parseIdx(c.req.param("flightIndex"), "flight index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  if (typeof flightIdx === "object") return c.json({ error: flightIdx.error }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const flights = getFlights(days[dayIdx]);
+    if (flightIdx >= flights.length) return { error: `flight index ${flightIdx} out of range` };
+    const removed = flights.splice(flightIdx, 1)[0];
+    return { day_index: dayIdx, removed, day: days[dayIdx] };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Update a flight's fields.
+dataRoutes.patch("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const dayIdx = parseIdx(c.req.param("dayIndex"), "day index");
+  const flightIdx = parseIdx(c.req.param("flightIndex"), "flight index");
+  if (typeof dayIdx === "object") return c.json({ error: dayIdx.error }, 400);
+  if (typeof flightIdx === "object") return c.json({ error: flightIdx.error }, 400);
+  const body = await c.req.json<{
+    activity_id?: string;
+    start_time?: string | null;
+    notes?: string | null;
+  }>();
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
+    const flights = getFlights(days[dayIdx]);
+    if (flightIdx >= flights.length) return { error: `flight index ${flightIdx} out of range` };
+    const flight = flights[flightIdx];
+    if (body.activity_id !== undefined) flight.activityId = body.activity_id;
+    if (body.start_time === null) delete flight.startTime;
+    else if (body.start_time !== undefined) flight.startTime = body.start_time;
+    if (body.notes === null) delete flight.notes;
+    else if (body.notes !== undefined) flight.notes = body.notes;
+    return { day_index: dayIdx, flight_index: flightIdx, day: days[dayIdx] };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
+// Move a flight — reorder within a day or transfer between days.
+dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex/move", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const fromDay = parseIdx(c.req.param("dayIndex"), "day index");
+  const fromFlight = parseIdx(c.req.param("flightIndex"), "flight index");
+  if (typeof fromDay === "object") return c.json({ error: fromDay.error }, 400);
+  if (typeof fromFlight === "object") return c.json({ error: fromFlight.error }, 400);
+  const body = await c.req.json<{ to_day_index: number; to_position?: number }>();
+  if (typeof body.to_day_index !== "number") return c.json({ error: "to_day_index required" }, 400);
+
+  const out = await mutateDays(pb, id, (days) => {
+    if (fromDay >= days.length) return { error: `from day_index ${fromDay} out of range` };
+    if (body.to_day_index >= days.length) return { error: `to_day_index ${body.to_day_index} out of range` };
+    const fromFlights = getFlights(days[fromDay]);
+    if (fromFlight >= fromFlights.length) return { error: `flight index ${fromFlight} out of range` };
+    const flight = fromFlights.splice(fromFlight, 1)[0];
+    const toFlights = getFlights(days[body.to_day_index]);
+    const pos = body.to_position ?? toFlights.length;
+    const clamped = Math.max(0, Math.min(toFlights.length, pos));
+    toFlights.splice(clamped, 0, flight);
+    return {
+      from_day_index: fromDay,
+      to_day_index: body.to_day_index,
+      to_position: clamped,
+      from_day: days[fromDay],
+      to_day: days[body.to_day_index],
+    };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json(out.result);
+}));
+
 // ---- Life ----
 
 // Get the user's life log
@@ -1713,6 +1897,29 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
     snoozed_until: "",
   });
   return c.json({ id: record.id, last_completed: record.last_completed });
+}));
+
+// Add and/or remove tags atomically without round-tripping through update_task.
+// remove is applied first, then add — so re-tagging in one call does the right
+// thing.
+dataRoutes.post("/tasks/:id/tags", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{ add?: string[]; remove?: string[] }>();
+  const add = body.add ?? [];
+  const remove = body.remove ?? [];
+  if (add.length === 0 && remove.length === 0) {
+    return c.json({ error: "at least one of add[] / remove[] required" }, 400);
+  }
+
+  const task = await pb.collection("tasks").getOne(id);
+  const removeSet = new Set(remove);
+  const filtered = ((task.tags as string[] | undefined) ?? []).filter((t) => !removeSet.has(t));
+  const merged = [...filtered];
+  for (const t of add) if (!merged.includes(t)) merged.push(t);
+
+  const record = await pb.collection("tasks").update(id, { tags: merged });
+  return c.json({ id: record.id, tags: record.tags });
 }));
 
 // Snooze a task

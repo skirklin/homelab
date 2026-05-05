@@ -52,11 +52,14 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `delete_recipe_box` — delete a box (cascades to recipes + cooking log)
 - `subscribe_to_box` / `unsubscribe_from_box` — manage the authenticated user's box subscriptions
 - `add_recipe_to_box` — add a recipe with structured data
-- `update_recipe` — replace a recipe's data (use after `get_recipe` to fetch + modify)
+- `update_recipe` — replace a recipe's data (whole-replace; for small edits prefer the surgical ops below)
+- `patch_recipe` — merge top-level fields into recipe.data (name, recipeYield, recipeCuisine, …); null clears
+- `add_recipe_ingredient` / `update_recipe_ingredient` / `remove_recipe_ingredient` / `reorder_recipe_ingredients` — index-addressable ingredient ops
+- `add_recipe_step` / `update_recipe_step` / `remove_recipe_step` / `reorder_recipe_steps` — same for instruction steps
 - `delete_recipe` — delete a recipe
 - `set_recipe_visibility` — set per-recipe visibility
 - `add_cooking_log_entry` — log a cooking session (optional notes/timestamp)
-- `update_cooking_log_entry` — edit cooking log notes
+- `update_cooking_log_entry` — edit cooking log notes and/or timestamp
 - `delete_cooking_log_entry` — delete a cooking log entry
 
 **Shopping (read):**
@@ -77,7 +80,9 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 
 **Tasks (write):**
 - `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot, notify_users)
-- `update_task` — update fields (typed schema; pass only the fields to change)
+- `update_task` — update fields (typed schema; pass only the fields to change). To reparent or move between lists use `move_task` instead.
+- `move_task` — reparent and/or move between lists; recomputes descendant `path` atomically
+- `tag_task` — add and/or remove tags atomically (avoids the get-then-set race of `update_task(tags=...)`)
 - `delete_task` — delete task and all descendants
 - `complete_task` — toggle completion (recurring sets last_completed; one_shot toggles completed)
 - `snooze_task` / `unsnooze_task` — snooze until a date or clear snooze
@@ -98,6 +103,8 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 - `add_travel_itinerary` — create an itinerary
 - `update_travel_itinerary` — update itinerary fields or replace days array (whole-replace; for small edits prefer the surgical ops below)
 - `add_itinerary_slot` / `remove_itinerary_slot` / `update_itinerary_slot` / `move_itinerary_slot` — surgical slot ops by `(itinerary_id, day_index, slot_index)` so callers don't round-trip the whole days array
+- `add_itinerary_flight` / `remove_itinerary_flight` / `update_itinerary_flight` / `move_itinerary_flight` — same shape, but for the `flights[]` array on a day
+- `add_itinerary_day` / `remove_itinerary_day` / `move_itinerary_day` — manage the day list itself
 - `update_itinerary_day` — patch a day's `label` / `date` / `lodging_activity_id`
 - `delete_travel_trip` — delete a trip
 - `delete_travel_activity` — delete an activity

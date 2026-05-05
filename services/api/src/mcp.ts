@@ -1181,6 +1181,136 @@ server.tool(
   },
 );
 
+server.tool(
+  "add_itinerary_day",
+  "Insert a new day into an itinerary at the given position (default: end).",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    label: z.string().describe("Day label, e.g. 'Day 4 — Rest day'"),
+    date: z.string().optional().describe("ISO date if scheduled"),
+    lodging_activity_id: z.string().optional().describe("Activity ID for lodging on this night"),
+    position: z.number().int().nonnegative().optional().describe("Insertion position; defaults to end"),
+  },
+  async ({ itinerary_id, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_itinerary_day",
+  "Remove a day from an itinerary by index. Cascades any slots/flights it contained — those activity records still exist on the trip but become unscheduled.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative(),
+  },
+  async ({ itinerary_id, day_index }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}`, {
+      method: "DELETE",
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "move_itinerary_day",
+  "Reorder a whole day in an itinerary (e.g., move Day 5 to Day 3).",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative().describe("Source day index"),
+    to_position: z.number().int().nonnegative().describe("New position for this day"),
+  },
+  async ({ itinerary_id, day_index, to_position }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/move`, {
+      method: "POST",
+      body: JSON.stringify({ to_position }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+// --- Itinerary flight-slot ops (parity with regular slot ops) ---
+// Days have a separate `flights[]` for major transport. Same shape and
+// semantics as add/remove/update/move_itinerary_slot.
+
+server.tool(
+  "add_itinerary_flight",
+  "Add a flight (or other major-transport) slot to a day's flights array. Position defaults to end.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative(),
+    activity_id: z.string().describe("The Flight-category activity to slot in"),
+    start_time: z.string().optional(),
+    notes: z.string().optional(),
+    position: z.number().int().nonnegative().optional(),
+  },
+  async ({ itinerary_id, day_index, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/flights`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_itinerary_flight",
+  "Remove a flight from a day's flights array by index.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative(),
+    flight_index: z.number().int().nonnegative(),
+  },
+  async ({ itinerary_id, day_index, flight_index }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/flights/${flight_index}`, {
+      method: "DELETE",
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_itinerary_flight",
+  "Update fields on a single flight slot (start_time, notes, activity_id). Pass null to clear an optional field.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative(),
+    flight_index: z.number().int().nonnegative(),
+    activity_id: z.string().optional(),
+    start_time: z.string().nullable().optional(),
+    notes: z.string().nullable().optional(),
+  },
+  async ({ itinerary_id, day_index, flight_index, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/flights/${flight_index}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "move_itinerary_flight",
+  "Reorder a flight within a day, or move it to a different day.",
+  {
+    itinerary_id: z.string().describe("The itinerary record ID"),
+    day_index: z.number().int().nonnegative().describe("Source day index"),
+    flight_index: z.number().int().nonnegative().describe("Source flight index"),
+    to_day_index: z.number().int().nonnegative(),
+    to_position: z.number().int().nonnegative().optional(),
+  },
+  async ({ itinerary_id, day_index, flight_index, ...body }) => {
+    const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/flights/${flight_index}/move`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Upkeep write tools ---
 
 const taskFrequencySchema = z.object({
@@ -1270,6 +1400,23 @@ server.tool(
   { id: z.string().describe("The task record ID") },
   async ({ id }) => {
     const data = await api(`/tasks/${id}/complete`, { method: "POST" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "tag_task",
+  "Add and/or remove tags on a task atomically. remove[] is applied first, then add[]. Avoids the get-then-set race when only changing some tags.",
+  {
+    id: z.string().describe("The task record ID"),
+    add: z.array(z.string()).optional().describe("Tags to add (deduped)"),
+    remove: z.array(z.string()).optional().describe("Tags to remove"),
+  },
+  async ({ id, ...body }) => {
+    const data = await api(`/tasks/${id}/tags`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );
