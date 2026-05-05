@@ -357,6 +357,257 @@ dataRoutes.patch("/recipes/:id", handler(async (c) => {
   });
 }));
 
+// ── Surgical recipe.data ops ────────────────────────────────────
+// All ops below read the recipe, mutate the named locality of `data`,
+// and write back. Each mutation invalidates `enrichment_status` and
+// clears `pending_changes` to mirror the whole-replace PATCH.
+
+interface RecipeStep {
+  "@type"?: string;
+  text: string;
+  ingredients?: string[];
+}
+
+async function mutateRecipeData<T>(
+  pb: PB,
+  userId: string,
+  id: string,
+  fn: (data: Record<string, unknown>) => T | { error: string },
+): Promise<{ result: T; data: Record<string, unknown> } | { error: string; status: number }> {
+  const record = await pb.collection("recipes").getOne(id);
+  const data: Record<string, unknown> = { ...((record.data as Record<string, unknown>) || {}) };
+  // Shallow-clone the array fields callers might mutate, so we don't mutate
+  // the cached record arrays in place.
+  if (Array.isArray(data.recipeIngredient)) data.recipeIngredient = [...(data.recipeIngredient as string[])];
+  if (Array.isArray(data.recipeInstructions)) {
+    data.recipeInstructions = (data.recipeInstructions as RecipeStep[]).map((s) => ({ ...s }));
+  }
+  const result = fn(data);
+  if (result && typeof result === "object" && "error" in result) {
+    return { error: (result as { error: string }).error, status: 400 };
+  }
+  await pb.collection("recipes").update(id, {
+    data,
+    last_updated_by: userId,
+    enrichment_status: "needed",
+    pending_changes: null,
+  });
+  return { result: result as T, data };
+}
+
+function recipeArrayResponse(
+  field: "recipeIngredient" | "recipeInstructions",
+  data: Record<string, unknown>,
+) {
+  return {
+    field,
+    count: Array.isArray(data[field]) ? (data[field] as unknown[]).length : 0,
+    items: data[field] ?? [],
+  };
+}
+
+// Merge top-level recipe.data fields (name, description, recipeYield, etc).
+// Use null to clear a field. For ingredient/step arrays, prefer the
+// dedicated surgical ops below — passing them here whole-replaces.
+dataRoutes.patch("/recipes/:id/data", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{ fields: Record<string, unknown> }>();
+  if (!body.fields || typeof body.fields !== "object") {
+    return c.json({ error: "fields object required" }, 400);
+  }
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    for (const [k, v] of Object.entries(body.fields)) {
+      if (v === null) delete data[k];
+      else data[k] = v;
+    }
+    return { fields_changed: Object.keys(body.fields) };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...out.result, name: out.data.name });
+}));
+
+// Add an ingredient (default: append to end).
+dataRoutes.post("/recipes/:id/ingredients", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{ ingredient: string; position?: number }>();
+  if (!body.ingredient || typeof body.ingredient !== "string") {
+    return c.json({ error: "ingredient string required" }, 400);
+  }
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeIngredient as string[] | undefined) ?? [];
+    const pos = body.position ?? list.length;
+    const clamped = Math.max(0, Math.min(list.length, pos));
+    list.splice(clamped, 0, body.ingredient);
+    data.recipeIngredient = list;
+    return { position: clamped };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...out.result, ...recipeArrayResponse("recipeIngredient", out.data) });
+}));
+
+// Update a single ingredient by index.
+dataRoutes.patch("/recipes/:id/ingredients/:index", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const idx = parseInt(c.req.param("index")!, 10);
+  const { ingredient } = await c.req.json<{ ingredient: string }>();
+  if (!ingredient || typeof ingredient !== "string") {
+    return c.json({ error: "ingredient string required" }, 400);
+  }
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeIngredient as string[] | undefined) ?? [];
+    if (idx < 0 || idx >= list.length) return { error: `index ${idx} out of range (have ${list.length})` };
+    list[idx] = ingredient;
+    data.recipeIngredient = list;
+    return { index: idx };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...out.result, ...recipeArrayResponse("recipeIngredient", out.data) });
+}));
+
+// Remove an ingredient by index.
+dataRoutes.delete("/recipes/:id/ingredients/:index", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const idx = parseInt(c.req.param("index")!, 10);
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeIngredient as string[] | undefined) ?? [];
+    if (idx < 0 || idx >= list.length) return { error: `index ${idx} out of range` };
+    const removed = list.splice(idx, 1)[0];
+    data.recipeIngredient = list;
+    return { removed, index: idx };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...out.result, ...recipeArrayResponse("recipeIngredient", out.data) });
+}));
+
+// Reorder ingredients. `order` is a permutation: new[i] = old[order[i]].
+dataRoutes.post("/recipes/:id/ingredients/reorder", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const { order } = await c.req.json<{ order: number[] }>();
+  if (!Array.isArray(order)) return c.json({ error: "order must be an array of integers" }, 400);
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeIngredient as string[] | undefined) ?? [];
+    const err = validatePermutation(order, list.length);
+    if (err) return { error: err };
+    data.recipeIngredient = order.map((i) => list[i]);
+    return {};
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...recipeArrayResponse("recipeIngredient", out.data) });
+}));
+
+// ── Steps ──────────────────────────────────────────────────────
+
+// Add a recipe step (default: append).
+dataRoutes.post("/recipes/:id/steps", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{ text: string; ingredients?: string[]; position?: number }>();
+  if (!body.text || typeof body.text !== "string") {
+    return c.json({ error: "text required" }, 400);
+  }
+
+  const step: RecipeStep = { "@type": "HowToStep", text: body.text };
+  if (body.ingredients && body.ingredients.length > 0) step.ingredients = body.ingredients;
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeInstructions as RecipeStep[] | undefined) ?? [];
+    const pos = body.position ?? list.length;
+    const clamped = Math.max(0, Math.min(list.length, pos));
+    list.splice(clamped, 0, step);
+    data.recipeInstructions = list;
+    return { position: clamped };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...out.result, ...recipeArrayResponse("recipeInstructions", out.data) });
+}));
+
+// Update a step. `text` and `ingredients` are independently patchable.
+// Pass ingredients=null to drop the field.
+dataRoutes.patch("/recipes/:id/steps/:index", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const idx = parseInt(c.req.param("index")!, 10);
+  const body = await c.req.json<{ text?: string; ingredients?: string[] | null }>();
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeInstructions as RecipeStep[] | undefined) ?? [];
+    if (idx < 0 || idx >= list.length) return { error: `index ${idx} out of range` };
+    const step = list[idx];
+    if (body.text !== undefined) step.text = body.text;
+    if (body.ingredients === null) delete step.ingredients;
+    else if (body.ingredients !== undefined) step.ingredients = body.ingredients;
+    data.recipeInstructions = list;
+    return { index: idx };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...out.result, ...recipeArrayResponse("recipeInstructions", out.data) });
+}));
+
+// Remove a step by index.
+dataRoutes.delete("/recipes/:id/steps/:index", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const idx = parseInt(c.req.param("index")!, 10);
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeInstructions as RecipeStep[] | undefined) ?? [];
+    if (idx < 0 || idx >= list.length) return { error: `index ${idx} out of range` };
+    const removed = list.splice(idx, 1)[0];
+    data.recipeInstructions = list;
+    return { removed, index: idx };
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...out.result, ...recipeArrayResponse("recipeInstructions", out.data) });
+}));
+
+// Reorder steps; same permutation contract as ingredients.
+dataRoutes.post("/recipes/:id/steps/reorder", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id")!;
+  const { order } = await c.req.json<{ order: number[] }>();
+  if (!Array.isArray(order)) return c.json({ error: "order must be an array of integers" }, 400);
+
+  const out = await mutateRecipeData(pb, userId, id, (data) => {
+    const list = (data.recipeInstructions as RecipeStep[] | undefined) ?? [];
+    const err = validatePermutation(order, list.length);
+    if (err) return { error: err };
+    data.recipeInstructions = order.map((i) => list[i]);
+    return {};
+  });
+  if ("error" in out) return c.json({ error: out.error }, 400);
+  return c.json({ id, ...recipeArrayResponse("recipeInstructions", out.data) });
+}));
+
+function validatePermutation(order: number[], n: number): string | null {
+  if (order.length !== n) return `order length ${order.length} doesn't match item count ${n}`;
+  const seen = new Set<number>();
+  for (const i of order) {
+    if (!Number.isInteger(i) || i < 0 || i >= n) return `order contains invalid index ${i}`;
+    if (seen.has(i)) return `order has duplicate index ${i}`;
+    seen.add(i);
+  }
+  return null;
+}
+
 // Delete a recipe
 dataRoutes.delete("/recipes/:id", handler(async (c) => {
   const pb = c.get("pb");

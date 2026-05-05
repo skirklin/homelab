@@ -331,6 +331,124 @@ describe("Recipes", () => {
     cleanupIds.push({ collection: "recipes", id: data.id });
   });
 
+  it("recipe surgical ops — patch_recipe, ingredients, steps round-trip", async () => {
+    // Fresh recipe so we don't disturb the seeded ones.
+    const create = await apiReq("/data/recipes", {
+      method: "POST",
+      token: userToken,
+      body: {
+        boxId: recipeBoxId,
+        data: {
+          name: "Surgical-ops Test",
+          recipeIngredient: ["1 cup flour", "1 tsp salt"],
+          recipeInstructions: [
+            { "@type": "HowToStep", text: "Mix dry" },
+            { "@type": "HowToStep", text: "Bake" },
+          ],
+        },
+      },
+    });
+    expect(create.status).toBe(201);
+    const recipeId = create.data.id as string;
+    cleanupIds.push({ collection: "recipes", id: recipeId });
+
+    // patch_recipe — partial top-level merge + null clears
+    const patched = await apiReq(`/data/recipes/${recipeId}/data`, {
+      method: "PATCH",
+      token: userToken,
+      body: { fields: { recipeYield: "4 servings", recipeCuisine: "Italian", description: null } },
+    });
+    expect(patched.status).toBe(200);
+    const get1 = await apiReq(`/data/recipes/${recipeId}`, { token: userToken });
+    expect(get1.data.data.recipeYield).toBe("4 servings");
+    expect(get1.data.data.recipeCuisine).toBe("Italian");
+    expect(get1.data.data.description).toBeUndefined();
+    expect(get1.data.enrichment_status).toBe("needed");
+
+    // add_recipe_ingredient — append + insert at position
+    const add1 = await apiReq(`/data/recipes/${recipeId}/ingredients`, {
+      method: "POST",
+      token: userToken,
+      body: { ingredient: "2 eggs" },
+    });
+    expect(add1.status).toBe(200);
+    expect(add1.data.count).toBe(3);
+    const add2 = await apiReq(`/data/recipes/${recipeId}/ingredients`, {
+      method: "POST",
+      token: userToken,
+      body: { ingredient: "1 tbsp butter", position: 0 },
+    });
+    expect(add2.status).toBe(200);
+    expect(add2.data.position).toBe(0);
+    expect(add2.data.items[0]).toBe("1 tbsp butter");
+
+    // update_recipe_ingredient
+    const upd = await apiReq(`/data/recipes/${recipeId}/ingredients/2`, {
+      method: "PATCH",
+      token: userToken,
+      body: { ingredient: "1 tsp kosher salt" },
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.data.items[2]).toBe("1 tsp kosher salt");
+
+    // reorder_recipe_ingredients — reverse the array
+    const len = upd.data.count as number;
+    const reverse = Array.from({ length: len }, (_, i) => len - 1 - i);
+    const reord = await apiReq(`/data/recipes/${recipeId}/ingredients/reorder`, {
+      method: "POST",
+      token: userToken,
+      body: { order: reverse },
+    });
+    expect(reord.status).toBe(200);
+
+    // Bad permutation rejected
+    const badReord = await apiReq(`/data/recipes/${recipeId}/ingredients/reorder`, {
+      method: "POST",
+      token: userToken,
+      body: { order: [0, 0, 1, 2] },
+    });
+    expect(badReord.status).toBe(400);
+
+    // remove_recipe_ingredient
+    const rm = await apiReq(`/data/recipes/${recipeId}/ingredients/0`, {
+      method: "DELETE",
+      token: userToken,
+    });
+    expect(rm.status).toBe(200);
+    expect(rm.data.count).toBe(len - 1);
+
+    // Steps surgical ops
+    const stepAdd = await apiReq(`/data/recipes/${recipeId}/steps`, {
+      method: "POST",
+      token: userToken,
+      body: { text: "Rest 30 min", ingredients: ["dough"], position: 1 },
+    });
+    expect(stepAdd.status).toBe(200);
+    expect(stepAdd.data.items[1].text).toBe("Rest 30 min");
+    expect(stepAdd.data.items[1].ingredients).toEqual(["dough"]);
+
+    const stepPatch = await apiReq(`/data/recipes/${recipeId}/steps/1`, {
+      method: "PATCH",
+      token: userToken,
+      body: { ingredients: null },
+    });
+    expect(stepPatch.status).toBe(200);
+    expect(stepPatch.data.items[1].ingredients).toBeUndefined();
+
+    const stepRm = await apiReq(`/data/recipes/${recipeId}/steps/0`, {
+      method: "DELETE",
+      token: userToken,
+    });
+    expect(stepRm.status).toBe(200);
+
+    // Out-of-range index returns 400
+    const oob = await apiReq(`/data/recipes/${recipeId}/steps/99`, {
+      method: "DELETE",
+      token: userToken,
+    });
+    expect(oob.status).toBe(400);
+  });
+
   it("PATCH /data/cooking-log/:eventId — edits notes and timestamp independently", async () => {
     // Create a cooking log entry to edit
     const created = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {

@@ -552,6 +552,155 @@ server.tool(
   },
 );
 
+// --- Surgical recipe.data ops ---
+// Prefer these over update_recipe (whole-replace) for single-field edits,
+// ingredient/step swaps, and step reorders. They invalidate enrichment
+// the same way the whole-replace does.
+
+server.tool(
+  "patch_recipe",
+  "Merge top-level fields into recipe.data (name, description, recipeYield, recipeCuisine, etc). Pass null to clear a field. For ingredient/step arrays prefer the dedicated surgical ops.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    fields: z.record(z.unknown()).describe("Partial recipeDataSchema fields to merge; null to clear"),
+  },
+  async ({ id, fields }) => {
+    const result = await api(`/recipes/${id}/data`, {
+      method: "PATCH",
+      body: JSON.stringify({ fields }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_recipe_ingredient",
+  "Append (or insert at position) an ingredient on a recipe. Position defaults to end.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    ingredient: z.string().describe('The ingredient string, e.g. "1 tsp kosher salt"'),
+    position: z.number().int().nonnegative().optional(),
+  },
+  async ({ id, ingredient, position }) => {
+    const result = await api(`/recipes/${id}/ingredients`, {
+      method: "POST",
+      body: JSON.stringify({ ingredient, position }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_recipe_ingredient",
+  "Replace a single ingredient by index.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    index: z.number().int().nonnegative(),
+    ingredient: z.string(),
+  },
+  async ({ id, index, ingredient }) => {
+    const result = await api(`/recipes/${id}/ingredients/${index}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ingredient }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_recipe_ingredient",
+  "Remove an ingredient by index.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    index: z.number().int().nonnegative(),
+  },
+  async ({ id, index }) => {
+    const result = await api(`/recipes/${id}/ingredients/${index}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "reorder_recipe_ingredients",
+  "Reorder ingredients via a permutation. order[i] = old index that should land at new position i. Must be a complete permutation of [0..n-1].",
+  {
+    id: z.string().describe("The recipe record ID"),
+    order: z.array(z.number().int().nonnegative()).describe("Permutation of indices"),
+  },
+  async ({ id, order }) => {
+    const result = await api(`/recipes/${id}/ingredients/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ order }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_recipe_step",
+  "Append (or insert at position) an instruction step on a recipe. The step takes free-form text and an optional ingredients list (subset of the recipe's recipeIngredient strings used in this step).",
+  {
+    id: z.string().describe("The recipe record ID"),
+    text: z.string().describe("Instruction text"),
+    ingredients: z.array(z.string()).optional().describe("Ingredients used in this step"),
+    position: z.number().int().nonnegative().optional(),
+  },
+  async ({ id, ...body }) => {
+    const result = await api(`/recipes/${id}/steps`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_recipe_step",
+  "Patch a single step. text/ingredients are independently optional. Pass ingredients=null to clear the per-step ingredients field.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    index: z.number().int().nonnegative(),
+    text: z.string().optional(),
+    ingredients: z.array(z.string()).nullable().optional(),
+  },
+  async ({ id, index, ...body }) => {
+    const result = await api(`/recipes/${id}/steps/${index}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_recipe_step",
+  "Remove an instruction step by index.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    index: z.number().int().nonnegative(),
+  },
+  async ({ id, index }) => {
+    const result = await api(`/recipes/${id}/steps/${index}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "reorder_recipe_steps",
+  "Reorder steps via a permutation. Same contract as reorder_recipe_ingredients.",
+  {
+    id: z.string().describe("The recipe record ID"),
+    order: z.array(z.number().int().nonnegative()),
+  },
+  async ({ id, order }) => {
+    const result = await api(`/recipes/${id}/steps/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ order }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
 server.tool(
   "delete_recipe",
   "Permanently delete a recipe and its cooking log entries",
