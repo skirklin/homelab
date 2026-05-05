@@ -19,9 +19,16 @@ export function handler(
       return await retryOnBusy(() => fn(c));
     } catch (err) {
       console.error(`${c.req.method} ${c.req.path}:`, err);
+      // PocketBase's ClientResponseError carries upstream status (e.g. 404
+      // for missing record). Forward any 4xx as-is so callers see the right
+      // shape; everything else collapses to 500.
+      const upstream = (err as { status?: unknown })?.status;
+      const status = typeof upstream === "number" && upstream >= 400 && upstream < 500
+        ? (upstream as 400 | 401 | 403 | 404)
+        : 500;
       return c.json(
         { error: err instanceof Error ? err.message : "Internal error" },
-        500,
+        status,
       );
     }
   };

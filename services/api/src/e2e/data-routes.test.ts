@@ -717,6 +717,15 @@ describe("Travel", () => {
       body: { activity_id: travelActivityId },
     });
     expect(bad.status).toBe(400);
+
+    // Missing itinerary surfaces as 404 (not 500) — confirms the handler
+    // wrapper forwards PB's upstream 4xx instead of collapsing to 500.
+    const missing = await apiReq("/data/travel/itineraries/nonexistent_id/days/0", {
+      method: "PATCH",
+      token: userToken,
+      body: { label: "x" },
+    });
+    expect(missing.status).toBe(404);
   });
 });
 
