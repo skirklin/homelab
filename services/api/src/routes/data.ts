@@ -402,19 +402,28 @@ dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
   return c.json({ id: record.id, timestamp: record.timestamp }, 201);
 }));
 
-// Update notes on a cooking log entry (empty string clears notes)
+// Update notes and/or timestamp on a cooking log entry. Empty-string notes
+// clears the notes. Timestamp lets callers fix a wrong-day cook entry without
+// delete + re-add.
 dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
   const pb = c.get("pb");
   const eventId = c.req.param("eventId")!;
-  const { notes } = await c.req.json<{ notes: string }>();
+  const body = await c.req.json<{ notes?: string; timestamp?: string }>();
   const record = await pb.collection("recipe_events").getOne(eventId);
-  const data = { ...((record.data as Record<string, unknown>) || {}) };
-  const trimmed = (notes ?? "").trim();
-  if (trimmed) data.notes = trimmed;
-  else delete data.notes;
-  const updated = await pb.collection("recipe_events").update(eventId, { data });
+  const update: Record<string, unknown> = {};
+  if (body.notes !== undefined) {
+    const data = { ...((record.data as Record<string, unknown>) || {}) };
+    const trimmed = (body.notes ?? "").trim();
+    if (trimmed) data.notes = trimmed;
+    else delete data.notes;
+    update.data = data;
+  }
+  if (body.timestamp !== undefined) update.timestamp = body.timestamp;
+  if (Object.keys(update).length === 0) return c.json({ error: "no fields provided" }, 400);
+  const updated = await pb.collection("recipe_events").update(eventId, update);
   return c.json({
     id: updated.id,
+    timestamp: updated.timestamp,
     notes: (updated.data as Record<string, unknown> | undefined)?.notes,
   });
 }));
@@ -1339,19 +1348,85 @@ dataRoutes.post("/tasks", handler(async (c) => {
   return c.json({ id: record.id, name: record.name }, 201);
 }));
 
-// Update a task
+// Update a task. parent_id and list are intentionally NOT allowed here —
+// changing them must go through POST /tasks/:id/move so descendant `path`
+// values get recomputed transactionally. PATCHing parent_id directly was a
+// footgun that left stale subtree paths.
 dataRoutes.patch("/tasks/:id", handler(async (c) => {
   const pb = c.get("pb");
   const id = c.req.param("id")!;
   const body = await c.req.json<Record<string, unknown>>();
   const allowed = ["name", "description", "task_type", "frequency", "position",
-    "completed", "snoozed_until", "tags", "collapsed", "notify_users", "parent_id"];
+    "completed", "snoozed_until", "tags", "collapsed", "notify_users"];
   const data: Record<string, unknown> = {};
   for (const key of allowed) {
     if (body[key] !== undefined) data[key] = body[key];
   }
   const record = await pb.collection("tasks").update(id, data);
   return c.json({ id: record.id, name: record.name });
+}));
+
+// Move a task: change its parent (within or across lists) and/or position.
+// Recomputes `path` on the task and all descendants so subtree filters stay
+// correct. Pass new_parent_id="" (or null) to make it a root task.
+dataRoutes.post("/tasks/:id/move", handler(async (c) => {
+  const pb = c.get("pb");
+  const id = c.req.param("id")!;
+  const body = await c.req.json<{
+    new_parent_id?: string | null;
+    new_list?: string;
+    position?: number;
+  }>();
+
+  const task = await pb.collection("tasks").getOne(id);
+  const oldPath = task.path as string;
+  const newList = body.new_list ?? (task.list as string);
+
+  let newParentId = "";
+  let newPathPrefix = id; // root → path is just the id
+  if (body.new_parent_id !== undefined && body.new_parent_id !== null && body.new_parent_id !== "") {
+    const parent = await pb.collection("tasks").getOne(body.new_parent_id);
+    if ((parent.list as string) !== newList) {
+      return c.json({ error: "new_parent_id is in a different list than new_list" }, 400);
+    }
+    // Reject parent that's a descendant of this task (would create a cycle)
+    if ((parent.path as string).startsWith(`${oldPath}/`) || parent.path === oldPath) {
+      return c.json({ error: "cannot move a task under its own descendant" }, 400);
+    }
+    newParentId = parent.id;
+    newPathPrefix = `${parent.path}/${id}`;
+  } else if (body.new_parent_id === undefined) {
+    // Caller didn't touch parent — keep current parent and current path prefix.
+    newParentId = task.parent_id as string;
+    newPathPrefix = oldPath;
+  }
+
+  const descendants = await pb.collection("tasks").getFullList({
+    filter: pb.filter("path ~ {:prefix}", { prefix: `${oldPath}/%` }),
+  });
+
+  const taskUpdate: Record<string, unknown> = { path: newPathPrefix };
+  if (body.new_parent_id !== undefined) taskUpdate.parent_id = newParentId;
+  if (body.new_list !== undefined) taskUpdate.list = newList;
+  if (body.position !== undefined) taskUpdate.position = body.position;
+  await pb.collection("tasks").update(id, taskUpdate);
+
+  // Rewrite each descendant's path (and list, if moving across lists).
+  for (const d of descendants) {
+    const descPath = d.path as string;
+    const newDescPath = newPathPrefix + descPath.slice(oldPath.length);
+    const update: Record<string, unknown> = { path: newDescPath };
+    if (body.new_list !== undefined) update.list = newList;
+    await pb.collection("tasks").update(d.id, update);
+  }
+
+  return c.json({
+    id,
+    parent_id: newParentId,
+    list: newList,
+    path: newPathPrefix,
+    descendants_updated: descendants.length,
+  });
 }));
 
 // Complete a task (recurring: adds a task_events record + refreshes

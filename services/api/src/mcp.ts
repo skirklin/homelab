@@ -655,15 +655,16 @@ server.tool(
 
 server.tool(
   "update_cooking_log_entry",
-  "Edit the notes on a cooking log entry. Pass an empty string to clear notes.",
+  "Edit notes and/or timestamp on a cooking log entry. Pass empty-string notes to clear; pass timestamp to fix a wrong-day entry.",
   {
     eventId: z.string().describe("The cooking log event ID"),
-    notes: z.string(),
+    notes: z.string().optional(),
+    timestamp: z.string().optional().describe("ISO datetime to overwrite when the recipe was cooked"),
   },
-  async ({ eventId, notes }) => {
+  async ({ eventId, ...body }) => {
     const result = await api(`/cooking-log/${eventId}`, {
       method: "PATCH",
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(body),
     });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
@@ -1063,24 +1064,41 @@ server.tool(
 
 server.tool(
   "update_task",
-  "Update fields on an existing task. Only provided fields are changed.",
+  "Update fields on an existing task. Only provided fields are changed. To reparent or move between lists, use move_task — direct parent_id changes are not allowed here because they would leave descendant paths stale.",
   {
     id: z.string().describe("The task record ID"),
     name: z.string().optional(),
     description: z.string().optional(),
-    parent_id: z.string().optional().describe("Move under a different parent (empty string for root)"),
     position: z.number().optional(),
     task_type: z.enum(["recurring", "one_shot"]).optional(),
     frequency: taskFrequencySchema.optional(),
     completed: z.boolean().optional().describe("One-shot tasks only — for recurring use complete_task instead"),
     snoozed_until: z.string().optional().describe("ISO date — empty string clears snooze"),
-    tags: z.array(z.string()).optional(),
+    tags: z.array(z.string()).optional().describe("Replaces the tag list. For partial edits use tag_task once available."),
     notify_users: z.array(z.string()).optional(),
     collapsed: z.boolean().optional(),
   },
   async ({ id, ...body }) => {
     const data = await api(`/tasks/${id}`, {
       method: "PATCH",
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "move_task",
+  "Move a task: change its parent (within or across lists), and/or its position among siblings. Recomputes path on the task and all descendants atomically. Pass new_parent_id='' to make it a root task.",
+  {
+    id: z.string().describe("The task record ID"),
+    new_parent_id: z.string().nullable().optional().describe("New parent task ID, '' (root), or omit to keep parent"),
+    new_list: z.string().optional().describe("Target task list ID (must contain the new parent if any)"),
+    position: z.number().optional().describe("New position among siblings"),
+  },
+  async ({ id, ...body }) => {
+    const data = await api(`/tasks/${id}/move`, {
+      method: "POST",
       body: JSON.stringify(body),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };

@@ -330,6 +330,51 @@ describe("Recipes", () => {
     expect(data.name).toBe("New Recipe");
     cleanupIds.push({ collection: "recipes", id: data.id });
   });
+
+  it("PATCH /data/cooking-log/:eventId — edits notes and timestamp independently", async () => {
+    // Create a cooking log entry to edit
+    const created = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      method: "POST",
+      token: userToken,
+      body: { notes: "Original notes" },
+    });
+    expect(created.status).toBe(201);
+    const eventId = created.data.id as string;
+
+    // Patch only the timestamp
+    const ts = "2024-12-25T10:00:00Z";
+    const patchTs = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: { timestamp: ts },
+    });
+    expect(patchTs.status).toBe(200);
+    expect(patchTs.data.timestamp).toContain("2024-12-25");
+    expect(patchTs.data.notes).toBe("Original notes");
+
+    // Patch only notes (clear them)
+    const patchNotes = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: { notes: "" },
+    });
+    expect(patchNotes.status).toBe(200);
+    expect(patchNotes.data.notes).toBeUndefined();
+
+    // Empty body returns 400
+    const empty = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: {},
+    });
+    expect(empty.status).toBe(400);
+
+    // Cleanup
+    await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "DELETE",
+      token: userToken,
+    });
+  });
 });
 
 // ==========================================
@@ -501,6 +546,58 @@ describe("Upkeep", () => {
     expect(status).toBe(200);
     expect(data.id).toBe(task2Id);
     expect(data.snoozed_until).toBeDefined();
+  });
+
+  it("POST /data/tasks/:id/move — reparents and recomputes descendant paths", async () => {
+    // Build: parent A → child B → grandchild C, plus uncle D (root, sibling of A).
+    const a = await apiReq("/data/tasks", {
+      method: "POST",
+      token: userToken,
+      body: { list: taskListId, name: "A" },
+    });
+    cleanupIds.push({ collection: "tasks", id: a.data.id });
+    const b = await apiReq("/data/tasks", {
+      method: "POST",
+      token: userToken,
+      body: { list: taskListId, name: "B", parent_id: a.data.id },
+    });
+    cleanupIds.push({ collection: "tasks", id: b.data.id });
+    const cTask = await apiReq("/data/tasks", {
+      method: "POST",
+      token: userToken,
+      body: { list: taskListId, name: "C", parent_id: b.data.id },
+    });
+    cleanupIds.push({ collection: "tasks", id: cTask.data.id });
+    const d = await apiReq("/data/tasks", {
+      method: "POST",
+      token: userToken,
+      body: { list: taskListId, name: "D" },
+    });
+    cleanupIds.push({ collection: "tasks", id: d.data.id });
+
+    // Move B (and its subtree containing C) under D.
+    const moved = await apiReq(`/data/tasks/${b.data.id}/move`, {
+      method: "POST",
+      token: userToken,
+      body: { new_parent_id: d.data.id },
+    });
+    expect(moved.status).toBe(200);
+    expect(moved.data.parent_id).toBe(d.data.id);
+    expect(moved.data.path).toBe(`${d.data.id}/${b.data.id}`);
+    expect(moved.data.descendants_updated).toBe(1);
+
+    // Confirm C's path was rewritten to live under the new B path.
+    const tasks = await apiReq(`/data/tasks?list=${taskListId}`, { token: userToken });
+    const c = tasks.data.find((t: any) => t.id === cTask.data.id);
+    expect(c.path).toBe(`${d.data.id}/${b.data.id}/${cTask.data.id}`);
+
+    // Cycle prevention: moving D under C should fail.
+    const cycle = await apiReq(`/data/tasks/${d.data.id}/move`, {
+      method: "POST",
+      token: userToken,
+      body: { new_parent_id: cTask.data.id },
+    });
+    expect(cycle.status).toBe(400);
   });
 });
 
