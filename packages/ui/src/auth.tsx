@@ -44,7 +44,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(record ? recordToUser(record) : null);
     });
 
-    return unsubscribe;
+    // Slide token expiry forward whenever the app is loaded or kept open.
+    // PocketBase has no automatic refresh (Firebase used to do this for us),
+    // so without this users get bounced to login every ~7 days regardless of
+    // active use. Failures clear the store, so an actually-expired token
+    // funnels the user through the login screen as expected.
+    const refresh = async () => {
+      if (!pb.authStore.isValid) return;
+      try {
+        await pb.collection("users").authRefresh();
+      } catch {
+        pb.authStore.clear();
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 6 * 60 * 60 * 1000); // every 6h
+
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, []);
 
   return (
