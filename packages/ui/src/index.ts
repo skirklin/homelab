@@ -49,6 +49,7 @@ export { eventFromStore, eventToStore } from "./types";
 export { AppHeader } from "./AppHeader";
 export type { AppHeaderProps } from "./AppHeader";
 export { ShareModal } from "./ShareModal";
+export { ErrorBoundary } from "./ErrorBoundary";
 
 // Styled Components
 export {

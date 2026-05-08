@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect } from "react";
-import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
+import { AuthProvider, useAuth, initializeBackend, ErrorBoundary } from "@kirkl/shared";
 import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
@@ -50,12 +50,12 @@ function AuthenticatedRoutes() {
         <Route path="/invite/:code" element={<InviteRedirect />} />
         <Route path="/timeline" element={<Timeline />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/life/*" element={<LifeRoutes embedded />} />
-        <Route path="/shopping/*" element={<ShoppingRoutes embedded />} />
-        <Route path="/recipes/*" element={<RecipesRoutes embedded />} />
-        <Route path="/travel/*" element={<TravelRoutes embedded />} />
-        <Route path="/upkeep/*" element={<UpkeepRoutes embedded />} />
-        <Route path="/tasks/*" element={<TasksRoutes embedded />} />
+        <Route path="/life/*" element={<ErrorBoundary label="Life"><LifeRoutes embedded /></ErrorBoundary>} />
+        <Route path="/shopping/*" element={<ErrorBoundary label="Shopping"><ShoppingRoutes embedded /></ErrorBoundary>} />
+        <Route path="/recipes/*" element={<ErrorBoundary label="Recipes"><RecipesRoutes embedded /></ErrorBoundary>} />
+        <Route path="/travel/*" element={<ErrorBoundary label="Travel"><TravelRoutes embedded /></ErrorBoundary>} />
+        <Route path="/upkeep/*" element={<ErrorBoundary label="Upkeep"><UpkeepRoutes embedded /></ErrorBoundary>} />
+        <Route path="/tasks/*" element={<ErrorBoundary label="Tasks"><TasksRoutes embedded /></ErrorBoundary>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
