@@ -18,7 +18,15 @@ import styled from "styled-components";
 // Google Maps API key from env
 import type { Activity, Itinerary } from "../types";
 
-const MAP_ID = "travel-map";
+// React-side key passed to <Map id={...}> and looked up via useMap(MAP_KEY).
+// Distinct from MAP_STYLE_ID (the Google Cloud Map Style ID) — those used to
+// share the same string and the bogus mapId crashed AdvancedMarker on mobile
+// where the SDK enforces strict validation.
+const MAP_KEY = "travel-map";
+
+// Google Cloud-registered Map Style ID. Configured in console.cloud.google.com
+// → Map Management. Required for vector rendering + AdvancedMarker.
+const MAP_STYLE_ID = "geo-map";
 
 // Day colors — enough for a 2-week trip
 const DAY_COLORS = [
@@ -71,7 +79,7 @@ function FlightSegment({ from, to, color }: {
   to: { lat: number; lng: number };
   color: string;
 }) {
-  const map = useMap(MAP_ID);
+  const map = useMap(MAP_KEY);
   const polylineRef = useRef<google.maps.Polyline | null>(null);
 
   useEffect(() => {
@@ -212,7 +220,7 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
   color: string;
   onRouteComputed?: (info: RouteInfo) => void;
 }) {
-  const map = useMap(MAP_ID);
+  const map = useMap(MAP_KEY);
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
   const path = useMemo(() =>
     pathCoords.split("|").map((s) => {
@@ -357,7 +365,7 @@ function FitBoundsToDay({ visibleDays, selectedDay }: {
   }>;
   selectedDay: number | "all";
 }) {
-  const map = useMap(MAP_ID);
+  const map = useMap(MAP_KEY);
   useEffect(() => {
     if (!map || visibleDays.length === 0) return;
 
@@ -531,12 +539,12 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
       <MapWrapper>
         <APIProvider apiKey={apiKey} libraries={["routes"]}>
           <GoogleMap
-            id={MAP_ID}
+            id={MAP_KEY}
             defaultCenter={defaultCenter}
             defaultZoom={defaultZoom}
             gestureHandling="greedy"
             disableDefaultUI={false}
-            mapId={MAP_ID}
+            mapId={MAP_STYLE_ID}
             style={{ width: "100%", height: "100%" }}
           >
             <FitBoundsToDay visibleDays={visibleDays} selectedDay={selectedDay} />
