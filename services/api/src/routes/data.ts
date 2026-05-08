@@ -751,6 +751,28 @@ dataRoutes.get("/travel/trips/:id", handler(async (c) => {
   });
 }));
 
+// Build write-time warnings: surface data shapes that the UI/map can't
+// render so the caller knows to fix them before they cause a silent gap on
+// the itinerary. Returned only on create/update — read paths don't include
+// `warnings` (callers can derive them client-side from the same fields).
+function activityWarnings(a: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  const hasLocation = typeof a.location === "string" && a.location.length > 0;
+  const hasCoords = typeof a.lat === "number" && typeof a.lng === "number";
+  if (a.category !== "Flight" && hasLocation && !hasCoords) {
+    warnings.push("Activity has location but no lat/lng — call geocode_activity to plot it on the map.");
+  }
+  if (a.category === "Flight") {
+    const fi = (a.flight_info as Record<string, unknown> | null) || null;
+    const fromOk = fi && typeof fi.fromLat === "number" && typeof fi.fromLng === "number";
+    const toOk = fi && typeof fi.toLat === "number" && typeof fi.toLng === "number";
+    if (!fromOk || !toOk) {
+      warnings.push("Flight is missing one or both endpoint coords — call geocode_activity to backfill from airport codes.");
+    }
+  }
+  return warnings;
+}
+
 // Shape every activity response identically — write-side and read-side stay
 // in sync so a fetched activity round-trips losslessly.
 function activityResponse(a: Record<string, unknown>) {
@@ -917,7 +939,8 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     personal_notes: body.personal_notes || "",
     experienced_at: body.experienced_at || "",
   });
-  return c.json(activityResponse(record), 201);
+  const warnings = activityWarnings(record);
+  return c.json({ ...activityResponse(record), ...(warnings.length ? { warnings } : {}) }, 201);
 }));
 
 // Update a travel activity. Whitelisted to schema fields so callers can't
@@ -939,7 +962,8 @@ dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
     if (body[key] !== undefined) updates[key] = body[key];
   }
   const record = await pb.collection("travel_activities").update(id, updates);
-  return c.json(activityResponse(record));
+  const warnings = activityWarnings(record);
+  return c.json({ ...activityResponse(record), ...(warnings.length ? { warnings } : {}) });
 }));
 
 // Create a travel itinerary

@@ -393,7 +393,11 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
       // is marked as "home" — those bookend legs stretch the map back to the
       // origin airport and obscure the actual trip.
       const flightSegments = slotActivitiesRaw
-        .filter((a) => a.category === "Flight" && a.flightInfo?.fromLat != null && a.flightInfo?.toLat != null)
+        .filter((a) =>
+          a.category === "Flight" &&
+          a.flightInfo?.fromLat != null && a.flightInfo?.fromLng != null &&
+          a.flightInfo?.toLat != null && a.flightInfo?.toLng != null,
+        )
         .filter((a) => !a.flightInfo!.fromIsHome && !a.flightInfo!.toIsHome)
         .map((a) => ({
           activity: a,
@@ -409,8 +413,9 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
         : nonFlightActivities.find((a) => a.category === "Accommodation"); // fallback for old data
 
       const nonLodging = nonFlightActivities.filter((a) => a.id !== lodging?.id);
+      const lodgingHasCoords = lodging != null && lodging.lat != null && lodging.lng != null;
       const allDayActivities = [
-        ...(lodging && lodging.lat != null ? [lodging] : []),
+        ...(lodgingHasCoords ? [lodging!] : []),
         ...nonLodging,
       ];
 
@@ -420,7 +425,7 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
         color: DAY_COLORS[i % DAY_COLORS.length],
         activities: allDayActivities,
         flightSegments,
-        lodging: lodging?.lat != null ? lodging : undefined,
+        lodging: lodgingHasCoords ? lodging : undefined,
         nonLodging,
       };
     });
@@ -592,7 +597,7 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
             {/* Info window */}
             {selectedActivity && (() => {
               const activity = activityMap.get(selectedActivity);
-              if (!activity || activity.lat == null) return null;
+              if (!activity || activity.lat == null || activity.lng == null) return null;
               return (
                 <InfoWindow
                   position={{ lat: activity.lat!, lng: activity.lng! }}

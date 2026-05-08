@@ -211,6 +211,11 @@ export function ActivityList({ activities, showReflection = false }: ActivityLis
                       <span><EnvironmentOutlined /> {a.location}</span>
                     )
                   )}
+                  {!isFlight && a.location && (a.lat == null || a.lng == null) && (
+                    <Tag color="warning" style={{ fontSize: 10, lineHeight: "16px", margin: 0 }} title="Won't render on the itinerary map until geocoded">
+                      ⚠ no coords
+                    </Tag>
+                  )}
                   {!isFlight && a.durationEstimate && <span><ClockCircleOutlined /> {a.durationEstimate}</span>}
                   {!isFlight && !isHike && a.walkMiles != null && a.walkMiles > 0 && (
                     <span>{a.walkMiles} mi</span>

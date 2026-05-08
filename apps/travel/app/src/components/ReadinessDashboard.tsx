@@ -181,10 +181,12 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
       });
     }
 
-    // Activities without geocoding (won't show on map)
+    // Activities without coords (won't render as a marker on the itinerary map).
+    // Use lat/lng — that's what ItineraryMap actually gates on. placeId can be
+    // set by a search even when geocoding hasn't filled in coords.
     const ungeocodedInItin = activeItin ? activeItin.days.flatMap((d) =>
       d.slots.map((s) => activities.find((a) => a.id === s.activityId))
-        .filter((a): a is Activity => a != null && !a.placeId)
+        .filter((a): a is Activity => a != null && (a.lat == null || a.lng == null))
     ) : [];
     if (ungeocodedInItin.length > 0) {
       result.push({
