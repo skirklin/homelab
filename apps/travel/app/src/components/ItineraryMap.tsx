@@ -1,5 +1,5 @@
 /// <reference types="google.maps" />
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, type ComponentProps } from "react";
 import {
   APIProvider,
   Map as GoogleMap,
@@ -116,6 +116,30 @@ function FlightMarker({ color, label }: { color: string; label: string }) {
     }} title={label}>
       ✈
     </div>
+  );
+}
+
+/**
+ * Wraps AdvancedMarker with a finite-number guard on the position. The
+ * Google Maps Marker `set position` setter calls into validation that
+ * crashes with "Cannot read properties of undefined (reading 'get')" if
+ * either coord is NaN/undefined. Skipping render in that case prevents
+ * one bad activity from blowing up the whole itinerary view.
+ */
+function SafeMarker({
+  position,
+  children,
+  ...rest
+}: ComponentProps<typeof AdvancedMarker>) {
+  const lat = position && (position as { lat?: unknown }).lat;
+  const lng = position && (position as { lng?: unknown }).lng;
+  if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+  return (
+    <AdvancedMarker position={{ lat, lng }} {...rest}>
+      {children}
+    </AdvancedMarker>
   );
 }
 
@@ -557,13 +581,13 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
               da.activities.map((activity) => {
                 const isAccommodation = activity.category === "Accommodation";
                 return (
-                  <AdvancedMarker
+                  <SafeMarker
                     key={activity.id}
                     position={{ lat: activity.lat!, lng: activity.lng! }}
                     onClick={() => handleMarkerClick(activity.id)}
                   >
                     <MarkerDot color={da.color} isAccommodation={isAccommodation} />
-                  </AdvancedMarker>
+                  </SafeMarker>
                 );
               })
             )}
@@ -581,20 +605,20 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
                     to={seg.to}
                     color={da.color}
                   />,
-                  <AdvancedMarker
+                  <SafeMarker
                     key={`from-${seg.activity.id}`}
                     position={seg.from}
                     onClick={() => handleMarkerClick(seg.activity.id)}
                   >
                     <FlightMarker color={da.color} label={`${label} departure`} />
-                  </AdvancedMarker>,
-                  <AdvancedMarker
+                  </SafeMarker>,
+                  <SafeMarker
                     key={`to-${seg.activity.id}`}
                     position={seg.to}
                     onClick={() => handleMarkerClick(seg.activity.id)}
                   >
                     <FlightMarker color={da.color} label={`${label} arrival`} />
-                  </AdvancedMarker>,
+                  </SafeMarker>,
                 ];
               })
             )}
