@@ -445,7 +445,7 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
 
   // Compute center and zoom from scheduled activities only
   const defaultCenter = useMemo(() => {
-    const source = scheduledWithCoords.length > 0 ? scheduledWithCoords : activities.filter((a) => a.lat != null);
+    const source = scheduledWithCoords.length > 0 ? scheduledWithCoords : activities.filter((a) => a.lat != null && a.lng != null);
     if (source.length === 0) return { lat: 39.8283, lng: -98.5795 };
     const lats = source.map((a) => a.lat!);
     const lngs = source.map((a) => a.lng!);
@@ -457,7 +457,7 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
 
   // Compute zoom from bounds spread
   const defaultZoom = useMemo(() => {
-    const source = scheduledWithCoords.length > 0 ? scheduledWithCoords : activities.filter((a) => a.lat != null);
+    const source = scheduledWithCoords.length > 0 ? scheduledWithCoords : activities.filter((a) => a.lat != null && a.lng != null);
     if (source.length <= 1) return 12;
     const lats = source.map((a) => a.lat!);
     const lngs = source.map((a) => a.lng!);
@@ -488,7 +488,13 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
   }
 
   const anyWithCoords = activities.some((a) => a.lat != null && a.lng != null);
-  if (!anyWithCoords) {
+  // Belt-and-suspenders: even if center/zoom math somehow yielded NaN
+  // (negative test counts on Math.max(...[]) etc), refuse to mount the Map.
+  // The internal Maps Marker class throws on NaN with the cryptic
+  // "Cannot read properties of undefined (reading 'keys')" trace.
+  const validCenter =
+    Number.isFinite(defaultCenter.lat) && Number.isFinite(defaultCenter.lng);
+  if (!anyWithCoords || !validCenter) {
     return (
       <Typography.Text type="secondary">
         No activities have coordinates yet. Add lat/lng to activities to see them on the map.
