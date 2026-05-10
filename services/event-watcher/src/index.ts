@@ -85,26 +85,42 @@ async function postEvent(ev: CoreEvent): Promise<void> {
   }
 }
 
-async function watch(): Promise<void> {
+// One pass = set up the watch, wait until it ends, return so the outer
+// loop can reconnect. The k8s client's Watch.watch resolves once the
+// stream is established, so we wrap it in an explicit promise that
+// only settles when the done callback fires.
+function watchOnce(): Promise<void> {
   const watcher = new k8s.Watch(kc);
-  await watcher.watch(
-    "/api/v1/events",
-    {},
-    (_phase: string, ev: CoreEvent) => {
-      postEvent(ev).catch((err) => console.error("postEvent rejected:", err));
-    },
-    (err) => {
-      // Server-side watch closed (timeout, network blip, etc.); reconnect.
-      if (err) console.error("watch ended:", err instanceof Error ? err.message : err);
-      setTimeout(() => {
-        watch().catch((e) => console.error("watch restart failed:", e));
-      }, 2000);
-    },
-  );
+  return new Promise<void>((resolve, reject) => {
+    watcher.watch(
+      "/api/v1/events",
+      {},
+      (_phase: string, ev: CoreEvent) => {
+        postEvent(ev).catch((err) => console.error("postEvent rejected:", err));
+      },
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      },
+    ).catch(reject);
+  });
 }
 
-console.log(`event-watcher starting → ${API_URL}, kinds=[${KINDS.join(",")}]`);
-watch().catch((err) => {
-  console.error("watch start failed:", err);
+async function watchLoop(): Promise<never> {
+  while (true) {
+    try {
+      console.error("watch: connecting...");
+      await watchOnce();
+      console.error("watch: stream closed (clean), reconnecting in 2s");
+    } catch (err) {
+      console.error("watch: error,", err instanceof Error ? err.message : err);
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+console.error(`event-watcher starting → ${API_URL}, kinds=[${KINDS.join(",")}]`);
+watchLoop().catch((err) => {
+  console.error("watchLoop crashed:", err);
   process.exit(1);
 });

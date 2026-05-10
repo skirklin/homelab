@@ -14,4 +14,5 @@ RUN pnpm install --frozen-lockfile || pnpm install
 COPY services/event-watcher/ services/event-watcher/
 
 WORKDIR /workspace/services/event-watcher
-CMD ["pnpm", "start"]
+# Run tsx directly so stdout isn't buffered behind pnpm's process wrapper
+CMD ["./node_modules/.bin/tsx", "src/index.ts"]
