@@ -567,7 +567,12 @@ oauth.post("/token", async (c) => {
       clientPk: client.id,
       userPk: rec.user as string,
       scope: (rec.scope as string) ?? SUPPORTED_SCOPES.join(" "),
-      familyId: (rec.family_id as string | undefined) ?? generateOpaqueToken("fam_", 16),
+      // `||`, not `??`: the PB column defaults to "" (not null/undefined) so
+      // `??` would let "" pass through and we'd write empty family_ids for
+      // every refresh of any pre-migration-0023 token. Use `||` to fall back
+      // on any falsy value, including empty string. After the first refresh
+      // a legacy chain bootstraps a real family_id and propagates correctly.
+      familyId: (rec.family_id as string | undefined) || generateOpaqueToken("fam_", 16),
     });
   }
 
@@ -600,6 +605,10 @@ async function issueTokens(
   adminPb: Awaited<ReturnType<typeof getAdminPb>>,
   ctx: { clientPk: string; userPk: string; scope: string; familyId: string },
 ) {
+  // Temporary debug — strip after we confirm post-fix records actually carry
+  // a non-empty family_id in the DB. Logs the path that called us (auth_code
+  // vs refresh) and what family_id we're about to write.
+  console.log(`[oauth-debug] issueTokens family_id="${ctx.familyId}" len=${ctx.familyId.length} user=${ctx.userPk}`);
   const accessToken = generateOpaqueToken("mcpat_", 32);
   const refreshToken = generateOpaqueToken("mcprt_", 48);
   const accessExp = new Date(Date.now() + ACCESS_TOKEN_TTL_SEC * 1000).toISOString();
