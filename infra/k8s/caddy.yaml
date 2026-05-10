@@ -8,7 +8,7 @@ data:
     # Public apps — each site block lists both the production and
     # beta hostnames. Caddy auto-requests Let's Encrypt certs for all.
 
-    kirkl.in, beta.kirkl.in {
+    kirkl.in, beta.kirkl.in, home.kirkl.in {
         reverse_proxy home.homelab.svc.cluster.local:80
     }
 
