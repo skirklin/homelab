@@ -1,0 +1,76 @@
+# event-watcher — streams k8s Events to /fn/data/pod_events for long-term
+# history (k8s itself only retains Events for ~1h). Cluster-scoped RBAC for
+# reading Events; uses HOMELAB_API_TOKEN to authenticate to the api service.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: event-watcher
+  namespace: homelab
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: event-watcher
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: event-watcher
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: event-watcher
+subjects:
+  - kind: ServiceAccount
+    name: event-watcher
+    namespace: homelab
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-watcher
+  namespace: homelab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: event-watcher
+  template:
+    metadata:
+      labels:
+        app: event-watcher
+    spec:
+      serviceAccountName: event-watcher
+      containers:
+        - name: event-watcher
+          image: localhost:30500/homelab/event-watcher:latest
+          imagePullPolicy: Always
+          env:
+            - name: API_URL
+              value: http://functions.homelab.svc.cluster.local:3000
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: HOMELAB_API_TOKEN
+            # Comma-separated involved-object kinds to forward. Default = "Pod".
+            # Could expand to include Deployment, StatefulSet, etc. if useful.
+            - name: EVENT_KINDS
+              value: "Pod"
+            # Comma-separated reasons to drop. Tune over time as the noise
+            # floor reveals itself in the monitor frontend.
+            - name: IGNORE_REASONS
+              value: ""
+          resources:
+            requests: { memory: 64Mi, cpu: 10m }
+            limits: { memory: 128Mi, cpu: 100m }

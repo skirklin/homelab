@@ -116,7 +116,7 @@ elapsed() {
 # Build phase
 if [ "$PUSH_ONLY" = false ]; then
     if [ ${#APPS[@]} -eq 0 ]; then
-        BUILD_LIST=("${!APP_BUILDS[@]}" homepage pocketbase ingest functions)
+        BUILD_LIST=("${!APP_BUILDS[@]}" homepage pocketbase ingest functions event-watcher)
     else
         BUILD_LIST=("${APPS[@]}")
     fi
@@ -169,6 +169,15 @@ if [ "$PUSH_ONLY" = false ]; then
                 echo "[${BUILT}/${TOTAL}] ✓ functions ($(elapsed $((SECONDS - APP_START))))"
             else
                 echo "[${BUILT}/${TOTAL}] ✗ functions FAILED"
+                FAILED=$((FAILED + 1))
+                FAILED_APPS+=("$app")
+            fi
+        elif [ "$app" = "event-watcher" ]; then
+            echo "[${BUILT}/${TOTAL}] Building event-watcher..."
+            if docker build -q -f infra/docker/event-watcher.Dockerfile -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
+                echo "[${BUILT}/${TOTAL}] ✓ event-watcher ($(elapsed $((SECONDS - APP_START))))"
+            else
+                echo "[${BUILT}/${TOTAL}] ✗ event-watcher FAILED"
                 FAILED=$((FAILED + 1))
                 FAILED_APPS+=("$app")
             fi

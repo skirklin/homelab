@@ -12,4 +12,5 @@ resources:
   - api.yaml
   - beszel.yaml
   - gatus.yaml
+  - event-watcher.yaml
   - cronjobs.yaml

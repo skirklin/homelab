@@ -41,3 +41,27 @@ export async function fetchGatusStatuses(): Promise<GatusEndpoint[]> {
   if (!res.ok) throw new Error(`gatus: HTTP ${res.status}`);
   return res.json();
 }
+
+export type PodEvent = {
+  id: string;
+  uid: string;
+  namespace: string;
+  involved_kind: string;
+  involved_name: string;
+  type: "Normal" | "Warning";
+  reason: string;
+  message: string;
+  source: string;
+  count: number;
+  first_seen: string;
+  last_seen: string;
+};
+
+export async function fetchPodEvents(opts: { type?: "Warning" | "Normal"; limit?: number } = {}): Promise<PodEvent[]> {
+  const params = new URLSearchParams();
+  if (opts.type) params.set("type", opts.type);
+  params.set("limit", String(opts.limit ?? 50));
+  const res = await fetch(`/api/pod_events?${params}`);
+  if (!res.ok) throw new Error(`pod_events: HTTP ${res.status}`);
+  return res.json();
+}

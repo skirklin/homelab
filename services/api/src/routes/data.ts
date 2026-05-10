@@ -2213,3 +2213,113 @@ dataRoutes.delete("/deployments/:id", handler(async (c) => {
   await pb.collection("deployments").delete(id);
   return c.json({ deleted: true });
 }));
+
+// =============================================================================
+// Monitor — pod / cluster events
+// =============================================================================
+
+// Upsert a k8s Event by uid. Called continuously by the event-watcher service.
+// Same uid is sent multiple times as count grows; we update last_seen + count
+// rather than inserting duplicates.
+dataRoutes.post("/pod_events", handler(async (c) => {
+  const pb = c.get("pb");
+  const body = await c.req.json<{
+    uid: string;
+    namespace?: string;
+    involved_kind?: string;
+    involved_name?: string;
+    type: "Normal" | "Warning";
+    reason?: string;
+    message?: string;
+    source?: string;
+    count?: number;
+    first_seen?: string;
+    last_seen?: string;
+  }>();
+
+  if (!body.uid || !body.type) {
+    return c.json({ error: "uid and type required" }, 400);
+  }
+  if (!["Normal", "Warning"].includes(body.type)) {
+    return c.json({ error: "invalid type" }, 400);
+  }
+
+  const data = {
+    uid: body.uid,
+    namespace: body.namespace ?? "",
+    involved_kind: body.involved_kind ?? "",
+    involved_name: body.involved_name ?? "",
+    type: body.type,
+    reason: body.reason ?? "",
+    message: body.message ?? "",
+    source: body.source ?? "",
+    count: body.count ?? 1,
+    first_seen: body.first_seen ?? new Date().toISOString(),
+    last_seen: body.last_seen ?? new Date().toISOString(),
+  };
+
+  try {
+    const existing = await pb.collection("pod_events").getFirstListItem(
+      pb.filter("uid = {:uid}", { uid: body.uid }),
+    );
+    const updated = await pb.collection("pod_events").update(existing.id, {
+      count: data.count,
+      last_seen: data.last_seen,
+      message: data.message,
+    });
+    return c.json({ id: updated.id, action: "updated" });
+  } catch {
+    const created = await pb.collection("pod_events").create(data);
+    return c.json({ id: created.id, action: "created" }, 201);
+  }
+}));
+
+// List recent events. Filters: type (Normal|Warning), namespace, since (ISO).
+dataRoutes.get("/pod_events", handler(async (c) => {
+  const pb = c.get("pb");
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "100", 10) || 100, 500);
+  const type = c.req.query("type");
+  const ns = c.req.query("namespace");
+  const since = c.req.query("since");
+
+  const clauses: string[] = [];
+  const params: Record<string, unknown> = {};
+  if (type) { clauses.push("type = {:type}"); params.type = type; }
+  if (ns) { clauses.push("namespace = {:ns}"); params.ns = ns; }
+  if (since) { clauses.push("last_seen >= {:since}"); params.since = since; }
+  const filter = clauses.length ? pb.filter(clauses.join(" && "), params) : "";
+
+  const records = await pb.collection("pod_events").getList(1, limit, {
+    sort: "-last_seen",
+    filter,
+  });
+  return c.json(records.items.map((r) => ({
+    id: r.id,
+    uid: r.uid,
+    namespace: r.namespace,
+    involved_kind: r.involved_kind,
+    involved_name: r.involved_name,
+    type: r.type,
+    reason: r.reason,
+    message: r.message,
+    source: r.source,
+    count: r.count,
+    first_seen: r.first_seen,
+    last_seen: r.last_seen,
+  })));
+}));
+
+// Delete pod_events older than `before` (ISO timestamp). Used for retention.
+dataRoutes.delete("/pod_events", handler(async (c) => {
+  const pb = c.get("pb");
+  const before = c.req.query("before");
+  if (!before) return c.json({ error: "before query param required" }, 400);
+
+  const stale = await pb.collection("pod_events").getFullList({
+    filter: pb.filter("last_seen < {:before}", { before }),
+  });
+  for (const r of stale) {
+    await pb.collection("pod_events").delete(r.id);
+  }
+  return c.json({ deleted: stale.length });
+}));

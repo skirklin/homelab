@@ -1,19 +1,33 @@
 import { useEffect, useState } from "react";
-import { fetchDeployments, fetchGatusStatuses, type Deployment, type GatusEndpoint } from "../api";
+import {
+  fetchDeployments,
+  fetchGatusStatuses,
+  fetchPodEvents,
+  type Deployment,
+  type GatusEndpoint,
+  type PodEvent,
+} from "../api";
 import { fmtDuration, groupBy, shortSha, timeAgo } from "../utils";
 
 export function Overview() {
   const [deployments, setDeployments] = useState<Deployment[] | null>(null);
   const [endpoints, setEndpoints] = useState<GatusEndpoint[] | null>(null);
+  const [events, setEvents] = useState<PodEvent[] | null>(null);
+  const [eventsAll, setEventsAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [d, g] = await Promise.all([fetchDeployments(20), fetchGatusStatuses()]);
+      const [d, g, e] = await Promise.all([
+        fetchDeployments(20),
+        fetchGatusStatuses(),
+        fetchPodEvents(eventsAll ? { limit: 100 } : { type: "Warning", limit: 50 }),
+      ]);
       setDeployments(d);
       setEndpoints(g);
+      setEvents(e);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -26,7 +40,8 @@ export function Overview() {
     load();
     const t = setInterval(load, 30_000);
     return () => clearInterval(t);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventsAll]);
 
   return (
     <>
@@ -40,6 +55,16 @@ export function Overview() {
           </button>
         </div>
         {endpoints ? <UptimeView endpoints={endpoints} /> : <div className="loading">Loading…</div>}
+      </section>
+
+      <section className="section">
+        <div className="section-header">
+          <h2>Cluster events</h2>
+          <button className="btn" onClick={() => setEventsAll((v) => !v)}>
+            {eventsAll ? "Warnings only" : "Show all"}
+          </button>
+        </div>
+        {events ? <EventsTable rows={events} /> : <div className="loading">Loading…</div>}
       </section>
 
       <section className="section">
@@ -91,6 +116,38 @@ function UptimeCard({ endpoint }: { endpoint: GatusEndpoint }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function EventsTable({ rows }: { rows: PodEvent[] }) {
+  if (rows.length === 0) {
+    return <div className="muted">No events captured. The event-watcher should start streaming once deployed.</div>;
+  }
+  return (
+    <table className="deployments">
+      <thead>
+        <tr>
+          <th></th>
+          <th>When</th>
+          <th>Pod</th>
+          <th>Reason</th>
+          <th>Message</th>
+          <th>Count</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.id}>
+            <td><div className={`dot ${r.type === "Warning" ? "red" : "green"}`} /></td>
+            <td className="muted" title={r.last_seen}>{timeAgo(r.last_seen)}</td>
+            <td className="sha">{r.namespace}/{r.involved_name}</td>
+            <td>{r.reason}</td>
+            <td className="subject" title={r.message}>{r.message}</td>
+            <td className="muted">{r.count > 1 ? `×${r.count}` : ""}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

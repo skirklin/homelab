@@ -15,6 +15,14 @@ server {
         proxy_ssl_server_name on;
     }
 
+    # Pod / cluster events — same auth pattern as /api/deployments.
+    location /api/pod_events {
+        proxy_pass https://api.kirkl.in/fn/data/pod_events;
+        proxy_set_header Authorization "Bearer ${HOMELAB_API_TOKEN}";
+        proxy_set_header Host api.kirkl.in;
+        proxy_ssl_server_name on;
+    }
+
     # Gatus uptime checks — internal cluster Service, no auth.
     location /api/gatus/ {
         proxy_pass http://gatus.homelab.svc.cluster.local:8080/;
