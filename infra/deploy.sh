@@ -84,10 +84,22 @@ record_deployment() {
         --argjson duration_seconds "$duration" \
         '{git_sha:$git_sha, git_branch:$git_branch, git_subject:$git_subject, status:$status, deployer:$deployer, host:$host, apps:$apps, failed_apps:$failed_apps, duration_seconds:$duration_seconds}')
 
-    curl -fsS --max-time 10 -X POST "${api_url}/data/deployments" \
-        -H "Authorization: Bearer ${HOMELAB_API_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "$payload" > /dev/null 2>&1 || true
+    # Retry the POST: the api/functions pod is often mid-rolling-restart
+    # when this trap fires (a deploy that touched it just rotated its pod),
+    # so a single attempt regularly hits a transient connection failure.
+    # 3 attempts × 10s covers a typical pod-restart window. If it still
+    # fails, surface to stderr instead of silently dropping the record.
+    local attempt
+    for attempt in 1 2 3; do
+        if curl -fsS --max-time 10 -X POST "${api_url}/data/deployments" \
+                -H "Authorization: Bearer ${HOMELAB_API_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "$payload" > /dev/null 2>&1; then
+            return $exit_code
+        fi
+        [ $attempt -lt 3 ] && sleep 10
+    done
+    echo "[deploy.sh] failed to record deployment after 3 attempts (status=${DEPLOY_STATUS})" >&2
 
     return $exit_code
 }
