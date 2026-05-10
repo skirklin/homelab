@@ -69,8 +69,14 @@ spec:
               value: "Pod"
             # Comma-separated reasons to drop. Tune over time as the noise
             # floor reveals itself in the monitor frontend.
+            #
+            # DNSConfigForming: kubelet reads /run/systemd/resolve/resolv.conf
+            # which has 4 Hetzner nameservers — exceeds the Linux 3-nameserver
+            # limit so kubelet warns on every pod schedule. DNS still works
+            # (uses the first 3); silenced here as cosmetic noise. Real fix
+            # would require k3s --resolv-conf kubelet arg + cluster restart.
             - name: IGNORE_REASONS
-              value: ""
+              value: "DNSConfigForming"
           resources:
             requests: { memory: 64Mi, cpu: 10m }
             limits: { memory: 128Mi, cpu: 100m }
