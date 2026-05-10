@@ -355,18 +355,31 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
           }
         }
 
-        // Seed and deliver. Skip records the queue already knows about: an
-        // SSE event may have raced ahead of getFullList between ensureReal-
-        // Subscription and now, and that SSE delivery already notified this
-        // subscriber. Re-seeding would clobber a fresher snapshot with stale
-        // data, and re-delivering would duplicate the create event.
+        // Seed and deliver. Two distinct concerns here:
+        //  1. Seeding: only seed if the queue doesn't already have a snapshot
+        //     for this id. A prior subscriber's seed (or an SSE event that
+        //     raced ahead during our await) may already hold a fresher view;
+        //     re-seeding from our potentially-stale getFullList would clobber
+        //     it.
+        //  2. Delivery: ALWAYS deliver to THIS subscriber. Whether the queue
+        //     was just-seeded or already populated, this subscriber was just
+        //     attached and has not yet received any event for this record.
+        //     (Pre-fix, skipping delivery when queue.view !== null caused a
+        //     real bug: home shell mounts ShoppingProvider + RecipesProvider
+        //     concurrently and both wpb.subscribe('users', uid); the second
+        //     one's onSlugs callback never fired and lists rendered empty.)
+        // Deliver from queue.view so we forward whatever's freshest, not
+        // necessarily the snapshot we just fetched.
         for (const r of initialRecords) {
-          if (queue.view(name, r.id) !== null) continue;
-          queue.applyServer(name, r.id, r);
-          if (topic !== "*" && topic !== r.id) continue;
-          if (opts?.local && !opts.local(r)) continue;
+          if (queue.view(name, r.id) === null) {
+            queue.applyServer(name, r.id, r);
+          }
+          const view = queue.view(name, r.id);
+          if (!view) continue;
+          if (topic !== "*" && topic !== view.id) continue;
+          if (opts?.local && !opts.local(view)) continue;
           try {
-            callback({ action: "create", record: r as RecordModel });
+            callback({ action: "create", record: view as RecordModel });
           } catch (err) {
             console.error("[wpb] initial replay threw", err);
           }

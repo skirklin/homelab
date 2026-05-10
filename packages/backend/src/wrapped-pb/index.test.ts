@@ -376,6 +376,57 @@ describe("wrapPocketBase auto-load on subscribe", () => {
     expect(events).toHaveLength(1);
     expect(events[0].id).toBe("a");
   });
+
+  it("two concurrent subscribers to the same record id both receive the initial create event", async () => {
+    // Repro of the prod bug: home shell mounts ShoppingProvider and
+    // RecipesProvider concurrently; both call wpb.collection('users')
+    // .subscribe(uid). Whoever seeds the queue first should NOT prevent
+    // the other subscriber from receiving its initial create event.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const seed: RecordModel = { id: "u1", shopping_slugs: { groceries: "L1" }, collectionId: "users", collectionName: "users", created: "", updated: "" } as unknown as RecordModel;
+    stub.col("users").records.set("u1", seed);
+
+    let seenA: RecordModel | null = null;
+    let seenB: RecordModel | null = null;
+    await Promise.all([
+      wpb.collection("users").subscribe("u1", (e) => { seenA = e.record; }),
+      wpb.collection("users").subscribe("u1", (e) => { seenB = e.record; }),
+    ]);
+
+    expect(seenA).not.toBeNull();
+    expect(seenB).not.toBeNull();
+  });
+
+  it("two concurrent filtered '*' subscribers both receive initial creates for matching records", async () => {
+    // Same race for collection-scope subscribes: e.g. two screens both
+    // subscribing to the same shopping list's items. Both must see the
+    // existing items, not just the first one to subscribe.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const a: RecordModel = { id: "a", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "" } as unknown as RecordModel;
+    const b: RecordModel = { id: "b", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "" } as unknown as RecordModel;
+    stub.col("items").records.set("a", a);
+    stub.col("items").records.set("b", b);
+
+    const seenA: RecordModel[] = [];
+    const seenB: RecordModel[] = [];
+    await Promise.all([
+      wpb.collection("items").subscribe("*", (e) => { seenA.push(e.record); }, {
+        filter: "list = 'L1'",
+        local: (r) => r.list === "L1",
+      }),
+      wpb.collection("items").subscribe("*", (e) => { seenB.push(e.record); }, {
+        filter: "list = 'L1'",
+        local: (r) => r.list === "L1",
+      }),
+    ]);
+
+    expect(seenA.map((r) => r.id).sort()).toEqual(["a", "b"]);
+    expect(seenB.map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
 });
 
 describe("wrapPocketBase subscribe replay", () => {
