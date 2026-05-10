@@ -384,11 +384,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
     unsubs: Array<() => void>,
     cb: { onData: (r: RecordModel) => void; onDelete?: () => void },
   ) {
-    this.pb().collection(col)
-      .getOne(id, { $autoCancel: false })
-      .then((r) => { if (!cancelled()) cb.onData(r); })
-      .catch(() => {});
-
     this.wpb.collection(col)
       .subscribe(id, (e) => {
         if (cancelled()) return;
@@ -410,16 +405,23 @@ export class PocketBaseTravelBackend implements TravelBackend {
       onChange: (a: string, r: RecordModel) => void;
     },
   ) {
-    this.pb().collection(col)
-      .getFullList({ filter: opts.filter, $autoCancel: false })
-      .then((rs) => { if (!cancelled()) opts.onInitial(rs); })
-      .catch((e) => { if (!cancelled()) console.warn(`[travel] subCol ${col} failed`, e); });
-
+    let initialDone = false;
+    const initial: RecordModel[] = [];
     this.wpb.collection(col)
       .subscribe("*", (e) => {
         if (cancelled() || !opts.belongsTo(e.record as RecordModel)) return;
+        if (!initialDone) {
+          initial.push(e.record);
+          return;
+        }
         opts.onChange(e.action, e.record);
-      }, { local: (r) => opts.belongsTo(r as RecordModel) })
-      .then((unsub) => unsubs.push(unsub));
+      }, { filter: opts.filter, local: (r) => opts.belongsTo(r as RecordModel) })
+      .then((unsub) => {
+        unsubs.push(unsub);
+        if (!cancelled()) {
+          initialDone = true;
+          opts.onInitial(initial);
+        }
+      });
   }
 }

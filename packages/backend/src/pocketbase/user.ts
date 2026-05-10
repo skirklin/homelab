@@ -78,21 +78,26 @@ export class PocketBaseUserBackend implements UserBackend {
     let cancelled = false;
     const field = SLUG_FIELDS[namespace];
 
-    // Fetch initial
-    this.pb().collection("users").getOne(userId, { $autoCancel: false }).then((record) => {
-      if (!cancelled) onSlugs(record[field] || {});
-    }).catch(() => {
-      if (!cancelled) onSlugs({});
-    });
-
-    // Subscribe to changes — optimistic-aware via wpb.
+    // wpb.subscribe(id) auto-loads the user record (delivered as a "create"
+    // event), seeds the optimistic queue, then forwards live updates.
     let unsub: (() => void) | undefined;
+    let initialDone = false;
     this.wpb.collection("users").subscribe(userId, (e) => {
       if (cancelled) return;
-      if (e.action === "update") {
-        onSlugs((e.record as Record<string, unknown>)[field] as Record<string, string> || {});
+      if (e.action === "delete") return;
+      onSlugs((e.record as Record<string, unknown>)[field] as Record<string, string> || {});
+    }).then((fn) => {
+      unsub = fn;
+      if (!cancelled && !initialDone) {
+        initialDone = true;
+        // If the user record didn't exist (404 on initial getOne), no event
+        // fired above. Emit empty slugs so consumers don't hang on the
+        // initial-load promise.
+        if (!this.wpb.collection("users").view(userId)) {
+          onSlugs({});
+        }
       }
-    }).then((fn) => { unsub = fn; });
+    });
 
     return () => {
       cancelled = true;

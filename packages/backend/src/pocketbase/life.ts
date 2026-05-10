@@ -132,17 +132,11 @@ export class PocketBaseLifeBackend implements LifeBackend {
       if (!cancelled) onEntries(Array.from(entriesMap.values()));
     };
 
-    // Initial fetch
-    this.pb().collection("life_events").getFullList({
-      filter: this.pb().filter("log = {:logId}", { logId }),
-      $autoCancel: false,
-    }).then((records) => {
-      if (cancelled) return;
-      for (const r of records) entriesMap.set(r.id, entryFromRecord(r));
-      emit();
-    }).catch((e) => { if (!cancelled) console.warn("[life] initial fetch failed", e); });
-
-    // Realtime — optimistic-aware via wpb with predicate.
+    // wpb.subscribe with a filter auto-loads matching records, seeds the
+    // optimistic queue, and delivers each as a "create" event before
+    // forwarding live updates. We defer the first emit until subscribe()
+    // resolves so consumers see one batched onEntries instead of N.
+    let initialDone = false;
     let unsub: (() => void) | undefined;
     this.wpb.collection("life_events").subscribe("*", (e) => {
       if (cancelled || e.record.log !== logId) return;
@@ -151,8 +145,17 @@ export class PocketBaseLifeBackend implements LifeBackend {
       } else {
         entriesMap.set(e.record.id, entryFromRecord(e.record));
       }
-      emit();
-    }, { local: (r) => r.log === logId }).then((fn) => { unsub = fn; });
+      if (initialDone) emit();
+    }, {
+      filter: this.pb().filter("log = {:logId}", { logId }),
+      local: (r) => r.log === logId,
+    }).then((fn) => {
+      unsub = fn;
+      if (!cancelled) {
+        initialDone = true;
+        emit();
+      }
+    });
 
     return () => {
       cancelled = true;

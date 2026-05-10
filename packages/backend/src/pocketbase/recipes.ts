@@ -300,94 +300,93 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
     },
   ): Unsubscribe {
     let cancelled = false;
-    const isCancelled = () => cancelled;
     const boxUnsubs = new Map<string, Array<() => void>>();
 
-    const setupBox = async (boxId: string) => {
+    // Buffer initial box+recipes events and emit a single combined onBox
+    // call once both subscriptions have delivered their initial state. This
+    // matches the prior behavior (one batched onBox(box, recipes) call) so
+    // the consumer doesn't see N intermediate callbacks during initial load.
+    const setupBox = (boxId: string) => {
       if (cancelled || boxUnsubs.has(boxId)) return;
       const unsubs: Array<() => void> = [];
       boxUnsubs.set(boxId, unsubs);
 
-      // Subscribe to box record
-      try {
-        const boxRecord = await this.pb().collection("recipe_boxes").getOne(boxId, { $autoCancel: false });
-        if (cancelled) return;
-        const box = boxFromRecord(boxRecord);
+      let boxInitialDone = false;
+      let recipesInitialDone = false;
+      let initialBox: RecipeBox | null = null;
+      const initialRecipes: Recipe[] = [];
+      let combinedEmitted = false;
 
-        // Fetch recipes for this box
-        const recipeRecords = await this.pb().collection("recipes").getFullList({
-          filter: this.pb().filter("box = {:boxId}", { boxId }),
-          $autoCancel: false,
-        });
-        if (cancelled) return;
-        const recipes = recipeRecords.map(recipeFromRecord);
-        handlers.onBox(box, recipes);
-      } catch {
-        // Box may not exist
-        return;
-      }
+      const tryEmitInitial = () => {
+        if (combinedEmitted || !boxInitialDone || !recipesInitialDone) return;
+        combinedEmitted = true;
+        if (initialBox) handlers.onBox(initialBox, initialRecipes);
+      };
 
-      // Box realtime — optimistic-aware via wpb.
+      // Box record — wpb auto-loads via getOne, delivers as a "create".
       this.wpb.collection("recipe_boxes").subscribe(boxId, (e) => {
         if (cancelled) return;
         if (e.action === "delete") {
           handlers.onBoxRemoved(boxId);
-        } else {
-          const box = boxFromRecord(e.record);
-          handlers.onBox(box, []); // recipes unchanged
+          return;
         }
-      }).then((unsub) => unsubs.push(unsub));
+        const box = boxFromRecord(e.record);
+        if (!combinedEmitted) {
+          initialBox = box;
+          return;
+        }
+        handlers.onBox(box, []);
+      }).then((unsub) => {
+        unsubs.push(unsub);
+        if (cancelled) return;
+        boxInitialDone = true;
+        tryEmitInitial();
+      });
 
-      // Recipes realtime for this box — wpb routes both server + optimistic
-      // events through the local predicate.
+      // Recipes for this box — wpb auto-loads via getFullList(filter),
+      // delivers each as a "create", then forwards live events.
       this.wpb.collection("recipes").subscribe("*", (e) => {
-        if (cancelled || e.record.box !== boxId) return;
+        if (cancelled || (e.record as RecordModel).box !== boxId) return;
         if (e.action === "delete") {
           handlers.onRecipeRemoved(boxId, e.record.id);
-        } else {
-          handlers.onRecipeChanged(boxId, recipeFromRecord(e.record));
+          return;
         }
-      }, { local: (r) => r.box === boxId }).then((unsub) => unsubs.push(unsub));
+        const recipe = recipeFromRecord(e.record);
+        if (!combinedEmitted) {
+          initialRecipes.push(recipe);
+          return;
+        }
+        handlers.onRecipeChanged(boxId, recipe);
+      }, {
+        filter: this.pb().filter("box = {:boxId}", { boxId }),
+        local: (r) => r.box === boxId,
+      }).then((unsub) => {
+        unsubs.push(unsub);
+        if (cancelled) return;
+        recipesInitialDone = true;
+        tryEmitInitial();
+      });
     };
 
-    // Subscribe to user record for box list changes
+    // User record drives the box list. wpb.subscribe(id) auto-loads and
+    // delivers the user as the first "create" event, which sets up
+    // per-box subscriptions; subsequent updates re-reconcile the set.
     let userUnsub: (() => void) | undefined;
+    this.wpb.collection("users").subscribe(userId, (e) => {
+      if (cancelled) return;
+      if (e.action === "delete") return;
+      const user = userFromRecord(e.record);
+      handlers.onUser(user);
 
-    const initUser = async () => {
-      try {
-        const userRecord = await this.pb().collection("users").getOne(userId, { $autoCancel: false });
-        if (cancelled) return;
-        const user = userFromRecord(userRecord);
-        handlers.onUser(user);
-
-        for (const boxId of user.boxes) {
-          setupBox(boxId);
+      const currentBoxes = new Set(user.boxes);
+      for (const [boxId, unsubs] of boxUnsubs) {
+        if (!currentBoxes.has(boxId)) {
+          unsubs.forEach((u) => u());
+          boxUnsubs.delete(boxId);
         }
-      } catch {
-        // User not found
       }
-
-      this.wpb.collection("users").subscribe(userId, (e) => {
-        if (cancelled) return;
-        const user = userFromRecord(e.record);
-        handlers.onUser(user);
-
-        // Tear down subscriptions for boxes no longer in the user's list
-        const currentBoxes = new Set(user.boxes);
-        for (const [boxId, unsubs] of boxUnsubs) {
-          if (!currentBoxes.has(boxId)) {
-            unsubs.forEach((u) => u());
-            boxUnsubs.delete(boxId);
-          }
-        }
-
-        for (const boxId of user.boxes) {
-          setupBox(boxId);
-        }
-      }).then((fn) => { userUnsub = fn; });
-    };
-
-    initUser();
+      for (const boxId of user.boxes) setupBox(boxId);
+    }).then((fn) => { userUnsub = fn; });
 
     return () => {
       cancelled = true;

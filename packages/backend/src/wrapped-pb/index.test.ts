@@ -79,8 +79,14 @@ function makeStubPb(): { pb: PocketBase; emit: (col: string, e: { action: string
         },
         async getOne(id: string): Promise<RecordModel> {
           const r = c.records.get(id);
-          if (!r) throw new Error("not found");
+          if (!r) throw Object.assign(new Error("not found"), { status: 404 });
           return r;
+        },
+        // Returns all records in the collection. The stub ignores the filter
+        // string — tests that need filtered initial-load behavior should pre-
+        // populate `c.records` with only the records they want returned.
+        async getFullList(_opts?: unknown): Promise<RecordModel[]> {
+          return Array.from(c.records.values());
         },
       };
     },
@@ -268,6 +274,107 @@ describe("wrapPocketBase server events", () => {
     expect((seen as unknown as RecordModel).note).toBe("x");
 
     await ack;
+  });
+});
+
+describe("wrapPocketBase auto-load on subscribe", () => {
+  it("subscribe('*', { filter }) loads matching records, seeds the queue, and delivers them as create events before live updates", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    // Seed a record server-side. No SSE event yet — the queue is empty.
+    const seed: RecordModel = { id: "a", list: "L1", name: "x", collectionId: "items", collectionName: "items", created: "", updated: "" } as unknown as RecordModel;
+    stub.col("items").records.set("a", seed);
+
+    const events: Array<{ action: string; record: RecordModel }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, record: e.record }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    // Initial create event delivered before subscribe resolved.
+    expect(events).toHaveLength(1);
+    expect(events[0].action).toBe("create");
+    expect(events[0].record.id).toBe("a");
+  });
+
+  it("optimistic delete on an auto-loaded record emits the full prior record (not bare {id})", async () => {
+    // Repro of the mobile shopping bug: without auto-load seeding the queue,
+    // wpb.delete emits notifySubscribers(delete, {id}) and any predicate that
+    // reads other fields (like `r.list === listId`) drops the event, so the
+    // local subscriber never sees its own delete until SSE confirms.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const seed: RecordModel = { id: "a", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "" } as unknown as RecordModel;
+    stub.col("items").records.set("a", seed);
+
+    const events: Array<{ action: string; record: RecordModel }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, record: e.record }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    events.length = 0;
+
+    await wpb.collection("items").delete("a");
+    const deleteEvent = events.find((e) => e.action === "delete");
+    expect(deleteEvent).toBeDefined();
+    // Crucial: the record carries `list`, so subscriber predicates pass.
+    expect((deleteEvent!.record as RecordModel & { list: string }).list).toBe("L1");
+  });
+
+  it("optimistic update on an auto-loaded record emits a composed view (not skipped)", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const seed: RecordModel = { id: "a", list: "L1", checked: false, collectionId: "items", collectionName: "items", created: "", updated: "" } as unknown as RecordModel;
+    stub.col("items").records.set("a", seed);
+
+    const events: Array<{ action: string; record: RecordModel }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, record: e.record }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    events.length = 0;
+
+    await wpb.collection("items").update("a", { checked: true });
+    const updateEvent = events.find((e) => e.action === "update");
+    expect(updateEvent).toBeDefined();
+    expect((updateEvent!.record as RecordModel & { checked: boolean; list: string }).checked).toBe(true);
+    expect((updateEvent!.record as RecordModel & { checked: boolean; list: string }).list).toBe("L1");
+  });
+
+  it("subscribe(id) auto-loads the single record via getOne and delivers it as a create", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const seed: RecordModel = { id: "a", name: "server", collectionId: "items", collectionName: "items", created: "", updated: "" } as unknown as RecordModel;
+    stub.col("items").records.set("a", seed);
+
+    let seen: RecordModel | null = null;
+    await wpb.collection("items").subscribe("a", (e) => { seen = e.record; });
+
+    expect(seen).not.toBeNull();
+    expect((seen as unknown as RecordModel).id).toBe("a");
+  });
+
+  it("subscribe(id) on a missing record (404) does not throw and stays armed for future creates", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const events: RecordModel[] = [];
+    await wpb.collection("items").subscribe("a", (e) => { events.push(e.record); });
+    expect(events).toHaveLength(0);
+
+    const created: RecordModel = { id: "a", name: "later", collectionId: "items", collectionName: "items", created: "", updated: "" } as unknown as RecordModel;
+    stub.emit("items", { action: "create", record: created });
+    expect(events).toHaveLength(1);
+    expect(events[0].id).toBe("a");
   });
 });
 

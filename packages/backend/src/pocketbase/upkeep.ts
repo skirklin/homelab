@@ -421,9 +421,6 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     col: string, id: string, cancelled: () => boolean, unsubs: Array<() => void>,
     cb: { onData: (r: RecordModel) => void; onDelete?: () => void },
   ) {
-    this.pb().collection(col).getOne(id, { $autoCancel: false }).then((r) => {
-      if (!cancelled()) cb.onData(r);
-    }).catch(() => {});
     this.wpb.collection(col).subscribe(id, (e) => {
       if (cancelled()) return;
       if (e.action === "delete") cb.onDelete?.(); else cb.onData(e.record);
@@ -434,13 +431,25 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     col: string, cancelled: () => boolean, unsubs: Array<() => void>,
     opts: { filter: string; belongsTo: (r: RecordModel) => boolean; onInitial: (rs: RecordModel[]) => void; onChange: (a: string, r: RecordModel) => void },
   ) {
-    this.pb().collection(col).getFullList({ filter: opts.filter, $autoCancel: false }).then((rs) => {
-      if (!cancelled()) opts.onInitial(rs);
-    }).catch((e) => { if (!cancelled()) console.warn(`[upkeep] subCol ${col} failed`, e); });
+    // Buffer initial creates so we can emit one onInitial batch instead of
+    // N per-record onChange calls. After subscribe() resolves, the buffer is
+    // drained as the initial batch and subsequent events go through onChange.
+    let initialDone = false;
+    const initial: RecordModel[] = [];
     this.wpb.collection(col).subscribe("*", (e) => {
       if (cancelled() || !opts.belongsTo(e.record)) return;
+      if (!initialDone) {
+        initial.push(e.record);
+        return;
+      }
       opts.onChange(e.action, e.record);
-    }, { local: (r) => opts.belongsTo(r as RecordModel) }).then((unsub) => unsubs.push(unsub));
+    }, { filter: opts.filter, local: (r) => opts.belongsTo(r as RecordModel) }).then((unsub) => {
+      unsubs.push(unsub);
+      if (!cancelled()) {
+        initialDone = true;
+        opts.onInitial(initial);
+      }
+    });
   }
 
 }

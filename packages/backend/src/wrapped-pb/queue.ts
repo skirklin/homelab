@@ -97,6 +97,26 @@ export class MutationQueue {
     return out;
   }
 
+  /**
+   * Like viewCollection but only returns records with pending mutations.
+   * Used by subscribe replay so server-only seeded records (which the
+   * caller already loaded via its own initial fetch) aren't double-emitted.
+   */
+  viewPending(
+    collection: string,
+    predicate?: (r: RawRecord) => boolean,
+  ): RawRecord[] {
+    const col = this.state.get(collection);
+    if (!col) return [];
+    const out: RawRecord[] = [];
+    for (const rec of col.values()) {
+      if (rec.pending.length === 0) continue;
+      const v = composeView(rec.server, rec.pending);
+      if (v && (!predicate || predicate(v))) out.push(v);
+    }
+    return out;
+  }
+
   /** Server snapshot upserted (null = tombstone). Returns the prior view. */
   applyServer(
     collection: string,

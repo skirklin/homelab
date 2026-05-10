@@ -48,7 +48,12 @@ export class WrappedPbError extends Error {
 }
 
 export interface WrappedSubscribeOptions {
-  /** PB-side filter string (sent to server). */
+  /**
+   * PocketBase filter string used to scope the initial-load fetch when
+   * `topic === "*"`. Without it, "*" subscribes deliver only live events
+   * (no initial state). For specific-id topics, the id alone scopes the
+   * fetch and `filter` is ignored.
+   */
   filter?: string;
   /** JS predicate evaluated locally — required for filtered subscriptions so optimistic mutations route to the right subscribers. */
   local?: (r: RawRecord) => boolean;
@@ -302,7 +307,18 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         return true;
       },
 
-      // Subscribe with a local predicate.
+      // Subscribe with onSnapshot-style semantics: caller gets a unified
+      // stream of "create" events for current matching records (initial load),
+      // followed by live create/update/delete events. Returned promise
+      // resolves only after the initial batch has been delivered, so callers
+      // can flip a loading flag at that point.
+      //
+      // Initial load also seeds the optimistic queue. Without this, a local
+      // delete/update on a record that has only ever been read (never had an
+      // SSE event) would compose against a null server snapshot and emit a
+      // bare {id} (failing subscriber predicates) or no event at all (update
+      // on null is a no-op). On mobile, where SSE is unreliable, that means
+      // the user's own writes never reach the UI until a refresh.
       async subscribe(
         topic: string,
         callback: (e: RecordSubscription) => void,
@@ -313,8 +329,54 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         state.subscribers.add(sub);
         await ensureRealSubscription(name);
 
+        // Auto-load matching records and seed the queue. Two scopes:
+        //  - topic="*" with filter: getFullList(filter) → batch
+        //  - topic=<id>: getOne(id) → single record (404 → empty)
+        // topic="*" without filter is left alone; callers that want raw
+        // event-only semantics can use that form.
+        let initialRecords: RawRecord[] = [];
+        if (topic !== "*") {
+          try {
+            const r = await pb().collection(name).getOne(topic, { $autoCancel: false });
+            initialRecords = [r as unknown as RawRecord];
+          } catch {
+            // 404 / not found is fine — record may not exist yet; live events
+            // will deliver any future create.
+          }
+        } else if (opts?.filter !== undefined) {
+          try {
+            const rs = await pb().collection(name).getFullList({
+              filter: opts.filter,
+              $autoCancel: false,
+            });
+            initialRecords = rs as unknown as RawRecord[];
+          } catch (e) {
+            console.warn(`[wpb] initial load for ${name} failed`, e);
+          }
+        }
+
+        // Seed and deliver. Skip records the queue already knows about: an
+        // SSE event may have raced ahead of getFullList between ensureReal-
+        // Subscription and now, and that SSE delivery already notified this
+        // subscriber. Re-seeding would clobber a fresher snapshot with stale
+        // data, and re-delivering would duplicate the create event.
+        for (const r of initialRecords) {
+          if (queue.view(name, r.id) !== null) continue;
+          queue.applyServer(name, r.id, r);
+          if (topic !== "*" && topic !== r.id) continue;
+          if (opts?.local && !opts.local(r)) continue;
+          try {
+            callback({ action: "create", record: r as RecordModel });
+          } catch (err) {
+            console.error("[wpb] initial replay threw", err);
+          }
+        }
+
         // Replay current pending mutations matching this subscriber.
-        for (const r of queue.viewCollection(name, opts?.local)) {
+        // Only records with pending mutations are replayed; server-only
+        // snapshots (already delivered above as part of the initial batch)
+        // are skipped to avoid double-emission.
+        for (const r of queue.viewPending(name, opts?.local)) {
           if (topic !== "*" && topic !== r.id) continue;
           try {
             callback({ action: "create", record: r as RecordModel });

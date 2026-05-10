@@ -253,29 +253,41 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       if (!cancelled) handlers.onItems(Array.from(itemsMap.values()));
     };
 
-    // List metadata — optimistic-aware via wpb.
-    this.subscribeToRecord("shopping_lists", listId, isCancelled, {
-      onData: (r) => handlers.onList(listFromRecord(r)),
-      onDelete: () => handlers.onDeleted?.(),
+    // List metadata — wpb.subscribe(id) auto-loads + delivers initial state
+    // as a "create" event, then forwards live updates.
+    this.wpb.collection("shopping_lists").subscribe(listId, (e) => {
+      if (cancelled) return;
+      if (e.action === "delete") {
+        handlers.onDeleted?.();
+      } else {
+        handlers.onList(listFromRecord(e.record));
+      }
     }).then((u) => unsubs.push(u));
 
-    // Items — optimistic-aware via wpb with predicate.
-    this.subscribeToCollection("shopping_items", isCancelled, {
+    // Items — wpb.subscribe("*", { filter }) auto-loads matching records,
+    // seeds the optimistic queue, and delivers each as a "create" event,
+    // then forwards live create/update/delete. We buffer initial creates
+    // into itemsMap and emit a single onItems batch once the subscribe
+    // promise resolves; subsequent live events emit per-change.
+    let itemsInitialDone = false;
+    this.wpb.collection("shopping_items").subscribe("*", (e) => {
+      if (cancelled || (e.record as RecordModel).list !== listId) return;
+      if (e.action === "delete") {
+        itemsMap.delete(e.record.id);
+      } else {
+        itemsMap.set(e.record.id, itemFromRecord(e.record));
+      }
+      if (itemsInitialDone) emitItems();
+    }, {
       filter: this.pb().filter("list = {:listId}", { listId }),
-      belongsTo: (r) => r.list === listId,
-      onInitial: (records) => {
-        for (const r of records) itemsMap.set(r.id, itemFromRecord(r));
+      local: (r) => r.list === listId,
+    }).then((u) => {
+      unsubs.push(u);
+      if (!cancelled) {
+        itemsInitialDone = true;
         emitItems();
-      },
-      onChange: (action, r) => {
-        if (action === "delete") {
-          itemsMap.delete(r.id);
-        } else {
-          itemsMap.set(r.id, itemFromRecord(r));
-        }
-        emitItems();
-      },
-    }).then((u) => unsubs.push(u));
+      }
+    });
 
     // History — full reload on any change. Stays on raw pb subscribe; writes
     // still go through wpb so persistence + replay-on-reload work.
@@ -303,64 +315,6 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
   }
 
   // --- Internal subscription helpers ---
-
-  /** Subscribe to a single record. Optimistic events for that id are included. */
-  private async subscribeToRecord(
-    collection: string,
-    id: string,
-    cancelled: () => boolean,
-    callbacks: { onData: (r: RecordModel) => void; onDelete?: () => void },
-  ): Promise<() => void> {
-    try {
-      const record = await this.pb().collection(collection).getOne(id, { $autoCancel: false });
-      if (!cancelled()) callbacks.onData(record);
-    } catch {
-      // Record not found; subscriber will receive any optimistic create via wpb.
-    }
-
-    const unsub = await this.wpb.collection(collection).subscribe(id, (e) => {
-      if (cancelled()) return;
-      if (e.action === "delete") {
-        callbacks.onDelete?.();
-      } else {
-        callbacks.onData(e.record);
-      }
-    });
-
-    return unsub;
-  }
-
-  /**
-   * Subscribe to a filtered collection. Server initial seed via getFullList,
-   * then live updates (server + optimistic) via wpb.subscribe with predicate.
-   */
-  private async subscribeToCollection(
-    collection: string,
-    cancelled: () => boolean,
-    options: {
-      filter: string;
-      belongsTo: (r: RecordModel) => boolean;
-      onInitial: (records: RecordModel[]) => void;
-      onChange: (action: "create" | "update" | "delete", r: RecordModel) => void;
-    },
-  ): Promise<() => void> {
-    try {
-      const records = await this.pb().collection(collection).getFullList({
-        filter: options.filter,
-        $autoCancel: false,
-      });
-      if (!cancelled()) options.onInitial(records);
-    } catch (e) {
-      if (!cancelled()) console.warn(`[shopping] initial load ${collection} failed`, e);
-    }
-
-    const unsub = await this.wpb.collection(collection).subscribe("*", (e) => {
-      if (cancelled() || !options.belongsTo(e.record as RecordModel)) return;
-      options.onChange(e.action as "create" | "update" | "delete", e.record);
-    }, { local: (r) => options.belongsTo(r as RecordModel) });
-
-    return unsub;
-  }
 
   /**
    * Subscribe to a collection that fully reloads on any change. Used for
