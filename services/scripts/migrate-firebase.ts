@@ -214,6 +214,7 @@ const shouldRun = (name: string) => !config.collection || config.collection === 
 // ID maps: Firestore doc ID -> PocketBase record ID
 // Used in step 7 for slug wiring
 const fireBoxIdToPbId = new Map<string, string>();
+const fireRecipeIdToPbId = new Map<string, string>();
 const fireListIdToPbId = new Map<string, string>();
 const fireTaskListIdToPbId = new Map<string, string>();
 const fireLogIdToPbId = new Map<string, string>(); // life logs
@@ -322,9 +323,10 @@ if (shouldRun("recipes")) {
           // Idempotency: check if recipe with same name already exists in this box
           if (recipeName) {
             try {
-              await adminPb.collection("recipes").getFirstListItem(
+              const existing = await adminPb.collection("recipes").getFirstListItem(
                 `box = "${pbBoxId}" && data.name = "${esc(recipeName)}"`,
               );
+              fireRecipeIdToPbId.set(recipeDoc.id, existing.id);
               recipeStats.skipped++;
               continue; // already exists
             } catch {
@@ -337,6 +339,7 @@ if (shouldRun("recipes")) {
           const recipeOwnerPbId = userMap.get(recipeOwner)?.pbId || ownerPbId;
 
           const recipeId = await recipes.addRecipe(pbBoxId, recipeData, recipeOwnerPbId);
+          fireRecipeIdToPbId.set(recipeDoc.id, recipeId);
 
           // Set visibility
           if (rData.visibility && rData.visibility !== "private") {
@@ -377,14 +380,20 @@ if (shouldRun("recipes")) {
         const eData = eventDoc.data();
         try {
           const createdBy = userMap.get(refId(eData.createdBy))?.pbId || ownerPbId;
-          const subjectId = eData.subjectId || "";
+          const fireSubjectId = eData.subjectId || "";
+          const pbRecipeId = fireRecipeIdToPbId.get(fireSubjectId);
+          if (!pbRecipeId) {
+            console.warn(`    Skip event ${eventDoc.id}: FB recipe ${fireSubjectId} not in map`);
+            eventStats.skipped++;
+            continue;
+          }
 
           // Idempotency: check by timestamp + subject_id + created_by
           const ts = toIso(eData.timestamp);
-          if (ts && subjectId) {
+          if (ts) {
             try {
               await adminPb.collection("recipe_events").getFirstListItem(
-                `box = "${pbBoxId}" && subject_id = "${esc(subjectId)}" && created_by = "${createdBy}" && timestamp = "${ts}"`,
+                `box = "${pbBoxId}" && subject_id = "${pbRecipeId}" && created_by = "${createdBy}" && timestamp = "${ts}"`,
               );
               eventStats.skipped++;
               continue;
@@ -393,7 +402,10 @@ if (shouldRun("recipes")) {
             }
           }
 
-          await recipes.addCookingLogEvent(pbBoxId, subjectId, createdBy, eData.data?.notes);
+          await recipes.addCookingLogEvent(pbBoxId, pbRecipeId, createdBy, {
+            notes: eData.data?.notes,
+            timestamp: toDate(eData.timestamp) || undefined,
+          });
           eventStats.created++;
         } catch (err: any) {
           console.error(`    Error migrating event ${eventDoc.id}: ${err.message}`);
