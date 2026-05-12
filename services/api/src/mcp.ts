@@ -1646,6 +1646,157 @@ server.tool(
   },
 );
 
+// --- Money tools (read-only proxy to ingest) ---
+
+/** GET /money/<path>?<qs> through apiRaw. */
+async function money(path: string, params?: Record<string, string | undefined>): Promise<unknown> {
+  const qs = params
+    ? Object.entries(params)
+        .filter(([, v]) => v !== undefined && v !== "")
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v as string)}`)
+        .join("&")
+    : "";
+  return apiRaw(`/money${path}${qs ? `?${qs}` : ""}`);
+}
+
+server.tool(
+  "list_money_accounts",
+  "List all financial accounts (checking, savings, credit cards, investment, etc.) across institutions. Returns id, name, institution, account_type, current balance, and performance data.",
+  {},
+  async () => {
+    const data = await money("/accounts");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_money_balances",
+  "List balance snapshots, optionally filtered to a single account. Useful for short-window balance history.",
+  {
+    account_id: z.string().optional().describe("Filter to a specific account id"),
+  },
+  async ({ account_id }) => {
+    const data = await money("/balances", { account_id });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_money_transactions",
+  "List transactions across all accounts, with optional filters. Categories use a hierarchical path like 'Food/Groceries' or 'Travel/Lodging'. Negative amounts on credit cards = money owed.",
+  {
+    account_id: z.string().optional().describe("Filter to a specific account id"),
+    category: z.string().optional().describe("Filter to a category prefix (e.g. 'Food' matches 'Food/Groceries')"),
+    start: z.string().optional().describe("Inclusive start date (YYYY-MM-DD)"),
+    end: z.string().optional().describe("Inclusive end date (YYYY-MM-DD)"),
+    limit: z.string().optional().describe("Max rows (default ingest-side cap)"),
+  },
+  async ({ account_id, category, start, end, limit }) => {
+    const data = await money("/transactions", { account_id, category, start, end, limit });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "get_money_net_worth_summary",
+  "Current net worth across all accounts, broken down by category (assets/liabilities) and institution.",
+  {},
+  async () => {
+    const data = await money("/net-worth/summary");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "get_money_net_worth_history",
+  "Net worth time series over the requested date range. Returns one point per snapshot date.",
+  {
+    start: z.string().optional().describe("Inclusive start date (YYYY-MM-DD)"),
+    end: z.string().optional().describe("Inclusive end date (YYYY-MM-DD)"),
+  },
+  async ({ start, end }) => {
+    const data = await money("/net-worth/history", { start, end });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "get_money_performance",
+  "Investment performance (invested vs earned, returns) as a time series. Filter by account or institution.",
+  {
+    account_id: z.string().optional().describe("Filter to a specific account id"),
+    institution: z.string().optional().describe("Filter to a specific institution"),
+  },
+  async ({ account_id, institution }) => {
+    const data = await money("/performance", { account_id, institution });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "get_money_spending_summary",
+  "Spending aggregated by category and/or time period. Use for 'how much did I spend on groceries last month'-style questions.",
+  {
+    range: z.string().optional().describe("Time range hint: e.g. 'month', 'quarter', 'year', or a date range"),
+  },
+  async ({ range }) => {
+    const data = await money("/spending/summary", { range });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_money_holdings",
+  "Investment holdings (positions) across accounts. Returns symbol, quantity, cost basis, current value per position.",
+  {
+    account_id: z.string().optional().describe("Filter to a specific account id"),
+  },
+  async ({ account_id }) => {
+    const data = await money("/holdings", { account_id });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "get_money_allocation",
+  "Asset allocation breakdown (e.g. stocks/bonds/cash/etc.) across the investment portfolio.",
+  {},
+  async () => {
+    const data = await money("/allocation");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_money_recurring",
+  "Detected recurring transactions (subscriptions, recurring transfers, etc.) with cadence and last-seen date.",
+  {},
+  async () => {
+    const data = await money("/recurring");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_money_institutions",
+  "List financial institutions configured in the money database (lookup table for resolving names referenced by accounts/transactions).",
+  {},
+  async () => {
+    const data = await money("/institutions");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "list_money_people",
+  "List people configured in the money database (counterparties in shared expenses, transfers, etc.).",
+  {},
+  async () => {
+    const data = await money("/people");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
   return server;
 }
 

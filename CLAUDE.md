@@ -124,6 +124,21 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 - `update_invite` — change expiry on an existing invite
 - `delete_invite` — revoke an invite
 
+**Money (read-only, proxied to the ingest service):**
+- `list_money_accounts` — all financial accounts with current balances
+- `list_money_balances` — balance snapshots (optionally by account)
+- `list_money_transactions` — transaction history with filters (account, category, date range)
+- `get_money_net_worth_summary` — current net worth, broken down by category/institution
+- `get_money_net_worth_history` — net-worth time series
+- `get_money_performance` — invested/earned + returns for investment accounts
+- `get_money_spending_summary` — spending aggregated by category/period
+- `list_money_holdings` — investment positions
+- `get_money_allocation` — asset allocation breakdown
+- `list_money_recurring` — detected recurring transactions / subscriptions
+- `list_money_institutions` / `list_money_people` — lookup tables
+
+Writes are deliberately not exposed — money mutations are infrequent and risky to delegate. To migrate money fully to PocketBase, see [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md).
+
 ### Activity field guide
 
 When creating or updating travel activities, fill in ALL relevant fields — don't put structured data in the description:
@@ -221,6 +236,7 @@ Deferred but worth picking up if a need surfaces:
 - **Push notifications on Gatus failures** — wire Gatus's webhook alerts into the existing VAPID push setup (`api-secrets` already has the keys). Converts uptime monitoring from "you check the dashboard" to "your phone buzzes when something dies."
 - **Native Beszel charts in the monitor frontend** — query Beszel's PocketBase API directly and render CPU/memory/disk/network charts natively, instead of linking out to the Beszel UI. Needs a read-only auth path into Beszel's PB (separate user with read-only API token, stored in a k8s Secret, injected at the monitor's nginx layer like `HOMELAB_API_TOKEN` is). Couple hours of work.
 - **Gatus tailnet-end checks** — current Gatus checks hit cluster-internal Service IPs, which prove the pod is healthy but don't catch a broken Tailscale operator proxy. To check the tailnet-edge URL end-to-end, Gatus would need to be tailnet-attached itself (e.g., a tailscale sidecar in its pod). Low priority since the operator's stable.
+- **Money → PocketBase migration** — retire ingest's sqlite as system of record; money joins the `@homelab/backend` pattern. Plan in [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md). ~2–3 weeks focused work. MCP access already covered by the TS proxy in `services/api/src/routes/money.ts`.
 
 ## Three Man Team
 Available agents: Alice (Architect), Bob (Builder), Robert (Reviewer)
