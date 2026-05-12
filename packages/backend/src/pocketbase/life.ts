@@ -51,9 +51,28 @@ export class PocketBaseLifeBackend implements LifeBackend {
       try {
         const r = await this.pb().collection("life_logs").getOne(logId);
         return logFromRecord(r);
-      } catch {
-        // Log was deleted, fall through to create
+      } catch (err: unknown) {
+        // Only treat genuine 404 as "log is gone." A transient auth/network
+        // error here used to fall through and silently mint a new empty log
+        // while clobbering user.life_log_id, orphaning the user's real data.
+        const status = (err as { status?: number })?.status;
+        if (status !== 404) throw err;
       }
+    }
+
+    // Before creating a new log, try to recover any log this user already
+    // owns — covers the case where life_log_id was empty, stale, or
+    // accidentally pointed at a deleted/wrong log.
+    const owned = await this.pb().collection("life_logs").getList(1, 1, {
+      filter: this.pb().filter("owners.id ?= {:uid}", { uid: userId }),
+      sort: "created",
+    });
+    if (owned.items.length > 0) {
+      const existing = owned.items[0];
+      if (user.life_log_id !== existing.id) {
+        await this.wpb.collection("users").update(userId, { life_log_id: existing.id });
+      }
+      return logFromRecord(existing);
     }
 
     const id = newId();

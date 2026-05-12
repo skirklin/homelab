@@ -109,8 +109,37 @@ export class PocketBaseTravelBackend implements TravelBackend {
     const slugs: Record<string, string> = user.travel_slugs || {};
     const firstId = Object.values(slugs)[0];
     if (firstId) {
-      try { await this.pb().collection("travel_logs").getOne(firstId); return firstId; } catch {}
+      try {
+        await this.pb().collection("travel_logs").getOne(firstId);
+        return firstId;
+      } catch (err: unknown) {
+        // Only fall through on genuine 404 — transient errors must NOT
+        // cause us to mint a duplicate log and orphan the user's data.
+        const status = (err as { status?: number })?.status;
+        if (status !== 404) throw err;
+      }
     }
+
+    // Before creating a new log, recover any log this user already owns.
+    // Defense-in-depth against a corrupted travel_slugs pointer.
+    const owned = await this.pb().collection("travel_logs").getList(1, 1, {
+      filter: this.pb().filter("owners.id ?= {:uid}", { uid: userId }),
+      sort: "created",
+    });
+    if (owned.items.length > 0) {
+      const existing = owned.items[0];
+      const newSlugs = { ...slugs };
+      // Preserve whichever slug key pointed at the missing log; otherwise
+      // add a "default" entry so the rest of the app can find it.
+      let updated = false;
+      for (const [k, v] of Object.entries(newSlugs)) {
+        if (v === firstId) { newSlugs[k] = existing.id; updated = true; }
+      }
+      if (!updated) newSlugs.default = existing.id;
+      await this.wpb.collection("users").update(userId, { travel_slugs: newSlugs });
+      return existing.id;
+    }
+
     const id = newId();
     await this.wpb.collection("travel_logs").create({
       id,
