@@ -320,6 +320,7 @@ async function handleNavigation(details) {
 
   const now = Date.now();
   if (lastCapture[institution] && now - lastCapture[institution] < COOLDOWN_MS) return;
+  if (activeHandlers.has(institution)) return;
 
   const ctx = makeContext(institution, details.tabId);
   activeHandlers.add(institution);
