@@ -201,13 +201,33 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     );
   }
 
-  /** Upsert a history entry — find existing by (list, ingredient) and update, else create. */
+  /** Upsert a history entry — find existing by (list, ingredient) and update, else create.
+   *
+   * The optimistic-view check must come first. Reading through the live PB
+   * here (this.pb().getFirstListItem) used to race when a user added an
+   * item and re-categorized it within ~5s: the second upsert's read fired
+   * before the first upsert's create had committed to the server, so it
+   * saw "no row" and created a duplicate. Checking the wpb view first
+   * means a still-pending create is visible and we update it in place.
+   */
   private async upsertHistory(
     listId: string,
     ingredient: string,
     categoryId: string,
   ): Promise<void> {
     const normalized = normalizeIngredient(ingredient);
+
+    const fromQueue = this.wpb.collection("shopping_history").viewCollection<RecordModel>(
+      (r) => r.list === listId && r.ingredient === normalized,
+    );
+    if (fromQueue.length > 0) {
+      await this.wpb.collection("shopping_history").update(fromQueue[0].id, {
+        category_id: categoryId,
+        last_added: new Date().toISOString(),
+      });
+      return;
+    }
+
     const filter = this.pb().filter(
       "list = {:listId} && ingredient = {:ingredient}",
       { listId, ingredient: normalized },

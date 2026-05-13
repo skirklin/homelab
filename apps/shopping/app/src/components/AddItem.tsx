@@ -35,7 +35,12 @@ export function AddItem() {
   const [note, setNote] = useState("");
   const inputRef = useRef<BaseSelectRef>(null);
 
-  // Filter history for autocomplete options (based on ingredient)
+  // Filter history for autocomplete options (based on ingredient).
+  // Dedupe by lowercased ingredient name (server can legitimately hold
+  // duplicate rows — see upsertHistory race notes), keeping the most-recent
+  // entry, then rank prefix matches above substring matches so typing "b"
+  // shows items that start with "b" before things that merely contain it.
+  // Within each rank, newest first so recent additions stay reachable.
   const autocompleteOptions = useMemo(() => {
     if (!ingredient.trim()) return [];
 
@@ -43,17 +48,26 @@ export function AddItem() {
     const existingItems = getItemsFromState(state);
     const existingIngredients = new Set(existingItems.map((i) => i.ingredient.toLowerCase()));
 
-    return state.history
-      .filter(
-        (h) =>
-          h.ingredient.toLowerCase().includes(searchTerm) &&
-          !existingIngredients.has(h.ingredient.toLowerCase())
-      )
+    const ts = (d: Date | null | undefined) => d ? d.getTime() : 0;
+
+    const byName = new Map<string, typeof state.history[number]>();
+    for (const h of state.history) {
+      const key = h.ingredient.toLowerCase();
+      if (existingIngredients.has(key)) continue;
+      if (!key.includes(searchTerm)) continue;
+      const prior = byName.get(key);
+      if (!prior || ts(h.lastAdded) > ts(prior.lastAdded)) byName.set(key, h);
+    }
+
+    return Array.from(byName.values())
+      .sort((a, b) => {
+        const aPrefix = a.ingredient.toLowerCase().startsWith(searchTerm);
+        const bPrefix = b.ingredient.toLowerCase().startsWith(searchTerm);
+        if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
+        return ts(b.lastAdded) - ts(a.lastAdded);
+      })
       .slice(0, 8)
-      .map((h) => ({
-        value: h.ingredient,
-        label: h.ingredient,
-      }));
+      .map((h) => ({ value: h.ingredient, label: h.ingredient }));
   }, [ingredient, state.history, state.items]);
 
   const handleSubmit = (e: React.FormEvent) => {
