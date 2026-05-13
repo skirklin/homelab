@@ -85,6 +85,44 @@ function useOptimisticErrorToast() {
   }, []);
 }
 
+/**
+ * Force a wpb.resync() on tab focus, pageshow, and on a slow interval while
+ * the page is visible. Compensates for PocketBase's 5-minute realtime idle
+ * disconnect + mobile-network SSE failures where the SDK's auto-reconnect
+ * misses events (the symptom: one user adds an item, another user staring
+ * at the same list never sees it until they refresh).
+ */
+function useRealtimeResync() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let inFlight: Promise<void> | null = null;
+    const probe = () => {
+      if (inFlight) return;
+      inFlight = wpb.resync().catch(() => { /* offline or auth blip */ })
+        .finally(() => { inFlight = null; });
+    };
+
+    // pageshow + focus cover phones returning from background (focus alone
+    // misses bfcache restores on iOS); visibilitychange catches in-app tab
+    // switches that fire neither.
+    window.addEventListener("focus", probe);
+    window.addEventListener("pageshow", probe);
+    const visHandler = () => { if (document.visibilityState === "visible") probe(); };
+    document.addEventListener("visibilitychange", visHandler);
+
+    // Periodic probe so a foregrounded tab that's been idle past the 5-min
+    // server-side disconnect still catches up without user interaction.
+    const interval = setInterval(probe, 60 * 1000);
+
+    return () => {
+      window.removeEventListener("focus", probe);
+      window.removeEventListener("pageshow", probe);
+      document.removeEventListener("visibilitychange", visHandler);
+      clearInterval(interval);
+    };
+  }, []);
+}
+
 export function BackendProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     registerServiceWorker();
@@ -95,6 +133,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
   }, []);
   useTimezoneSync();
   useOptimisticErrorToast();
+  useRealtimeResync();
   return (
     <ShoppingBackendContext.Provider value={backends.shopping}>
       <RecipesBackendContext.Provider value={backends.recipes}>

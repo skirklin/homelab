@@ -60,7 +60,9 @@ export interface WrappedSubscribeOptions {
 }
 
 interface LocalSubscriber {
+  collection: string;
   topic: string; // "*" or a record id
+  filter?: string; // server-side filter that was passed at subscribe time
   predicate?: (r: RawRecord) => boolean;
   callback: (e: RecordSubscription) => void;
 }
@@ -92,6 +94,15 @@ export interface WrappedPocketBase {
   collection(name: string): WrappedCollection;
   /** Triggers persisted-mutation replay. Idempotent. Call once after auth is ready. */
   replayPending(): Promise<void>;
+  /**
+   * Re-fetch every active subscription's matching records, apply them to the
+   * queue, and synthesize create/update/delete events for any drift since
+   * the last delivery. Compensates for PocketBase's 5-minute realtime idle
+   * disconnect (and any mobile-network SSE failure where the SDK's
+   * auto-reconnect misses events) by treating server state as authoritative
+   * on every wake-up. Call on tab focus/pageshow and on a slow interval.
+   */
+  resync(): Promise<void>;
 }
 
 // ---- Implementation ----
@@ -324,7 +335,13 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         callback: (e: RecordSubscription) => void,
         opts?: WrappedSubscribeOptions,
       ): Promise<UnsubscribeFunc> {
-        const sub: LocalSubscriber = { topic, predicate: opts?.local, callback };
+        const sub: LocalSubscriber = {
+          collection: name,
+          topic,
+          filter: opts?.filter,
+          predicate: opts?.local,
+          callback,
+        };
         const state = getColState(name);
         state.subscribers.add(sub);
         await ensureRealSubscription(name);
@@ -411,8 +428,96 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     };
   }
 
+  /**
+   * Re-fetch every active subscription's matching records and reconcile against
+   * the local queue. Emits create/update for new or changed records and delete
+   * for records that previously matched a filter but no longer exist or no
+   * longer match. Quiet on no-ops (when the queue view matches the server,
+   * notifySubscribers is skipped). One HTTP round-trip per unique
+   * (collection, topic, filter) tuple — same cost as the initial-subscribe
+   * load, run again on focus/interval.
+   */
+  async function resync(): Promise<void> {
+    // Group subscriptions by (collection, topic, filter) to avoid duplicate
+    // network calls when multiple components subscribe with the same shape.
+    const groups = new Map<string, { collection: string; topic: string; filter?: string; predicate?: (r: RawRecord) => boolean }>();
+    for (const [colName, state] of collections) {
+      for (const sub of state.subscribers) {
+        const key = `${colName}|${sub.topic}|${sub.filter ?? ""}`;
+        if (groups.has(key)) continue;
+        groups.set(key, {
+          collection: colName,
+          topic: sub.topic,
+          filter: sub.filter,
+          predicate: sub.predicate,
+        });
+      }
+    }
+
+    await Promise.all(Array.from(groups.values()).map(async (g) => {
+      // Refetch via the same path subscribe() uses for initial load.
+      let records: RawRecord[] = [];
+      try {
+        if (g.topic !== "*") {
+          const r = await pb().collection(g.collection).getOne(g.topic, { $autoCancel: false });
+          records = [r as unknown as RawRecord];
+        } else if (g.filter !== undefined) {
+          const rs = await pb().collection(g.collection).getFullList({
+            filter: g.filter,
+            $autoCancel: false,
+          });
+          records = rs as unknown as RawRecord[];
+        } else {
+          // Unfiltered "*" subscribe — no canonical refetch target. Skip;
+          // the subscriber asked for raw events without a filter, so there's
+          // no defined set of records to reconcile against.
+          return;
+        }
+      } catch (err) {
+        // 404 on a single-record subscribe is a legitimate "record gone" signal.
+        if (g.topic !== "*" && (err as { status?: number })?.status === 404) {
+          const before = queue.view(g.collection, g.topic);
+          if (before) {
+            queue.applyServer(g.collection, g.topic, null);
+            notifySubscribers(g.collection, "delete", before);
+          }
+          return;
+        }
+        // Network / auth blip — leave local state alone and try again next probe.
+        return;
+      }
+
+      // Apply each fetched record. applyServer returns before/after; emit a
+      // notify only when the view actually changed. Skipping no-op records
+      // keeps the focus probe from flooding subscribers with unchanged data.
+      const seen = new Set<string>();
+      for (const r of records) {
+        seen.add(r.id);
+        const { before, after } = queue.applyServer(g.collection, r.id, r);
+        if (!after) continue;
+        if (before && JSON.stringify(before) === JSON.stringify(after)) continue;
+        const action = before === null ? "create" : "update";
+        notifySubscribers(g.collection, action, after);
+      }
+
+      // For filtered subscriptions, anything previously in the queue that
+      // matched this subscriber's predicate but is missing from the refetch
+      // was deleted server-side during the disconnect window. Emit deletes
+      // so consumers' maps drop the stale entries.
+      if (g.topic === "*" && g.predicate) {
+        const stale = queue.viewCollection(g.collection, g.predicate);
+        for (const r of stale) {
+          if (seen.has(r.id)) continue;
+          queue.applyServer(g.collection, r.id, null);
+          notifySubscribers(g.collection, "delete", r);
+        }
+      }
+    }));
+  }
+
   return {
     collection: makeCollection,
+    resync,
     async replayPending() {
       const persisted = await loadAllMutations();
       for (const m of persisted) {

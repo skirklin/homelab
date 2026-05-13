@@ -446,3 +446,83 @@ describe("wrapPocketBase subscribe replay", () => {
     await ack;
   });
 });
+
+describe("wrapPocketBase resync", () => {
+  it("delivers events the SSE channel missed: another user added a record while we were idle", async () => {
+    // The user-reported repro: PocketBase disconnects realtime subscriptions
+    // after 5 min of idle; if a peer adds a record during that window, SSE
+    // never delivers the event. resync() must refetch the filter and emit
+    // a "create" so subscribers' local state catches up without a refresh.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    events.length = 0;
+
+    // Simulate a peer's write that the SSE channel missed (no stub.emit).
+    const peerRecord: RecordModel = {
+      id: "walnuts", list: "L1", ingredient: "walnuts",
+      collectionId: "items", collectionName: "items", created: "", updated: "",
+    } as unknown as RecordModel;
+    stub.col("items").records.set("walnuts", peerRecord);
+
+    await wpb.resync();
+
+    const walnut = events.find((e) => e.id === "walnuts");
+    expect(walnut, "resync should synthesize a create for the missed record").toBeDefined();
+    expect(walnut!.action).toBe("create");
+  });
+
+  it("emits a synthetic delete when a record we previously held disappears server-side during the disconnect", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const seed: RecordModel = {
+      id: "a", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "",
+    } as unknown as RecordModel;
+    stub.col("items").records.set("a", seed);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    events.length = 0;
+
+    // Peer deleted the record while our SSE was dead.
+    stub.col("items").records.delete("a");
+    await wpb.resync();
+
+    const del = events.find((e) => e.id === "a");
+    expect(del, "resync should synthesize a delete for the missing record").toBeDefined();
+    expect(del!.action).toBe("delete");
+  });
+
+  it("emits nothing when the server state matches the local view", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const seed: RecordModel = {
+      id: "a", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "",
+    } as unknown as RecordModel;
+    stub.col("items").records.set("a", seed);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    events.length = 0;
+
+    await wpb.resync();
+
+    expect(events, "resync on unchanged state should be a no-op").toHaveLength(0);
+  });
+});
