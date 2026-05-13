@@ -8,6 +8,7 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "test:ingest": "cd services/ingest && env -u VIRTUAL_ENV uv sync --group dev --quiet && env -u VIRTUAL_ENV uv run pytest",
     "test:env:up": "infra/test-env.sh up",
     "test:env:down": "infra/test-env.sh down",
     "test:env:status": "infra/test-env.sh status",

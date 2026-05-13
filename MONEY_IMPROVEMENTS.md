@@ -8,20 +8,26 @@ later functional changes ship with a real safety net.
 
 ### Testing (do these first)
 
-- [ ] **T1. Fix `services/ingest/tests/conftest.py:5` import failure.** Currently
+- [x] **T1. Fix `services/ingest/tests/conftest.py:5` import failure.** Currently
   fails with `ModuleNotFoundError: No module named 'money'` on a clean
   checkout, so `uv run pytest` can't collect anything. Tests gate nothing
-  until this works from a fresh clone.
-- [ ] **T2. Add `.github/workflows/test.yml`** running `uv run pytest` on push
-  and PR for `services/ingest/`. Tests must gate merges.
-- [ ] **T3. Delete the bug-codifying assertion** at
+  until this works from a fresh clone. (Done: `pythonpath = ["src"]` under
+  `[tool.pytest.ini_options]` in `pyproject.toml`, commit e165a78.)
+- [x] **T1.5. One-command test entry point.** `pnpm test:ingest` from repo
+  root handles the `VIRTUAL_ENV` poisoning workaround
+  (`env -u VIRTUAL_ENV uv sync --group dev && uv run pytest`). Extra args
+  pass through to pytest. See `services/ingest/README.md`.
+- [x] **T2. Add `.github/workflows/test.yml`** running `uv run pytest` on push
+  and PR for `services/ingest/`. Tests must gate merges. (Done: commit 1127aaa.)
+- [x] **T3. Delete the bug-codifying assertion** at
   [services/ingest/tests/test_identity.py:47][ti47]
   (`test_ally_returns_none_without_login_entry`). It asserts the very bug
-  shipped this morning as correct behavior.
-- [ ] **T4. Add a positive `customers/self` identity test** —
+  shipped this morning as correct behavior. (Done: commit 2131ba6.)
+- [x] **T4. Add a positive `customers/self` identity test** —
   `test_ally_identity_from_customers_self`: entry with
   `url=/acs/v3/customers/self`, `responseBody.data.emails=[{type:"PRIMARY",
-  value:"x@y"}]`, assert `_extract_identity` returns the email.
+  value:"x@y"}]`, assert `_extract_identity` returns the email. (Done: commit
+  d41de52.)
 - [ ] **T5. Commit anonymized fixture captures** under
   `services/ingest/tests/fixtures/` so `test_parsers.py` and
   `test_identity.py` actually run in CI instead of `pytest.skip`-ing because
