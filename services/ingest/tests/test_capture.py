@@ -196,6 +196,24 @@ class TestExtractIdentityIntegration:
             })
         assert result["login_id"] == "scott@ally"
 
+    def test_ally_identity_from_customers_self(self, server):
+        port, _, _ = server
+        config = _make_config({
+            "scott@ally": LoginConfig(person="scott", institution="ally", username="scott@example.com"),
+        })
+        entries = [{
+            "url": "https://secure.ally.com/acs/v3/customers/self",
+            "responseBody": {"data": {"emails": [
+                {"type": "PRIMARY", "value": "scott@example.com"},
+                {"type": "SECONDARY", "value": "other@example.com"},
+            ]}},
+        }]
+        with patch("money.config.load_config", return_value=config):
+            result = _post_json(port, "/capture", {
+                "institution": "ally", "cookies": [], "entries": entries,
+            })
+        assert result["login_id"] == "scott@ally"
+
     def test_capital_one_identity_from_cookies(self, server):
         port, _, _ = server
         config = _make_config({
