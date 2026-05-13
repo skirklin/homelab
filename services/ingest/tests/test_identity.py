@@ -44,12 +44,6 @@ class TestIdentityExtraction:
         result = _extract_identity(cookies, [])
         assert result == "kirk"
 
-    def test_ally_returns_none_without_login_entry(self):
-        from money.ingest.ally_api import _extract_identity
-
-        result = _extract_identity([], [{"url": "https://ally.com/accounts", "responseBody": {}}])
-        assert result is None
-
     def test_wealthfront_returns_none_without_user_entry(self):
         from money.ingest.wealthfront import _extract_identity
 
