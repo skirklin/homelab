@@ -28,14 +28,16 @@ later functional changes ship with a real safety net.
   `url=/acs/v3/customers/self`, `responseBody.data.emails=[{type:"PRIMARY",
   value:"x@y"}]`, assert `_extract_identity` returns the email. (Done: commit
   d41de52.)
-- [ ] **T5. Commit anonymized fixture captures** under
+- [x] **T5. Commit anonymized fixture captures** under
   `services/ingest/tests/fixtures/` so `test_parsers.py` and
   `test_identity.py` actually run in CI instead of `pytest.skip`-ing because
   the hardcoded `/home/skirklin/projects/money/.data` path doesn't exist.
-- [ ] **T6. Add `test_capture_empty_entries_handled`** — POST `/capture` with
+  (Done: commits 946e8be, b00be4c, bc4ad8f, 38d484a — adds `scrub_fixture.py`,
+  ally/wealthfront/capital_one fixtures, identity tests now run unconditionally.)
+- [x] **T6. Add `test_capture_empty_entries_handled`** — POST `/capture` with
   `entries=[]`; assert either a 200 no-op or that empty quarantine files
   don't accumulate. The webNavigation race that fired today produced exactly
-  this shape.
+  this shape. (Done: commit 69c1040 — empty captures now return 200 no-op.)
 
 ### Server-side safety
 

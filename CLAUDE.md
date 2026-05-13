@@ -238,5 +238,19 @@ Deferred but worth picking up if a need surfaces:
 - **Gatus tailnet-end checks** — current Gatus checks hit cluster-internal Service IPs, which prove the pod is healthy but don't catch a broken Tailscale operator proxy. To check the tailnet-edge URL end-to-end, Gatus would need to be tailnet-attached itself (e.g., a tailscale sidecar in its pod). Low priority since the operator's stable.
 - **Money → PocketBase migration** — retire ingest's sqlite as system of record; money joins the `@homelab/backend` pattern. Plan in [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md). ~2–3 weeks focused work. MCP access already covered by the TS proxy in `services/api/src/routes/money.ts`.
 
+## Money debugging
+
+When inspecting money captures, identity extraction, or any JSON from ingest, **use these tools — never `sed`/`grep`/`python -c` over ssh**:
+
+- **JSON tools** (allow-listed in `.claude/settings.json`):
+  - `jq` — field extraction, filtering
+  - `gron` — every leaf as a path (`gron x.json | grep emails`); best for "what shape is this?"
+  - `genson` — generate a schema from a sample
+  - The pod doesn't have them; copy files locally first with `kubectl cp`.
+- **`services/scripts/fetch-network-log.sh`** — pulls a captured network log via `/api/debug/network-log/{list,latest,get}` to `~/.config/money/debug/`. Usage: `fetch-network-log.sh chase latest`.
+- **`services/ingest/scripts/scrub_fixture.py`** — redacts PII from a capture so it can be committed as a test fixture. Has `--check` mode for CI.
+- **`pnpm test:ingest`** from the repo root runs the ingest test suite. Handles the `VIRTUAL_ENV`/conda poisoning issue. Args pass through (e.g. `pnpm test:ingest tests/test_identity.py -v`).
+- **Punch list** of further tools to build (replay-capture, capture inspect, config edit, etc.) lives in [`MONEY_IMPROVEMENTS.md`](MONEY_IMPROVEMENTS.md) Tier-1 items C1–C6. Next-touch heuristic: if you reach for the same inline-python pattern twice, the third time add it as a script/subcommand.
+
 ## Three Man Team
 Available agents: Alice (Architect), Bob (Builder), Robert (Reviewer)
