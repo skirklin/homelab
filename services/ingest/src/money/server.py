@@ -1813,12 +1813,17 @@ class IngestHandler(BaseHTTPRequestHandler):
             log.info("Extracted identity '%s' for %s", identity, institution)
             identity_lower = identity.lower()
             for lid, lc in inst_logins.items():
-                if lc.username and lc.username.lower() == identity_lower:
+                candidates = []
+                if lc.username:
+                    candidates.append(lc.username.lower())
+                candidates.extend(a.lower() for a in lc.aliases)
+                if identity_lower in candidates:
                     log.info("Matched login %s via identity '%s'", lid, identity)
                     return lid
             log.error(
-                "Identity '%s' for %s did not match any configured username. "
-                "Add this username to the matching login in /app/.data/config.json.",
+                "Identity '%s' for %s did not match any configured username/alias. "
+                "Add this value to the matching login in /app/.data/config.json "
+                "(either as 'username' or in the 'aliases' list).",
                 identity, institution,
             )
             return None
@@ -1896,9 +1901,26 @@ class IngestHandler(BaseHTTPRequestHandler):
         )
 
         if not login_id:
+            quarantine_dir = DATA_DIR / "unresolved_captures"
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            quarantine_path = quarantine_dir / f"{institution}_{timestamp}.json"
+            quarantine_path.write_text(json.dumps({
+                "institution": institution,
+                "cookies": cookies_raw,
+                "entries": entries,
+                "user_identity": user_identity,
+                "captured_at": data.get("captured_at"),
+            }, indent=2))
+            log.warning(
+                "Quarantined unresolved %s capture (%d cookies, %d entries) at %s",
+                institution, len(cookies_raw) if isinstance(cookies_raw, list) else 0,
+                len(entries) if isinstance(entries, list) else 0, quarantine_path,
+            )
             self._json_response(400, {
                 "error": f"Could not determine user for {institution}. "
                          "Check identity extraction and login usernames in config.",
+                "quarantine_path": str(quarantine_path),
             })
             return
 

@@ -626,6 +626,17 @@ def _extract_identity(
                 return val
         break
 
+    # Final fallback: numeric customer ID embedded in API URLs. Ally's CIAM cookie
+    # is sometimes an opaque session id rather than a JWT, so the username isn't
+    # recoverable from cookies. The customer id is stable per login and appears in
+    # most authenticated API paths.
+    customer_id_re = re.compile(r"/customers/(\d{6,})(?:/|\?|$)|[?&]customerId=(\d{6,})")
+    for entry in entries:
+        url = entry.get("url", "")
+        m = customer_id_re.search(url)
+        if m:
+            return m.group(1) or m.group(2)
+
     return None
 
 

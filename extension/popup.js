@@ -69,7 +69,7 @@ async function refreshManualStatus() {
 
 async function loadSettings() {
   const result = await chrome.storage.local.get(["serverUrl"]);
-  document.getElementById("serverUrlInput").value = result.serverUrl || "https://homelab-0.tail56ca88.ts.net:8443";
+  document.getElementById("serverUrlInput").value = result.serverUrl || "https://ingest.tail56ca88.ts.net";
   document.getElementById("serverUrlInput").addEventListener("change", async (e) => {
     const url = e.target.value.trim();
     if (url) {
@@ -91,7 +91,7 @@ async function checkForUpdate() {
   const banner = document.getElementById("updateBanner");
   try {
     const result = await chrome.storage.local.get("serverUrl");
-    const baseUrl = (result.serverUrl || "https://homelab-0.tail56ca88.ts.net:8443").replace(/\/+$/, "");
+    const baseUrl = (result.serverUrl || "https://ingest.tail56ca88.ts.net").replace(/\/+$/, "");
     const resp = await fetch(`${baseUrl}/extension/version`, { signal: AbortSignal.timeout(3000) });
     if (!resp.ok) return;
     const data = await resp.json();

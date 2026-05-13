@@ -17,7 +17,8 @@ import fidelity from "./institutions/fidelity.js";
 import morgan_stanley from "./institutions/morgan_stanley.js";
 import wealthfront from "./institutions/wealthfront.js";
 
-const DEFAULT_SERVER_URL = "https://homelab-0.tail56ca88.ts.net:8443";
+const DEFAULT_SERVER_URL = "https://ingest.tail56ca88.ts.net";
+const LEGACY_SERVER_URLS = ["https://homelab-0.tail56ca88.ts.net:8443"];
 
 // ── Institution registry ─────────────────────────────────────────────
 
@@ -39,7 +40,12 @@ function getInstitutionForUrl(url) {
 
 async function getServerUrl() {
   const result = await chrome.storage.local.get("serverUrl");
-  return (result.serverUrl || DEFAULT_SERVER_URL).replace(/\/+$/, "");
+  let url = result.serverUrl || DEFAULT_SERVER_URL;
+  if (LEGACY_SERVER_URLS.includes(url.replace(/\/+$/, ""))) {
+    url = DEFAULT_SERVER_URL;
+    await chrome.storage.local.set({ serverUrl: url });
+  }
+  return url.replace(/\/+$/, "");
 }
 
 async function postToServer(endpoint, data) {
