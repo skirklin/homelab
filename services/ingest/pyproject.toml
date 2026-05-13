@@ -20,13 +20,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gcs = [
+    "google-cloud-storage",
+]
+
+[dependency-groups]
 dev = [
     "pytest",
     "ruff",
     "pyright",
-]
-gcs = [
-    "google-cloud-storage",
 ]
 
 [project.scripts]
@@ -53,3 +55,4 @@ reportUnknownArgumentType = "warning"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]

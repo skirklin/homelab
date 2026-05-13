@@ -757,13 +757,15 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+gcs = [
+    { name = "google-cloud-storage" },
+]
+
+[package.dev-dependencies]
 dev = [
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
-]
-gcs = [
-    { name = "google-cloud-storage" },
 ]
 
 [package.metadata]
@@ -777,12 +779,16 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.0" },
     { name = "playwright" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pyright", marker = "extra == 'dev'" },
-    { name = "pytest", marker = "extra == 'dev'" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "ruff", marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev", "gcs"]
+provides-extras = ["gcs"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
 
 [[package]]
 name = "nodeenv"
