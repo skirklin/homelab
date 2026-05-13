@@ -577,66 +577,37 @@ def sync_ally(db: Database, store: RawStore, profile: str,
 from money.ingest.registry import InstitutionInfo  # noqa: E402
 
 
-def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
-    """Decode the payload of a JWT (no signature verification). Returns None on failure."""
-    import base64
-    parts = token.split(".")
-    if len(parts) < 2:
-        return None
-    payload = parts[1]
-    payload += "=" * (-len(payload) % 4)  # base64 padding
-    try:
-        decoded = base64.urlsafe_b64decode(payload)
-        claims = json.loads(decoded)
-        return claims if isinstance(claims, dict) else None
-    except Exception:
-        return None
-
-
 def _extract_identity(
     cookies: list[dict[str, Any]], entries: list[dict[str, Any]],
 ) -> str | None:
-    """Extract the Ally username (uid).
+    """Return the primary email on Ally's `customers/self` response.
 
-    Fresh login: read from /auth/login request body. Already-authenticated session:
-    decode the Ally-CIAM-Token JWT cookie and use its username claim.
+    Present in both fresh-login and already-authenticated captures, and is the
+    natural cross-institution identifier (same value shows up on other banks
+    where the user signed up with the same address).
     """
-    import re
     for entry in entries:
         url = entry.get("url", "")
-        if "auth/login" not in url:
+        if "/customers/self" not in url:
             continue
-        req = entry.get("requestBody", "")
-        if not isinstance(req, str):
-            req = json.dumps(req)
-        m = re.search(r'"uid":\s*"([^"]+)"', req)
-        if m:
-            return m.group(1)
-
-    for c in cookies:
-        if c.get("name") != "Ally-CIAM-Token":
+        body = entry.get("responseBody")
+        if not isinstance(body, dict):
             continue
-        claims = _decode_jwt_claims(c.get("value", ""))
-        if not claims:
+        emails = (body.get("data") or {}).get("emails") or body.get("emails") or []
+        if not isinstance(emails, list):
             continue
-        log.info("Ally-CIAM-Token claim keys: %s", sorted(claims.keys()))
-        for key in ("preferred_username", "username", "uid", "login", "sub"):
-            val = claims.get(key)
+        primary = next(
+            (e.get("value") for e in emails
+             if isinstance(e, dict) and e.get("type") == "PRIMARY"),
+            None,
+        )
+        if primary:
+            return primary
+        # Fall back to the first email if none is marked primary.
+        for e in emails:
+            val = e.get("value") if isinstance(e, dict) else None
             if isinstance(val, str) and val:
                 return val
-        break
-
-    # Final fallback: numeric customer ID embedded in API URLs. Ally's CIAM cookie
-    # is sometimes an opaque session id rather than a JWT, so the username isn't
-    # recoverable from cookies. The customer id is stable per login and appears in
-    # most authenticated API paths.
-    customer_id_re = re.compile(r"/customers/(\d{6,})(?:/|\?|$)|[?&]customerId=(\d{6,})")
-    for entry in entries:
-        url = entry.get("url", "")
-        m = customer_id_re.search(url)
-        if m:
-            return m.group(1) or m.group(2)
-
     return None
 
 

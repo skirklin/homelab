@@ -44,7 +44,6 @@ class LoginConfig:
     person: str
     institution: str
     username: str | None = None
-    aliases: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -90,7 +89,6 @@ def load_config() -> AppConfig:
             person=login_data["person"],
             institution=login_data["institution"],
             username=login_data.get("username"),
-            aliases=list(login_data.get("aliases", []) or []),
         )
 
     return AppConfig(

@@ -1813,17 +1813,12 @@ class IngestHandler(BaseHTTPRequestHandler):
             log.info("Extracted identity '%s' for %s", identity, institution)
             identity_lower = identity.lower()
             for lid, lc in inst_logins.items():
-                candidates = []
-                if lc.username:
-                    candidates.append(lc.username.lower())
-                candidates.extend(a.lower() for a in lc.aliases)
-                if identity_lower in candidates:
+                if lc.username and lc.username.lower() == identity_lower:
                     log.info("Matched login %s via identity '%s'", lid, identity)
                     return lid
             log.error(
-                "Identity '%s' for %s did not match any configured username/alias. "
-                "Add this value to the matching login in /app/.data/config.json "
-                "(either as 'username' or in the 'aliases' list).",
+                "Identity '%s' for %s did not match any configured username. "
+                "Set 'username' to this value on the matching login in /app/.data/config.json.",
                 identity, institution,
             )
             return None
@@ -1903,7 +1898,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         if not login_id:
             quarantine_dir = DATA_DIR / "unresolved_captures"
             quarantine_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             quarantine_path = quarantine_dir / f"{institution}_{timestamp}.json"
             quarantine_path.write_text(json.dumps({
                 "institution": institution,
