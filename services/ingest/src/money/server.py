@@ -1887,6 +1887,14 @@ class IngestHandler(BaseHTTPRequestHandler):
         entries = data.get("entries", [])
         user_identity = data.get("user_identity")
 
+        # No-op when there's literally nothing to attribute. The extension's
+        # webNavigation race fires post-login callbacks with empty cookies +
+        # entries; treat those as benign so they don't accumulate quarantine
+        # files. Quarantine still fires when at least one input is non-empty.
+        if not cookies_raw and not entries and not user_identity:
+            self._json_response(200, {"status": "noop", "reason": "empty capture"})
+            return
+
         # Resolve login using identity extraction
         login_id = self._resolve_login_id(
             institution,

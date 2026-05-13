@@ -112,7 +112,10 @@ class TestCaptureEndpoint:
         with patch("money.config.load_config", return_value=SINGLE_NO_USERNAME):
             result = _post_json(port, "/capture", {
                 "institution": "fidelity",
-                "cookies": [],
+                # At least one of (cookies, entries, user_identity) must be
+                # non-empty or the server treats it as a no-op. Here we
+                # exercise the single-login-unambiguous fallback path.
+                "cookies": [{"name": "session", "value": "abc"}],
                 "entries": [],
             })
         assert result["status"] == "ok"
@@ -125,6 +128,9 @@ class TestCaptureEndpoint:
                 "institution": "chase",
                 "cookies": [],
                 "entries": [],
+                # Non-empty identity defeats the empty-capture short-circuit
+                # but doesn't match any configured login -> quarantine.
+                "user_identity": "Unknown Person",
             })
         assert "Could not determine user" in result["error"]
 
@@ -147,6 +153,9 @@ class TestCaptureEndpoint:
                 "institution": "chase",
                 "cookies": [],
                 "entries": [],
+                # Defeat the empty-capture short-circuit so we actually
+                # exercise the no-logins-configured failure path.
+                "user_identity": "Someone",
             })
         assert "Could not determine user" in result["error"]
 
@@ -164,6 +173,22 @@ class TestCaptureEndpoint:
 
         from money.config import DATA_DIR
         assert (DATA_DIR / "cookies" / "scott@wealthfront.json").exists()
+
+    def test_capture_empty_entries_handled(self, server, monkeypatch, tmp_path):
+        """Extension's webNavigation race fires post-login callbacks with no
+        cookies and no entries; we should treat those as benign no-ops, not
+        quarantine them."""
+        port, _, tmpdir = server
+        # Isolate DATA_DIR so the quarantine check is meaningful.
+        monkeypatch.setattr("money.config.DATA_DIR", tmp_path)
+        monkeypatch.setattr("money.server.DATA_DIR", tmp_path, raising=False)
+        with patch("money.config.load_config", return_value=MULTI_USER):
+            result = _post_json(port, "/capture", {
+                "institution": "betterment", "cookies": [], "entries": [],
+            })
+        assert result["status"] == "noop"
+        quarantine = tmp_path / "unresolved_captures"
+        assert not quarantine.exists() or not any(quarantine.iterdir())
 
     def test_capture_missing_institution_returns_400(self, server):
         port, _, _ = server
