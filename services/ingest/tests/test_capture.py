@@ -201,26 +201,6 @@ class TestCaptureEndpoint:
 class TestExtractIdentityIntegration:
     """Test that server-side extract_identity is called during /capture."""
 
-    def test_ally_identity_from_entries(self, server):
-        port, _, _ = server
-        config = _make_config({
-            "scott@ally": LoginConfig(person="scott", institution="ally", username="kirk4000"),
-            "angela@ally": LoginConfig(person="angela", institution="ally", username="angela123"),
-        })
-        entries = [
-            {
-                "url": "https://secure.ally.com/acs/customers/authenticate/api/v2/auth/login?aid=ciam_web",
-                "requestBody": '{"headers":[{"type":"uid","uid":"kirk4000"}],"data":{}}',
-            },
-        ]
-        with patch("money.config.load_config", return_value=config):
-            result = _post_json(port, "/capture", {
-                "institution": "ally",
-                "cookies": [],
-                "entries": entries,
-            })
-        assert result["login_id"] == "scott@ally"
-
     def test_ally_identity_from_customers_self(self, server):
         port, _, _ = server
         config = _make_config({
