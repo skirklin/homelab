@@ -13,7 +13,7 @@ set -euo pipefail
 
 INSTITUTION="${1:-chase}"
 ACTION="${2:-latest}"
-HOST="${INGEST_HOST:-https://homelab-0.tail56ca88.ts.net}"
+HOST="${INGEST_HOST:-https://ingest.tail56ca88.ts.net}"
 SANDBOX="${MONEY_DEBUG_DIR:-$HOME/.config/money/debug}"
 
 mkdir -p "$SANDBOX"
