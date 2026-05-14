@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Mapping
 from http.server import HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -22,7 +23,7 @@ from money.storage import LocalStore
 def _seed_capture(
     directory: Path,
     filename: str,
-    payload: dict[str, object],
+    payload: Mapping[str, object],
     mtime: float | None = None,
 ) -> Path:
     directory.mkdir(parents=True, exist_ok=True)

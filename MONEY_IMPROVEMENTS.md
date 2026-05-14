@@ -54,11 +54,11 @@ later functional changes ship with a real safety net.
 
 ### Tooling for the agent (CLI subcommands)
 
-- [ ] **C1. `money replay-capture <id|latest>`** — POST a quarantined capture
-  back at `/capture` with optional `--as-login` override.
-- [ ] **C2. `money capture {list,inspect}`** — `list [--unresolved]` shows
+- [x] **C1. `money replay-capture <id|latest>`** — POST a quarantined capture
+  back at `/capture` with optional `--as-login` override. (Done: commit aec91aa.)
+- [x] **C2. `money capture {list,inspect}`** — `list [--unresolved]` shows
   recent captures with size + institution + timestamp; `inspect <id>`
-  pretty-prints JSON structure / extracts a field.
+  pretty-prints JSON structure / extracts a field. (Done: commit 3ac9acc.)
 - [ ] **C3. `money config {get,set,edit}`** — atomic read-modify-write of
   `/app/.data/config.json` with schema validation, `--dry-run` diff.
 - [ ] **C4. `money registry probe`** — print `_discover()` results + per-
@@ -66,9 +66,9 @@ later functional changes ship with a real safety net.
   inline imports.
 - [ ] **C5. `money parse-test <inst> <capture>`** — run an institution's
   parser against a capture without DB writes. Closes the inner debug loop.
-- [ ] **C6. `infra/scripts/m` wrapper** — `kubectl exec -n homelab
+- [x] **C6. `infra/scripts/m` wrapper** — `kubectl exec -n homelab
   deploy/ingest -- money "$@"` so the agent runs `m replay-capture latest`
-  instead of building SSH heredocs. Update CLAUDE.md to point here.
+  instead of building SSH heredocs. Update CLAUDE.md to point here. (Done: commit 1a5ce96.)
 
 ## Tier 2 — medium leverage
 
