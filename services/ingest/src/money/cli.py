@@ -630,6 +630,63 @@ def capture_inspect(capture_id: str, unresolved: bool, field: str | None, raw: b
         click.echo(f"top-level type: {type(data).__name__}")
 
 
+@main.command("replay-capture")
+@click.argument("capture_ref")
+@click.option(
+    "--as-login",
+    "as_login",
+    default=None,
+    help="Override the user_identity field with this login_id.",
+)
+@click.option(
+    "--url",
+    default="http://localhost:5555/capture",
+    help="Endpoint to POST to (default: in-pod loopback).",
+)
+@click.option(
+    "--unresolved/--no-unresolved",
+    default=True,
+    help="Default source is unresolved_captures/. --no-unresolved uses network_logs/.",
+)
+def replay_capture(
+    capture_ref: str, as_login: str | None, url: str, unresolved: bool,
+) -> None:
+    """Replay a stored capture by POSTing it to the /capture endpoint."""
+    import json as _json
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    path = _resolve_capture_path(capture_ref, unresolved)
+    payload = _json.loads(path.read_text())
+    if as_login is not None:
+        payload["user_identity"] = as_login
+
+    body = _json.dumps(payload).encode()
+    req = Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    click.echo(f"Replaying {path.name} -> {url}")
+    try:
+        with urlopen(req) as resp:
+            status = resp.status
+            text = resp.read().decode("utf-8", errors="replace")
+    except HTTPError as e:
+        status = e.code
+        text = e.read().decode("utf-8", errors="replace")
+        click.echo(f"HTTP {status}\n{text}")
+        raise click.ClickException(f"Replay failed with HTTP {status}") from e
+    except URLError as e:
+        raise click.ClickException(f"Connection error: {e.reason}") from e
+
+    click.echo(f"HTTP {status}\n{text}")
+    if not (200 <= status < 300):
+        raise click.ClickException(f"Replay failed with HTTP {status}")
+
+
 @main.group()
 def login() -> None:
     """Log into financial institutions to capture auth tokens/cookies."""

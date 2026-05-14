@@ -2,13 +2,21 @@
 
 import json
 import os
+import tempfile
 import time
+from http.server import HTTPServer
 from pathlib import Path
+from threading import Thread
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 from money.cli import main
+from money.config import AppConfig, InstitutionConfig, LoginConfig, PersonConfig
+from money.db import Database
+from money.server import IngestHandler
+from money.storage import LocalStore
 
 
 def _seed_capture(
@@ -141,3 +149,128 @@ class TestCaptureInspect:
         assert result.exit_code == 0
         # The first line of output should be the file contents verbatim.
         assert result.output.rstrip("\n") == path.read_text()
+
+
+def _make_config(logins: dict[str, LoginConfig]) -> AppConfig:
+    institutions = {}
+    people = {}
+    for _lid, lc in logins.items():
+        institutions[lc.institution] = InstitutionConfig(label=lc.institution)
+        people[lc.person] = PersonConfig(name=lc.person)
+    return AppConfig(institutions=institutions, logins=logins, people=people)
+
+
+SINGLE_WEALTHFRONT = _make_config({
+    "scott@wealthfront": LoginConfig(
+        person="scott", institution="wealthfront", username="scott@gmail.com",
+    ),
+})
+
+
+@pytest.fixture
+def replay_server():
+    """Spin up an IngestHandler on a random port. Yields (port, db, tmpdir)."""
+    db = Database(":memory:", check_same_thread=False)
+    db.initialize()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = LocalStore(tmpdir)
+        IngestHandler.db = db
+        IngestHandler.store = store
+        httpd = HTTPServer(("127.0.0.1", 0), IngestHandler)
+        port = httpd.server_address[1]
+        thread = Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        yield port, db, tmpdir
+        httpd.shutdown()
+    db.close()
+
+
+class TestReplayCapture:
+    def test_replay_unresolved_capture(self, data_dir, replay_server, monkeypatch):
+        port, _, _ = replay_server
+        # Quarantine the data dir for the server side too so persisted files
+        # land in tmp.
+        monkeypatch.setattr("money.server.DATA_DIR", data_dir, raising=False)
+        unresolved = data_dir / "unresolved_captures"
+        payload = {
+            "institution": "wealthfront",
+            "cookies": [{"name": "session", "value": "abc"}],
+            "entries": [],
+            "user_identity": "scott@gmail.com",
+        }
+        _seed_capture(unresolved, "wealthfront_20260514_080000.json", payload)
+
+        runner = CliRunner()
+        with patch("money.config.load_config", return_value=SINGLE_WEALTHFRONT):
+            result = runner.invoke(
+                main,
+                ["replay-capture", "wealthfront", "--url", f"http://127.0.0.1:{port}/capture"],
+            )
+        assert result.exit_code == 0, result.output
+        assert '"login_id": "scott@wealthfront"' in result.output \
+            or '"login_id":"scott@wealthfront"' in result.output
+
+    def test_as_login_overrides_user_identity(self, data_dir, replay_server, monkeypatch):
+        port, _, _ = replay_server
+        monkeypatch.setattr("money.server.DATA_DIR", data_dir, raising=False)
+        unresolved = data_dir / "unresolved_captures"
+        # Stored capture has a wrong identity; --as-login should override.
+        payload = {
+            "institution": "wealthfront",
+            "cookies": [{"name": "session", "value": "abc"}],
+            "entries": [],
+            "user_identity": "wrong-identity@example.com",
+        }
+        _seed_capture(unresolved, "wealthfront_20260514_080000.json", payload)
+
+        runner = CliRunner()
+        with patch("money.config.load_config", return_value=SINGLE_WEALTHFRONT):
+            result = runner.invoke(
+                main,
+                [
+                    "replay-capture",
+                    "wealthfront",
+                    "--as-login",
+                    "scott@gmail.com",
+                    "--url",
+                    f"http://127.0.0.1:{port}/capture",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        assert "scott@wealthfront" in result.output
+
+    def test_latest_keyword(self, data_dir, replay_server, monkeypatch):
+        port, _, _ = replay_server
+        monkeypatch.setattr("money.server.DATA_DIR", data_dir, raising=False)
+        unresolved = data_dir / "unresolved_captures"
+        now = time.time()
+        old_payload = {
+            "institution": "wealthfront",
+            "cookies": [{"name": "session", "value": "old"}],
+            "entries": [],
+            "user_identity": "scott@gmail.com",
+        }
+        new_payload = {
+            "institution": "wealthfront",
+            "cookies": [{"name": "session", "value": "new"}],
+            "entries": [],
+            "user_identity": "scott@gmail.com",
+        }
+        _seed_capture(unresolved, "wealthfront_20260514_070000.json", old_payload, mtime=now - 100)
+        _seed_capture(unresolved, "wealthfront_20260514_080000.json", new_payload, mtime=now)
+
+        runner = CliRunner()
+        with patch("money.config.load_config", return_value=SINGLE_WEALTHFRONT):
+            result = runner.invoke(
+                main, ["replay-capture", "latest", "--url", f"http://127.0.0.1:{port}/capture"],
+            )
+        assert result.exit_code == 0, result.output
+        assert "wealthfront_20260514_080000.json" in result.output
+
+    def test_bogus_ref_exits_nonzero(self, data_dir):
+        unresolved = data_dir / "unresolved_captures"
+        _seed_capture(unresolved, "wealthfront_20260514_080000.json", {"institution": "wealthfront"})
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["replay-capture", "totally-not-real"])
+        assert result.exit_code != 0
