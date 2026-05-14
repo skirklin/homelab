@@ -64,8 +64,12 @@ later functional changes ship with a real safety net.
 - [ ] **C4. `money registry probe`** — print `_discover()` results + per-
   institution signatures, so module-load failures are visible without
   inline imports.
-- [ ] **C5. `money parse-test <inst> <capture>`** — run an institution's
+- [x] **C5. `money parse-test <inst> <capture>`** — run an institution's
   parser against a capture without DB writes. Closes the inner debug loop.
+  (Done: commit pending — currently supports `network_log.json`-anchored
+  institutions only (chase). Multi-file institutions like ally/wealthfront
+  emit a clear "not yet implemented" error. Widen once the server's
+  capture→raw-files staging logic is factored out — see Tier-2 D1.)
 - [x] **C6. `infra/scripts/m` wrapper** — `kubectl exec -n homelab
   deploy/ingest -- money "$@"` so the agent runs `m replay-capture latest`
   instead of building SSH heredocs. Update CLAUDE.md to point here. (Done: commit 1a5ce96.)

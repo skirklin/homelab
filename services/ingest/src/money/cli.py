@@ -495,6 +495,17 @@ def _resolve_capture_path(capture_ref: str, unresolved: bool) -> Path:
     raise click.ClickException(f"No capture matched '{capture_ref}' in {directory}.")
 
 
+def _timestamp_from_filename(name: str) -> str | None:
+    """Extract `YYYYMMDD_HHMMSS` from a capture filename, if present.
+
+    Filenames look like `{institution}_{YYYYMMDD}_{HHMMSS}.json` (and sometimes
+    have microseconds appended). Returns None if the shape doesn't match.
+    """
+    import re
+    m = re.search(r"_(\d{8}_\d{6})(?:_|\.)", name)
+    return m.group(1) if m else None
+
+
 def _institution_from_filename(name: str) -> str:
     """Extract the institution prefix from a capture filename.
 
@@ -685,6 +696,81 @@ def replay_capture(
     click.echo(f"HTTP {status}\n{text}")
     if not (200 <= status < 300):
         raise click.ClickException(f"Replay failed with HTTP {status}")
+
+
+@main.command("parse-test")
+@click.argument("institution")
+@click.argument("capture_ref")
+@click.option("--unresolved/--no-unresolved", default=True,
+              help="Default source is unresolved_captures/. --no-unresolved uses network_logs/.")
+@click.option("--profile", default="testuser",
+              help="Profile/login_id passed to parse_fn (only affects raw_key strings).")
+@click.option("--human", is_flag=True, help="Render output as human-readable rather than JSON.")
+def parse_test(
+    institution: str, capture_ref: str, unresolved: bool, profile: str, human: bool,
+) -> None:
+    """Run an institution's parse_fn against a captured payload (no real DB writes).
+
+    Stages the capture as the institution's anchor file in a tempdir and parses
+    into an in-memory SQLite DB so you can iterate on extractors without touching
+    prod data. Currently only supports institutions whose anchor_file is
+    `network_log.json` (chase). Other institutions raise a clear error.
+    """
+    import json as _json
+    import tempfile
+    from money.db import Database
+    from money.ingest import registry
+
+    try:
+        info = registry.get(institution)
+    except KeyError as e:
+        known = ", ".join(sorted(i.name for i in registry.all_institutions()))
+        raise click.ClickException(f"Unknown institution '{institution}'. Known: {known}") from e
+
+    if info.parse_fn is None:
+        raise click.ClickException(f"parse-test: {institution} has no parse_fn.")
+
+    if info.anchor_file != "network_log.json":
+        raise click.ClickException(
+            f"parse-test: {institution} uses anchor file '{info.anchor_file}', "
+            "which requires multi-file capture staging (not yet implemented). "
+            "Currently supported: institutions whose anchor_file is 'network_log.json' (chase)."
+        )
+
+    from datetime import datetime
+
+    capture_path = _resolve_capture_path(capture_ref, unresolved)
+    # Use the capture's own filename timestamp so parsers like chase that derive
+    # `as_of` from the timestamp don't choke on a placeholder year.
+    timestamp = _timestamp_from_filename(capture_path.name) or datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        inst_dir = Path(tmp)
+        staged = inst_dir / f"{timestamp}_{info.anchor_file}"
+        staged.write_bytes(capture_path.read_bytes())
+
+        db = Database(":memory:")
+        db.initialize()
+        try:
+            summary = info.parse_fn(db, inst_dir, timestamp, profile)
+        except Exception as e:
+            raise click.ClickException(
+                f"parse_fn raised {type(e).__name__}: {e}"
+            ) from e
+
+    result = {
+        "institution": institution,
+        "capture": capture_path.name,
+        "parse_summary": dict(summary) if summary else {},
+    }
+    if human:
+        click.echo(f"institution: {institution}")
+        click.echo(f"capture:     {capture_path.name}")
+        click.echo("parse_summary:")
+        for k, v in result["parse_summary"].items():
+            click.echo(f"  {k}: {v}")
+    else:
+        click.echo(_json.dumps(result, indent=2, default=str))
 
 
 @main.group()
