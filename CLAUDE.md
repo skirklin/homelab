@@ -250,6 +250,7 @@ When inspecting money captures, identity extraction, or any JSON from ingest, **
 - **`services/scripts/fetch-network-log.sh`** — pulls a captured network log via `/api/debug/network-log/{list,latest,get}` to `~/.config/money/debug/`. Usage: `fetch-network-log.sh chase latest`.
 - **`services/ingest/scripts/scrub_fixture.py`** — redacts PII from a capture so it can be committed as a test fixture. Has `--check` mode for CI.
 - **`pnpm test:ingest`** from the repo root runs the ingest test suite. Handles the `VIRTUAL_ENV`/conda poisoning issue. Args pass through (e.g. `pnpm test:ingest tests/test_identity.py -v`).
+- **`infra/scripts/m <args>`** — wraps `kubectl exec -n homelab deploy/ingest -- money "$@"` over ssh. Run `m replay-capture latest` / `m capture list --unresolved` from the laptop instead of building ssh heredocs. Set `INGEST_SSH_HOST` to override the default `scott@5.78.200.161`.
 - **Punch list** of further tools to build (replay-capture, capture inspect, config edit, etc.) lives in [`MONEY_IMPROVEMENTS.md`](MONEY_IMPROVEMENTS.md) Tier-1 items C1–C6. Next-touch heuristic: if you reach for the same inline-python pattern twice, the third time add it as a script/subcommand.
 
 ## Three Man Team

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# m — run a `money` subcommand inside the ingest pod from the laptop.
+# Override the host via $INGEST_SSH_HOST.
+set -euo pipefail
+HOST="${INGEST_SSH_HOST:-scott@5.78.200.161}"
+exec ssh "$HOST" kubectl exec -n homelab deploy/ingest -- money "$@"
