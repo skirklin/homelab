@@ -688,6 +688,184 @@ def replay_capture(
 
 
 @main.group()
+def config() -> None:
+    """Read/write the money config.json (the source of truth for logins, people, institutions)."""
+
+
+def _config_path() -> Path:
+    from money.config import _resolve_config_file
+
+    return _resolve_config_file()
+
+
+@config.command("get")
+@click.argument("path", required=False)
+@click.option("--human", is_flag=True, help="Render as key=value (default: JSON).")
+def config_get(path: str | None, human: bool) -> None:
+    """Read a value from config.json. Without PATH, dumps the whole config."""
+    import json as _json
+
+    from money.config_io import ConfigPathError, get_value, load_raw
+
+    cfg_path = _config_path()
+    try:
+        raw = load_raw(cfg_path)
+    except Exception as e:
+        raise click.ClickException(str(e)) from e
+
+    if path is None:
+        value: object = raw
+    else:
+        try:
+            value = get_value(raw, path)
+        except ConfigPathError as e:
+            raise click.ClickException(str(e)) from e
+
+    if human:
+        if isinstance(value, dict | list):
+            click.echo(_json.dumps(value, indent=2))
+        elif isinstance(value, str):
+            click.echo(value)
+        else:
+            click.echo(repr(value))
+    else:
+        click.echo(_json.dumps(value, indent=2))
+
+
+@config.command("set")
+@click.argument("path")
+@click.argument("value")
+@click.option("--dry-run", is_flag=True, help="Show the diff but don't write.")
+def config_set(path: str, value: str, dry_run: bool) -> None:
+    """Set a value at PATH. VALUE is parsed as JSON first, then falls back to string."""
+    import json as _json
+    import sys
+
+    from money.config_io import (
+        ConfigPathError,
+        ConfigValidationError,
+        apply_mutation,
+        coerce_scalar,
+        set_value,
+    )
+
+    cfg_path = _config_path()
+    coerced = coerce_scalar(value)
+
+    def _mutate(raw: dict[str, object]) -> None:
+        set_value(raw, path, coerced)
+
+    try:
+        result = apply_mutation(cfg_path, _mutate, dry_run=dry_run)
+    except (ConfigPathError, ConfigValidationError) as e:
+        raise click.ClickException(str(e)) from e
+
+    if not result.diff:
+        click.echo("(no change)")
+        return
+
+    if sys.stdout.isatty():
+        for line in result.diff.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                click.echo(click.style(line, fg="green"))
+            elif line.startswith("-") and not line.startswith("---"):
+                click.echo(click.style(line, fg="red"))
+            else:
+                click.echo(line)
+    else:
+        click.echo(result.diff, nl=False)
+
+    summary = {
+        "changed": result.changed,
+        "backup": str(result.backup) if result.backup else None,
+        "dry_run": dry_run,
+    }
+    click.echo(_json.dumps(summary))
+
+
+@config.command("edit")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def config_edit(yes: bool) -> None:
+    """Open config.json in $VISUAL/$EDITOR/vi, then validate and atomically write."""
+    import json as _json
+    import os as _os
+    import subprocess
+    import sys
+    import tempfile
+
+    from money.config_io import ConfigValidationError, apply_mutation
+
+    cfg_path = _config_path()
+    editor = _os.environ.get("VISUAL") or _os.environ.get("EDITOR") or "vi"
+
+    with tempfile.NamedTemporaryFile(
+        "w+", prefix="money-config-", suffix=".json", delete=False
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+        if cfg_path.exists():
+            tmp.write(cfg_path.read_text())
+        else:
+            tmp.write("{}\n")
+    try:
+        try:
+            result = subprocess.run([editor, str(tmp_path)])
+        except FileNotFoundError as e:
+            raise click.ClickException(f"Editor not found: {editor!r}") from e
+        if result.returncode != 0:
+            raise click.ClickException(f"Editor exited with status {result.returncode}")
+
+        try:
+            edited = _json.loads(tmp_path.read_text())
+        except _json.JSONDecodeError as e:
+            raise click.ClickException(f"Edited file is not valid JSON: {e}") from e
+        if not isinstance(edited, dict):
+            raise click.ClickException("Edited config must be a JSON object")
+
+        def _mutate(raw: dict[str, object]) -> None:
+            raw.clear()
+            raw.update(edited)
+
+        try:
+            dry = apply_mutation(cfg_path, _mutate, dry_run=True)
+        except ConfigValidationError as e:
+            raise click.ClickException(str(e)) from e
+
+        if not dry.diff:
+            click.echo("(no change)")
+            return
+
+        if sys.stdout.isatty():
+            for line in dry.diff.splitlines():
+                if line.startswith("+") and not line.startswith("+++"):
+                    click.echo(click.style(line, fg="green"))
+                elif line.startswith("-") and not line.startswith("---"):
+                    click.echo(click.style(line, fg="red"))
+                else:
+                    click.echo(line)
+        else:
+            click.echo(dry.diff, nl=False)
+
+        if not yes:
+            click.confirm("Apply these changes?", abort=True)
+
+        try:
+            result_write = apply_mutation(cfg_path, _mutate, dry_run=False)
+        except ConfigValidationError as e:
+            raise click.ClickException(str(e)) from e
+
+        summary = {
+            "changed": result_write.changed,
+            "backup": str(result_write.backup) if result_write.backup else None,
+        }
+        click.echo(_json.dumps(summary))
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+@main.group()
 def registry() -> None:
     """Inspect the institution registry."""
 
