@@ -121,6 +121,31 @@ class TestCaptureEndpoint:
         assert result["status"] == "ok"
         assert result["login_id"] == "scott@fidelity"
 
+    def test_capture_single_login_no_identity_logs_fallback(self, server):
+        """The single-login fallback must emit a loud IDENTITY_FALLBACK error
+        in the log so missing extract_identity implementations are visible
+        in kubectl logs."""
+        port, _, _ = server
+        # caplog runs on the test thread, but the HTTPServer dispatches the
+        # handler on a worker thread, so caplog may miss the record. Use a
+        # mock on the server's logger instead and inspect its calls.
+        with patch("money.server.log.error") as mock_error:
+            with patch("money.config.load_config", return_value=SINGLE_NO_USERNAME):
+                result = _post_json(port, "/capture", {
+                    "institution": "fidelity",
+                    "cookies": [{"name": "session", "value": "abc"}],
+                    "entries": [],
+                })
+        assert result["login_id"] == "scott@fidelity"
+        assert mock_error.call_count >= 1
+        # First positional arg is the format string; following args are the
+        # interpolation values. The format string carries the IDENTITY_FALLBACK
+        # tag.
+        fmt_strings = [
+            call.args[0] for call in mock_error.call_args_list if call.args
+        ]
+        assert any("IDENTITY_FALLBACK" in s for s in fmt_strings), fmt_strings
+
     def test_capture_multi_login_no_identity_fails(self, server):
         port, _, _ = server
         with patch("money.config.load_config", return_value=MULTI_NO_USERNAMES):

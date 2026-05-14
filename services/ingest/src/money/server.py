@@ -1823,12 +1823,19 @@ class IngestHandler(BaseHTTPRequestHandler):
             )
             return None
 
-        # No identity extracted. This is only acceptable for institutions where
-        # exactly one person has an account — unambiguous without identity.
-        # For multi-login institutions this is an error: we refuse to guess.
+        # No identity extracted. With exactly one configured login we keep
+        # ingesting (chase / fidelity / morgan_stanley currently rely on this
+        # because they lack extract_identity); but emit a loud error so the
+        # missing extractor is visible in kubectl logs. Remove this branch
+        # once every institution has a working extract_identity.
         if len(inst_logins) == 1:
             lid = next(iter(inst_logins))
-            log.info("No identity extracted for %s; single login %s (unambiguous)", institution, lid)
+            log.error(
+                "IDENTITY_FALLBACK: no identity extracted for %s; "
+                "defaulting to sole login %s. Implement extract_identity "
+                "for %s to remove this fallback.",
+                institution, lid, institution,
+            )
             return lid
 
         log.error(

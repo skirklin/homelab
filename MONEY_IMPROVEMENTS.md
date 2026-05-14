@@ -41,9 +41,12 @@ later functional changes ship with a real safety net.
 
 ### Server-side safety
 
-- [ ] **S1. Delete (or loud-warn) the "single login = unambiguous" fallback**
+- [x] **S1. Delete (or loud-warn) the "single login = unambiguous" fallback**
   at [services/ingest/src/money/server.py:1829-1832][srv1829]. It hides every
   identity-extraction bug until a second login appears.
+- [ ] **S1.5. Delete single-login fallback** after chase/fidelity/morgan_stanley
+  each have a working `_extract_identity`. Grep `kubectl logs deploy/ingest`
+  for `IDENTITY_FALLBACK` to see how often it currently fires.
 - [ ] **S2. Last-successful-capture watcher.** New PB collection / table:
   `(login_id, institution, last_success_at)`. Gatus check alerts when any
   configured login goes >24h without a successful capture. Closes the
