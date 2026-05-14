@@ -688,6 +688,83 @@ def replay_capture(
 
 
 @main.group()
+def registry() -> None:
+    """Inspect the institution registry."""
+
+
+@registry.command("probe")
+@click.option("--human", is_flag=True, help="Render as a 3-section human-readable report.")
+def registry_probe(human: bool) -> None:
+    """Show every discovered institution, its capabilities, and any import failures."""
+    import inspect
+    import json as _json
+
+    from money.ingest.registry import _discover_with_errors
+
+    registered, failures, skipped = _discover_with_errors()
+
+    registered_payload: list[dict[str, object]] = []
+    for info in registered:
+        try:
+            sig = f"{info.sync_fn.__name__}{inspect.signature(info.sync_fn)}"
+        except (TypeError, ValueError):
+            sig = info.sync_fn.__name__
+        mod = inspect.getmodule(info.sync_fn)
+        module_name = mod.__name__ if mod is not None else ""
+        registered_payload.append({
+            "name": info.name,
+            "dir_name": info.dir_name,
+            "display_name": info.display_name,
+            "anchor_file": info.anchor_file,
+            "sync_fn_signature": sig,
+            "has_extract_identity": info.extract_identity is not None,
+            "has_post_replay_fn": info.post_replay_fn is not None,
+            "module": module_name,
+        })
+
+    failed_payload = [{"module": f.module, "error": f.error} for f in failures]
+
+    result: dict[str, object] = {
+        "registered": registered_payload,
+        "failed": failed_payload,
+        "skipped": list(skipped),
+    }
+
+    if not human:
+        click.echo(_json.dumps(result, indent=2))
+        return
+
+    click.echo(f"Registered institutions ({len(registered_payload)}):")
+    if not registered_payload:
+        click.echo("  (none)")
+    for entry in registered_payload:
+        flags = []
+        if entry["has_extract_identity"]:
+            flags.append("identity")
+        if entry["has_post_replay_fn"]:
+            flags.append("post_replay")
+        flag_str = f"  [{','.join(flags)}]" if flags else ""
+        click.echo(
+            f"  {entry['name']:<18s} {entry['display_name'] or '—':<28s}"
+            f"  anchor={entry['anchor_file']}{flag_str}"
+        )
+        click.echo(f"      module: {entry['module']}")
+        click.echo(f"      sync:   {entry['sync_fn_signature']}")
+
+    click.echo()
+    click.echo(f"Failed imports ({len(failed_payload)}):")
+    if not failed_payload:
+        click.echo("  (none)")
+    for f in failed_payload:
+        click.echo(f"  {f['module']}")
+        for line in str(f["error"]).rstrip().splitlines():
+            click.echo(f"    {line}")
+
+    click.echo()
+    click.echo(f"Skipped modules ({len(skipped)}): {', '.join(skipped) or '(none)'}")
+
+
+@main.group()
 def login() -> None:
     """Log into financial institutions to capture auth tokens/cookies."""
 

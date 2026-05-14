@@ -3,6 +3,7 @@
 import importlib
 import logging
 import pkgutil
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -87,3 +88,46 @@ def _discover() -> None:
         info = getattr(mod, "INSTITUTION", None)
         if isinstance(info, InstitutionInfo):
             register(info)
+
+
+@dataclass(frozen=True)
+class FailedImport:
+    """An institution-module import that raised."""
+
+    module: str
+    error: str
+
+
+def _discover_with_errors() -> "tuple[list[InstitutionInfo], list[FailedImport], list[str]]":
+    """Re-iterate institution modules independently of `_discover`, capturing failures.
+
+    Returns (registered_infos, failures, skipped_short_names). Does NOT mutate the
+    global `_registry`/`_discovered` state; safe to call repeatedly from tooling
+    (e.g. `money registry probe`).
+    """
+    import money.ingest as pkg
+
+    registered: list[InstitutionInfo] = []
+    failures: list[FailedImport] = []
+    skipped: list[str] = []
+
+    for _finder, mod_name, is_pkg in pkgutil.iter_modules(pkg.__path__, pkg.__name__ + "."):
+        if is_pkg:
+            continue
+        short_name = mod_name.split(".")[-1]
+        if short_name in _SKIP_MODULES:
+            skipped.append(short_name)
+            continue
+        try:
+            mod = importlib.import_module(mod_name)
+        except Exception:
+            failures.append(FailedImport(module=mod_name, error=traceback.format_exc()))
+            continue
+        info = getattr(mod, "INSTITUTION", None)
+        if isinstance(info, InstitutionInfo):
+            registered.append(info)
+
+    registered.sort(key=lambda i: i.name)
+    failures.sort(key=lambda f: f.module)
+    skipped.sort()
+    return registered, failures, skipped
