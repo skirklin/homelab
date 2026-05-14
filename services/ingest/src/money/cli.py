@@ -449,6 +449,187 @@ def serve(ctx: click.Context, port: int, host: str) -> None:
         db.close()
 
 
+def _resolve_capture_path(capture_ref: str, unresolved: bool) -> Path:
+    """Resolve a capture reference (filename, substring, institution name, or
+    'latest') against the appropriate capture directory.
+
+    Returns the resolved Path. Raises click.ClickException on miss / ambiguity.
+    """
+    from money.config import DATA_DIR
+
+    directory = DATA_DIR / ("unresolved_captures" if unresolved else "network_logs")
+    if not directory.is_dir():
+        raise click.ClickException(f"Directory does not exist: {directory}")
+
+    files = sorted(
+        (p for p in directory.glob("*.json")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not files:
+        raise click.ClickException(f"No capture files in {directory}.")
+
+    # 'latest' keyword
+    if capture_ref == "latest":
+        return files[0]
+
+    # Exact filename match (with or without .json)
+    for f in files:
+        if f.name == capture_ref or f.stem == capture_ref:
+            return f
+
+    # Institution-name match: any filename starting with `<ref>_`. Return newest.
+    inst_matches = [f for f in files if f.name.startswith(f"{capture_ref}_")]
+    if inst_matches:
+        return inst_matches[0]
+
+    # Substring match against filenames
+    sub_matches = [f for f in files if capture_ref in f.name]
+    if len(sub_matches) == 1:
+        return sub_matches[0]
+    if len(sub_matches) > 1:
+        candidates = "\n  ".join(f.name for f in sub_matches[:10])
+        raise click.ClickException(
+            f"Ambiguous capture ref '{capture_ref}'. Candidates:\n  {candidates}"
+        )
+    raise click.ClickException(f"No capture matched '{capture_ref}' in {directory}.")
+
+
+def _institution_from_filename(name: str) -> str:
+    """Extract the institution prefix from a capture filename.
+
+    Filenames look like `{institution}_{timestamp}.json`. Returns the bit
+    before the first `_`, or '—' if there's no underscore.
+    """
+    if "_" not in name:
+        return "—"
+    return name.split("_", 1)[0]
+
+
+def _human_size(n: int) -> str:
+    for unit in ("B", "K", "M", "G"):
+        if n < 1024:
+            return f"{n:>4d}{unit}" if unit == "B" else f"{n:>4.0f}{unit}"
+        n_float = n / 1024
+        if n_float < 1024:
+            return f"{n_float:>4.1f}{unit}"
+        n = int(n_float)
+    return f"{n}G"
+
+
+@main.group()
+def capture() -> None:
+    """Inspect and replay captured data from the extension."""
+
+
+@capture.command("list")
+@click.option("--unresolved", is_flag=True, help="Scope to /app/.data/unresolved_captures/.")
+@click.option("--limit", "-n", default=10, type=int)
+@click.option("--institution", default=None, help="Filter by institution substring.")
+def capture_list(unresolved: bool, limit: int, institution: str | None) -> None:
+    """List captured network logs (or unresolved captures with --unresolved)."""
+    from datetime import datetime
+
+    from money.config import DATA_DIR
+
+    directory = DATA_DIR / ("unresolved_captures" if unresolved else "network_logs")
+    if not directory.is_dir():
+        click.echo(f"Directory does not exist: {directory}")
+        return
+
+    files = [p for p in directory.glob("*.json")]
+    if institution:
+        files = [p for p in files if institution.lower() in p.name.lower()]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    files = files[:limit]
+
+    if not files:
+        click.echo(f"No captures found in {directory}.")
+        return
+
+    for f in files:
+        stat = f.stat()
+        mtime = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+        inst = _institution_from_filename(f.name)
+        size = _human_size(stat.st_size)
+        click.echo(f"{mtime}  {inst:<18s} {size}  {f.name}")
+
+
+@capture.command("inspect")
+@click.argument("capture_id")
+@click.option("--unresolved", is_flag=True)
+@click.option("--field", default=None, help="Dot-path to a single field, e.g. entries.0.url")
+@click.option("--raw", is_flag=True, help="Dump the full JSON file.")
+def capture_inspect(capture_id: str, unresolved: bool, field: str | None, raw: bool) -> None:
+    """Inspect a single capture: structural summary, a single field, or raw dump."""
+    import json as _json
+
+    path = _resolve_capture_path(capture_id, unresolved)
+
+    if raw:
+        click.echo(path.read_text())
+        return
+
+    data = _json.loads(path.read_text())
+
+    if field:
+        cur: object = data
+        for seg in field.split("."):
+            if isinstance(cur, list):
+                try:
+                    idx = int(seg)
+                except ValueError:
+                    raise click.ClickException(
+                        f"Field path expects integer at list, got '{seg}' (full path: {field})"
+                    ) from None
+                if idx < 0 or idx >= len(cur):
+                    raise click.ClickException(
+                        f"Index {idx} out of range at '{seg}' (full path: {field})"
+                    )
+                cur = cur[idx]
+            elif isinstance(cur, dict):
+                if seg not in cur:
+                    raise click.ClickException(
+                        f"Field '{seg}' not found in dict (full path: {field})"
+                    )
+                cur = cur[seg]
+            else:
+                raise click.ClickException(
+                    f"Cannot descend into {type(cur).__name__} at '{seg}' (full path: {field})"
+                )
+        click.echo(_json.dumps(cur, indent=2))
+        return
+
+    # Structural summary
+    click.echo(f"file:    {path}")
+    if isinstance(data, dict):
+        click.echo(f"keys:    {sorted(data.keys())}")
+        entries = data.get("entries")
+        if isinstance(entries, list):
+            click.echo(f"entries: {len(entries)}")
+            urls = []
+            for e in entries[:30]:
+                if isinstance(e, dict):
+                    url = e.get("url")
+                    if isinstance(url, str):
+                        urls.append(url)
+            if urls:
+                click.echo("urls:")
+                for u in urls:
+                    click.echo(f"  {u}")
+        cookies = data.get("cookies")
+        if isinstance(cookies, list):
+            names = []
+            for c in cookies:
+                if isinstance(c, dict):
+                    n = c.get("name")
+                    if isinstance(n, str):
+                        names.append(n)
+            click.echo(f"cookies: {len(cookies)} ({sorted(names)})")
+    else:
+        click.echo(f"top-level type: {type(data).__name__}")
+
+
 @main.group()
 def login() -> None:
     """Log into financial institutions to capture auth tokens/cookies."""
