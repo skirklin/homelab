@@ -112,10 +112,59 @@ interface CollectionState {
   realUnsub: Promise<UnsubscribeFunc> | null;
 }
 
+/**
+ * Window inside which a recently-seen SSE event proves the realtime channel
+ * is alive — resync() skips any collection that delivered an event in the
+ * last `SSE_FRESH_MS` ms. PocketBase's idle disconnect kicks in at 5 min, so
+ * 90 s is comfortably under the worst-case "we missed everything since the
+ * last live event" window while still catching real drop-outs on the very
+ * next focus tick.
+ */
+const SSE_FRESH_MS = 90 * 1000;
+
 export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   const queue = new MutationQueue();
   const collections = new Map<string, CollectionState>();
   const origin = newId(); // session id for this wrapper instance
+  /** Per-collection timestamp of the most recent SSE-delivered event. */
+  const lastSseEventAt = new Map<string, number>();
+  /**
+   * Set when the PB SDK reports a realtime disconnect with active subscriptions.
+   * Cleared after the next successful PB_CONNECT triggers a resync. This is
+   * the desktop-drop fast path: we don't have to wait for tab focus to
+   * notice the SSE died — the SDK tells us, we resync the moment SSE comes
+   * back. Mobile-suspend doesn't fire onDisconnect (the OS freezes the
+   * network stack silently), which is why we still keep the focus-driven
+   * resync as a backstop.
+   */
+  let realtimeDirty = false;
+  /** Idempotency guard for the disconnect hook + PB_CONNECT subscription. */
+  let realtimeHooked = false;
+
+  function hookRealtimeLifecycle() {
+    if (realtimeHooked) return;
+    const client = pb();
+    if (!client.realtime) return;
+    realtimeHooked = true;
+
+    const prev = client.realtime.onDisconnect;
+    client.realtime.onDisconnect = (activeSubs) => {
+      // Only mark dirty when there were live subscriptions to lose — an
+      // unsubscribe-all teardown also fires this, and we don't want to
+      // resync on graceful close.
+      if (activeSubs && activeSubs.length > 0) realtimeDirty = true;
+      try { prev?.(activeSubs); } catch { /* hook owner errors are theirs */ }
+    };
+
+    // PB_CONNECT fires on every successful (re)connect, including the very
+    // first. We only resync if a prior disconnect armed us — otherwise the
+    // per-collection subscribe() auto-load already delivered initial state.
+    void client.realtime.subscribe("PB_CONNECT", () => {
+      if (!realtimeDirty) return;
+      realtimeDirty = false;
+      void resync();
+    });
+  }
 
   function getColState(name: string): CollectionState {
     let s = collections.get(name);
@@ -147,7 +196,16 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   function ensureRealSubscription(collection: string): Promise<UnsubscribeFunc> {
     const state = getColState(collection);
     if (state.realUnsub) return state.realUnsub;
+    // Hook the realtime lifecycle once — first subscribe is the earliest
+    // we know the app is actually using the channel. Doing it lazily here
+    // avoids materializing pb() in environments that import wpb but never
+    // subscribe (e.g., the test stub before its first subscribe call).
+    hookRealtimeLifecycle();
     state.realUnsub = pb().collection(collection).subscribe("*", (e) => {
+      // Any SSE delivery proves the realtime channel is currently alive for
+      // this collection. Stamp the time so the focus-driven resync can skip
+      // unnecessary refetches on healthy tabs.
+      lastSseEventAt.set(collection, Date.now());
       const action = e.action as "create" | "update" | "delete";
       const record = e.record as RawRecord;
       if (action === "delete") {
@@ -432,16 +490,25 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
    * Re-fetch every active subscription's matching records and reconcile against
    * the local queue. Emits create/update for new or changed records and delete
    * for records that previously matched a filter but no longer exist or no
-   * longer match. Quiet on no-ops (when the queue view matches the server,
-   * notifySubscribers is skipped). One HTTP round-trip per unique
-   * (collection, topic, filter) tuple — same cost as the initial-subscribe
-   * load, run again on focus/interval.
+   * longer match.
+   *
+   * Skips collections whose SSE channel has delivered an event within the
+   * last SSE_FRESH_MS — those are demonstrably alive and a refetch would
+   * be pure overhead. Skips no-op records (queue view already matches the
+   * server) so even an active focus-resync of a chatty tab is silent on
+   * the wire that matters (no notifySubscribers churn).
    */
   async function resync(): Promise<void> {
+    const now = Date.now();
     // Group subscriptions by (collection, topic, filter) to avoid duplicate
     // network calls when multiple components subscribe with the same shape.
     const groups = new Map<string, { collection: string; topic: string; filter?: string; predicate?: (r: RawRecord) => boolean }>();
     for (const [colName, state] of collections) {
+      // SSE-liveness short-circuit: a recent event means the channel is up
+      // and we trust it. The 90 s window comfortably covers any focus blip
+      // while staying well under PB's 5-min idle disconnect.
+      const last = lastSseEventAt.get(colName);
+      if (last !== undefined && now - last < SSE_FRESH_MS) continue;
       for (const sub of state.subscribers) {
         const key = `${colName}|${sub.topic}|${sub.filter ?? ""}`;
         if (groups.has(key)) continue;

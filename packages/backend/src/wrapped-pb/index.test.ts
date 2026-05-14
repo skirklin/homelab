@@ -19,7 +19,19 @@ interface StubCollection {
   rejectNext: { create?: unknown; update?: unknown; delete?: unknown };
 }
 
-function makeStubPb(): { pb: PocketBase; emit: (col: string, e: { action: string; record: RecordModel }) => void; col: (n: string) => StubCollection } {
+interface StubRealtime {
+  onDisconnect?: (activeSubs: string[]) => void;
+  pbConnectCbs: Set<(e: unknown) => void>;
+  /** Test-only: simulate the SDK detecting a disconnect-then-reconnect. */
+  simulateDropAndReconnect: (activeSubs: string[]) => void;
+}
+
+function makeStubPb(): {
+  pb: PocketBase;
+  emit: (col: string, e: { action: string; record: RecordModel }) => void;
+  col: (n: string) => StubCollection;
+  realtime: StubRealtime;
+} {
   const cols = new Map<string, StubCollection>();
   const get = (n: string): StubCollection => {
     let c = cols.get(n);
@@ -30,7 +42,26 @@ function makeStubPb(): { pb: PocketBase; emit: (col: string, e: { action: string
     return c;
   };
 
+  const realtime: StubRealtime = {
+    pbConnectCbs: new Set(),
+    simulateDropAndReconnect(activeSubs: string[]) {
+      this.onDisconnect?.(activeSubs);
+      for (const cb of this.pbConnectCbs) cb({});
+    },
+  };
+
   const stub = {
+    realtime: {
+      get onDisconnect() { return realtime.onDisconnect; },
+      set onDisconnect(fn) { realtime.onDisconnect = fn; },
+      async subscribe(topic: string, cb: (e: unknown) => void) {
+        if (topic === "PB_CONNECT") {
+          realtime.pbConnectCbs.add(cb);
+          return async () => { realtime.pbConnectCbs.delete(cb); };
+        }
+        return async () => {};
+      },
+    },
     collection: (name: string) => {
       const c = get(name);
       return {
@@ -99,6 +130,7 @@ function makeStubPb(): { pb: PocketBase; emit: (col: string, e: { action: string
       for (const cb of c.realtimeCbs) cb(e);
     },
     col: get,
+    realtime,
   };
 }
 
@@ -502,6 +534,97 @@ describe("wrapPocketBase resync", () => {
     const del = events.find((e) => e.id === "a");
     expect(del, "resync should synthesize a delete for the missing record").toBeDefined();
     expect(del!.action).toBe("delete");
+  });
+
+  it("auto-resyncs on PB_CONNECT after the SDK reports a disconnect — no focus event needed", async () => {
+    // Desktop fast path: SDK reports the drop, autoreconnects, fires
+    // PB_CONNECT, and we resync immediately. This is what makes the
+    // failure window seconds instead of "next time the user happens to
+    // refocus the tab."
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    events.length = 0;
+
+    // Peer creates a record server-side while SSE is presumed dead.
+    const peer: RecordModel = {
+      id: "peer", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "",
+    } as unknown as RecordModel;
+    stub.col("items").records.set("peer", peer);
+
+    // SDK reports drop+reconnect. wpb should resync without us calling it.
+    stub.realtime.simulateDropAndReconnect(["items"]);
+    // Resync is fire-and-forget inside the hook — give it a tick to land.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(events.find((e) => e.id === "peer"), "PB_CONNECT after onDisconnect should trigger resync").toBeDefined();
+  });
+
+  it("does not resync on PB_CONNECT when there was no prior disconnect (initial connect)", async () => {
+    // PB_CONNECT also fires on the very first connect. Resyncing then would
+    // duplicate the per-subscribe initial load.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const seed: RecordModel = {
+      id: "a", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "",
+    } as unknown as RecordModel;
+    stub.col("items").records.set("a", seed);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    events.length = 0;
+
+    // Simulate a bare PB_CONNECT (no prior onDisconnect — e.g., the initial
+    // connect that just completed). resync must NOT fire.
+    for (const cb of stub.realtime.pbConnectCbs) cb({});
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(events, "bare PB_CONNECT should not trigger resync").toHaveLength(0);
+  });
+
+  it("skips collections whose SSE channel just delivered an event", async () => {
+    // The cost-control invariant: a chatty foregrounded tab whose SSE is
+    // demonstrably alive should pay nothing on focus. We mark the channel
+    // fresh by emitting an SSE event, then assert resync didn't refetch.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    events.length = 0;
+
+    // SSE delivers a live event — channel is proven alive.
+    const live: RecordModel = {
+      id: "live", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "",
+    } as unknown as RecordModel;
+    stub.emit("items", { action: "create", record: live });
+    events.length = 0;
+
+    // Peer creates a record server-side. If resync ran, it would synthesize
+    // a create. Because the channel is fresh, it must not.
+    const peer: RecordModel = {
+      id: "peer", list: "L1", collectionId: "items", collectionName: "items", created: "", updated: "",
+    } as unknown as RecordModel;
+    stub.col("items").records.set("peer", peer);
+
+    await wpb.resync();
+    expect(events.find((e) => e.id === "peer"), "resync should skip a recently-live channel").toBeUndefined();
   });
 
   it("emits nothing when the server state matches the local view", async () => {

@@ -86,11 +86,18 @@ function useOptimisticErrorToast() {
 }
 
 /**
- * Force a wpb.resync() on tab focus, pageshow, and on a slow interval while
- * the page is visible. Compensates for PocketBase's 5-minute realtime idle
- * disconnect + mobile-network SSE failures where the SDK's auto-reconnect
- * misses events (the symptom: one user adds an item, another user staring
- * at the same list never sees it until they refresh).
+ * Resync subscriptions only when the user re-engages with the tab AND we
+ * have reason to suspect the realtime channel may be stale.
+ *
+ * Polling on a fixed interval was the wrong default — when SSE is working,
+ * a steady GET storm is pure overhead. The case we actually need to handle
+ * is the mobile-resume one: phone backgrounded, OS suspended the SSE
+ * connection or dropped events past PocketBase's 5-min idle disconnect,
+ * user comes back to the tab. focus/pageshow/visibilitychange fire at
+ * exactly that moment, and that's the only time we should pay for a
+ * reconcile. wpb.resync() additionally short-circuits when SSE has
+ * delivered an event very recently, so a foregrounded chatty tab does
+ * nothing on every focus blip.
  */
 function useRealtimeResync() {
   useEffect(() => {
@@ -102,23 +109,15 @@ function useRealtimeResync() {
         .finally(() => { inFlight = null; });
     };
 
-    // pageshow + focus cover phones returning from background (focus alone
-    // misses bfcache restores on iOS); visibilitychange catches in-app tab
-    // switches that fire neither.
     window.addEventListener("focus", probe);
     window.addEventListener("pageshow", probe);
     const visHandler = () => { if (document.visibilityState === "visible") probe(); };
     document.addEventListener("visibilitychange", visHandler);
 
-    // Periodic probe so a foregrounded tab that's been idle past the 5-min
-    // server-side disconnect still catches up without user interaction.
-    const interval = setInterval(probe, 60 * 1000);
-
     return () => {
       window.removeEventListener("focus", probe);
       window.removeEventListener("pageshow", probe);
       document.removeEventListener("visibilitychange", visHandler);
-      clearInterval(interval);
     };
   }, []);
 }
