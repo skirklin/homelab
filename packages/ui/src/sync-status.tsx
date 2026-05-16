@@ -34,7 +34,9 @@ interface SyncState {
   label: string;
   /** Number of pending mutations within the scoped collections. */
   pending: number;
-  /** Age of oldest pending mutation in ms, null if none. */
+  /** Subset that have already failed at least once and are awaiting retry. */
+  errored: number;
+  /** Age of oldest pending or errored mutation in ms, null if none. */
   oldestAgeMs: number | null;
 }
 
@@ -44,6 +46,15 @@ interface SyncState {
  * When provided, only those collections are considered (used by per-app
  * header dots — keeps the shopping dot from turning yellow because a
  * pending write exists in upkeep).
+ *
+ * Severity ladder (highest match wins):
+ *  - severe: any errored writes (already failed once, will retry on
+ *    next PB_CONNECT/focus), or in-flight writes older than the severe
+ *    threshold
+ *  - warn:   realtime channel down + subscribers present (stale view
+ *    risk), or in-flight writes older than the grace window
+ *  - ok:     no pending, or all pending are still inside the grace
+ *    window (normal in-flight latency)
  */
 function deriveSyncState(
   snapshot: WpbSnapshot,
@@ -58,24 +69,46 @@ function deriveSyncState(
 
   const hasAnySubscriber = scope.some((c) => c.subscribers > 0);
   const pending = scope.reduce((sum, c) => sum + c.pendingMutations, 0);
+  const errored = scope.reduce((sum, c) => sum + c.erroredMutations, 0);
   const oldestPendingAt = scope
     .map((c) => c.oldestPendingAt)
     .filter((t): t is number => t !== null)
     .reduce<number | null>((acc, t) => (acc === null || t < acc ? t : acc), null);
+  const oldestErroredAt = scope
+    .map((c) => c.oldestErroredAt)
+    .filter((t): t is number => t !== null)
+    .reduce<number | null>((acc, t) => (acc === null || t < acc ? t : acc), null);
+
+  // Errored writes mean the optimistic UI is showing changes the server
+  // hasn't agreed to. Surface immediately — no grace window — because
+  // they've already failed at least once.
+  if (errored > 0) {
+    const ageStr = oldestErroredAt !== null ? formatAge(now - oldestErroredAt) : "";
+    const plural = errored === 1 ? "change" : "changes";
+    return {
+      severity: "severe",
+      label: ageStr
+        ? `${errored} ${plural} stuck retrying — ${ageStr} old`
+        : `${errored} ${plural} stuck retrying`,
+      pending,
+      errored,
+      oldestAgeMs: oldestErroredAt !== null ? now - oldestErroredAt : null,
+    };
+  }
 
   // Realtime channel down while we have subscribers in scope = stale view
   // risk for those collections.
   if (hasAnySubscriber && (!snapshot.realtimeConnected || snapshot.realtimeDirty)) {
-    return { severity: "warn", label: "Reconnecting to live updates…", pending, oldestAgeMs: null };
+    return { severity: "warn", label: "Reconnecting to live updates…", pending, errored: 0, oldestAgeMs: null };
   }
 
   if (pending === 0 || oldestPendingAt === null) {
-    return { severity: "ok", label: "Synced", pending: 0, oldestAgeMs: null };
+    return { severity: "ok", label: "Synced", pending: 0, errored: 0, oldestAgeMs: null };
   }
 
   const age = now - oldestPendingAt;
   if (age < PENDING_GRACE_MS) {
-    return { severity: "ok", label: "Synced", pending, oldestAgeMs: age };
+    return { severity: "ok", label: "Synced", pending, errored: 0, oldestAgeMs: age };
   }
 
   if (age >= PENDING_SEVERE_MS) {
@@ -84,6 +117,7 @@ function deriveSyncState(
       severity: "severe",
       label: `${pending} ${plural} not synced — oldest ${formatAge(age)} old`,
       pending,
+      errored: 0,
       oldestAgeMs: age,
     };
   }
@@ -92,6 +126,7 @@ function deriveSyncState(
     severity: "warn",
     label: pending === 1 ? "Saving 1 change…" : `Saving ${pending} changes…`,
     pending,
+    errored: 0,
     oldestAgeMs: age,
   };
 }
@@ -128,12 +163,13 @@ function DetailsPanel({ debug, onClose }: DetailsPanelProps) {
 
   const summary = [
     `realtime: ${snapshot.realtimeConnected ? "connected" : "disconnected"}${snapshot.realtimeDirty ? " (dirty)" : ""}`,
-    `total pending: ${snapshot.totalPending}`,
+    `total pending: ${snapshot.totalPending} (errored: ${snapshot.totalErrored})`,
     snapshot.oldestPendingAt ? `oldest pending: ${formatAge(Date.now() - snapshot.oldestPendingAt)} ago` : "no pending",
+    snapshot.oldestErroredAt ? `oldest errored: ${formatAge(Date.now() - snapshot.oldestErroredAt)} ago` : "no errored",
     "",
     "per-collection:",
     ...Object.entries(snapshot.collections).map(([name, c]) =>
-      `  ${name}  subs=${c.subscribers}  pending=${c.pendingMutations}  lastSse=${
+      `  ${name}  subs=${c.subscribers}  pending=${c.pendingMutations}  errored=${c.erroredMutations}  lastSse=${
         c.lastSseEventAt ? `${formatAge(Date.now() - c.lastSseEventAt)} ago` : "never"
       }`),
     "",

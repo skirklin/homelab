@@ -649,3 +649,146 @@ describe("wrapPocketBase resync", () => {
     expect(events, "resync on unchanged state should be a no-op").toHaveLength(0);
   });
 });
+
+describe("wrapPocketBase transient-error queue + retry", () => {
+  it("503 keeps the mutation in queue, does NOT revert the optimistic view, and does not throw", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    stub.col("items").rejectNext.create = Object.assign(new Error("service unavailable"), { status: 503 });
+
+    let caught: unknown = null;
+    try {
+      await wpb.collection("items").create({ id: "a", list: "L1" });
+    } catch (err) {
+      caught = err;
+    }
+
+    // Caller's await resolves successfully — transient errors don't throw.
+    expect(caught, "transient error must not throw to the caller").toBeNull();
+
+    // Optimistic UI stays — no revert delete event for record "a".
+    const itemEvents = events.filter((e) => e.id === "a");
+    expect(itemEvents.length).toBeGreaterThan(0);
+    expect(itemEvents.every((e) => e.action !== "delete"), "no revert delete should be emitted").toBe(true);
+
+    // Snapshot reflects the errored state.
+    const snap = wpb.debug.snapshot();
+    expect(snap.totalErrored).toBe(1);
+    expect(snap.collections.items.erroredMutations).toBe(1);
+    // The mutation is still pending in the queue (optimistic UI source).
+    expect(snap.totalPending).toBe(1);
+  });
+
+  it("network failure (no status) is classified transient", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+    await wpb.collection("items").subscribe(
+      "*", () => {},
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    // No status — simulates fetch throwing (offline, CORS, etc.)
+    stub.col("items").rejectNext.create = new Error("Failed to fetch");
+
+    let caught: unknown = null;
+    try {
+      await wpb.collection("items").create({ id: "a", list: "L1" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeNull();
+    expect(wpb.debug.snapshot().totalErrored).toBe(1);
+  });
+
+  it("permanent error (403) drains the mutation, emits revert, and throws — unchanged from prior behavior", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    stub.col("items").rejectNext.create = Object.assign(new Error("forbidden"), { status: 403 });
+
+    let caught: unknown = null;
+    try {
+      await wpb.collection("items").create({ id: "a", list: "L1" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(WrappedPbError);
+    expect(events.filter((e) => e.id === "a").some((e) => e.action === "delete")).toBe(true);
+    expect(wpb.debug.snapshot().totalErrored).toBe(0);
+  });
+
+  it("retryErrored re-fires queued writes; success drains them", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+    await wpb.collection("items").subscribe(
+      "*", () => {},
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    // First attempt fails transiently.
+    stub.col("items").rejectNext.create = Object.assign(new Error("temporarily down"), { status: 503 });
+    await wpb.collection("items").create({ id: "a", list: "L1", name: "walnuts" });
+    expect(wpb.debug.snapshot().totalErrored).toBe(1);
+
+    // Network recovers — next create succeeds. Retry the queued write.
+    // (rejectNext is one-shot; not setting it means the call succeeds.)
+    await wpb.retryErrored();
+    // Give microtasks a tick to flush — dispatchMutation in retryErrored
+    // is fire-and-forget (void), so the in-memory state updates after
+    // the awaited Promise.all but the test needs one settle.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(wpb.debug.snapshot().totalErrored).toBe(0);
+    expect(wpb.debug.snapshot().totalPending).toBe(0);
+    // The record landed on the server.
+    expect(stub.col("items").records.has("a")).toBe(true);
+  });
+
+  it("retryErrored leaves the mutation queued if the retry also fails transiently (attempts bumps)", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+    await wpb.collection("items").subscribe(
+      "*", () => {},
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    stub.col("items").rejectNext.create = Object.assign(new Error("down 1"), { status: 503 });
+    await wpb.collection("items").create({ id: "a", list: "L1" });
+
+    stub.col("items").rejectNext.create = Object.assign(new Error("down 2"), { status: 503 });
+    await wpb.retryErrored();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(wpb.debug.snapshot().totalErrored).toBe(1);
+    // Two attempts now — first dispatch + one retry. Event log should
+    // include the second mutation-error event.
+    const errorEvents = wpb.debug.events().filter((e) => e.kind === "mutation-error");
+    expect(errorEvents.length).toBe(2);
+    expect((errorEvents[1].detail as { attempts?: number }).attempts).toBe(2);
+  });
+
+  it("retryErrored is a no-op when there are no errored writes", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+    const eventsBefore = wpb.debug.events().length;
+    await wpb.retryErrored();
+    const eventsAfter = wpb.debug.events().length;
+    expect(eventsAfter, "no retry-batch event should be recorded").toBe(eventsBefore);
+  });
+});

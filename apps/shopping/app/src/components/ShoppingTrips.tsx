@@ -148,9 +148,11 @@ export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
     const normalized = ingredient.toLowerCase().trim();
     const historyEntry = state.history.find((h) => h.ingredient.toLowerCase() === normalized);
     const categoryId = historyEntry?.categoryId || "uncategorized";
-    shopping.addItem(listId, ingredient, userId, categoryId, note).catch((error) => {
-      console.error("Failed to add item:", error);
-    });
+    // wpb handles transient errors by queueing for retry; permanent errors
+    // bubble up as unhandled WrappedPbError rejections that the global
+    // useOptimisticErrorToast surfaces. Locally catching here would
+    // swallow both and produce silent data loss.
+    void shopping.addItem(listId, ingredient, userId, categoryId, note);
   };
 
   return (

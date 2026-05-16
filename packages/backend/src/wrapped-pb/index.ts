@@ -104,6 +104,14 @@ export interface WrappedPocketBase {
    */
   resync(): Promise<void>;
   /**
+   * Re-fire every mutation whose dispatch failed transiently (network
+   * blip, 5xx, 429, etc.). Wired internally to PB_CONNECT; BackendProvider
+   * also calls it on focus/visibilitychange so phones picking back up
+   * drain queued writes without the user having to retry by hand. No-op
+   * when there are no errored writes.
+   */
+  retryErrored(): Promise<void>;
+  /**
    * Observability handle: ring-buffered event log + live snapshot. Exists so
    * the next "Angela's phone didn't see the update" or "my writes vanished
    * after a cache clear" report can be diagnosed from real data instead of
@@ -123,6 +131,7 @@ export type WpbEventKind =
   | "mutation-error"   // server rejected a mutation
   | "replay"           // replayPending re-fired a persisted mutation
   | "resync"           // resync() reconciled state for a collection
+  | "retry-batch"      // retryErrored() began a sweep of queued failed writes
   | "disconnect"       // SDK reported realtime drop
   | "connect";         // SDK reported realtime (re)connect
 
@@ -136,9 +145,16 @@ export interface WpbEvent {
 
 export interface WpbCollectionSnapshot {
   subscribers: number;
+  /** All pending mutations for this collection (in-flight + errored). */
   pendingMutations: number;
+  /** Subset of pendingMutations that have failed at least once and are
+   *  waiting on retryErrored() (PB_CONNECT or focus) to re-fire. */
+  erroredMutations: number;
   /** Oldest pending mutation's createdAt (ms epoch), null if none. */
   oldestPendingAt: number | null;
+  /** Oldest errored mutation's first-error timestamp (ms epoch), null if
+   *  no errored mutations in this collection. */
+  oldestErroredAt: number | null;
   /** Last SSE-delivered event timestamp (ms epoch), null if none. */
   lastSseEventAt: number | null;
 }
@@ -149,7 +165,9 @@ export interface WpbSnapshot {
   /** Set when onDisconnect fired and PB_CONNECT hasn't cleared it yet. */
   realtimeDirty: boolean;
   totalPending: number;
+  totalErrored: number;
   oldestPendingAt: number | null;
+  oldestErroredAt: number | null;
   collections: Record<string, WpbCollectionSnapshot>;
 }
 
@@ -195,6 +213,27 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     debugRing.push({ t: Date.now(), ...ev });
     if (debugRing.length > DEBUG_RING_CAPACITY) debugRing.shift();
   }
+
+  /**
+   * Mutations whose dispatch failed transiently and are awaiting retry.
+   * The optimistic queue entry stays — UI shows the pending state — and
+   * retryErrored() re-fires each on PB_CONNECT/focus. Keyed by mutationId.
+   *
+   * Persistence is separate (IndexedDB), so even a page reload preserves
+   * the queue; on the next mount replayPending re-dispatches, the same
+   * classifier runs, and transient failures end up back in this map.
+   */
+  interface ErroredEntry {
+    collection: string;
+    recordId: string;
+    mutationId: string;
+    kind: "create" | "update" | "delete";
+    errorAt: number;
+    attempts: number;
+    lastStatus?: number;
+    lastMessage?: string;
+  }
+  const errored = new Map<string, ErroredEntry>();
   /**
    * Set when the PB SDK reports a realtime disconnect with active subscriptions.
    * Cleared after the next successful PB_CONNECT triggers a resync. This is
@@ -231,6 +270,10 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     // per-collection subscribe() auto-load already delivered initial state.
     void client.realtime.subscribe("PB_CONNECT", () => {
       recordEvent({ kind: "connect", detail: { afterDirty: realtimeDirty } });
+      // Always sweep errored writes on a fresh connection — they may have
+      // failed precisely because the network was down, and now isn't.
+      // Cheap when the errored map is empty (early return inside).
+      void retryErrored();
       if (!realtimeDirty) return;
       realtimeDirty = false;
       void resync();
@@ -310,6 +353,27 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     };
   }
 
+  /**
+   * Build the network call for a given mutation. Centralized so both the
+   * initial dispatch and the retry / replay paths reconstruct the request
+   * the same way without duplicating the kind-switching logic.
+   */
+  function fireMutation(collection: string, recordId: string, mutation: Mutation): () => Promise<RawRecord | null> {
+    return async () => {
+      if (mutation.kind === "set") {
+        const { id: _id, ...body } = mutation.record;
+        const r = await pb().collection(collection).create({ ...body, id: recordId });
+        return r as RawRecord;
+      } else if (mutation.kind === "update") {
+        const r = await pb().collection(collection).update(recordId, mutation.patch);
+        return r as RawRecord;
+      } else {
+        await pb().collection(collection).delete(recordId);
+        return null;
+      }
+    };
+  }
+
   async function dispatchMutation(
     collection: string,
     recordId: string,
@@ -323,6 +387,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       queue.applyServer(collection, recordId, result);
       const drainResult = queue.drainPending(collection, recordId, mutationId);
       void unpersistMutation(mutationId);
+      errored.delete(mutationId);
       recordEvent({ kind: "mutation-ack", collection, recordId, detail: { mutationId, op: kind } });
       // Emit the post-drain view so subscribers see the server-confirmed value.
       const view = drainResult.after;
@@ -333,21 +398,49 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       }
       return result;
     } catch (err) {
-      // Drop mutation, emit current view, re-throw wrapped with op context so
-      // un-awaited rejections can be toasted by a global handler. Replay-specific
-      // errors (idempotent dup/404) are handled by replayPending, not here.
+      const status = (err as { status?: number })?.status;
+      const message = (err as { message?: string })?.message;
+      const transient = isTransientWriteError(err);
+
+      if (transient) {
+        // Keep the mutation in the queue and IndexedDB. The optimistic UI
+        // stays — the caller's await resolves with the synthesized record
+        // via wpb.create/update's `(ack ?? record)` fallback, matching
+        // Firebase's offline-write semantics. retryErrored() re-fires on
+        // PB_CONNECT / focus, so a network blip no longer eats the write.
+        const prior = errored.get(mutationId);
+        errored.set(mutationId, {
+          collection,
+          recordId,
+          mutationId,
+          kind,
+          errorAt: Date.now(),
+          attempts: (prior?.attempts ?? 0) + 1,
+          lastStatus: status,
+          lastMessage: message,
+        });
+        recordEvent({
+          kind: "mutation-error",
+          collection,
+          recordId,
+          detail: { mutationId, op: kind, status, message, transient: true, attempts: (prior?.attempts ?? 0) + 1 },
+        });
+        // Don't notify a revert — the optimistic queue entry is still there,
+        // subscribers' views are unchanged. Don't throw — caller's await
+        // resolves so the UI continues without alarming the user about a
+        // network blip that will likely auto-recover.
+        return null;
+      }
+
+      // Permanent error: drain, drop persisted copy, notify revert, throw.
       const drainResult = queue.drainPending(collection, recordId, mutationId);
       void unpersistMutation(mutationId);
+      errored.delete(mutationId);
       recordEvent({
         kind: "mutation-error",
         collection,
         recordId,
-        detail: {
-          mutationId,
-          op: kind,
-          status: (err as { status?: number })?.status,
-          message: (err as { message?: string })?.message,
-        },
+        detail: { mutationId, op: kind, status, message, transient: false },
       });
       const view = drainResult.after;
       if (view === null) {
@@ -681,34 +774,73 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     });
   }
 
+  /**
+   * Walk every errored mutation and re-fire its dispatch. Wired to
+   * PB_CONNECT and (via BackendProvider) focus/visibilitychange so that
+   * "writes queued during a network blip" land automatically when
+   * conditions improve. No-op when there are no errored writes — cheap to
+   * call on every wake-up.
+   */
+  async function retryErrored(): Promise<void> {
+    if (errored.size === 0) return;
+    // Snapshot the keys up front: dispatchMutation will mutate `errored`
+    // as it runs (success removes, repeat failure re-adds with bumped
+    // attempts), and iterating a Map while it's being mutated is awkward.
+    const entries = Array.from(errored.values());
+    recordEvent({ kind: "retry-batch", detail: { count: entries.length } });
+    for (const entry of entries) {
+      // The mutation must still be in the queue — transient errors keep
+      // it there intentionally. If it's gone, the entry is stale (e.g.,
+      // explicit drain elsewhere), so just drop the errored marker.
+      const pending = queue.allPending().find((p) => p.id === entry.mutationId);
+      if (!pending) {
+        errored.delete(entry.mutationId);
+        continue;
+      }
+      // Leave the errored entry in place — dispatchMutation reads
+      // prior?.attempts to bump the counter on continued failure, and
+      // removes the entry on success. Pre-deleting here would reset the
+      // attempts count and lose retry history.
+      void dispatchMutation(
+        entry.collection,
+        entry.recordId,
+        entry.mutationId,
+        fireMutation(entry.collection, entry.recordId, pending.mutation),
+        entry.kind,
+      ).catch((err) => {
+        // Permanent error path already drained + logged; transient path
+        // re-armed errored map. Either way nothing for us to do here, but
+        // we swallow the rejection so the void doesn't escalate to
+        // unhandledrejection (the user-facing toast handler is bound to
+        // the original caller's awaited dispatch, not the retry).
+        void err;
+      });
+    }
+  }
+
   return {
     collection: makeCollection,
     resync,
+    retryErrored,
     async replayPending() {
       const persisted = await loadAllMutations();
       for (const m of persisted) {
         // Push back into in-memory queue (preserves ordering by createdAt).
         queue.pushPending(m.collection, m.recordId, m.mutation, m.id);
         recordEvent({ kind: "replay", collection: m.collection, recordId: m.recordId, detail: { mutationId: m.id, op: m.mutation.kind } });
-        // Re-fire. Replay swallows idempotent errors (404 on already-deleted,
-        // 409 on already-created); real failures propagate via console.warn
-        // since there's no awaiting caller.
-        const fire = async (): Promise<RawRecord | null> => {
-          if (m.mutation.kind === "set") {
-            const { id: _id, ...body } = m.mutation.record;
-            const r = await pb().collection(m.collection).create({ ...body, id: m.recordId });
-            return r as RawRecord;
-          } else if (m.mutation.kind === "update") {
-            const r = await pb().collection(m.collection).update(m.recordId, m.mutation.patch);
-            return r as RawRecord;
-          } else {
-            await pb().collection(m.collection).delete(m.recordId);
-            return null;
-          }
-        };
+        // Re-fire via the shared mutation-builder. Replay swallows
+        // idempotent errors (404 on already-deleted, 409 on already-
+        // created); transient errors stay queued via dispatchMutation's
+        // normal path and get retried on next PB_CONNECT/focus.
         const kind: "create" | "update" | "delete" =
           m.mutation.kind === "set" ? "create" : m.mutation.kind === "update" ? "update" : "delete";
-        void dispatchMutation(m.collection, m.recordId, m.id, fire, kind).catch((err) => {
+        void dispatchMutation(
+          m.collection,
+          m.recordId,
+          m.id,
+          fireMutation(m.collection, m.recordId, m.mutation),
+          kind,
+        ).catch((err) => {
           // Replay swallows idempotent errors (404 / 409) — those mean PB
           // already converged with our intent.
           const inner = err instanceof WrappedPbError ? err.originalError : err;
@@ -721,20 +853,34 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       events: () => debugRing.slice(),
       snapshot: () => {
         const pending = queue.allPending();
-        const oldest = pending.length > 0 ? pending[0].createdAt : null;
+        const oldestPendingAt = pending.length > 0 ? pending[0].createdAt : null;
+        const erroredEntries = Array.from(errored.values());
+        const oldestErroredAt = erroredEntries.length > 0
+          ? erroredEntries.reduce((min, e) => Math.min(min, e.errorAt), Infinity)
+          : null;
+        const erroredIdsByCollection = new Map<string, number[]>();
+        for (const e of erroredEntries) {
+          const arr = erroredIdsByCollection.get(e.collection) ?? [];
+          arr.push(e.errorAt);
+          erroredIdsByCollection.set(e.collection, arr);
+        }
         const perCol: Record<string, WpbCollectionSnapshot> = {};
         // Per-collection rollup. Walk every collection we know about (either
-        // has subscribers or has pending mutations) so the snapshot covers
-        // the full picture, not just subscribed collections.
+        // has subscribers, pending mutations, or errored entries) so the
+        // snapshot covers the full picture.
         const known = new Set<string>(collections.keys());
         for (const p of pending) known.add(p.collection);
+        for (const e of erroredEntries) known.add(e.collection);
         for (const col of known) {
           const state = collections.get(col);
           const colPending = pending.filter((p) => p.collection === col);
+          const colErroredAts = erroredIdsByCollection.get(col) ?? [];
           perCol[col] = {
             subscribers: state?.subscribers.size ?? 0,
             pendingMutations: colPending.length,
+            erroredMutations: colErroredAts.length,
             oldestPendingAt: colPending.length > 0 ? colPending[0].createdAt : null,
+            oldestErroredAt: colErroredAts.length > 0 ? Math.min(...colErroredAts) : null,
             lastSseEventAt: lastSseEventAt.get(col) ?? null,
           };
         }
@@ -744,7 +890,9 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
           realtimeConnected,
           realtimeDirty,
           totalPending: pending.length,
-          oldestPendingAt: oldest,
+          totalErrored: erroredEntries.length,
+          oldestPendingAt,
+          oldestErroredAt: oldestErroredAt === Infinity || oldestErroredAt === null ? null : oldestErroredAt,
           collections: perCol,
         };
       },
@@ -768,4 +916,38 @@ function isIdempotentReplayError(err: unknown): boolean {
   const e = err as { status?: number; isAbort?: boolean };
   if (e.isAbort) return false;
   return e.status === 404 || e.status === 409;
+}
+
+/**
+ * Classify whether a failed write deserves to stay queued for later retry
+ * (the network/server might recover) or should be dropped + surfaced to the
+ * user immediately (the request is wrong and will never succeed).
+ *
+ * Transient (keep in queue, retry on PB_CONNECT/focus):
+ *  - No status — fetch threw (offline, CORS, DNS, TLS handshake fail)
+ *  - 5xx — server is sick, will likely recover
+ *  - 408 — Request Timeout
+ *  - 425 — Too Early
+ *  - 429 — Rate Limited
+ *  - 401 — token may have expired; AuthProvider's refresh will likely fix it
+ *
+ * Permanent (drain queue + throw):
+ *  - 400 / 422 — bad request / validation
+ *  - 403 — forbidden
+ *  - 404 — wrong target (for fresh writes; replay handles 404 separately)
+ *  - 409 — conflict (duplicate id for fresh writes; replay swallows this)
+ *  - 413 — payload too large
+ *
+ * Aborted requests are not classified as transient — they were intentionally
+ * cancelled (typically by autoCancel) and replaying them is wrong.
+ */
+function isTransientWriteError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { status?: number; isAbort?: boolean };
+  if (e.isAbort) return false;
+  if (e.status === undefined || e.status === 0) return true;
+  if (e.status >= 500 && e.status < 600) return true;
+  if (e.status === 408 || e.status === 425 || e.status === 429) return true;
+  if (e.status === 401) return true;
+  return false;
 }

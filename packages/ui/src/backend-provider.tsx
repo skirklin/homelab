@@ -96,18 +96,20 @@ function useOptimisticErrorToast() {
 }
 
 /**
- * Resync subscriptions only when the user re-engages with the tab AND we
- * have reason to suspect the realtime channel may be stale.
+ * On tab re-engagement, run wpb's two recovery sweeps:
+ *  - resync(): refetch active subscriptions if SSE has gone idle, so the
+ *    user sees writes other peers made while we were backgrounded
+ *  - retryErrored(): re-fire writes that failed transiently (network
+ *    blip, 5xx, 429, 401), so queued-up local edits land without the
+ *    user having to retry by hand
  *
- * Polling on a fixed interval was the wrong default — when SSE is working,
- * a steady GET storm is pure overhead. The case we actually need to handle
- * is the mobile-resume one: phone backgrounded, OS suspended the SSE
- * connection or dropped events past PocketBase's 5-min idle disconnect,
- * user comes back to the tab. focus/pageshow/visibilitychange fire at
- * exactly that moment, and that's the only time we should pay for a
- * reconcile. wpb.resync() additionally short-circuits when SSE has
- * delivered an event very recently, so a foregrounded chatty tab does
- * nothing on every focus blip.
+ * Both short-circuit when there's nothing to do — quiet, healthy tabs
+ * pay nothing on every focus blip. Polling on a fixed interval was the
+ * wrong default and got removed; focus/pageshow/visibilitychange fire
+ * exactly when we need to act. The PB SDK's onDisconnect+PB_CONNECT hook
+ * already drives both on detected drops, so this is the mobile-suspend
+ * backstop (the OS freezes the network stack silently and the SDK never
+ * notices).
  */
 function useRealtimeResync() {
   useEffect(() => {
@@ -115,8 +117,10 @@ function useRealtimeResync() {
     let inFlight: Promise<void> | null = null;
     const probe = () => {
       if (inFlight) return;
-      inFlight = wpb.resync().catch(() => { /* offline or auth blip */ })
-        .finally(() => { inFlight = null; });
+      inFlight = Promise.all([
+        wpb.resync().catch(() => { /* offline or auth blip */ }),
+        wpb.retryErrored().catch(() => { /* same */ }),
+      ]).then(() => undefined).finally(() => { inFlight = null; });
     };
 
     window.addEventListener("focus", probe);

@@ -104,13 +104,17 @@ export function AddItem() {
     );
     const categoryId = historyEntry?.categoryId || "uncategorized";
 
-    // Fire and forget - pass category to skip network lookup
+    // Fire and forget - pass category to skip network lookup. We don't
+    // catch the promise: transient errors stay queued in wpb for automatic
+    // retry on PB_CONNECT/focus, and permanent errors propagate as
+    // unhandled WrappedPbError rejections that BackendProvider's global
+    // useOptimisticErrorToast handler surfaces with a "Couldn't save"
+    // message. A local .catch(console.error) here used to swallow both,
+    // which is how silent data loss happened.
     const trimmedNote = note.trim() || undefined;
     const listId = state.list?.id;
     if (!listId) return;
-    shopping.addItem(listId, trimmedIngredient, user.uid, categoryId, trimmedNote).catch((error) => {
-      console.error("Failed to add item:", error);
-    });
+    void shopping.addItem(listId, trimmedIngredient, user.uid, categoryId, trimmedNote);
   };
 
   return (

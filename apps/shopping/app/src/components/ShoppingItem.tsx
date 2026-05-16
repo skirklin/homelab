@@ -127,13 +127,13 @@ export function ShoppingItemRow({ item }: Props) {
 
     const trimmedNote = editNote.trim();
 
-    // Only update if something changed
+    // Only update if something changed. Errors flow through wpb (transient
+    // → queued for retry, permanent → unhandled rejection → global toast)
+    // so we don't catch locally.
     if (trimmedIngredient !== item.ingredient || trimmedNote !== (item.note || "")) {
-      shopping.updateItem(item.id, {
+      void shopping.updateItem(item.id, {
         ingredient: trimmedIngredient,
         note: trimmedNote,
-      }).catch((error) => {
-        console.error("Failed to update item:", error);
       });
     }
 
