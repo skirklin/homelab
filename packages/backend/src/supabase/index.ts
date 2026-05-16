@@ -19,6 +19,7 @@ import { SupabaseUserBackend } from "./user";
 import { SupabaseLifeBackend } from "./life";
 import { SupabaseRecipesBackend } from "./recipes";
 import { SupabaseUpkeepBackend } from "./upkeep";
+import { SupabaseTravelBackend } from "./travel";
 
 export { initializeSupabase, getSupabase, type SupabaseConfig } from "./client";
 export { SupabaseAuthBackend } from "./auth";
@@ -27,6 +28,7 @@ export { SupabaseUserBackend } from "./user";
 export { SupabaseLifeBackend } from "./life";
 export { SupabaseRecipesBackend } from "./recipes";
 export { SupabaseUpkeepBackend } from "./upkeep";
+export { SupabaseTravelBackend } from "./travel";
 
 export function createSupabaseBackends(getClient: () => SupabaseClient) {
   const client = getClient();
@@ -37,6 +39,6 @@ export function createSupabaseBackends(getClient: () => SupabaseClient) {
     life: new SupabaseLifeBackend(client) as import("../interfaces/life").LifeBackend,
     recipes: new SupabaseRecipesBackend(client) as import("../interfaces/recipes").RecipesBackend,
     upkeep: new SupabaseUpkeepBackend(client) as import("../interfaces/upkeep").UpkeepBackend,
-    // Pending: travel.
+    travel: new SupabaseTravelBackend(client) as import("../interfaces/travel").TravelBackend,
   };
 }
