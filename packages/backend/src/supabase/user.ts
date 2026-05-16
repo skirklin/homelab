@@ -24,7 +24,7 @@ interface UserProfileRow {
   shopping_slugs: Record<string, string> | null;
   household_slugs: Record<string, string> | null;
   travel_slugs: Record<string, string> | null;
-  recipe_boxes: Record<string, string> | null;
+  recipe_boxes: string[] | null;
   fcm_tokens: string[] | null;
   upkeep_notification_mode: NotificationMode | null;
   last_task_notification: string | null;

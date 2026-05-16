@@ -60,10 +60,13 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     avatar_url text,
 
     -- Slug namespaces — small JSON objects keyed by app/category.
+    -- Slug namespaces are objects (slug → resource UUID).
     shopping_slugs jsonb DEFAULT '{}'::jsonb,
     household_slugs jsonb DEFAULT '{}'::jsonb,
     travel_slugs jsonb DEFAULT '{}'::jsonb,
-    recipe_boxes jsonb DEFAULT '{}'::jsonb,
+    -- recipe_boxes is an array of box UUIDs the user has joined/subscribed.
+    -- (PB stored this as a JSON array, not an object — different shape from slugs.)
+    recipe_boxes jsonb DEFAULT '[]'::jsonb,
 
     life_log_id uuid,  -- backfilled in Phase 7 to point at life_logs.id
 
@@ -1170,5 +1173,15 @@ END $$;
 ALTER TABLE shopping_items REPLICA IDENTITY FULL;
 ALTER TABLE recipes        REPLICA IDENTITY FULL;
 ALTER TABLE tasks          REPLICA IDENTITY FULL;
+
+-- Schema-shape repairs: ensure recipe_boxes defaults to [] (it's an array
+-- of box UUIDs, not a slug-style object). Existing rows created with the
+-- earlier {} default get coerced too — losing nothing because no recipes
+-- code has shipped yet.
+ALTER TABLE user_profiles
+    ALTER COLUMN recipe_boxes SET DEFAULT '[]'::jsonb;
+UPDATE user_profiles
+SET recipe_boxes = '[]'::jsonb
+WHERE jsonb_typeof(recipe_boxes) <> 'array';
 
 -- Done.
