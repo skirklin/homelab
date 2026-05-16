@@ -17,6 +17,7 @@ import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
 import { withCache } from "@homelab/backend/cache";
 import { WrappedPbError } from "@homelab/backend/wrapped-pb";
 import { OfflineBanner } from "./online-status";
+import { SyncStatusBanner } from "./sync-status";
 import { registerServiceWorker } from "./sw-register";
 import { useAuth } from "./auth";
 import type {
@@ -31,6 +32,14 @@ import type {
 const allBackends = createPocketBaseBackends(() => getBackend());
 const wpb = allBackends.wpb;
 const backends = withCache(allBackends);
+
+// Expose the wpb debug handle on the global so investigating a "writes
+// vanished after cache clear" or "Angela never saw the update" report is
+// `__wpbDebug.snapshot()` in the console, not a code-spelunking expedition.
+// No-op outside browsers (SSR/tests don't have window).
+if (typeof window !== "undefined") {
+  (window as unknown as { __wpbDebug?: typeof wpb.debug }).__wpbDebug = wpb.debug;
+}
 
 const ShoppingBackendContext = createContext<ShoppingBackend>(backends.shopping);
 const RecipesBackendContext = createContext<RecipesBackend>(backends.recipes);
@@ -141,6 +150,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
             <LifeBackendContext.Provider value={backends.life}>
               <UserBackendContext.Provider value={backends.user}>
                 <OfflineBanner />
+                <SyncStatusBanner debug={wpb.debug} />
                 {children}
               </UserBackendContext.Provider>
             </LifeBackendContext.Provider>

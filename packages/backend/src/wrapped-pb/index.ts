@@ -103,7 +103,68 @@ export interface WrappedPocketBase {
    * on every wake-up. Call on tab focus/pageshow and on a slow interval.
    */
   resync(): Promise<void>;
+  /**
+   * Observability handle: ring-buffered event log + live snapshot. Exists so
+   * the next "Angela's phone didn't see the update" or "my writes vanished
+   * after a cache clear" report can be diagnosed from real data instead of
+   * theories. Auto-exposed on `window.__wpbDebug` in browsers — open the
+   * console and run `__wpbDebug.snapshot()` or `__wpbDebug.events()`.
+   */
+  debug: WpbDebug;
 }
+
+/** Kinds of internal events recorded for post-hoc debugging. */
+export type WpbEventKind =
+  | "subscribe"        // a local subscriber attached
+  | "unsubscribe"      // a local subscriber detached
+  | "sse"              // an SSE event was delivered for a collection
+  | "mutation-push"    // wpb pushed a pending mutation to the queue
+  | "mutation-ack"     // server confirmed a mutation
+  | "mutation-error"   // server rejected a mutation
+  | "replay"           // replayPending re-fired a persisted mutation
+  | "resync"           // resync() reconciled state for a collection
+  | "disconnect"       // SDK reported realtime drop
+  | "connect";         // SDK reported realtime (re)connect
+
+export interface WpbEvent {
+  t: number; // ms since epoch
+  kind: WpbEventKind;
+  collection?: string;
+  recordId?: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface WpbCollectionSnapshot {
+  subscribers: number;
+  pendingMutations: number;
+  /** Oldest pending mutation's createdAt (ms epoch), null if none. */
+  oldestPendingAt: number | null;
+  /** Last SSE-delivered event timestamp (ms epoch), null if none. */
+  lastSseEventAt: number | null;
+}
+
+export interface WpbSnapshot {
+  /** PB SDK's view of whether the realtime EventSource is open. */
+  realtimeConnected: boolean;
+  /** Set when onDisconnect fired and PB_CONNECT hasn't cleared it yet. */
+  realtimeDirty: boolean;
+  totalPending: number;
+  oldestPendingAt: number | null;
+  collections: Record<string, WpbCollectionSnapshot>;
+}
+
+export interface WpbDebug {
+  /** Read-only view of the most recent N events (newest last). */
+  events(): readonly WpbEvent[];
+  /** Live snapshot of subscribers, pending writes, and realtime state. */
+  snapshot(): WpbSnapshot;
+  /** Drop the in-memory ring buffer. Does not touch persisted mutations. */
+  clear(): void;
+}
+
+/** Cap on the ring buffer — enough to cover a few minutes of activity, small
+ *  enough that the memory footprint and stringify cost is irrelevant. */
+const DEBUG_RING_CAPACITY = 200;
 
 // ---- Implementation ----
 
@@ -128,6 +189,12 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   const origin = newId(); // session id for this wrapper instance
   /** Per-collection timestamp of the most recent SSE-delivered event. */
   const lastSseEventAt = new Map<string, number>();
+  /** Ring buffer of recent internal events for debugging. */
+  const debugRing: WpbEvent[] = [];
+  function recordEvent(ev: Omit<WpbEvent, "t">) {
+    debugRing.push({ t: Date.now(), ...ev });
+    if (debugRing.length > DEBUG_RING_CAPACITY) debugRing.shift();
+  }
   /**
    * Set when the PB SDK reports a realtime disconnect with active subscriptions.
    * Cleared after the next successful PB_CONNECT triggers a resync. This is
@@ -152,7 +219,10 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       // Only mark dirty when there were live subscriptions to lose — an
       // unsubscribe-all teardown also fires this, and we don't want to
       // resync on graceful close.
-      if (activeSubs && activeSubs.length > 0) realtimeDirty = true;
+      if (activeSubs && activeSubs.length > 0) {
+        realtimeDirty = true;
+        recordEvent({ kind: "disconnect", detail: { activeSubs } });
+      }
       try { prev?.(activeSubs); } catch { /* hook owner errors are theirs */ }
     };
 
@@ -160,6 +230,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     // first. We only resync if a prior disconnect armed us — otherwise the
     // per-collection subscribe() auto-load already delivered initial state.
     void client.realtime.subscribe("PB_CONNECT", () => {
+      recordEvent({ kind: "connect", detail: { afterDirty: realtimeDirty } });
       if (!realtimeDirty) return;
       realtimeDirty = false;
       void resync();
@@ -208,6 +279,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       lastSseEventAt.set(collection, Date.now());
       const action = e.action as "create" | "update" | "delete";
       const record = e.record as RawRecord;
+      recordEvent({ kind: "sse", collection, recordId: record?.id, detail: { action } });
       if (action === "delete") {
         const { after } = queue.applyServer(collection, record.id, null);
         notifySubscribers(collection, "delete", record);
@@ -251,6 +323,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       queue.applyServer(collection, recordId, result);
       const drainResult = queue.drainPending(collection, recordId, mutationId);
       void unpersistMutation(mutationId);
+      recordEvent({ kind: "mutation-ack", collection, recordId, detail: { mutationId, op: kind } });
       // Emit the post-drain view so subscribers see the server-confirmed value.
       const view = drainResult.after;
       if (result === null && view === null) {
@@ -265,6 +338,17 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       // errors (idempotent dup/404) are handled by replayPending, not here.
       const drainResult = queue.drainPending(collection, recordId, mutationId);
       void unpersistMutation(mutationId);
+      recordEvent({
+        kind: "mutation-error",
+        collection,
+        recordId,
+        detail: {
+          mutationId,
+          op: kind,
+          status: (err as { status?: number })?.status,
+          message: (err as { message?: string })?.message,
+        },
+      });
       const view = drainResult.after;
       if (view === null) {
         // Use the pre-drain view so subscriber predicates (e.g. r.list === X)
@@ -310,6 +394,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const mutation: Mutation = { kind: "set", record };
 
         queue.pushPending(name, id, mutation, mutationId);
+        recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "create" } });
         notifySubscribers(name, "create", record);
         void persistMutation({
           id: mutationId,
@@ -333,6 +418,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const mutation: Mutation = { kind: "update", patch: body };
 
         const { after } = queue.pushPending(name, id, mutation, mutationId);
+        recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "update" } });
         if (after) notifySubscribers(name, "update", after);
         void persistMutation({
           id: mutationId,
@@ -359,6 +445,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         // emit it as the event record — predicates need the full record (with
         // the list/log/parent fields) to match, not just the id.
         const { before } = queue.pushPending(name, id, mutation, mutationId);
+        recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "delete" } });
         notifySubscribers(name, "delete", before ?? { id });
         void persistMutation({
           id: mutationId,
@@ -402,6 +489,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         };
         const state = getColState(name);
         state.subscribers.add(sub);
+        recordEvent({ kind: "subscribe", collection: name, detail: { topic, filter: opts?.filter } });
         await ensureRealSubscription(name);
 
         // Auto-load matching records and seed the queue. Two scopes:
@@ -475,6 +563,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
 
         return async () => {
           state.subscribers.delete(sub);
+          recordEvent({ kind: "unsubscribe", collection: name, detail: { topic } });
           // Tear down real subscription when the last local subscriber leaves.
           if (state.subscribers.size === 0 && state.realUnsub) {
             const unsub = await state.realUnsub;
@@ -503,12 +592,13 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     // Group subscriptions by (collection, topic, filter) to avoid duplicate
     // network calls when multiple components subscribe with the same shape.
     const groups = new Map<string, { collection: string; topic: string; filter?: string; predicate?: (r: RawRecord) => boolean }>();
+    const skippedFresh: string[] = [];
     for (const [colName, state] of collections) {
       // SSE-liveness short-circuit: a recent event means the channel is up
       // and we trust it. The 90 s window comfortably covers any focus blip
       // while staying well under PB's 5-min idle disconnect.
       const last = lastSseEventAt.get(colName);
-      if (last !== undefined && now - last < SSE_FRESH_MS) continue;
+      if (last !== undefined && now - last < SSE_FRESH_MS) { skippedFresh.push(colName); continue; }
       for (const sub of state.subscribers) {
         const key = `${colName}|${sub.topic}|${sub.filter ?? ""}`;
         if (groups.has(key)) continue;
@@ -580,6 +670,15 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         }
       }
     }));
+
+    recordEvent({
+      kind: "resync",
+      detail: {
+        groupsRefetched: Array.from(groups.values()).map((g) => g.collection),
+        skippedFresh,
+        durationMs: Date.now() - now,
+      },
+    });
   }
 
   return {
@@ -590,6 +689,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       for (const m of persisted) {
         // Push back into in-memory queue (preserves ordering by createdAt).
         queue.pushPending(m.collection, m.recordId, m.mutation, m.id);
+        recordEvent({ kind: "replay", collection: m.collection, recordId: m.recordId, detail: { mutationId: m.id, op: m.mutation.kind } });
         // Re-fire. Replay swallows idempotent errors (404 on already-deleted,
         // 409 on already-created); real failures propagate via console.warn
         // since there's no awaiting caller.
@@ -616,6 +716,39 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
           console.warn("[wpb] replay failed for", m.collection, m.recordId, err);
         });
       }
+    },
+    debug: {
+      events: () => debugRing.slice(),
+      snapshot: () => {
+        const pending = queue.allPending();
+        const oldest = pending.length > 0 ? pending[0].createdAt : null;
+        const perCol: Record<string, WpbCollectionSnapshot> = {};
+        // Per-collection rollup. Walk every collection we know about (either
+        // has subscribers or has pending mutations) so the snapshot covers
+        // the full picture, not just subscribed collections.
+        const known = new Set<string>(collections.keys());
+        for (const p of pending) known.add(p.collection);
+        for (const col of known) {
+          const state = collections.get(col);
+          const colPending = pending.filter((p) => p.collection === col);
+          perCol[col] = {
+            subscribers: state?.subscribers.size ?? 0,
+            pendingMutations: colPending.length,
+            oldestPendingAt: colPending.length > 0 ? colPending[0].createdAt : null,
+            lastSseEventAt: lastSseEventAt.get(col) ?? null,
+          };
+        }
+        let realtimeConnected = false;
+        try { realtimeConnected = !!pb().realtime?.isConnected; } catch { /* pb not ready */ }
+        return {
+          realtimeConnected,
+          realtimeDirty,
+          totalPending: pending.length,
+          oldestPendingAt: oldest,
+          collections: perCol,
+        };
+      },
+      clear: () => { debugRing.length = 0; },
     },
   };
 }
