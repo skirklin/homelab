@@ -5,6 +5,10 @@ we can revisit when we have a separate reason to want Postgres (joins, views,
 BI tooling, better backups) or if PocketBase's failure modes become more
 painful than the migration cost.
 
+**See also:** `ELECTRIC-SQL-MIGRATION.md` (Postgres + true cursor-based
+resumable sync, younger project), `SYNC-ENGINE-DESIGN.md` (stay on PB,
+build the sync layer ourselves).
+
 The trigger for this exploration was repeated PocketBase realtime drop-outs on
 mobile (SSE-based, no session resumption). That specific symptom is now
 mitigated by `wpb.resync()` (focus/visibility-driven catch-up) at trivial
@@ -16,9 +20,15 @@ breakage.
 ## Why Supabase (over the alternatives we considered)
 
 - **Realtime quality**: Postgres logical-replication-backed change stream is
-  sequence-numbered, survives reconnects with proper resume semantics. SSE/WAL
-  via Phoenix Channels on WebSocket — qualitatively different from PB's bare
-  SSE. This is the "transcript-like" property we want.
+  sequence-numbered server-side. The realtime transport is Phoenix Channels
+  on WebSocket — qualitatively more reliable than PB's bare SSE.
+  **Important caveat (see also `ELECTRIC-SQL-MIGRATION.md`)**: the
+  `realtime-js` client SDK does *not* expose a per-subscription cursor.
+  On reconnect, you re-subscribe and start from "live now"; you still need
+  a `resync()`-style refetch to catch up on what you missed. This is
+  better transport but the same protocol gap PB has. If proper resumable
+  sync is the requirement (not just a more reliable connection), see
+  Electric or the custom sync-engine option, not this doc.
 - **Auth bundled**: GoTrue (now `auth-server`) ships with the stack —
   email/password, OAuth (Google/Apple/GitHub), magic links, JWT issuance,
   Row-Level Security integration. Same paradigm as Firebase Auth.
@@ -150,8 +160,10 @@ configured server-side. The user's `sub` claim is what matters.
 
 ## What we'd gain
 
-- **Reliable realtime** without focus-based hacks (Postgres replication is
-  sequence-numbered and resumable).
+- **More reliable realtime transport** (WebSocket survives more conditions
+  than SSE; PB's 5-min idle disconnect is gone). The `resync()` plumbing
+  stays — Supabase doesn't expose a client cursor — but it would fire less
+  often because the transport itself drops less.
 - **Proper joins and views** — currently we hand-roll multi-collection
   fetches (e.g., recipe → box → owners). Postgres views collapse these.
 - **BI tooling**: any Postgres-aware tool (Metabase, Grafana, DBeaver, plain
