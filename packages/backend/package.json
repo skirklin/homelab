@@ -14,6 +14,10 @@
       "types": "./src/pocketbase/index.ts",
       "default": "./src/pocketbase/index.ts"
     },
+    "./supabase": {
+      "types": "./src/supabase/index.ts",
+      "default": "./src/supabase/index.ts"
+    },
     "./cache": {
       "types": "./src/cache/index.ts",
       "default": "./src/cache/index.ts"
@@ -32,6 +36,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
     "idb": "^8.0.3",
     "pocketbase": "^0.25.0"
   }
