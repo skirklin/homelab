@@ -1,0 +1,1049 @@
+# Supabase self-hosted stack — Phase 1 of the PB → Supabase migration.
+#
+# Intent: stand the full stack up alongside PocketBase, 100% tailnet-internal,
+# so nothing on kirkl.in changes. PB stays authoritative until cutover.
+#
+# All services run in the `homelab` namespace. Studio + Postgres TCP are
+# reachable on the tailnet only — there's no public Caddy block for any of
+# this until the cutover phase.
+#
+# Bootstrap (run once, before `kubectl apply -k infra/k8s/`):
+#   ./infra/scripts/bootstrap-supabase-secrets.sh
+#
+# That script creates the `supabase-secrets` Secret out-of-band. Same pattern
+# as `beszel-agent-token` / `api-secrets`. The script will refuse to overwrite
+# an existing Secret.
+#
+# Smoke test order after apply:
+#   1. All pods Running:  kubectl get pods -n homelab -l app.kubernetes.io/part-of=supabase
+#   2. psql from laptop:  psql "postgresql://postgres:$PWD@db.tail56ca88.ts.net/postgres"
+#   3. Studio UI:         https://supabase-studio.tail56ca88.ts.net/
+#   4. PostgREST via Kong (in-cluster):
+#        kubectl exec -n homelab deploy/functions -- \
+#          curl -sf -H "apikey: $ANON_KEY" http://supabase-kong:8000/rest/v1/
+#   5. Realtime: confirm the supabase-bootstrap Job completed
+#      (kubectl logs -n homelab job/supabase-bootstrap) and the Realtime pod
+#      accepts a websocket upgrade on /socket/. Full end-to-end "INSERT
+#      triggers event" is Phase 2 territory once the first table + RLS lands.
+#   6. All Gatus supabase checks green.
+#   7. kirkl.in unchanged.
+
+---
+# ---------- Persistent storage ----------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: supabase-db-data
+  namespace: homelab
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# ---------- Postgres (supabase-flavored) ----------
+# Image bundles the supabase init scripts (roles, schemas, publication,
+# extensions) and sets wal_level=logical out of the box.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: supabase-db
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  serviceName: supabase-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: supabase-db
+  template:
+    metadata:
+      labels:
+        app: supabase-db
+        app.kubernetes.io/part-of: supabase
+    spec:
+      containers:
+        - name: postgres
+          image: supabase/postgres:15.6.1.143
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_HOST
+              value: /var/run/postgresql
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: postgres
+            - name: POSTGRES_USER
+              # MUST be supabase_admin (not postgres) so initdb creates
+              # supabase_admin as the bootstrap superuser. The image's
+              # /docker-entrypoint-initdb.d/migrate.sh then connects as
+              # supabase_admin to run init-scripts that create the
+              # `postgres`, `authenticator`, `supabase_auth_admin`, etc.
+              # roles that downstream services authenticate as.
+              value: supabase_admin
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: JWT_EXP
+              value: "3600"
+            # ANON_KEY / SERVICE_ROLE_KEY must be in scope for the supabase/postgres
+            # init scripts so role grants reference the same keys Kong+Studio use.
+            - name: ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+            - name: SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: SERVICE_ROLE_KEY
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "/var/run/postgresql", "-d", "postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-h", "/var/run/postgresql", "-d", "postgres"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 200m
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: supabase-db-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-db
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  selector:
+    app: supabase-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+
+---
+# Tailnet TCP exposure for Postgres (psql / DBeaver / Metabase from laptop).
+# The Tailscale operator picks this up via loadBalancerClass=tailscale and
+# provisions a dedicated tailnet device. Hostname matches the Service name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-db-tailnet
+  namespace: homelab
+  annotations:
+    tailscale.com/hostname: supabase-db
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app: supabase-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+
+---
+# ---------- GoTrue / auth-server ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-auth
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: supabase-auth
+  template:
+    metadata:
+      labels:
+        app: supabase-auth
+        app.kubernetes.io/part-of: supabase
+    spec:
+      containers:
+        - name: auth
+          image: supabase/gotrue:v2.158.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9999
+          env:
+            - name: GOTRUE_API_HOST
+              value: 0.0.0.0
+            - name: GOTRUE_API_PORT
+              value: "9999"
+            - name: API_EXTERNAL_URL
+              # Phase 1: cluster-internal. Magic-link / password-recovery emails
+              # would contain unreachable URLs, but we set MAILER_AUTOCONFIRM=true
+              # below so GoTrue never sends them. This flips to a public hostname
+              # at Phase 8 cutover, when SMTP is configured.
+              value: http://supabase-kong:8000
+            - name: GOTRUE_DB_DRIVER
+              value: postgres
+            - name: GOTRUE_DB_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: GOTRUE_DB_URL
+            - name: GOTRUE_SITE_URL
+              value: https://kirkl.in
+            - name: GOTRUE_URI_ALLOW_LIST
+              value: https://kirkl.in,https://*.kirkl.in
+            - name: GOTRUE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: GOTRUE_JWT_EXP
+              value: "3600"
+            - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+              value: authenticated
+            - name: GOTRUE_DISABLE_SIGNUP
+              value: "false"
+            - name: GOTRUE_MAILER_AUTOCONFIRM
+              # Phase 1: skip email confirmation. SMTP config comes in Phase 2.
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9999
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-auth
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  selector:
+    app: supabase-auth
+  ports:
+    - port: 9999
+      targetPort: 9999
+
+---
+# ---------- PostgREST ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-rest
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: supabase-rest
+  template:
+    metadata:
+      labels:
+        app: supabase-rest
+        app.kubernetes.io/part-of: supabase
+    spec:
+      containers:
+        - name: rest
+          image: postgrest/postgrest:v12.2.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PGRST_DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: PGRST_DB_URI
+            - name: PGRST_DB_SCHEMAS
+              value: public,storage,graphql_public
+            - name: PGRST_DB_ANON_ROLE
+              value: anon
+            - name: PGRST_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: PGRST_DB_USE_LEGACY_GUCS
+              value: "false"
+            - name: PGRST_APP_SETTINGS_JWT_EXP
+              value: "3600"
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-rest
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  selector:
+    app: supabase-rest
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+---
+# ---------- Realtime ----------
+# Phoenix Channels server. Watches Postgres logical-replication WAL via the
+# `supabase_realtime` publication created by the supabase/postgres init.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-realtime
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: supabase-realtime
+  template:
+    metadata:
+      labels:
+        app: supabase-realtime
+        app.kubernetes.io/part-of: supabase
+    spec:
+      containers:
+        - name: realtime
+          image: supabase/realtime:v2.30.34
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+          env:
+            - name: PORT
+              value: "4000"
+            - name: DB_HOST
+              value: supabase-db
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: postgres
+            - name: DB_USER
+              value: supabase_admin
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DB_AFTER_CONNECT_QUERY
+              value: 'SET search_path TO _realtime'
+            - name: DB_ENC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: REALTIME_ENC_KEY
+            - name: API_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: REALTIME_SECRET_KEY_BASE
+            - name: ERL_AFLAGS
+              value: -proto_dist inet_tcp
+            - name: ENABLE_TAILSCALE
+              value: "false"
+            - name: DNS_NODES
+              value: "''"
+            - name: RLIMIT_NOFILE
+              value: "10000"
+            - name: APP_NAME
+              value: realtime
+            - name: FLY_ALLOC_ID
+              value: realtime-local
+            - name: FLY_APP_NAME
+              value: realtime
+          readinessProbe:
+            # Realtime v2.30 doesn't expose /api/health (only per-tenant
+            # health endpoints). TCP-level check is sufficient — once the
+            # Phoenix endpoint is accepting connections, it's ready.
+            tcpSocket:
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-realtime
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  selector:
+    app: supabase-realtime
+  ports:
+    - port: 4000
+      targetPort: 4000
+
+---
+# ---------- postgres-meta (used by Studio) ----------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-meta
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: supabase-meta
+  template:
+    metadata:
+      labels:
+        app: supabase-meta
+        app.kubernetes.io/part-of: supabase
+    spec:
+      containers:
+        - name: meta
+          image: supabase/postgres-meta:v0.84.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PG_META_PORT
+              value: "8080"
+            - name: PG_META_DB_HOST
+              value: supabase-db
+            - name: PG_META_DB_PORT
+              value: "5432"
+            - name: PG_META_DB_NAME
+              value: postgres
+            - name: PG_META_DB_USER
+              value: supabase_admin
+            - name: PG_META_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 300m
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-meta
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  selector:
+    app: supabase-meta
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+# ---------- Kong API gateway (DB-less, declarative config) ----------
+# Routes /auth/v1/*, /rest/v1/*, /realtime/v1/* to the right upstreams and
+# does JWT validation. Standard supabase self-host kong.yml shape.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supabase-kong-config
+  namespace: homelab
+data:
+  kong.yml: |
+    _format_version: "2.1"
+    _transform: true
+
+    consumers:
+      - username: anon
+        keyauth_credentials:
+          - key: "{vault://env/SUPABASE_ANON_KEY}"
+      - username: service_role
+        keyauth_credentials:
+          - key: "{vault://env/SUPABASE_SERVICE_KEY}"
+
+    acls:
+      - consumer: anon
+        group: anon
+      - consumer: service_role
+        group: admin
+
+    services:
+      - name: auth-v1
+        url: http://supabase-auth:9999/
+        routes:
+          - name: auth-v1-route
+            strip_path: true
+            paths:
+              - /auth/v1/
+        plugins:
+          - name: cors
+
+      - name: rest-v1
+        url: http://supabase-rest:3000/
+        routes:
+          - name: rest-v1-route
+            strip_path: true
+            paths:
+              - /rest/v1/
+        plugins:
+          - name: cors
+          - name: key-auth
+            config:
+              hide_credentials: true
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
+
+      - name: realtime-v1
+        url: http://supabase-realtime:4000/socket/
+        routes:
+          - name: realtime-v1-route
+            strip_path: true
+            paths:
+              - /realtime/v1/
+        plugins:
+          - name: cors
+          - name: key-auth
+            config:
+              hide_credentials: false
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
+
+      - name: meta
+        url: http://supabase-meta:8080/
+        routes:
+          - name: meta-route
+            strip_path: true
+            paths:
+              - /pg/
+        plugins:
+          - name: key-auth
+            config:
+              hide_credentials: false
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-kong
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: supabase-kong
+  template:
+    metadata:
+      labels:
+        app: supabase-kong
+        app.kubernetes.io/part-of: supabase
+    spec:
+      containers:
+        - name: kong
+          image: kong:3.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: proxy
+            - containerPort: 8001
+              name: admin
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /var/lib/kong/kong.yml
+            - name: KONG_DNS_ORDER
+              value: LAST,A,CNAME
+            - name: KONG_PLUGINS
+              value: request-transformer,cors,key-auth,acl
+            - name: KONG_NGINX_PROXY_PROXY_BUFFER_SIZE
+              value: 160k
+            - name: KONG_NGINX_PROXY_PROXY_BUFFERS
+              value: 64 160k
+            # Enable the bundled env vault so {vault://env/X} resolves to env var X.
+            # Required because Kong's declarative config does NOT do shell-style
+            # variable substitution; 2.8.1 had no fix, 3.x has the env vault.
+            - name: KONG_VAULTS
+              value: bundled
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+            - name: SUPABASE_SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: SERVICE_ROLE_KEY
+          volumeMounts:
+            - name: kong-config
+              mountPath: /var/lib/kong
+          readinessProbe:
+            # Kong returns 404 at /, so an httpGet probe flaps. A TCP-level
+            # check is sufficient — once Kong's nginx is listening, it's ready.
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+      volumes:
+        - name: kong-config
+          configMap:
+            name: supabase-kong-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-kong
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  selector:
+    app: supabase-kong
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: proxy
+
+---
+# Tailnet Ingress for Kong. Studio's browser code calls Kong by SUPABASE_PUBLIC_URL,
+# so the gateway needs a tailnet hostname during Phase 1 (no public route).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: supabase-kong
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: supabase-kong
+      port:
+        number: 8000
+  tls:
+    - hosts:
+        - supabase-kong
+
+---
+# ---------- Supabase post-init bootstrap (one-shot) ----------
+# Two responsibilities:
+#  1. ALTER USER passwords for the supabase roles that the image's migrate.sh
+#     creates without passwords (authenticator, supabase_auth_admin,
+#     supabase_storage_admin, etc.). Upstream self-host mounts a SQL file
+#     with these statements; we run it as a Job instead.
+#  2. Insert the realtime tenant + postgres_cdc_rls extension row so
+#     Realtime can serve channel subscriptions.
+# Idempotent. Runs after Postgres is reachable and after migrate.sh's init
+# scripts have created the _realtime schema + supabase roles.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: supabase-bootstrap
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: supabase
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: postgres:15-alpine
+          env:
+            - name: PGHOST
+              value: supabase-db
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: postgres
+            - name: PGUSER
+              value: supabase_admin
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              # Wait for Postgres to accept connections.
+              for i in $(seq 1 60); do
+                if pg_isready -q; then break; fi
+                sleep 2
+              done
+              # supabase/postgres:15.6.1.143 creates the `realtime` schema
+              # but supabase/realtime:v2.30 expects `_realtime`. Create it so
+              # Realtime's own Ecto migrator can build its tables there.
+              psql -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS _realtime AUTHORIZATION supabase_admin;'
+              # Set passwords on roles that migrate.sh creates without them.
+              # All share POSTGRES_PASSWORD; downstream services connect with
+              # the same value but as their dedicated role.
+              psql -v ON_ERROR_STOP=1 -v pw="$PGPASSWORD" <<'SQL'
+              ALTER USER authenticator              WITH PASSWORD :'pw';
+              ALTER USER supabase_auth_admin        WITH PASSWORD :'pw';
+              ALTER USER supabase_storage_admin     WITH PASSWORD :'pw';
+              ALTER USER supabase_replication_admin WITH PASSWORD :'pw';
+              ALTER USER supabase_read_only_user    WITH PASSWORD :'pw';
+              ALTER USER dashboard_user             WITH PASSWORD :'pw';
+              SQL
+              # Tenant seed runs only if Realtime has already populated its
+              # schema; otherwise skip (a later Phase-2 run picks it up). The
+              # Job must succeed regardless so Phase 1 isn't gated on it.
+              tenants_exists=$(psql -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='_realtime' AND table_name='tenants'" || true)
+              if [ "$tenants_exists" != "1" ]; then
+                echo "INFO: _realtime.tenants not present yet (Realtime hasn't run its migrator); skipping tenant seed. Phase 2 re-runs this Job."
+                exit 0
+              fi
+              psql -v ON_ERROR_STOP=1 -v jwt_secret="$JWT_SECRET" -v db_password="$PGPASSWORD" <<'SQL'
+              INSERT INTO _realtime.tenants
+                (id, name, external_id, jwt_secret,
+                 max_concurrent_users, max_events_per_second, max_bytes_per_second,
+                 max_channels_per_client, max_joins_per_second, suspend,
+                 postgres_cdc_default, inserted_at, updated_at)
+              SELECT gen_random_uuid(), 'realtime-dev', 'realtime-dev', :'jwt_secret',
+                     200, 100, 100000, 100, 100, false,
+                     'postgres_cdc_rls', now(), now()
+              WHERE NOT EXISTS (
+                SELECT 1 FROM _realtime.tenants WHERE external_id = 'realtime-dev'
+              );
+
+              INSERT INTO _realtime.extensions
+                (id, type, settings, tenant_external_id, inserted_at, updated_at)
+              SELECT gen_random_uuid(), 'postgres_cdc_rls',
+                     jsonb_build_object(
+                       'db_host', 'supabase-db',
+                       'db_port', '5432',
+                       'db_name', 'postgres',
+                       'db_user', 'supabase_admin',
+                       'db_password', :'db_password',
+                       'region', 'us-east-1',
+                       'ssl_enforced', false,
+                       'poll_interval_ms', 100,
+                       'poll_max_record_bytes', 1048576
+                     ),
+                     'realtime-dev', now(), now()
+              WHERE NOT EXISTS (
+                SELECT 1 FROM _realtime.extensions
+                WHERE tenant_external_id = 'realtime-dev' AND type = 'postgres_cdc_rls'
+              );
+              SQL
+          resources:
+            requests:
+              memory: 32Mi
+              cpu: 10m
+            limits:
+              memory: 128Mi
+              cpu: 200m
+
+---
+# ---------- Studio (admin UI) ----------
+# Tailnet-only — no Caddy public block.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-studio
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: supabase-studio
+  template:
+    metadata:
+      labels:
+        app: supabase-studio
+        app.kubernetes.io/part-of: supabase
+    spec:
+      containers:
+        - name: studio
+          image: supabase/studio:20241014-c083b3b
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: STUDIO_PG_META_URL
+              value: http://supabase-meta:8080
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DEFAULT_ORGANIZATION_NAME
+              value: kirkl.in
+            - name: DEFAULT_PROJECT_NAME
+              value: homelab
+            - name: SUPABASE_URL
+              value: http://supabase-kong:8000
+            - name: SUPABASE_PUBLIC_URL
+              # Studio's browser bundle calls Kong by this hostname. Must be a
+              # reachable URL for the user (tailnet), NOT Studio's own host.
+              value: https://supabase-kong.tail56ca88.ts.net
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+            - name: SUPABASE_SERVICE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: SERVICE_ROLE_KEY
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: DASHBOARD_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: DASHBOARD_USERNAME
+            - name: DASHBOARD_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: DASHBOARD_PASSWORD
+            - name: LOGFLARE_API_KEY
+              value: disabled
+            - name: LOGFLARE_URL
+              value: ""
+            - name: NEXT_PUBLIC_ENABLE_LOGS
+              value: "false"
+          readinessProbe:
+            httpGet:
+              # `/api/platform/profile` returns 401 unauthenticated → probe flaps.
+              # `/` is served 200 by Next.js once Studio is up.
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 50m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-studio
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  selector:
+    app: supabase-studio
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: supabase-studio
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: supabase-studio
+      port:
+        number: 3000
+  tls:
+    - hosts:
+        - supabase-studio
+
+---
+# ---------- Phase 2 schema migration (one-shot) ----------
+# Applies infra/supabase/schema.sql against Postgres. The ConfigMap
+# `supabase-schema-sql` is created out-of-band by
+# infra/scripts/sync-supabase-schema.sh (same pattern as supabase-secrets).
+# The Job is idempotent — the SQL itself uses IF NOT EXISTS and DROP+CREATE
+# for policies, so re-running just no-ops.
+#
+# To re-run after editing schema.sql:
+#   ./infra/scripts/sync-supabase-schema.sh
+# The script updates the ConfigMap, deletes the existing Job, and applies
+# fresh.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: supabase-schema-migrate
+  namespace: homelab
+  labels:
+    app.kubernetes.io/part-of: supabase
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: supabase
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: postgres:15-alpine
+          env:
+            - name: PGHOST
+              value: supabase-db
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: postgres
+            - name: PGUSER
+              value: supabase_admin
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: POSTGRES_PASSWORD
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              # Wait for Postgres.
+              for i in $(seq 1 60); do
+                if pg_isready -q; then break; fi
+                sleep 2
+              done
+              # Wait for `auth.users` (GoTrue migrations) — our FKs reference it.
+              for i in $(seq 1 60); do
+                exists=$(psql -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='auth' AND table_name='users'" || true)
+                if [ "$exists" = "1" ]; then break; fi
+                sleep 2
+              done
+              # Apply.
+              psql -v ON_ERROR_STOP=1 -f /sql/schema.sql
+          volumeMounts:
+            - name: schema-sql
+              mountPath: /sql
+              readOnly: true
+          resources:
+            requests:
+              memory: 32Mi
+              cpu: 10m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+      volumes:
+        - name: schema-sql
+          configMap:
+            name: supabase-schema-sql
