@@ -28,6 +28,7 @@ import type {
   LifeBackend,
   UserBackend,
 } from "@homelab/backend";
+import type { WpbDebug } from "@homelab/backend/wrapped-pb";
 
 const allBackends = createPocketBaseBackends(() => getBackend());
 const wpb = allBackends.wpb;
@@ -183,4 +184,13 @@ export function useLifeBackend(): LifeBackend {
 
 export function useUserBackend(): UserBackend {
   return useContext(UserBackendContext);
+}
+
+/**
+ * Returns the wpb debug handle for use with <SyncDot> and similar
+ * observability surfaces. Pre-bound to the shared singleton so callers
+ * don't have to know about wpb's construction site.
+ */
+export function useWpbDebug(): WpbDebug {
+  return wpb.debug;
 }

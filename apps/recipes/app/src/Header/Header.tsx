@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { Button, Tooltip } from 'antd';
-import { getBackend } from '@kirkl/shared';
+import { getBackend, SyncDot, useWpbDebug } from '@kirkl/shared';
 import { InboxOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
@@ -9,6 +9,15 @@ import { AppHeader } from '@kirkl/shared';
 import './Header.css';
 import Breadcrumbs from './Breadcrumbs';
 import CookingMode from './CookingMode';
+
+/** Scope SyncDot to recipes' collections. */
+const RECIPES_COLLECTIONS = ["recipe_boxes", "recipes", "recipe_events"] as const;
+
+const TitleWithStatus = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
 
 const UserName = styled.span`
   color: var(--color-text-secondary);
@@ -25,6 +34,7 @@ function Header({ embedded = false }: HeaderProps) {
   const navigate = useNavigate();
   const basePath = useBasePath();
   const user = getBackend().authStore.record;
+  const wpbDebug = useWpbDebug();
 
   // When embedded, no dropdown menu - parent Shell handles account actions
   // When standalone, dropdown has Manage Boxes (for mobile) and Sign Out
@@ -57,7 +67,12 @@ function Header({ embedded = false }: HeaderProps) {
 
   return (
     <AppHeader
-      title={<Breadcrumbs />}
+      title={
+        <TitleWithStatus>
+          <Breadcrumbs />
+          <SyncDot debug={wpbDebug} collections={RECIPES_COLLECTIONS} />
+        </TitleWithStatus>
+      }
       menuItems={menuItems}
       desktopActions={desktopActions}
       mobileActions={mobileActions}

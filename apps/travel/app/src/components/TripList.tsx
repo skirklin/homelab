@@ -7,7 +7,15 @@ import {
   FlagOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { WideContainer } from "@kirkl/shared";
+import { WideContainer, SyncDot, useWpbDebug } from "@kirkl/shared";
+
+/** Scope SyncDot to travel's collections. */
+const TRAVEL_COLLECTIONS = [
+  "travel_logs",
+  "travel_trips",
+  "travel_activities",
+  "travel_itineraries",
+] as const;
 import { useTravelContext } from "../travel-context";
 import { ShareLogButton } from "./ShareLogButton";
 import {
@@ -34,6 +42,12 @@ const PageTitle = styled.h1`
   margin: 0;
   font-size: 20px;
   font-weight: 600;
+`;
+
+const TitleWithStatus = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
 `;
 
 const Toolbar = styled.div`
@@ -336,6 +350,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 export function TripList({ embedded: _embedded = false }: { embedded?: boolean }) {
   const { state } = useTravelContext();
   const navigate = useNavigate();
+  const wpbDebug = useWpbDebug();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<TripStatus | "all">("all");
   const [regionFilter, setRegionFilter] = useState<string>("all");
@@ -443,7 +458,10 @@ export function TripList({ embedded: _embedded = false }: { embedded?: boolean }
   return (
     <WideContainer>
       <PageHeader>
-        <PageTitle>Trips ({filtered.length})</PageTitle>
+        <TitleWithStatus>
+          <PageTitle>Trips ({filtered.length})</PageTitle>
+          <SyncDot debug={wpbDebug} collections={TRAVEL_COLLECTIONS} />
+        </TitleWithStatus>
         <Space size="small">
           {state.log && <ShareLogButton logId={state.log.id} />}
           <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => navigate("new")}>

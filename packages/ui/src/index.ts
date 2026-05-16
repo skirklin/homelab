@@ -10,6 +10,7 @@ export {
   useTravelBackend,
   useLifeBackend,
   useUserBackend,
+  useWpbDebug,
 } from "./backend-provider";
 
 // Auth
@@ -24,7 +25,8 @@ export type { AppStorage } from "./appStorage";
 
 // Online/offline
 export { useOnline, OfflineBanner } from "./online-status";
-export { SyncStatusBanner } from "./sync-status";
+export { SyncStatusBanner, SyncDot } from "./sync-status";
+export type { SyncDotProps } from "./sync-status";
 
 // List Management
 export { ListPicker, JoinList } from "./ListManagement";

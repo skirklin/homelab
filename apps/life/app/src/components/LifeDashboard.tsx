@@ -13,7 +13,19 @@ import {
   WidgetGrid,
   AppHeader,
   useFeedback,
+  SyncDot,
+  useWpbDebug,
 } from "@kirkl/shared";
+
+/** Scope SyncDot to life's collections so a stuck write elsewhere doesn't
+ *  yellow this app's indicator. */
+const LIFE_COLLECTIONS = ["life_logs", "life_events"] as const;
+
+const TitleWithStatus = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
 import { useLifeContext } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
 import { WidgetRenderer } from "./widgets";
@@ -109,6 +121,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const { state, dispatch } = useLifeContext();
   const navigate = useNavigate();
   const life = useLifeBackend();
+  const wpbDebug = useWpbDebug();
   const [showManifestEditor, setShowManifestEditor] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSampleModal, setShowSampleModal] = useState(false);
@@ -434,7 +447,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   return (
     <>
       <AppHeader
-        title="Life Tracker"
+        title={
+          <TitleWithStatus>
+            Life Tracker
+            <SyncDot debug={wpbDebug} collections={LIFE_COLLECTIONS} />
+          </TitleWithStatus>
+        }
         primaryAction={{
           label: "Configure",
           icon: <SettingOutlined />,

@@ -3,12 +3,20 @@ import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button } from "antd";
 import { LogoutOutlined, CheckOutlined, HistoryOutlined, SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
-import { getBackend, AppHeader, ShareModal } from "@kirkl/shared";
+import { getBackend, AppHeader, ShareModal, SyncDot, useWpbDebug } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend } from "@kirkl/shared";
 import { getItemsFromState } from "../selectors";
 import { appStorage, StorageKeys } from "../storage";
-import { SyncIndicator } from "./SyncIndicator";
+
+/** Collections this app subscribes to. Used to scope the SyncDot so the
+ *  shopping dot doesn't yellow because a write is pending in upkeep. */
+const SHOPPING_COLLECTIONS = [
+  "shopping_lists",
+  "shopping_items",
+  "shopping_history",
+  "shopping_trips",
+] as const;
 
 const TitleWithStatus = styled.div`
   display: flex;
@@ -28,6 +36,7 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
   const navigate = useNavigate();
   const { state } = useShoppingContext();
   const shopping = useShoppingBackend();
+  const wpbDebug = useWpbDebug();
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const items = getItemsFromState(state);
   const checkedCount = items.filter((item) => item.checked).length;
@@ -36,7 +45,7 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
   const titleWithStatus = (
     <TitleWithStatus>
       {listName}
-      <SyncIndicator status={state.syncStatus} />
+      <SyncDot debug={wpbDebug} collections={SHOPPING_COLLECTIONS} />
     </TitleWithStatus>
   );
 

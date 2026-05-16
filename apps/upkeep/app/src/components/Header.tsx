@@ -2,7 +2,10 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Popover, Segmented } from "antd";
 import { ShareAltOutlined, LogoutOutlined, PlusOutlined, BellOutlined, BellFilled } from "@ant-design/icons";
-import { AppHeader, ShareModal, useAuth, getBackend, useFeedback } from "@kirkl/shared";
+import { AppHeader, ShareModal, useAuth, getBackend, useFeedback, SyncDot, useWpbDebug } from "@kirkl/shared";
+
+/** Scope SyncDot to upkeep's collections so the dot reflects only this app. */
+const UPKEEP_COLLECTIONS = ["task_lists", "tasks", "task_events"] as const;
 import { useUpkeepContext } from "../upkeep-context";
 import { useUserBackend } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
@@ -12,6 +15,12 @@ import type { NotificationMode } from "../types";
 
 const NotificationPopover = styled.div`
   padding: var(--space-xs);
+`;
+
+const TitleWithStatus = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
 `;
 
 const PopoverTitle = styled.div`
@@ -31,6 +40,7 @@ export function Header({ onAddTask, embedded = false }: HeaderProps) {
   const { state } = useUpkeepContext();
   const { user } = useAuth();
   const userBackend = useUserBackend();
+  const wpbDebug = useWpbDebug();
   const navigate = useNavigate();
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [notificationMode, setNotificationModeState] = useState<NotificationMode>("subscribed");
@@ -144,7 +154,12 @@ export function Header({ onAddTask, embedded = false }: HeaderProps) {
   return (
     <>
       <AppHeader
-        title={listName}
+        title={
+          <TitleWithStatus>
+            {listName}
+            <SyncDot debug={wpbDebug} collections={UPKEEP_COLLECTIONS} />
+          </TitleWithStatus>
+        }
         onBack={() => {
           appStorage.remove(StorageKeys.LAST_LIST);
           navigate("..");

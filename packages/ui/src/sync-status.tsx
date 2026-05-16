@@ -12,8 +12,8 @@
  * the console handle uses, so the future Supabase realtime wrapper just
  * needs to provide compatible shapes for this UI to keep working.
  */
-import { useEffect, useState } from "react";
-import type { WpbDebug, WpbEvent, WpbSnapshot } from "@homelab/backend/wrapped-pb";
+import { useEffect, useMemo, useState } from "react";
+import type { WpbDebug, WpbEvent, WpbSnapshot, WpbCollectionSnapshot } from "@homelab/backend/wrapped-pb";
 
 /** Threshold below which "pending mutations" is treated as transient normal
  *  activity — don't show a banner for a write that's literally in-flight. */
@@ -25,49 +25,74 @@ const PENDING_SEVERE_MS = 30 * 1000;
  *  scan, so 1s is fine and gives the banner a live feel. */
 const POLL_MS = 1000;
 
-interface BannerState {
-  show: boolean;
-  severity: "info" | "warn" | "severe";
-  message: string;
+type Severity = "ok" | "info" | "warn" | "severe";
+
+interface SyncState {
+  /** Aggregate severity. "ok" means everything looks fine. */
+  severity: Severity;
+  /** Short user-facing label. Always non-empty so dot tooltips have text. */
+  label: string;
+  /** Number of pending mutations within the scoped collections. */
+  pending: number;
+  /** Age of oldest pending mutation in ms, null if none. */
+  oldestAgeMs: number | null;
 }
 
-function deriveBanner(snapshot: WpbSnapshot, now: number): BannerState {
-  const hasAnySubscriber = Object.values(snapshot.collections)
-    .some((c) => c.subscribers > 0);
+/**
+ * Compute aggregate sync state across an arbitrary set of collections.
+ * When `collections` is undefined, scope is global (used by the banner).
+ * When provided, only those collections are considered (used by per-app
+ * header dots — keeps the shopping dot from turning yellow because a
+ * pending write exists in upkeep).
+ */
+function deriveSyncState(
+  snapshot: WpbSnapshot,
+  now: number,
+  collections?: readonly string[],
+): SyncState {
+  const scope = collections
+    ? collections
+      .map((name) => snapshot.collections[name])
+      .filter((c): c is WpbCollectionSnapshot => !!c)
+    : Object.values(snapshot.collections);
 
-  // Realtime channel down while we have subscribers = stale view risk.
-  // realtimeDirty means the SDK noticed a drop and hasn't reconnected yet;
-  // realtimeConnected === false means the EventSource isn't open at all.
+  const hasAnySubscriber = scope.some((c) => c.subscribers > 0);
+  const pending = scope.reduce((sum, c) => sum + c.pendingMutations, 0);
+  const oldestPendingAt = scope
+    .map((c) => c.oldestPendingAt)
+    .filter((t): t is number => t !== null)
+    .reduce<number | null>((acc, t) => (acc === null || t < acc ? t : acc), null);
+
+  // Realtime channel down while we have subscribers in scope = stale view
+  // risk for those collections.
   if (hasAnySubscriber && (!snapshot.realtimeConnected || snapshot.realtimeDirty)) {
-    return { show: true, severity: "warn", message: "Reconnecting to live updates…" };
+    return { severity: "warn", label: "Reconnecting to live updates…", pending, oldestAgeMs: null };
   }
 
-  // No pending writes = nothing to surface. Healthy steady state.
-  if (snapshot.totalPending === 0 || snapshot.oldestPendingAt === null) {
-    return { show: false, severity: "info", message: "" };
+  if (pending === 0 || oldestPendingAt === null) {
+    return { severity: "ok", label: "Synced", pending: 0, oldestAgeMs: null };
   }
 
-  const age = now - snapshot.oldestPendingAt;
+  const age = now - oldestPendingAt;
   if (age < PENDING_GRACE_MS) {
-    return { show: false, severity: "info", message: "" };
+    return { severity: "ok", label: "Synced", pending, oldestAgeMs: age };
   }
 
-  const ageLabel = formatAge(age);
   if (age >= PENDING_SEVERE_MS) {
-    const plural = snapshot.totalPending === 1 ? "change" : "changes";
+    const plural = pending === 1 ? "change" : "changes";
     return {
-      show: true,
       severity: "severe",
-      message: `${snapshot.totalPending} ${plural} not synced — oldest ${ageLabel} old`,
+      label: `${pending} ${plural} not synced — oldest ${formatAge(age)} old`,
+      pending,
+      oldestAgeMs: age,
     };
   }
 
   return {
-    show: true,
     severity: "warn",
-    message: snapshot.totalPending === 1
-      ? "Saving 1 change…"
-      : `Saving ${snapshot.totalPending} changes…`,
+    label: pending === 1 ? "Saving 1 change…" : `Saving ${pending} changes…`,
+    pending,
+    oldestAgeMs: age,
   };
 }
 
@@ -206,27 +231,48 @@ function DetailsPanel({ debug, onClose }: DetailsPanelProps) {
   );
 }
 
-const SEVERITY_STYLE: Record<BannerState["severity"], { bg: string; fg: string; border: string }> = {
+const SEVERITY_PILL: Record<Exclude<Severity, "ok">, { bg: string; fg: string; border: string }> = {
   info: { bg: "#e6f4ff", fg: "#0958d9", border: "#91caff" },
   warn: { bg: "#fff7e6", fg: "#874d00", border: "#ffd591" },
   severe: { bg: "#fff1f0", fg: "#a8071a", border: "#ffa39e" },
 };
 
-export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
-  const [snapshot, setSnapshot] = useState<WpbSnapshot>(() => debug.snapshot());
-  const [showPanel, setShowPanel] = useState(false);
+const SEVERITY_DOT: Record<Severity, string> = {
+  ok: "#52c41a",     // green
+  info: "#1677ff",   // blue
+  warn: "#faad14",   // yellow
+  severe: "#ff4d4f", // red
+};
 
+/**
+ * Shared poll loop for snapshot consumers. Polling 1Hz is fine for an
+ * in-memory read; we don't want a per-component setInterval explosion if
+ * multiple consumers (banner + per-app dots) mount at once, but in practice
+ * each render tree mounts ~one of each, so the cost is bounded.
+ */
+function useSnapshot(debug: WpbDebug): WpbSnapshot {
+  const [snapshot, setSnapshot] = useState<WpbSnapshot>(() => debug.snapshot());
   useEffect(() => {
     if (typeof window === "undefined") return;
     const tick = () => setSnapshot(debug.snapshot());
     const interval = setInterval(tick, POLL_MS);
     return () => clearInterval(interval);
   }, [debug]);
+  return snapshot;
+}
 
-  const banner = deriveBanner(snapshot, Date.now());
-  if (!banner.show) return null;
+export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
+  const snapshot = useSnapshot(debug);
+  const [showPanel, setShowPanel] = useState(false);
 
-  const s = SEVERITY_STYLE[banner.severity];
+  const state = deriveSyncState(snapshot, Date.now());
+  // Banner is only the loud surface — silent when everything looks fine.
+  // The persistent per-app dots cover the ambient at-a-glance need.
+  if (state.severity === "ok") {
+    return showPanel ? <DetailsPanel debug={debug} onClose={() => setShowPanel(false)} /> : null;
+  }
+
+  const s = SEVERITY_PILL[state.severity];
   return (
     <>
       <button
@@ -253,7 +299,62 @@ export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
           overflow: "hidden",
           textOverflow: "ellipsis",
         }}
-      >{banner.message}</button>
+      >{state.label}</button>
+      {showPanel ? <DetailsPanel debug={debug} onClose={() => setShowPanel(false)} /> : null}
+    </>
+  );
+}
+
+/**
+ * Compact always-visible per-app health dot.
+ *
+ * Replaces the shopping-only SyncIndicator that was hard-wired to "always
+ * green after first load." Reads live state from wpb scoped to the
+ * collections this app actually subscribes to, so a stuck write in upkeep
+ * doesn't yellow the shopping dot.
+ *
+ * Tap/click opens the same details panel the banner does — gives a way
+ * into the debug info from any app's header even when nothing is wrong
+ * yet, which matters when the problem is on a phone where the console
+ * isn't available.
+ */
+export interface SyncDotProps {
+  debug: WpbDebug;
+  /** Collection names this app subscribes to. Used to scope the indicator
+   *  so each app's dot reflects only its own data. */
+  collections: readonly string[];
+}
+
+export function SyncDot({ debug, collections }: SyncDotProps) {
+  const snapshot = useSnapshot(debug);
+  const [showPanel, setShowPanel] = useState(false);
+  const cols = useMemo(() => [...collections], [collections]);
+  const state = deriveSyncState(snapshot, Date.now(), cols);
+
+  return (
+    <>
+      <button
+        aria-label={`Sync status: ${state.label}`}
+        title={state.label}
+        onClick={() => setShowPanel(true)}
+        style={{
+          width: 14,
+          height: 14,
+          padding: 0,
+          borderRadius: "50%",
+          border: "none",
+          background: SEVERITY_DOT[state.severity],
+          cursor: "pointer",
+          flexShrink: 0,
+          // Subtle pulse on non-ok states so motion draws the eye without
+          // being obnoxious.
+          animation: state.severity === "ok" ? undefined : "kirkl-sync-pulse 1.5s ease-in-out infinite",
+        }}
+      />
+      {/* Single keyframe definition. styled-components is used elsewhere but
+          we keep this component dep-free so it can be dropped into any app
+          header without extra imports. */}
+      <style>{`@keyframes kirkl-sync-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.5 } }`}</style>
       {showPanel ? <DetailsPanel debug={debug} onClose={() => setShowPanel(false)} /> : null}
     </>
   );

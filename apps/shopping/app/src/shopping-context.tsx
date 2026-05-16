@@ -8,8 +8,6 @@ import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 import type { ShoppingItem, ShoppingList, ItemHistory, ShoppingTrip } from "./types";
 import type { ShoppingBackend } from "@homelab/backend";
 
-export type SyncStatus = "synced" | "pending" | "offline";
-
 export interface ShoppingState {
   userSlugs: Record<string, string>;
   list: ShoppingList | null;
@@ -17,7 +15,6 @@ export interface ShoppingState {
   history: ItemHistory[];
   trips: ShoppingTrip[];
   loading: boolean;
-  syncStatus: SyncStatus;
 }
 
 export type ShoppingAction =
@@ -28,8 +25,7 @@ export type ShoppingAction =
   | { type: "CLEAR_ITEMS" }
   | { type: "SET_HISTORY"; history: ItemHistory[] }
   | { type: "SET_TRIPS"; trips: ShoppingTrip[] }
-  | { type: "SET_LOADING"; loading: boolean }
-  | { type: "SET_SYNC_STATUS"; status: SyncStatus };
+  | { type: "SET_LOADING"; loading: boolean };
 
 function reducer(state: ShoppingState, action: ShoppingAction): ShoppingState {
   switch (action.type) {
@@ -55,8 +51,6 @@ function reducer(state: ShoppingState, action: ShoppingAction): ShoppingState {
       return { ...state, trips: action.trips };
     case "SET_LOADING":
       return { ...state, loading: action.loading };
-    case "SET_SYNC_STATUS":
-      return { ...state, syncStatus: action.status };
     default:
       return state;
   }
@@ -69,7 +63,6 @@ const initialState: ShoppingState = {
   history: [],
   trips: [],
   loading: true,
-  syncStatus: "synced",
 };
 
 interface ContextType {
@@ -131,7 +124,6 @@ function subscribeToListViaBackend(
       if (firstItems) {
         firstItems = false;
         dispatch({ type: "SET_LOADING", loading: false });
-        dispatch({ type: "SET_SYNC_STATUS", status: "synced" });
       }
     },
     onHistory: (entries) => {
