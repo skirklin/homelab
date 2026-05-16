@@ -127,6 +127,10 @@ CREATE TABLE IF NOT EXISTS shopping_history (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_shopping_history_list ON shopping_history(list_id);
+-- Upsert target for autocomplete-history merging by normalized ingredient.
+-- The Supabase backend uses `ON CONFLICT (list_id, ingredient) DO UPDATE`.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shopping_history_list_ingredient
+    ON shopping_history(list_id, ingredient);
 
 CREATE TABLE IF NOT EXISTS shopping_trips (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

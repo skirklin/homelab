@@ -14,13 +14,17 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SupabaseAuthBackend } from "./auth";
+import { SupabaseShoppingBackend } from "./shopping";
 
 export { initializeSupabase, getSupabase, type SupabaseConfig } from "./client";
 export { SupabaseAuthBackend } from "./auth";
+export { SupabaseShoppingBackend } from "./shopping";
 
 export function createSupabaseBackends(getClient: () => SupabaseClient) {
+  const client = getClient();
   return {
-    auth: new SupabaseAuthBackend(getClient()) as import("../interfaces/auth").AuthBackend,
-    // Data backends pending — see Phase 3 plan in SUPABASE-MIGRATION.md.
+    auth: new SupabaseAuthBackend(client) as import("../interfaces/auth").AuthBackend,
+    shopping: new SupabaseShoppingBackend(client) as import("../interfaces/shopping").ShoppingBackend,
+    // Pending: user, recipes, upkeep, travel, life.
   };
 }
