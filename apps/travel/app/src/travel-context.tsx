@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   type ReactNode,
 } from "react";
 import { useAuth } from "@kirkl/shared";
@@ -123,12 +124,8 @@ export function TravelProvider({ children }: { children: ReactNode }) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
       }
-      if (logUnsubRef.current) {
-        logUnsubRef.current();
-        logUnsubRef.current = null;
-      }
     };
-  }, [user, userBackend]);
+  }, [user?.uid, userBackend]);
 
   const setCurrentLog = useCallback(
     (logId: string) => {
@@ -173,11 +170,16 @@ export function TravelProvider({ children }: { children: ReactNode }) {
 
       logUnsubRef.current = unsub;
     },
-    [user, travel]
+    [user?.uid, travel]
+  );
+
+  const contextValue = useMemo(
+    () => ({ state, dispatch, setCurrentLog }),
+    [state, setCurrentLog]
   );
 
   return (
-    <TravelContext.Provider value={{ state, dispatch, setCurrentLog }}>
+    <TravelContext.Provider value={contextValue}>
       {children}
     </TravelContext.Provider>
   );

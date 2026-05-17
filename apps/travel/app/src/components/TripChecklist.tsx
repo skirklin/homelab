@@ -67,7 +67,7 @@ export function TripChecklist({ trip }: TripChecklistProps) {
       if (!cancelled) setListId(firstListId || null);
     })();
     return () => { cancelled = true; };
-  }, [user, userBackend]);
+  }, [user?.uid, userBackend]);
 
   // Subscribe to the list's tasks
   useEffect(() => {
@@ -83,7 +83,7 @@ export function TripChecklist({ trip }: TripChecklistProps) {
       onCompletions: () => {},
     });
     return () => { cancelled = true; unsub(); };
-  }, [listId, user, upkeep, tripTag]);
+  }, [listId, user?.uid, upkeep, tripTag]);
 
   const { done, total, pct } = useMemo(() => {
     const total = tasks.length;
