@@ -2,7 +2,7 @@
  * Shopping-specific state management (no auth - that comes from shared)
  */
 
-import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useReducer, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
 import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 import type { ShoppingItem, ShoppingList, ItemHistory, ShoppingTrip } from "./types";
@@ -181,7 +181,7 @@ export function ShoppingProvider({ children }: { children: ReactNode }) {
         listUnsubRef.current = null;
       }
     };
-  }, [user, userBackend]);
+  }, [user?.uid, userBackend]);
 
   const setCurrentList = useCallback((listId: string) => {
     if (!user) return;
@@ -201,10 +201,15 @@ export function ShoppingProvider({ children }: { children: ReactNode }) {
       return;
     }
     listUnsubRef.current = unsub;
-  }, [user, shopping]);
+  }, [user?.uid, shopping]);
+
+  const contextValue = useMemo(
+    () => ({ state, dispatch, setCurrentList }),
+    [state, setCurrentList],
+  );
 
   return (
-    <ShoppingContext.Provider value={{ state, dispatch, setCurrentList }}>
+    <ShoppingContext.Provider value={contextValue}>
       {children}
     </ShoppingContext.Provider>
   );
