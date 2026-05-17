@@ -19,6 +19,23 @@ function recordToUser(record: RecordModel): User {
   };
 }
 
+/**
+ * Structural equality for the User fields we expose. PocketBase's
+ * authStore.onChange fires whenever the underlying record reference
+ * changes — including when our own resync() refetches the users
+ * collection and re-applies the (byte-identical) snapshot. If we let
+ * each of those produce a fresh User reference, every consumer with
+ * `[user]` in a useEffect dep teardowns + re-runs, which thrashes
+ * every wpb subscription downstream and cascades into a realtime
+ * disconnect loop. Keep the prior reference when the data hasn't
+ * actually changed, so consumers see stable identity.
+ */
+function userEquals(a: User | null, b: User | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.id === b.id && a.email === b.email && a.name === b.name;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -39,9 +56,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setLoading(false);
 
-    // Listen for auth changes
+    // Listen for auth changes. Use a functional updater so we can preserve
+    // the previous User reference when the underlying record's exposed
+    // fields haven't actually changed — preventing every consumer with
+    // [user] as a useEffect dep from thrashing on a refetch that produced
+    // a byte-identical record. See userEquals above for the why.
     const unsubscribe = pb.authStore.onChange((_token, record) => {
-      setUser(record ? recordToUser(record) : null);
+      const next = record ? recordToUser(record) : null;
+      setUser((prev) => (userEquals(prev, next) ? prev : next));
     });
 
     // Slide token expiry forward whenever the app is loaded or kept open.
