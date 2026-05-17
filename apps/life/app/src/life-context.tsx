@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, type ReactNode, type Dispatch } from "react";
+import { createContext, useContext, useMemo, useReducer, type ReactNode, type Dispatch } from "react";
 import type { LogEntry, LifeLog, LifeManifest } from "./types";
 
 export interface LifeState {
@@ -68,8 +68,9 @@ const LifeContext = createContext<LifeContextType>({
 
 export function LifeProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const contextValue = useMemo(() => ({ state, dispatch }), [state]);
   return (
-    <LifeContext.Provider value={{ state, dispatch }}>
+    <LifeContext.Provider value={contextValue}>
       {children}
     </LifeContext.Provider>
   );

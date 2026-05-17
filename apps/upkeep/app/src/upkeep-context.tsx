@@ -2,7 +2,7 @@
  * Upkeep-specific state management (no auth - that comes from shared)
  */
 
-import { createContext, useContext, useReducer, useEffect, useRef, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useReducer, useEffect, useMemo, useRef, useCallback, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
 import { useUpkeepBackend, useUserBackend } from "@kirkl/shared";
 import { taskFromBackend, listFromBackend, completionFromBackend } from "./adapters";
@@ -137,12 +137,8 @@ export function UpkeepProvider({ children }: { children: ReactNode }) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
       }
-      if (listUnsubRef.current) {
-        listUnsubRef.current();
-        listUnsubRef.current = null;
-      }
     };
-  }, [user, userBackend]);
+  }, [user?.uid, userBackend]);
 
   // Function to subscribe to a specific list (called by components)
   const setCurrentList = useCallback((listId: string) => {
@@ -166,10 +162,15 @@ export function UpkeepProvider({ children }: { children: ReactNode }) {
       return;
     }
     listUnsubRef.current = unsub;
-  }, [user, upkeep]);
+  }, [user?.uid, upkeep]);
+
+  const contextValue = useMemo(
+    () => ({ state, dispatch, setCurrentList }),
+    [state, setCurrentList],
+  );
 
   return (
-    <UpkeepContext.Provider value={{ state, dispatch, setCurrentList }}>
+    <UpkeepContext.Provider value={contextValue}>
       {children}
     </UpkeepContext.Provider>
   );

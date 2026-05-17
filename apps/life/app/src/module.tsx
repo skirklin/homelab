@@ -63,7 +63,7 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     loadLog();
 
     return () => { cancelled = true; };
-  }, [user, dispatch, life]);
+  }, [user?.uid, dispatch, life]);
 
   if (!state.log) {
     return (
