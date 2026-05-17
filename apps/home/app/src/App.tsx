@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect } from "react";
-import { AuthProvider, useAuth, initializeBackend, ErrorBoundary } from "@kirkl/shared";
+import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary } from "@kirkl/shared";
 import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
 import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
@@ -105,21 +105,23 @@ export function App() {
       <AntApp>
       <BrowserRouter>
         <AuthProvider>
-          <ShoppingProvider>
-            <LifeProvider>
-              <RecipesProvider>
-                <CookingModeProvider>
-                  <ShoppingIntegrationProvider>
-                    <TravelProvider>
-                      <UpkeepProvider>
-                        <AppRoutes />
-                      </UpkeepProvider>
-                    </TravelProvider>
-                  </ShoppingIntegrationProvider>
-                </CookingModeProvider>
-              </RecipesProvider>
-            </LifeProvider>
-          </ShoppingProvider>
+          <BackendProvider>
+            <ShoppingProvider>
+              <LifeProvider>
+                <RecipesProvider>
+                  <CookingModeProvider>
+                    <ShoppingIntegrationProvider>
+                      <TravelProvider>
+                        <UpkeepProvider>
+                          <AppRoutes />
+                        </UpkeepProvider>
+                      </TravelProvider>
+                    </ShoppingIntegrationProvider>
+                  </CookingModeProvider>
+                </RecipesProvider>
+              </LifeProvider>
+            </ShoppingProvider>
+          </BackendProvider>
         </AuthProvider>
       </BrowserRouter>
       </AntApp>
