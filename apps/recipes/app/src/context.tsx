@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useEffect, useMemo, type ReactNode } from 'react';
 import { useAuth } from '@kirkl/shared';
 import type { ActionType, AppState } from './types';
 import { initState, recipeBoxReducer } from './reducer';
@@ -65,10 +65,15 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
     return () => {
       unsub();
     };
-  }, [user, recipes]);
+  }, [user?.uid, recipes]);
+
+  // Memoize the provider value so consumers don't re-render on every
+  // RecipesProvider render — only when state actually changes. dispatch
+  // is reducer-stable, so it doesn't need to be in deps.
+  const contextValue = useMemo(() => ({ state, dispatch }), [state]);
 
   return (
-    <Context.Provider value={{ state, dispatch }}>
+    <Context.Provider value={contextValue}>
       {children}
     </Context.Provider>
   );
