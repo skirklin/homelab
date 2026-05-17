@@ -211,7 +211,7 @@ Implementations live in `packages/backend/src/pocketbase/`. Apps get backends vi
 Whenever you add a new public-facing app or internal service, touch every file in this checklist — partial wiring is the most common source of "why isn't this routing / monitored / deployed":
 
 1. `apps/<name>/` (or service equivalent) — code
-2. `infra/deploy.sh` — add to the `APP_BUILDS` map (or as a special case if it has its own Dockerfile, like `homepage`/`pocketbase`/`ingest`/`functions`)
+2. `infra/deploy.sh` — add to `APP_BUILDS` (Vite frontend served by the shared `app.Dockerfile`) or `SERVICE_BUILDS` (service with its own Dockerfile, like `homepage`/`pocketbase`/`ingest`/`functions`/`event-watcher`). One line in one of the two maps; the build loop is unified. If you created a new manifest file in step 3 below, also add it to `infra/k8s/kustomization.yaml`'s `resources:` — `kubectl apply -k` won't pick it up otherwise.
 3. `infra/k8s/apps.yaml` — `Deployment` + `Service` (skip if it's not a frontend; backend services get their own manifest)
 4. `infra/k8s/caddy.yaml` — public Caddy site block, OR for tailnet-only: `kubectl port-forward` systemd unit + `tailscale serve` rule on the VPS (matches `money`/`ingest`/`beszel`/`gatus` pattern)
 5. `infra/k8s/gatus.yaml` — add a check entry to the `gatus-config` ConfigMap so uptime is monitored from day one

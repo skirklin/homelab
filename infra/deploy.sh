@@ -105,7 +105,19 @@ record_deployment() {
 }
 trap record_deployment EXIT
 
-# App builds: name -> APP_DIR:DIST_DIR[:NGINX_CONF[:NGINX_CONF_DEST]]
+# ─── Build registry ──────────────────────────────────────────────────────────
+# Two flavors of buildable thing:
+#
+#   APP_BUILDS  — Vite frontends that share infra/docker/app.Dockerfile and are
+#                 parameterized by build args (APP, APP_DIR, DIST_DIR, optional
+#                 NGINX_CONF/NGINX_CONF_DEST). Value shape:
+#                     APP_DIR:DIST_DIR[:NGINX_CONF[:NGINX_CONF_DEST]]
+#
+#   SERVICE_BUILDS — Services with their own Dockerfile and no app-level args.
+#                    Value is the Dockerfile path relative to repo root.
+#
+# Adding a new app/service is now exactly one entry in one of these maps —
+# no new elif branch in the build loop.
 declare -A APP_BUILDS=(
     [home]="apps/home/app:dist"
     [recipes]="apps/recipes/app:build"
@@ -114,6 +126,14 @@ declare -A APP_BUILDS=(
     [travel]="apps/travel/app:dist"
     [money]="apps/money:dist:infra/docker/nginx-money.conf"
     [monitor]="apps/monitor/app:dist:apps/monitor/nginx.conf.template:/etc/nginx/templates/default.conf.template"
+)
+
+declare -A SERVICE_BUILDS=(
+    [homepage]="infra/docker/homepage.Dockerfile"
+    [pocketbase]="infra/docker/pocketbase.Dockerfile"
+    [ingest]="infra/docker/ingest.Dockerfile"
+    [functions]="infra/docker/api.Dockerfile"
+    [event-watcher]="infra/docker/event-watcher.Dockerfile"
 )
 
 elapsed() {
@@ -125,10 +145,29 @@ elapsed() {
     fi
 }
 
+# Run `docker build` with the given args and report success/failure.
+# Usage: run_docker_build <app> <progress_prefix> <docker_build_args...>
+run_docker_build() {
+    local app="$1"
+    local prefix="$2"
+    shift 2
+    local push_tag="${PUSH_REGISTRY}/homelab/${app}:latest"
+    local k8s_tag="${K8S_REGISTRY}/${app}:latest"
+    local app_start=$SECONDS
+    echo "${prefix} Building ${app}..."
+    if docker build -q "$@" -t "${push_tag}" -t "${k8s_tag}" . > /dev/null 2>&1; then
+        echo "${prefix} ✓ ${app} ($(elapsed $((SECONDS - app_start))))"
+        return 0
+    else
+        echo "${prefix} ✗ ${app} FAILED"
+        return 1
+    fi
+}
+
 # Build phase
 if [ "$PUSH_ONLY" = false ]; then
     if [ ${#APPS[@]} -eq 0 ]; then
-        BUILD_LIST=("${!APP_BUILDS[@]}" homepage pocketbase ingest functions event-watcher)
+        BUILD_LIST=("${!APP_BUILDS[@]}" "${!SERVICE_BUILDS[@]}")
     else
         BUILD_LIST=("${APPS[@]}")
     fi
@@ -142,83 +181,35 @@ if [ "$PUSH_ONLY" = false ]; then
     echo ""
     for app in "${BUILD_LIST[@]}"; do
         BUILT=$((BUILT + 1))
-        APP_START=$SECONDS
+        PROGRESS="[${BUILT}/${TOTAL}]"
 
-        # Tag for both registries: push registry (for docker push) and k8s registry (for manifests)
-        PUSH_TAG="${PUSH_REGISTRY}/homelab/${app}:latest"
-        K8S_TAG="${K8S_REGISTRY}/${app}:latest"
-
-        if [ "$app" = "homepage" ]; then
-            echo "[${BUILT}/${TOTAL}] Building homepage (static)..."
-            if docker build -q -f infra/docker/homepage.Dockerfile -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
-                echo "[${BUILT}/${TOTAL}] ✓ homepage ($(elapsed $((SECONDS - APP_START))))"
-            else
-                echo "[${BUILT}/${TOTAL}] ✗ homepage FAILED"
-                FAILED=$((FAILED + 1))
-                FAILED_APPS+=("$app")
-            fi
-        elif [ "$app" = "pocketbase" ]; then
-            echo "[${BUILT}/${TOTAL}] Building pocketbase..."
-            if docker build -q -f infra/docker/pocketbase.Dockerfile -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
-                echo "[${BUILT}/${TOTAL}] ✓ pocketbase ($(elapsed $((SECONDS - APP_START))))"
-            else
-                echo "[${BUILT}/${TOTAL}] ✗ pocketbase FAILED"
-                FAILED=$((FAILED + 1))
-                FAILED_APPS+=("$app")
-            fi
-        elif [ "$app" = "ingest" ]; then
-            echo "[${BUILT}/${TOTAL}] Building ingest..."
-            if docker build -q -f infra/docker/ingest.Dockerfile -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
-                echo "[${BUILT}/${TOTAL}] ✓ ingest ($(elapsed $((SECONDS - APP_START))))"
-            else
-                echo "[${BUILT}/${TOTAL}] ✗ ingest FAILED"
-                FAILED=$((FAILED + 1))
-                FAILED_APPS+=("$app")
-            fi
-        elif [ "$app" = "functions" ]; then
-            echo "[${BUILT}/${TOTAL}] Building functions (API service)..."
-            if docker build -q -f infra/docker/api.Dockerfile -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
-                echo "[${BUILT}/${TOTAL}] ✓ functions ($(elapsed $((SECONDS - APP_START))))"
-            else
-                echo "[${BUILT}/${TOTAL}] ✗ functions FAILED"
-                FAILED=$((FAILED + 1))
-                FAILED_APPS+=("$app")
-            fi
-        elif [ "$app" = "event-watcher" ]; then
-            echo "[${BUILT}/${TOTAL}] Building event-watcher..."
-            if docker build -q -f infra/docker/event-watcher.Dockerfile -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
-                echo "[${BUILT}/${TOTAL}] ✓ event-watcher ($(elapsed $((SECONDS - APP_START))))"
-            else
-                echo "[${BUILT}/${TOTAL}] ✗ event-watcher FAILED"
-                FAILED=$((FAILED + 1))
-                FAILED_APPS+=("$app")
-            fi
-        elif [ -n "${APP_BUILDS[$app]+x}" ]; then
+        if [ -n "${APP_BUILDS[$app]+x}" ]; then
+            # Vite frontend → shared app.Dockerfile with build args
             IFS=: read -r app_dir dist_dir nginx_conf nginx_conf_dest <<< "${APP_BUILDS[$app]}"
-            echo "[${BUILT}/${TOTAL}] Building ${app}..."
-            EXTRA_ARGS=""
-            if [ -n "$nginx_conf" ]; then
-                EXTRA_ARGS="--build-arg NGINX_CONF=${nginx_conf}"
+            BUILD_ARGS=(
+                -f infra/docker/app.Dockerfile
+                --build-arg "APP=${app}"
+                --build-arg "APP_DIR=${app_dir}"
+                --build-arg "DIST_DIR=${dist_dir}"
+                --build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}"
+                --build-arg "VITE_DOMAIN=${DOMAIN:-kirkl.in}"
+            )
+            [ -n "$nginx_conf" ] && BUILD_ARGS+=(--build-arg "NGINX_CONF=${nginx_conf}")
+            [ -n "$nginx_conf_dest" ] && BUILD_ARGS+=(--build-arg "NGINX_CONF_DEST=${nginx_conf_dest}")
+            if ! run_docker_build "$app" "$PROGRESS" "${BUILD_ARGS[@]}"; then
+                FAILED=$((FAILED + 1))
+                FAILED_APPS+=("$app")
             fi
-            if [ -n "$nginx_conf_dest" ]; then
-                EXTRA_ARGS="${EXTRA_ARGS} --build-arg NGINX_CONF_DEST=${nginx_conf_dest}"
-            fi
-            if docker build -q -f infra/docker/app.Dockerfile \
-                --build-arg APP="${app}" \
-                --build-arg APP_DIR="${app_dir}" \
-                --build-arg DIST_DIR="${dist_dir}" \
-                --build-arg VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}" \
-                --build-arg VITE_DOMAIN="${DOMAIN:-kirkl.in}" \
-                ${EXTRA_ARGS} \
-                -t "${PUSH_TAG}" -t "${K8S_TAG}" . > /dev/null 2>&1; then
-                echo "[${BUILT}/${TOTAL}] ✓ ${app} ($(elapsed $((SECONDS - APP_START))))"
-            else
-                echo "[${BUILT}/${TOTAL}] ✗ ${app} FAILED"
+        elif [ -n "${SERVICE_BUILDS[$app]+x}" ]; then
+            # Service with its own Dockerfile, no app-level build args
+            if ! run_docker_build "$app" "$PROGRESS" -f "${SERVICE_BUILDS[$app]}"; then
                 FAILED=$((FAILED + 1))
                 FAILED_APPS+=("$app")
             fi
         else
             echo "Unknown app: ${app}" >&2
+            echo "  Known APP_BUILDS: ${!APP_BUILDS[*]}" >&2
+            echo "  Known SERVICE_BUILDS: ${!SERVICE_BUILDS[*]}" >&2
             exit 1
         fi
     done
