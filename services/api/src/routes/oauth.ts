@@ -422,6 +422,32 @@ type LoadClientForTokenResult =
   | { ok: true; client: Record<string, unknown> & { id: string }; adminPb: AdminPb }
   | { ok: false; error: "invalid_client" };
 
+/**
+ * Parse client credentials from a token-endpoint-style request. Prefers
+ * Authorization: Basic (RFC 6749 §2.3.1), falls back to form-encoded
+ * client_id/client_secret. Used by both /token and /revoke so the two paths
+ * never drift on auth shape.
+ */
+function parseClientCredentials(
+  authHeader: string,
+  form: Record<string, unknown>,
+): { clientId: string; clientSecret: string | undefined } {
+  let basicClientId: string | undefined;
+  let basicSecret: string | undefined;
+  if (authHeader.startsWith("Basic ")) {
+    try {
+      const [u, p] = Buffer.from(authHeader.slice(6), "base64").toString("utf-8").split(":");
+      basicClientId = decodeURIComponent(u);
+      basicSecret = decodeURIComponent(p ?? "");
+    } catch {
+      // fall through to form
+    }
+  }
+  const clientId = basicClientId ?? String(form.client_id ?? "");
+  const clientSecret = basicSecret ?? (form.client_secret != null ? String(form.client_secret) : undefined);
+  return { clientId, clientSecret };
+}
+
 async function loadClientForToken(clientId: string, providedSecret: string | undefined): Promise<LoadClientForTokenResult> {
   const adminPb = await getAdminPb();
   let record;
@@ -464,22 +490,7 @@ oauth.post("/token", async (c) => {
     return c.json({ error: "rate_limited" }, 429);
   }
   const form = await c.req.parseBody();
-
-  // Client auth: prefer Authorization: Basic, fall back to form params.
-  const authHeader = c.req.header("Authorization") ?? "";
-  let basicClientId: string | undefined;
-  let basicSecret: string | undefined;
-  if (authHeader.startsWith("Basic ")) {
-    try {
-      const [u, p] = Buffer.from(authHeader.slice(6), "base64").toString("utf-8").split(":");
-      basicClientId = decodeURIComponent(u);
-      basicSecret = decodeURIComponent(p ?? "");
-    } catch {
-      // fall through to form
-    }
-  }
-  const clientId = basicClientId ?? String(form.client_id ?? "");
-  const clientSecret = basicSecret ?? (form.client_secret != null ? String(form.client_secret) : undefined);
+  const { clientId, clientSecret } = parseClientCredentials(c.req.header("Authorization") ?? "", form);
   if (!clientId) return c.json({ error: "invalid_client", error_description: "missing client_id" }, 401);
 
   const clientResult = await loadClientForToken(clientId, clientSecret);
@@ -506,6 +517,18 @@ oauth.post("/token", async (c) => {
     if (new Date(codeRec.expires_at as string) < new Date()) return c.json({ error: "invalid_grant", error_description: "code expired" }, 400);
     if (codeRec.client !== client.id) return c.json({ error: "invalid_grant", error_description: "code/client mismatch" }, 400);
     if (codeRec.redirect_uri !== redirectUri) return c.json({ error: "invalid_grant", error_description: "redirect_uri mismatch" }, 400);
+
+    // RFC 8707 §2: if the token request carries a resource parameter, it must
+    // match the resource bound at authorize time. We don't require the client
+    // to re-send resource — the binding is implicit from the code — but if
+    // they do send one, it has to be the same. Prevents a client from
+    // upgrading the token's intended audience after the user has consented.
+    const requestedResource = form.resource != null ? String(form.resource) : "";
+    const boundResource = (codeRec.resource as string | undefined) ?? "";
+    if (requestedResource && requestedResource !== boundResource) {
+      return c.json({ error: "invalid_target", error_description: "resource mismatch" }, 400);
+    }
+
     if (!verifyPkceS256(codeVerifier, codeRec.code_challenge as string)) {
       return c.json({ error: "invalid_grant", error_description: "PKCE verification failed" }, 400);
     }
@@ -605,10 +628,6 @@ async function issueTokens(
   adminPb: Awaited<ReturnType<typeof getAdminPb>>,
   ctx: { clientPk: string; userPk: string; scope: string; familyId: string },
 ) {
-  // Temporary debug — strip after we confirm post-fix records actually carry
-  // a non-empty family_id in the DB. Logs the path that called us (auth_code
-  // vs refresh) and what family_id we're about to write.
-  console.log(`[oauth-debug] issueTokens family_id="${ctx.familyId}" len=${ctx.familyId.length} user=${ctx.userPk}`);
   const accessToken = generateOpaqueToken("mcpat_", 32);
   const refreshToken = generateOpaqueToken("mcprt_", 48);
   const accessExp = new Date(Date.now() + ACCESS_TOKEN_TTL_SEC * 1000).toISOString();
@@ -647,16 +666,34 @@ async function issueTokens(
 
 oauth.post("/revoke", async (c) => {
   const form = await c.req.parseBody();
+
+  // RFC 7009 §2.1: confidential clients MUST authenticate at the revocation
+  // endpoint. Public PKCE clients (token_endpoint_auth_method === "none") send
+  // client_id only; loadClientForToken accepts that path. Without this gate, a
+  // caller who somehow guessed or leaked a token could also revoke arbitrary
+  // tokens — DoS only, but trivially closable.
+  const { clientId, clientSecret } = parseClientCredentials(c.req.header("Authorization") ?? "", form);
+  if (!clientId) return c.json({ error: "invalid_client", error_description: "missing client_id" }, 401);
+  const clientResult = await loadClientForToken(clientId, clientSecret);
+  if (!clientResult.ok) return c.json({ error: clientResult.error }, 401);
+  const { client, adminPb } = clientResult;
+
   const token = String(form.token ?? "");
   if (!token) return c.body(null, 200); // RFC 7009: respond 200 even when token is missing/unknown
 
   const hash = sha256Hex(token);
-  const adminPb = await getAdminPb();
   for (const collection of ["oauth_access_tokens", "oauth_refresh_tokens"]) {
     try {
       const rec = await adminPb.collection(collection).getFirstListItem(
         adminPb.filter("token_hash = {:h}", { h: hash }),
       );
+      // A token issued to a different client must not be revoked from this
+      // request. Respond 200 either way so we don't leak which client owns
+      // a given token (RFC 7009 doesn't distinguish "not found" from "not
+      // yours" in the response).
+      if (rec.client !== client.id) {
+        return c.body(null, 200);
+      }
       if (collection === "oauth_refresh_tokens") {
         await adminPb.collection(collection).update(rec.id, { revoked: true });
       } else {
