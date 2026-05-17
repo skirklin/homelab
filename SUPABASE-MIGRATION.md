@@ -1,4 +1,27 @@
-# Supabase migration — status + plan
+# Supabase migration — ABANDONED
+
+> **Status: abandoned 2026-05-17.** Phases 1-3 were landed (stack stood up,
+> schema applied, backend impls written) but no app code ever called into
+> Supabase. After working through the migration far enough to feel the
+> real cost, the realtime improvement turned out not to justify it —
+> Supabase's `realtime-js` doesn't expose a per-subscription cursor, so
+> the protocol gap we cared about isn't actually closed (see "What we'd
+> gain" section below for the honest version).
+>
+> Cluster stack torn down, `packages/backend/src/supabase/*`, schema, and
+> bootstrap scripts deleted. This doc is kept verbatim as a record of
+> the design decisions, the gotchas hit during phase 1, and the schema
+> shape — useful reference if we ever resurrect the migration (or a
+> future Postgres-backed alternative) and don't want to re-derive those
+> from scratch. The `legacy_pb_id text UNIQUE` pattern in Phase 2 in
+> particular is worth keeping.
+>
+> See also `ELECTRIC-SQL-MIGRATION.md` (also abandoned, alternative
+> Postgres path) and `SYNC-ENGINE-DESIGN.md` (still live — the option
+> we'd consider if we ever want to fill the cursor gap without
+> migrating the DB).
+
+---
 
 Working document. Drafted 2026-05-13, switched from "plan" to "in flight"
 2026-05-14. Current as of 2026-05-16.

@@ -1,4 +1,18 @@
-# ElectricSQL migration plan
+# ElectricSQL migration plan — NOT PURSUED
+
+> **Status: not pursued 2026-05-17.** Kept for reference because it's
+> the only one of the three options written up that *would* close the
+> cursor gap with an existing tool. If we ever revisit the realtime
+> question and decide the Supabase tradeoff was wrong, this is the
+> next thing to read.
+>
+> Why we didn't pursue: we abandoned the Supabase migration when it
+> turned out not to justify the work (see `SUPABASE-MIGRATION.md`),
+> and chose to either stay on plain PocketBase or build the missing
+> sync layer on top of PB (`SYNC-ENGINE-DESIGN.md`). Electric had a
+> higher migration cost than either.
+
+---
 
 Working document, drafted 2026-05-13. Peer to `SUPABASE-MIGRATION.md` —
 both describe ways out of PocketBase, with different trade-offs.

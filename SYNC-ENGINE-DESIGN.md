@@ -1,9 +1,17 @@
 # Custom sync engine on top of PocketBase
 
-Design sketch, drafted 2026-05-13. Third option alongside
-`SUPABASE-MIGRATION.md` and `ELECTRIC-SQL-MIGRATION.md`. The premise: we
-don't migrate the DB — we add the missing layer (cursor-based resumable
-sync) directly to the stack we have.
+Design sketch, drafted 2026-05-13.
+
+> **Status (2026-05-17): the live alternative.** The Supabase and Electric
+> migrations are abandoned. We're staying on plain PocketBase with
+> `wpb.resync()` for now. This doc is the path we'd take if the resync
+> mitigation doesn't hold up, or if we want to build the missing layer
+> for fun/learning even when things are stable. Re-read the "When to pick
+> this" and "Risks" sections before starting — the access-revocation
+> subtlety in particular needs to be designed in from day one.
+
+The premise: we don't migrate the DB — we add the missing layer
+(cursor-based resumable sync) directly to the stack we have.
 
 The principle: **PocketBase's access model is right for our app; only the
 realtime channel is wrong.** Fix that one thing instead of moving the
