@@ -176,10 +176,6 @@ export function ShoppingProvider({ children }: { children: ReactNode }) {
         slugsUnsubRef.current();
         slugsUnsubRef.current = null;
       }
-      if (listUnsubRef.current) {
-        listUnsubRef.current();
-        listUnsubRef.current = null;
-      }
     };
   }, [user?.uid, userBackend]);
 
