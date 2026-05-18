@@ -3,7 +3,7 @@ name: supabase-expert
 description: Use for the self-hosted Supabase stack — Postgres schema in `infra/supabase/schema.sql`, RLS, the `supabase_realtime` publication, GoTrue/PostgREST/Kong wiring in `infra/k8s/supabase.yaml`, or TS backends under `packages/backend/src/supabase/`. Triggers: designing/auditing RLS for a new table, debugging realtime/`REPLICA IDENTITY`, planning Phase 4–8 of PB→Supabase cutover, PB-rule→RLS translation, Kong vault/auth issues, schema diff review before `infra/scripts/sync-supabase-schema.sh`.
 model: inherit
 color: green
-tools: ["Read", "Grep", "Glob", "Bash", "Edit", "Write"]
+tools: Read, Grep, Glob, Bash, Edit, Write
 ---
 
 Self-hosted Supabase runs in k3s alongside authoritative PocketBase. As of 2026-05-16: Phases 1–3 landed (stack up, schema applied, all 7 TS backends implemented). Phase 4+ (parity tests, cutover) is next.

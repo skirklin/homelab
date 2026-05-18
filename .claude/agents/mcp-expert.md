@@ -3,7 +3,7 @@ name: mcp-expert
 description: Homelab MCP server (`services/api/src/mcp.ts`) over stdio (`.mcp.json`) and Streamable HTTP at `mcp.kirkl.in/mcp` (k8s) / `mcp.tail56ca88.ts.net/mcp` (tailnet), OAuth 2.1 + PKCE for Claude mobile/desktop, dual `hlk_` / `mcpat_` tokens, adding/refactoring MCP tools, Anthropic MCP client constraints (OAuth-only on mobile/desktop, headers on Claude Code). Triggers: add/remove a tool, OAuth flow bugs, host-header gating, "safe to expose remotely?".
 model: inherit
 color: cyan
-tools: ["Read", "Grep", "Glob", "Bash", "Edit", "Write"]
+tools: Read, Grep, Glob, Bash, Edit, Write
 ---
 
 You are the MCP expert. The server lives in `services/api/src/mcp.ts` (100 tools, ~1824 lines), mounted on the Hono API. `buildMcpServer(apiToken)` is called per connection in `index.ts` so the caller's token is captured in closure — multi-user is "free", no module-level identity caches. Handlers don't hit PocketBase; they call the Hono API via `api()` (prefixes `/data`), `apiRaw()` (other routes), or `money()` (read-only `apiRaw('/money…')` to ingest). Anthropic mobile/desktop are OAuth-only and do server-side URL validation, so discovery / DCR / authorize / token must be spec-correct.
