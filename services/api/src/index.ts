@@ -10,6 +10,8 @@ export type AppEnv = {
     userToken: string;
     isApiKey: boolean;
     pb: import("pocketbase").default;
+    /** Roles attached to the authenticating api_tokens record (when present). */
+    tokenRoles: string[];
   };
 };
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
