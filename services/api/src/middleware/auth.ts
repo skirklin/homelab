@@ -19,7 +19,7 @@ export function userClient(token: string): PocketBase {
 // raw token itself. Heap dumps (crash dump → log aggregator, gdb attach,
 // process snapshot) shouldn't surface live bearer tokens. Revocation paths
 // invalidate by hash via `tokenCache.delete(hashToken(rawToken))`.
-export const tokenCache = new Map<string, { userId: string; email: string; isApiKey: boolean; expiresAt: number }>();
+export const tokenCache = new Map<string, { userId: string; email: string; isApiKey: boolean; roles: string[]; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
 
 function cleanCache() {
@@ -68,6 +68,7 @@ export async function authMiddleware(c: Context, next: Next) {
     c.set("userEmail", cached.email);
     c.set("userToken", token);
     c.set("isApiKey", cached.isApiKey);
+    c.set("tokenRoles", cached.roles);
     if (cached.isApiKey) {
       // API tokens use the admin PB client scoped to the user's data
       const adminPb = await getAdminPb();
@@ -100,10 +101,16 @@ export async function authMiddleware(c: Context, next: Next) {
       const userId = user.id;
       const email = user.email as string;
 
+      // OAuth-issued tokens never carry infra roles. Those are reserved for
+      // direct `hlk_` minting by the operator; the OAuth consent flow has no
+      // path to grant `roles: ["infra"]`.
+      const roles: string[] = [];
+
       tokenCache.set(tokenKey, {
         userId,
         email,
         isApiKey: true,
+        roles,
         expiresAt: Date.now() + CACHE_TTL_MS,
       });
 
@@ -111,6 +118,7 @@ export async function authMiddleware(c: Context, next: Next) {
       c.set("userEmail", email);
       c.set("userToken", token);
       c.set("isApiKey", true);
+      c.set("tokenRoles", roles);
       c.set("pb", adminPb);
       return next();
     } catch (err) {
@@ -141,11 +149,32 @@ export async function authMiddleware(c: Context, next: Next) {
 
       const userId = user.id;
       const email = user.email as string;
+      // Role markers on the api_tokens record. Only `hlk_` tokens carry these
+      // — they are stamped manually (or via a follow-on migration) on the
+      // single infra token used by deploy.sh + event-watcher. Defaults to
+      // empty array if the field is missing/null. We accept either an array
+      // or a stringified JSON array to tolerate PB's json-field serialization
+      // quirks across versions.
+      const rawRoles = (record as { roles?: unknown }).roles;
+      let roles: string[] = [];
+      if (Array.isArray(rawRoles)) {
+        roles = rawRoles.filter((r): r is string => typeof r === "string");
+      } else if (typeof rawRoles === "string" && rawRoles.length > 0) {
+        try {
+          const parsed = JSON.parse(rawRoles);
+          if (Array.isArray(parsed)) {
+            roles = parsed.filter((r): r is string => typeof r === "string");
+          }
+        } catch {
+          // ignore — treat as no roles
+        }
+      }
 
       tokenCache.set(tokenKey, {
         userId,
         email,
         isApiKey: true,
+        roles,
         expiresAt: Date.now() + CACHE_TTL_MS,
       });
 
@@ -153,6 +182,7 @@ export async function authMiddleware(c: Context, next: Next) {
       c.set("userEmail", email);
       c.set("userToken", token);
       c.set("isApiKey", true);
+      c.set("tokenRoles", roles);
       c.set("pb", adminPb);
       return next();
     } catch (err) {
@@ -169,10 +199,14 @@ export async function authMiddleware(c: Context, next: Next) {
     const userId = result.record.id;
     const email = result.record.email as string;
 
+    // PB user JWTs never carry infra roles — those live on api_tokens only.
+    const roles: string[] = [];
+
     tokenCache.set(tokenKey, {
       userId,
       email,
       isApiKey: false,
+      roles,
       expiresAt: Date.now() + CACHE_TTL_MS,
     });
 
@@ -180,6 +214,7 @@ export async function authMiddleware(c: Context, next: Next) {
     c.set("userEmail", email);
     c.set("userToken", token);
     c.set("isApiKey", false);
+    c.set("tokenRoles", roles);
     c.set("pb", userClient(token));
     return next();
   } catch (err) {

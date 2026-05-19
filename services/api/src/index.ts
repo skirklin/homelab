@@ -9,6 +9,14 @@ export type AppEnv = {
     userEmail: string;
     userToken: string;
     isApiKey: boolean;
+    /**
+     * Role markers stamped on the caller's `api_tokens` record. Only set
+     * for hlk_ token auth (OAuth `mcpat_` tokens never carry infra roles —
+     * those flow from the human OAuth consent path, never from CI). Used
+     * by routes that gate infra-only writes (e.g. /data/deployments,
+     * /data/pod_events). Empty array for PB-user / OAuth / unscoped paths.
+     */
+    tokenRoles: string[];
     pb: import("pocketbase").default;
   };
 };

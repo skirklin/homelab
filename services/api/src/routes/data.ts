@@ -3,6 +3,7 @@
  * The frontend doesn't use these — it talks to PocketBase directly.
  */
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 
@@ -2145,8 +2146,31 @@ dataRoutes.delete("/travel/proposals/:id", handler(async (c) => {
 // Monitor — deployment history
 // =============================================================================
 
+/**
+ * Authorize an infra-only write. `deployments` and `pod_events` are global
+ * infrastructure collections — not tenant-scoped — so the per-user ownership
+ * pattern doesn't apply. Instead we require the caller's `api_tokens` record
+ * to carry `roles: ["infra"]`. User-minted Settings tokens, OAuth `mcpat_`
+ * tokens, and PB user JWTs never carry this role and are rejected with 403.
+ *
+ * Legitimate callers today: deploy.sh (records deployments via the EXIT
+ * trap) and event-watcher (records pod_events). Both are wired with the
+ * single `HOMELAB_API_TOKEN` from the k8s `api-secrets` Secret; that token's
+ * PB record needs `roles: ["infra"]` set once after migration 0025 ships
+ * (otherwise both writers will 403).
+ */
+function requireInfraRole(c: Context<AppEnv>) {
+  const roles = c.get("tokenRoles") ?? [];
+  if (!roles.includes("infra")) {
+    return c.json({ error: "Forbidden: infra role required" }, 403);
+  }
+  return null;
+}
+
 // Record a deployment. Called by infra/deploy.sh after each run.
 dataRoutes.post("/deployments", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const body = await c.req.json<{
     git_sha: string;
@@ -2208,6 +2232,8 @@ dataRoutes.get("/deployments", handler(async (c) => {
 
 // Delete a deployment record (for cleaning up stray entries).
 dataRoutes.delete("/deployments/:id", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const id = c.req.param("id")!;
   await pb.collection("deployments").delete(id);
@@ -2222,6 +2248,8 @@ dataRoutes.delete("/deployments/:id", handler(async (c) => {
 // Same uid is sent multiple times as count grows; we update last_seen + count
 // rather than inserting duplicates.
 dataRoutes.post("/pod_events", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const body = await c.req.json<{
     uid: string;
@@ -2311,6 +2339,8 @@ dataRoutes.get("/pod_events", handler(async (c) => {
 
 // Delete pod_events older than `before` (ISO timestamp). Used for retention.
 dataRoutes.delete("/pod_events", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const before = c.req.query("before");
   if (!before) return c.json({ error: "before query param required" }, 400);
