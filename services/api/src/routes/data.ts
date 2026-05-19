@@ -3,10 +3,33 @@
  * The frontend doesn't use these — it talks to PocketBase directly.
  */
 import { Hono } from "hono";
+import type PocketBase from "pocketbase";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 
 export const dataRoutes = new Hono<AppEnv>();
+
+/**
+ * Verify `userId` is in `travel_logs[logId].owners`. Returns `false` if the
+ * log doesn't exist OR the user isn't an owner. Use to gate every write
+ * route on the travel surface — admin-PB bypasses collection rules, so
+ * route-level enforcement is the only thing standing between an `hlk_`
+ * token holder and cross-tenant writes into another user's log.
+ */
+async function userOwnsTravelLog(
+  pb: PocketBase,
+  logId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!logId || !userId) return false;
+  try {
+    const log = await pb.collection("travel_logs").getOne(logId);
+    const owners = log.owners;
+    return Array.isArray(owners) && owners.includes(userId);
+  } catch {
+    return false;
+  }
+}
 
 // List recipe boxes for the authenticated user
 dataRoutes.get("/boxes", handler(async (c) => {
@@ -853,6 +876,7 @@ dataRoutes.get("/travel/itineraries", handler(async (c) => {
 // Create a travel trip
 dataRoutes.post("/travel/trips", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const body = await c.req.json<{
     log: string;
     destination: string;
@@ -863,6 +887,9 @@ dataRoutes.post("/travel/trips", handler(async (c) => {
     notes?: string;
   }>();
   if (!body.log || !body.destination) return c.json({ error: "log and destination required" }, 400);
+  if (!(await userOwnsTravelLog(pb, body.log, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const record = await pb.collection("travel_trips").create({
     log: body.log,
@@ -879,9 +906,18 @@ dataRoutes.post("/travel/trips", handler(async (c) => {
 // Update a travel trip
 dataRoutes.patch("/travel/trips/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const body = await c.req.json<Record<string, unknown>>();
-  const record = await pb.collection("travel_trips").update(id, body);
+  const existing = await pb.collection("travel_trips").getOne(id).catch(() => null);
+  if (!existing) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, existing.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  // Reparenting (changing `log`) is not a legitimate operation through this
+  // endpoint — strip it so an attacker can't move the trip into their own log.
+  const { log: _droppedLog, ...safeBody } = body;
+  const record = await pb.collection("travel_trips").update(id, safeBody);
   return c.json({
     id: record.id,
     destination: record.destination,
@@ -896,6 +932,7 @@ dataRoutes.patch("/travel/trips/:id", handler(async (c) => {
 // Create a travel activity
 dataRoutes.post("/travel/activities", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const body = await c.req.json<{
     log: string;
     trip_id?: string;
@@ -918,6 +955,9 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     experienced_at?: string;
   }>();
   if (!body.log || !body.name) return c.json({ error: "log and name required" }, 400);
+  if (!(await userOwnsTravelLog(pb, body.log, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const record = await pb.collection("travel_activities").create({
     log: body.log,
@@ -948,8 +988,14 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
 // accidentally write arbitrary keys.
 dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const body = await c.req.json<Record<string, unknown>>();
+  const existing = await pb.collection("travel_activities").getOne(id).catch(() => null);
+  if (!existing) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, existing.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const allowed = [
     "name", "category", "location", "place_id", "lat", "lng",
     "description", "cost_notes", "duration_estimate", "walk_miles",
@@ -970,6 +1016,7 @@ dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
 // Create a travel itinerary
 dataRoutes.post("/travel/itineraries", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const body = await c.req.json<{
     log: string;
     trip_id: string;
@@ -978,6 +1025,9 @@ dataRoutes.post("/travel/itineraries", handler(async (c) => {
     days?: unknown;
   }>();
   if (!body.log || !body.trip_id || !body.name) return c.json({ error: "log, trip_id, and name required" }, 400);
+  if (!(await userOwnsTravelLog(pb, body.log, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const record = await pb.collection("travel_itineraries").create({
     log: body.log,
@@ -992,7 +1042,13 @@ dataRoutes.post("/travel/itineraries", handler(async (c) => {
 // Delete a travel trip
 dataRoutes.delete("/travel/trips/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const existing = await pb.collection("travel_trips").getOne(id).catch(() => null);
+  if (!existing) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, existing.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("travel_trips").delete(id);
   return c.json({ success: true });
 }));
@@ -1000,7 +1056,13 @@ dataRoutes.delete("/travel/trips/:id", handler(async (c) => {
 // Delete a travel activity
 dataRoutes.delete("/travel/activities/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const existing = await pb.collection("travel_activities").getOne(id).catch(() => null);
+  if (!existing) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, existing.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("travel_activities").delete(id);
   return c.json({ success: true });
 }));
@@ -1008,7 +1070,13 @@ dataRoutes.delete("/travel/activities/:id", handler(async (c) => {
 // Delete a travel itinerary
 dataRoutes.delete("/travel/itineraries/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const existing = await pb.collection("travel_itineraries").getOne(id).catch(() => null);
+  if (!existing) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, existing.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("travel_itineraries").delete(id);
   return c.json({ success: true });
 }));
@@ -1016,9 +1084,17 @@ dataRoutes.delete("/travel/itineraries/:id", handler(async (c) => {
 // Update a travel itinerary
 dataRoutes.patch("/travel/itineraries/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const body = await c.req.json<Record<string, unknown>>();
-  const record = await pb.collection("travel_itineraries").update(id, body);
+  const existing = await pb.collection("travel_itineraries").getOne(id).catch(() => null);
+  if (!existing) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, existing.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  // Same reparent-block as trips/activities.
+  const { log: _droppedLog, ...safeBody } = body;
+  const record = await pb.collection("travel_itineraries").update(id, safeBody);
   return c.json({
     id: record.id,
     name: record.name,
