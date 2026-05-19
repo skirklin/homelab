@@ -4,7 +4,7 @@
  * Verifies the optimistic semantics in isolation — no real network, no
  * EventSource dependency.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type PocketBase from "pocketbase";
 import type { RecordModel, RecordSubscription, UnsubscribeFunc } from "pocketbase";
 import { wrapPocketBase, WrappedPbError } from "./index";
@@ -23,13 +23,26 @@ interface StubCollection {
    * that race against in-flight optimistic mutations.
    */
   gateCreate: Promise<void> | null;
+  /** Number of times `pb.collection(name).subscribe("*", ...)` was invoked. */
+  subscribeCalls: number;
 }
 
 interface StubRealtime {
   onDisconnect?: (activeSubs: string[]) => void;
   pbConnectCbs: Set<(e: unknown) => void>;
+  /** Mirror of PB SDK's `RealtimeService.isConnected` getter. Initially true. */
+  isConnected: boolean;
   /** Test-only: simulate the SDK detecting a disconnect-then-reconnect. */
   simulateDropAndReconnect: (activeSubs: string[]) => void;
+  /**
+   * Test-only: simulate the smoking-gun production scenario where the
+   * EventSource dies (browser tab throttling, Caddy idle timeout, network
+   * blip) and the SDK's `isConnected` flips false WITHOUT firing
+   * `onDisconnect`. This is the failure pattern the watchdog must catch.
+   */
+  simulateSilentDisconnect: () => void;
+  /** Test-only: simulate the EventSource reopening (e.g. after watchdog resubscribe). */
+  simulateReconnect: () => void;
 }
 
 function makeStubPb(): {
@@ -42,7 +55,7 @@ function makeStubPb(): {
   const get = (n: string): StubCollection => {
     let c = cols.get(n);
     if (!c) {
-      c = { records: new Map(), realtimeCbs: new Set(), rejectNext: {}, gateCreate: null };
+      c = { records: new Map(), realtimeCbs: new Set(), rejectNext: {}, gateCreate: null, subscribeCalls: 0 };
       cols.set(n, c);
     }
     return c;
@@ -50,14 +63,29 @@ function makeStubPb(): {
 
   const realtime: StubRealtime = {
     pbConnectCbs: new Set(),
+    isConnected: true,
     simulateDropAndReconnect(activeSubs: string[]) {
+      this.isConnected = false;
       this.onDisconnect?.(activeSubs);
+      this.isConnected = true;
+      for (const cb of this.pbConnectCbs) cb({});
+    },
+    simulateSilentDisconnect() {
+      // Mirrors the SDK quirk: isConnected reads `!!eventSource && !!clientId`,
+      // and a second `disconnect()` after clientId has been cleared (or a
+      // browser-side EventSource close that beats the SDK's error handler)
+      // leaves wpb's lifecycle hook un-notified.
+      this.isConnected = false;
+    },
+    simulateReconnect() {
+      this.isConnected = true;
       for (const cb of this.pbConnectCbs) cb({});
     },
   };
 
   const stub = {
     realtime: {
+      get isConnected() { return realtime.isConnected; },
       get onDisconnect() { return realtime.onDisconnect; },
       set onDisconnect(fn) { realtime.onDisconnect = fn; },
       async subscribe(topic: string, cb: (e: unknown) => void) {
@@ -115,7 +143,12 @@ function makeStubPb(): {
           return true;
         },
         async subscribe(_topic: string, cb: RealtimeCb): Promise<UnsubscribeFunc> {
+          c.subscribeCalls += 1;
           c.realtimeCbs.add(cb);
+          // Match the SDK: calling subscribe initiates connect() if not yet
+          // connected. Tests that flip isConnected false then resubscribe
+          // expect isConnected to return true again afterwards.
+          realtime.isConnected = true;
           return async () => { c.realtimeCbs.delete(cb); };
         },
         async getOne(id: string): Promise<RecordModel> {
@@ -849,5 +882,150 @@ describe("wrapPocketBase transient-error queue + retry", () => {
     await wpb.retryErrored();
     const eventsAfter = wpb.debug.events().length;
     expect(eventsAfter, "no retry-batch event should be recorded").toBe(eventsBefore);
+  });
+});
+
+describe("wrapPocketBase realtime watchdog", () => {
+  // Angela's bug: open the recipes app in two browser tabs, plain-refresh
+  // one, and the EventSource on that tab silently dies — `isConnected` flips
+  // false but `onDisconnect` never fires. wpb's existing lifecycle hook
+  // depends on `onDisconnect`, so it never learns the channel is dead. The
+  // tab stays in `realtime: disconnected, lastSse=never` forever.
+  //
+  // Repro is mechanical: subscribe, then flip `isConnected` false without
+  // calling the disconnect callback. The watchdog tick must notice and
+  // force-resubscribe to reopen the EventSource.
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("detects stuck-disconnect (isConnected=false with live subscribers) and force-resubscribes", async () => {
+    vi.useFakeTimers();
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb, { watchdogIntervalMs: 1000 });
+
+    // Subscribe with at least one live subscriber so the watchdog has a
+    // reason to recover. Use a filter so this maps to a getFullList path.
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    // After subscribe(), the stub's `subscribe()` was called exactly once
+    // to open the realtime channel.
+    expect(stub.col("items").subscribeCalls).toBe(1);
+    expect(stub.realtime.isConnected).toBe(true);
+
+    // Simulate the smoking gun: EventSource dies, onDisconnect does NOT fire.
+    stub.realtime.simulateSilentDisconnect();
+    expect(stub.realtime.isConnected).toBe(false);
+
+    // Without the watchdog, advancing time would do nothing — wpb never
+    // learns. With the watchdog, one interval tick should trigger recovery.
+    await vi.advanceTimersByTimeAsync(1500);
+
+    // Recovery must have re-invoked the SDK subscribe to reopen the channel.
+    expect(
+      stub.col("items").subscribeCalls,
+      "watchdog should force a fresh subscribe to recover the SSE channel",
+    ).toBeGreaterThan(1);
+    // And isConnected should be true again (the stub's subscribe flips it).
+    expect(stub.realtime.isConnected).toBe(true);
+
+    wpb.dispose?.();
+  });
+
+  it("is a no-op when realtime is healthy", async () => {
+    vi.useFakeTimers();
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb, { watchdogIntervalMs: 1000 });
+
+    await wpb.collection("items").subscribe(
+      "*",
+      () => { /* noop */ },
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    expect(stub.col("items").subscribeCalls).toBe(1);
+
+    // Tick the watchdog multiple times while the channel reports healthy.
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(
+      stub.col("items").subscribeCalls,
+      "healthy realtime should never trigger watchdog recovery",
+    ).toBe(1);
+
+    wpb.dispose?.();
+  });
+
+  it("does not fire when there are no active subscribers (idle wrapper)", async () => {
+    vi.useFakeTimers();
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb, { watchdogIntervalMs: 1000 });
+
+    // No subscribe call — the wrapper is idle. Even if we somehow flipped
+    // isConnected false (shouldn't happen without a subscribe), recovery
+    // would have nothing to recover.
+    stub.realtime.isConnected = false;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(
+      stub.col("items").subscribeCalls,
+      "idle wrapper with no subscribers should not invoke subscribe",
+    ).toBe(0);
+
+    wpb.dispose?.();
+  });
+
+  it("recovery is idempotent across ticks (does not re-fire while a recovery is in flight)", async () => {
+    vi.useFakeTimers();
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb, { watchdogIntervalMs: 100 });
+
+    await wpb.collection("items").subscribe(
+      "*",
+      () => { /* noop */ },
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    expect(stub.col("items").subscribeCalls).toBe(1);
+
+    stub.realtime.simulateSilentDisconnect();
+
+    // Advance enough that several ticks would have fired. We expect exactly
+    // one recovery — repeated ticks while isConnected is recovering must not
+    // re-pile-on subscribe calls.
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // Exactly one recovery resubscribe (count went 1 -> 2). Anything higher
+    // means the watchdog is hammering the SDK on every tick.
+    expect(
+      stub.col("items").subscribeCalls,
+      "watchdog must not re-fire on subsequent ticks once recovery completes",
+    ).toBe(2);
+
+    wpb.dispose?.();
+  });
+
+  it("dispose() stops the watchdog (no spurious recovery after teardown)", async () => {
+    vi.useFakeTimers();
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb, { watchdogIntervalMs: 100 });
+
+    await wpb.collection("items").subscribe(
+      "*",
+      () => { /* noop */ },
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    wpb.dispose?.();
+
+    // After dispose, even a stuck-disconnect should never trigger recovery.
+    stub.realtime.simulateSilentDisconnect();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(stub.col("items").subscribeCalls).toBe(1);
   });
 });
