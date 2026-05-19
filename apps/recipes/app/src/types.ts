@@ -67,6 +67,8 @@ export type ActionType = {
   | Recipe["recipeCategory"]
   | Recipe["author"]
   | Comment
+  | PendingChanges
+  | undefined
 }
 
 export type UnsubMap = {

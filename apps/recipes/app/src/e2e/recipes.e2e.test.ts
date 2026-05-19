@@ -4,6 +4,13 @@
  * Run with: npm test -- --run src/e2e
  * Requires PocketBase running: docker compose -f docker-compose.test.yml up -d
  */
+// PocketBase realtime uses EventSource, which Node doesn't have. Polyfill once
+// here so subscribe-based tests below work without a browser environment.
+import { EventSource as NodeEventSource } from "eventsource";
+if (typeof (globalThis as { EventSource?: unknown }).EventSource === "undefined") {
+  (globalThis as { EventSource: unknown }).EventSource = NodeEventSource;
+}
+
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   initTestPocketBase,
@@ -14,9 +21,11 @@ import {
   TestCleanup,
   createTestBox,
   createTestRecipe,
+  waitFor,
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseRecipesBackend } from "@homelab/backend/pocketbase";
+import type { CookingLogEvent } from "@homelab/backend";
 import { RecipeEntry } from "../storage";
 import { EnrichmentStatus, Visibility } from "../types";
 
@@ -386,6 +395,60 @@ describe("deleteCookingLogEvent", () => {
 
     await expect(ctx.pb.collection("recipe_events").getOne(eventId)).rejects.toThrow();
 
+    await cleanup.cleanup();
+  });
+});
+
+describe("subscribeToCookingLog", () => {
+  it("emits initial events on subscribe and live-updates on new adds (no remount needed)", async () => {
+    // Smoking gun for Bug 1: CookingLog.tsx mounts once and never re-fetches.
+    // This test pins the contract that the backend's subscribeToCookingLog
+    // fires for both initial state AND subsequent writes from a separate
+    // source, so the UI can replace its one-shot useEffect.
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const box = await createTestBox(ctx, cleanup, { name: "Sub Box" });
+    const recipe = await createTestRecipe(ctx, box.id, cleanup, { name: "Roast" });
+
+    // Pre-existing event to verify initial replay
+    const seedId = await recipes.addCookingLogEvent(box.id, recipe.id, user.id, { notes: "Seed" });
+    cleanup.track("recipe_events", seedId);
+
+    let lastBatch: CookingLogEvent[] = [];
+    let callbackCount = 0;
+    const unsub = recipes.subscribeToCookingLog(box.id, recipe.id, (events) => {
+      lastBatch = events;
+      callbackCount++;
+    });
+
+    // Wait for initial delivery
+    await waitFor(() => callbackCount >= 1 && lastBatch.length === 1, 5000);
+    expect(lastBatch[0].data?.notes).toBe("Seed");
+
+    // Simulate "another device" / out-of-band write: add via the admin client
+    // directly, bypassing the local wpb cache. The subscription must catch it
+    // via realtime SSE.
+    const newRec = await ctx.pb.collection("recipe_events").create({
+      box: box.id,
+      subject_id: recipe.id,
+      timestamp: new Date().toISOString(),
+      created_by: user.id,
+      data: { notes: "From another tab" },
+    });
+    cleanup.track("recipe_events", newRec.id);
+
+    await waitFor(() => lastBatch.length === 2, 5000);
+    expect(lastBatch.map((e) => e.data?.notes)).toContain("From another tab");
+    expect(lastBatch.map((e) => e.data?.notes)).toContain("Seed");
+
+    // Delete via the same backend instance — subscription should drop it
+    await recipes.deleteCookingLogEvent(newRec.id);
+    await waitFor(() => lastBatch.length === 1, 5000);
+    expect(lastBatch[0].data?.notes).toBe("Seed");
+
+    unsub();
     await cleanup.cleanup();
   });
 });

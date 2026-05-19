@@ -37,6 +37,7 @@ export function withRecipesCache(inner: RecipesBackend): RecipesBackend {
     addCookingLogEvent: (bid, rid, uid, opts) => inner.addCookingLogEvent(bid, rid, uid, opts),
     updateCookingLogEvent: (id, n) => inner.updateCookingLogEvent(id, n),
     deleteCookingLogEvent: (id) => inner.deleteCookingLogEvent(id),
+    subscribeToCookingLog: (bid, rid, cb) => inner.subscribeToCookingLog(bid, rid, cb),
 
     subscribeToUser(userId, handlers): Unsubscribe {
       const userKey = `recipes:user:${userId}`;

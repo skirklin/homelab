@@ -14,7 +14,7 @@ import DeleteButton from '../Buttons/DeleteRecipe'
 import DownloadButton from '../Buttons/DownloadRecipe';
 import VisibilityControl from '../Buttons/Visibility';
 import ForkButton from '../Buttons/ForkRecipe';
-import { type AppState, type BoxId, type RecipeId, Visibility } from '../types';
+import { type AppState, type BoxId, type RecipeId, type PendingChanges, Visibility } from '../types';
 import { useRecipesBackend } from '@kirkl/shared';
 import { Divider, RecipeActionGroup } from '../StyledComponents';
 import ByLine from './Byline';
@@ -169,7 +169,7 @@ const MenuButton = styled.button`
 function ActionMenu(props: RecipeCardProps) {
   const { message } = useFeedback();
   const { recipeId, boxId } = props;
-  const { state } = useContext(Context);
+  const { state, dispatch } = useContext(Context);
   const recipesBackend = useRecipesBackend();
   const [enriching, setEnriching] = useState(false);
   const [modifyModalVisible, setModifyModalVisible] = useState(false);
@@ -186,8 +186,21 @@ function ActionMenu(props: RecipeCardProps) {
     setEnriching(true);
     const hideLoading = message.loading('Generating AI suggestions...', 0);
     try {
-      await enrichRecipeManual({ boxId, recipeId });
+      // The API service writes pending_changes to PB and returns the same
+      // payload in the response. PB realtime races the HTTP response, so to
+      // avoid the "refresh required" UX bug, dispatch optimistically into
+      // local reducer state from the response. The eventual SSE event will
+      // confirm with the same value (no-op overlay).
+      const resp = await enrichRecipeManual({ boxId, recipeId });
       hideLoading();
+      if (resp?.enrichment) {
+        dispatch({
+          type: 'SET_PENDING_CHANGES',
+          boxId,
+          recipeId,
+          payload: resp.enrichment as PendingChanges,
+        });
+      }
       message.success('AI suggestions generated! Review them above.');
     } catch (error) {
       hideLoading();

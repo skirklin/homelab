@@ -486,6 +486,79 @@ describe('recipeBoxReducer', () => {
     });
   });
 
+  describe('SET_PENDING_CHANGES', () => {
+    // Smoking gun for Bug 2: handleEnrich showed a toast but never updated
+    // local state — users had to refresh to see the diff. The fix dispatches
+    // SET_PENDING_CHANGES from the API response. This pins the contract.
+    it('attaches PendingChanges to the recipe optimistically', () => {
+      const state = createStateWithBox();
+      const pendingChanges = {
+        data: { description: 'AI suggested description', recipeCategory: ['dinner'] },
+        source: 'enrichment' as const,
+        reasoning: 'tested',
+        generatedAt: new Date().toISOString(),
+        model: 'test-model',
+      };
+
+      const newState = recipeBoxReducer(state, {
+        type: 'SET_PENDING_CHANGES',
+        boxId: 'box1',
+        recipeId: 'recipe1',
+        payload: pendingChanges,
+      });
+
+      const recipe = newState.boxes.get('box1')?.recipes.get('recipe1');
+      expect(recipe?.pendingChanges).toEqual(pendingChanges);
+      // And the state reference is new — important so React re-renders.
+      expect(newState).not.toBe(state);
+      expect(newState.boxes).not.toBe(state.boxes);
+    });
+
+    it('clears pendingChanges when payload is undefined', () => {
+      const state = createStateWithBox();
+      const recipe = state.boxes.get('box1')?.recipes.get('recipe1');
+      recipe!.pendingChanges = {
+        data: { description: 'previous' },
+        source: 'enrichment',
+        reasoning: '',
+        generatedAt: new Date().toISOString(),
+        model: 'test',
+      };
+
+      const newState = recipeBoxReducer(state, {
+        type: 'SET_PENDING_CHANGES',
+        boxId: 'box1',
+        recipeId: 'recipe1',
+        payload: undefined,
+      });
+
+      const updated = newState.boxes.get('box1')?.recipes.get('recipe1');
+      expect(updated?.pendingChanges).toBeUndefined();
+    });
+
+    it('is a no-op when the recipe is missing', () => {
+      const state = createStateWithBox();
+      const newState = recipeBoxReducer(state, {
+        type: 'SET_PENDING_CHANGES',
+        boxId: 'box1',
+        recipeId: 'nonexistent',
+        payload: undefined,
+      });
+      expect(newState).toBe(state);
+    });
+
+    it('is a no-op when the box is missing', () => {
+      const state = createStateWithBox();
+      const newState = recipeBoxReducer(state, {
+        type: 'SET_PENDING_CHANGES',
+        boxId: 'no-such-box',
+        recipeId: 'recipe1',
+        payload: undefined,
+      });
+      expect(newState).toBe(state);
+    });
+  });
+
   describe('unknown action', () => {
     it('returns unchanged state for unknown action type', () => {
       const state = createStateWithBox();

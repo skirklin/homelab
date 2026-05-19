@@ -208,6 +208,23 @@ export function recipeBoxReducer(prevState: AppState, action: ActionType): AppSt
       setBoxInState(newState, action.boxId, box)
       return newState
     }
+    case 'SET_PENDING_CHANGES': {
+      // Optimistically attach AI enrichment/modification results to a recipe
+      // so the "Review above" prompt shows up immediately, without waiting on
+      // PB realtime to deliver the API-service-side update. Realtime will
+      // later confirm with the same value (a no-op overwrite). Set to null
+      // (via undefined payload) to clear.
+      if (action.recipeId === undefined || action.boxId === undefined) return prevState
+      const prevBox = prevState.boxes.get(action.boxId)
+      if (prevBox === undefined) return prevState
+      const existing = prevBox.recipes.get(action.recipeId)
+      if (existing === undefined) return prevState
+      const newBox = prevBox.clone()
+      const recipe = existing.clone()
+      recipe.pendingChanges = action.payload as RecipeEntry['pendingChanges']
+      newBox.recipes.set(action.recipeId, recipe)
+      return { ...prevState, boxes: new Map([...prevState.boxes, [action.boxId, newBox]]) }
+    }
 
     default:
       return prevState

@@ -126,28 +126,22 @@ function CookingLog(props: RecipeCardProps) {
 
   const currentUser = getAppUserFromState(state, authUser?.uid);
 
-  // Fetch events from subcollection
+  // Live-subscribe to cooking-log events so "I made it!" clicks, edits,
+  // deletes, and writes from another device all update the UI without a
+  // manual refresh. Backend fires once with the initial set, then on every
+  // matching create/update/delete.
   useEffect(() => {
     let cancelled = false;
-
-    const fetchEvents = async () => {
-      setLoading(true);
-      try {
-        const fetchedEvents = await recipesBackend.getCookingLogEvents(boxId, recipeId);
-        if (!cancelled) {
-          setEvents(fetchedEvents.map(backendEventToShared));
-        }
-      } catch (error) {
-        console.error('Failed to fetch cooking log:', error);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
+    setLoading(true);
+    const unsub = recipesBackend.subscribeToCookingLog(boxId, recipeId, (fetchedEvents) => {
+      if (cancelled) return;
+      setEvents(fetchedEvents.map(backendEventToShared));
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+      unsub();
     };
-
-    fetchEvents();
-    return () => { cancelled = true; };
   }, [boxId, recipeId, recipesBackend]);
 
   const getUserName = (userId: string): string => {
