@@ -715,8 +715,9 @@ dataRoutes.get("/travel/trips", handler(async (c) => {
   if (!logId) return c.json({ error: "log query param required" }, 400);
   const status = c.req.query("status"); // optional filter by status
 
-  let filter = pb.filter("log = {:logId}", { logId });
-  if (status) filter += ` && status = "${status}"`;
+  const filter = status
+    ? pb.filter("log = {:logId} && status = {:status}", { logId, status })
+    : pb.filter("log = {:logId}", { logId });
 
   const trips = await pb.collection("travel_trips").getFullList({ filter });
   return c.json(trips.map((t) => ({
@@ -1912,7 +1913,7 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
   // Recompute last_completed from the max event timestamp — keeps it honest
   // when events pre-date this one (backfills) or are later edited/deleted.
   const latestEvents = await pb.collection("task_events").getList(1, 1, {
-    filter: `subject_id="${id}"`,
+    filter: pb.filter("subject_id = {:id}", { id }),
     sort: "-timestamp",
   });
   const latest = latestEvents.items[0]?.timestamp ?? now;
