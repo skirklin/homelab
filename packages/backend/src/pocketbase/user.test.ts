@@ -211,5 +211,95 @@ describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
   });
 });
 
+describe("PocketBaseUserBackend.setSlug concurrency", () => {
+  it("two parallel setSlug calls for the same user both survive (no last-write-wins drop)", async () => {
+    // Bug A repro: setSlug does readUser → merge → wpb.update. Two
+    // concurrent calls both read the same baseline (empty), each merge in
+    // their own slug, each write back the single-slug map. Pre-fix, the
+    // network ack ordering decides which slug survives — the other is
+    // silently dropped.
+    const stub = makeStubPb();
+    stub.col("users").records.set("u1", {
+      id: "u1",
+      collectionId: "users",
+      collectionName: "users",
+      created: "",
+      updated: "",
+      shopping_slugs: {},
+    } as unknown as RecordModel);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+
+    await Promise.all([
+      user.setSlug("u1", "shopping", "groceries", "L1"),
+      user.setSlug("u1", "shopping", "hardware", "L2"),
+    ]);
+
+    const finalServer = stub.col("users").records.get("u1") as unknown as Record<string, unknown>;
+    const slugs = finalServer.shopping_slugs as Record<string, string>;
+    expect(slugs).toEqual({ groceries: "L1", hardware: "L2" });
+  });
+
+  it("two parallel saveFcmToken calls both tokens survive", async () => {
+    // Same get-then-set race for the fcm_tokens array. A cross-device
+    // install could otherwise lose a token, breaking push delivery to one
+    // of the user's devices.
+    const stub = makeStubPb();
+    stub.col("users").records.set("u1", {
+      id: "u1",
+      collectionId: "users",
+      collectionName: "users",
+      created: "",
+      updated: "",
+      fcm_tokens: [],
+    } as unknown as RecordModel);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+
+    await Promise.all([
+      user.saveFcmToken("u1", "device-A-token"),
+      user.saveFcmToken("u1", "device-B-token"),
+    ]);
+
+    const finalServer = stub.col("users").records.get("u1") as unknown as Record<string, unknown>;
+    const tokens = (finalServer.fcm_tokens as string[]).slice().sort();
+    expect(tokens).toEqual(["device-A-token", "device-B-token"]);
+  });
+
+  it("serialized setSlug + removeSlug compose to the expected final state", async () => {
+    // Mixed ops on the same field must also serialize cleanly.
+    const stub = makeStubPb();
+    stub.col("users").records.set("u1", {
+      id: "u1",
+      collectionId: "users",
+      collectionName: "users",
+      created: "",
+      updated: "",
+      shopping_slugs: { groceries: "L1" },
+    } as unknown as RecordModel);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+
+    await Promise.all([
+      user.setSlug("u1", "shopping", "hardware", "L2"),
+      user.removeSlug("u1", "shopping", "groceries"),
+      user.setSlug("u1", "shopping", "pantry", "L3"),
+    ]);
+
+    const finalServer = stub.col("users").records.get("u1") as unknown as Record<string, unknown>;
+    const slugs = finalServer.shopping_slugs as Record<string, string>;
+    // Exact ordering depends on the serializer, but the invariant is "no
+    // get-then-set loss": every op's intent must be reflected in the final
+    // state, modulo the explicit removeSlug. So groceries must be gone and
+    // hardware+pantry must both be present.
+    expect(slugs.groceries).toBeUndefined();
+    expect(slugs.hardware).toBe("L2");
+    expect(slugs.pantry).toBe("L3");
+  });
+});
+
 // Touch the unused RecordSubscription import to satisfy strict linters.
 export type _Touch = RecordSubscription;
