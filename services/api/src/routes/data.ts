@@ -78,6 +78,50 @@ async function userCanWriteRecipe(
 }
 
 /**
+ * Verify `userId` is in `task_lists[listId].owners`. Returns `false` if the
+ * list doesn't exist OR the user isn't an owner. Mirrors `userOwnsTravelLog`
+ * — admin-PB bypasses PB collection rules, so the route layer is the only
+ * ownership gate for `hlk_`/`mcpat_` callers writing into another user's
+ * task list or its child tasks/events.
+ */
+async function userOwnsTaskList(
+  pb: PocketBase,
+  listId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!listId || !userId) return false;
+  try {
+    const list = await pb.collection("task_lists").getOne(listId);
+    const owners = list.owners;
+    return Array.isArray(owners) && owners.includes(userId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verify `userId` is in `life_logs[logId].owners`. Returns `false` if the
+ * log doesn't exist OR the user isn't an owner. Mirrors `userOwnsTravelLog`
+ * — admin-PB bypasses PB collection rules, so the route layer is the only
+ * ownership gate for `hlk_`/`mcpat_` callers writing into another user's
+ * life log or its child entries.
+ */
+async function userOwnsLifeLog(
+  pb: PocketBase,
+  logId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!logId || !userId) return false;
+  try {
+    const log = await pb.collection("life_logs").getOne(logId);
+    const owners = log.owners;
+    return Array.isArray(owners) && owners.includes(userId);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Authorization for recipe READS via the data routes (token surface only).
  * Mirrors PB's tightened visRule (migration 0024):
  *   - visibility === "public" → always allowed
@@ -1931,8 +1975,12 @@ dataRoutes.get("/life/log", handler(async (c) => {
 // List entries (events) in a life log
 dataRoutes.get("/life/entries", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const logId = c.req.query("log");
   if (!logId) return c.json({ error: "log query param required" }, 400);
+  if (!(await userOwnsLifeLog(pb, logId, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const entries = await pb.collection("life_events").getFullList({
     filter: pb.filter("log = {:logId}", { logId }),
@@ -1961,6 +2009,9 @@ dataRoutes.post("/life/entries", handler(async (c) => {
     notes?: string;
   }>();
   if (!body.log || !body.widget_id) return c.json({ error: "log and widget_id required" }, 400);
+  if (!(await userOwnsLifeLog(pb, body.log, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const eventData: Record<string, unknown> = { ...(body.data || {}) };
   if (body.notes) eventData.notes = body.notes;
@@ -1978,13 +2029,18 @@ dataRoutes.post("/life/entries", handler(async (c) => {
 // Update a life log entry — timestamp, data (merged), or notes
 dataRoutes.patch("/life/entries/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const body = await c.req.json<{
     timestamp?: string;
     data?: Record<string, unknown>;
     notes?: string;
   }>();
-  const record = await pb.collection("life_events").getOne(id);
+  const record = await pb.collection("life_events").getOne(id).catch(() => null);
+  if (!record) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsLifeLog(pb, record.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const patch: Record<string, unknown> = {};
   if (body.timestamp) patch.timestamp = body.timestamp;
   const existingData = (record.data || {}) as Record<string, unknown>;
@@ -2002,7 +2058,13 @@ dataRoutes.patch("/life/entries/:id", handler(async (c) => {
 // Delete a life log entry
 dataRoutes.delete("/life/entries/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const record = await pb.collection("life_events").getOne(id).catch(() => null);
+  if (!record) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsLifeLog(pb, record.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("life_events").delete(id);
   return c.json({ success: true });
 }));
@@ -2025,8 +2087,12 @@ dataRoutes.get("/task-lists", handler(async (c) => {
 // List tasks (supports filtering by parent_id, tag, task_type)
 dataRoutes.get("/tasks", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const listId = c.req.query("list");
   if (!listId) return c.json({ error: "list query param required" }, 400);
+  if (!(await userOwnsTaskList(pb, listId, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const filters = [pb.filter("list = {:listId}", { listId })];
   const parentId = c.req.query("parent_id");
@@ -2060,6 +2126,7 @@ dataRoutes.get("/tasks", handler(async (c) => {
 // Create a task
 dataRoutes.post("/tasks", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const body = await c.req.json<{
     list: string;
     name: string;
@@ -2071,6 +2138,9 @@ dataRoutes.post("/tasks", handler(async (c) => {
     tags?: string[];
   }>();
   if (!body.list || !body.name) return c.json({ error: "list and name required" }, 400);
+  if (!(await userOwnsTaskList(pb, body.list, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const record = await pb.collection("tasks").create({
     list: body.list,
@@ -2097,10 +2167,17 @@ dataRoutes.post("/tasks", handler(async (c) => {
 // Update a task. parent_id and list are intentionally NOT allowed here —
 // changing them must go through POST /tasks/:id/move so descendant `path`
 // values get recomputed transactionally. PATCHing parent_id directly was a
-// footgun that left stale subtree paths.
+// footgun that left stale subtree paths. The `allowed` allowlist also
+// blocks reparent-via-PATCH attacks (`list`/`parent_id` aren't in it).
 dataRoutes.patch("/tasks/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const existing = await pb.collection("tasks").getOne(id).catch(() => null);
+  if (!existing) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTaskList(pb, existing.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const body = await c.req.json<Record<string, unknown>>();
   const allowed = ["name", "description", "task_type", "frequency", "position",
     "completed", "snoozed_until", "tags", "collapsed", "notify_users"];
@@ -2115,8 +2192,13 @@ dataRoutes.patch("/tasks/:id", handler(async (c) => {
 // Move a task: change its parent (within or across lists) and/or position.
 // Recomputes `path` on the task and all descendants so subtree filters stay
 // correct. Pass new_parent_id="" (or null) to make it a root task.
+//
+// Ownership: caller must own BOTH the source list AND the destination list
+// (if changed). Otherwise an attacker with their own list could steal any
+// task by moving it into their own list.
 dataRoutes.post("/tasks/:id/move", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const body = await c.req.json<{
     new_parent_id?: string | null;
@@ -2124,7 +2206,16 @@ dataRoutes.post("/tasks/:id/move", handler(async (c) => {
     position?: number;
   }>();
 
-  const task = await pb.collection("tasks").getOne(id);
+  const task = await pb.collection("tasks").getOne(id).catch(() => null);
+  if (!task) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTaskList(pb, task.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  if (body.new_list !== undefined && body.new_list !== (task.list as string)) {
+    if (!(await userOwnsTaskList(pb, body.new_list, userId))) {
+      return c.json({ error: "access denied" }, 403);
+    }
+  }
   const oldPath = task.path as string;
   const newList = body.new_list ?? (task.list as string);
 
@@ -2181,7 +2272,11 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
-  const task = await pb.collection("tasks").getOne(id);
+  const task = await pb.collection("tasks").getOne(id).catch(() => null);
+  if (!task) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTaskList(pb, task.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   if (task.task_type === "one_shot") {
     const record = await pb.collection("tasks").update(id, { completed: !task.completed });
@@ -2215,6 +2310,7 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
 // thing.
 dataRoutes.post("/tasks/:id/tags", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const body = await c.req.json<{ add?: string[]; remove?: string[] }>();
   const add = body.add ?? [];
@@ -2223,7 +2319,11 @@ dataRoutes.post("/tasks/:id/tags", handler(async (c) => {
     return c.json({ error: "at least one of add[] / remove[] required" }, 400);
   }
 
-  const task = await pb.collection("tasks").getOne(id);
+  const task = await pb.collection("tasks").getOne(id).catch(() => null);
+  if (!task) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTaskList(pb, task.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const removeSet = new Set(remove);
   const filtered = ((task.tags as string[] | undefined) ?? []).filter((t) => !removeSet.has(t));
   const merged = [...filtered];
@@ -2236,9 +2336,15 @@ dataRoutes.post("/tasks/:id/tags", handler(async (c) => {
 // Snooze a task
 dataRoutes.post("/tasks/:id/snooze", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const { until } = await c.req.json<{ until: string }>();
   if (!until) return c.json({ error: "until (ISO date) required" }, 400);
+  const task = await pb.collection("tasks").getOne(id).catch(() => null);
+  if (!task) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTaskList(pb, task.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const record = await pb.collection("tasks").update(id, { snoozed_until: until });
   return c.json({ id: record.id, snoozed_until: record.snoozed_until });
@@ -2247,7 +2353,13 @@ dataRoutes.post("/tasks/:id/snooze", handler(async (c) => {
 // Unsnooze a task (clear snoozed_until)
 dataRoutes.post("/tasks/:id/unsnooze", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const task = await pb.collection("tasks").getOne(id).catch(() => null);
+  if (!task) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTaskList(pb, task.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const record = await pb.collection("tasks").update(id, { snoozed_until: "" });
   return c.json({ id: record.id, snoozed_until: record.snoozed_until });
 }));
@@ -2255,8 +2367,13 @@ dataRoutes.post("/tasks/:id/unsnooze", handler(async (c) => {
 // Delete a task (and all descendants)
 dataRoutes.delete("/tasks/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
-  const task = await pb.collection("tasks").getOne(id);
+  const task = await pb.collection("tasks").getOne(id).catch(() => null);
+  if (!task) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTaskList(pb, task.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   // Delete descendants first (deepest first)
   const descendants = await pb.collection("tasks").getFullList({
@@ -2432,8 +2549,31 @@ dataRoutes.delete("/travel/proposals/:id", handler(async (c) => {
 // Monitor — deployment history
 // =============================================================================
 
+/**
+ * Authorize an infra-only write. `deployments` and `pod_events` are global
+ * infrastructure collections — not tenant-scoped — so the per-user ownership
+ * pattern doesn't apply. Instead we require the caller's `api_tokens` record
+ * to carry `roles: ["infra"]`. User-minted Settings tokens, OAuth `mcpat_`
+ * tokens, and PB user JWTs never carry this role and are rejected with 403.
+ *
+ * Legitimate callers today: deploy.sh (records deployments via the EXIT
+ * trap) and event-watcher (records pod_events). Both are wired with the
+ * single `HOMELAB_API_TOKEN` from the k8s `api-secrets` Secret; that token's
+ * PB record needs `roles: ["infra"]` set once after migration 0025 ships
+ * (otherwise both writers will 403).
+ */
+function requireInfraRole(c: Context<AppEnv>) {
+  const roles = c.get("tokenRoles") ?? [];
+  if (!roles.includes("infra")) {
+    return c.json({ error: "Forbidden: infra role required" }, 403);
+  }
+  return null;
+}
+
 // Record a deployment. Called by infra/deploy.sh after each run.
 dataRoutes.post("/deployments", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const body = await c.req.json<{
     git_sha: string;
@@ -2495,6 +2635,8 @@ dataRoutes.get("/deployments", handler(async (c) => {
 
 // Delete a deployment record (for cleaning up stray entries).
 dataRoutes.delete("/deployments/:id", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const id = c.req.param("id")!;
   await pb.collection("deployments").delete(id);
@@ -2509,6 +2651,8 @@ dataRoutes.delete("/deployments/:id", handler(async (c) => {
 // Same uid is sent multiple times as count grows; we update last_seen + count
 // rather than inserting duplicates.
 dataRoutes.post("/pod_events", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const body = await c.req.json<{
     uid: string;
@@ -2598,6 +2742,8 @@ dataRoutes.get("/pod_events", handler(async (c) => {
 
 // Delete pod_events older than `before` (ISO timestamp). Used for retention.
 dataRoutes.delete("/pod_events", handler(async (c) => {
+  const denied = requireInfraRole(c);
+  if (denied) return denied;
   const pb = c.get("pb");
   const before = c.req.query("before");
   if (!before) return c.json({ error: "before query param required" }, 400);
