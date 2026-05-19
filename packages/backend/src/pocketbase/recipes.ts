@@ -289,6 +289,55 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
 
   // --- Subscriptions ---
 
+  subscribeToCookingLog(
+    boxId: string,
+    recipeId: string,
+    onEvents: (events: CookingLogEvent[]) => void,
+  ): Unsubscribe {
+    // Mirrors the per-box recipes pattern: wpb.subscribe('*', filter) auto-loads
+    // the initial set + delivers each as a 'create', then forwards live events.
+    // We defer the first emit until subscribe() resolves so consumers see one
+    // batched onEvents([...]) instead of N per-record callbacks.
+    let cancelled = false;
+    const eventsMap = new Map<string, CookingLogEvent>();
+
+    const emit = () => {
+      if (cancelled) return;
+      const list = Array.from(eventsMap.values()).sort(
+        (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+      );
+      onEvents(list);
+    };
+
+    let initialDone = false;
+    let unsub: (() => void) | undefined;
+    this.wpb.collection("recipe_events").subscribe("*", (e) => {
+      if (cancelled) return;
+      const rec = e.record as RecordModel;
+      if (rec.box !== boxId || rec.subject_id !== recipeId) return;
+      if (e.action === "delete") {
+        eventsMap.delete(rec.id);
+      } else {
+        eventsMap.set(rec.id, eventFromRecord(rec));
+      }
+      if (initialDone) emit();
+    }, {
+      filter: this.pb().filter("box = {:boxId} && subject_id = {:recipeId}", { boxId, recipeId }),
+      local: (r) => r.box === boxId && r.subject_id === recipeId,
+    }).then((fn) => {
+      unsub = fn;
+      if (!cancelled) {
+        initialDone = true;
+        emit();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }
+
   subscribeToUser(
     userId: string,
     handlers: {

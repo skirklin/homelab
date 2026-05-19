@@ -60,6 +60,19 @@ export interface RecipesBackend {
   updateCookingLogEvent(eventId: string, notes: string): Promise<void>;
   deleteCookingLogEvent(eventId: string): Promise<void>;
 
+  /**
+   * Live-subscribe to a recipe's cooking-log events. Fires once with the
+   * initial set after subscribe() resolves, then again on every create /
+   * update / delete that matches `(box, subject_id)`. Lets the UI replace
+   * one-shot getCookingLogEvents fetches so "I made it!" or another-device
+   * writes show up without a manual refresh.
+   */
+  subscribeToCookingLog(
+    boxId: string,
+    recipeId: string,
+    onEvents: (events: CookingLogEvent[]) => void,
+  ): Unsubscribe;
+
   // --- Subscriptions ---
 
   /**
