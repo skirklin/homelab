@@ -73,6 +73,14 @@ export class MutationQueue {
     return rec;
   }
 
+  /** True when the record has at least one pending (unacked) mutation. */
+  hasPending(collection: string, recordId: string): boolean {
+    const col = this.state.get(collection);
+    if (!col) return false;
+    const rec = col.get(recordId);
+    return !!rec && rec.pending.length > 0;
+  }
+
   /** Returns the current view of a record (server snapshot + pending). */
   view(collection: string, recordId: string): RawRecord | null {
     const col = this.state.get(collection);

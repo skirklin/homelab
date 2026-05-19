@@ -575,6 +575,13 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const stale = queue.viewCollection(g.collection, g.predicate);
         for (const r of stale) {
           if (seen.has(r.id)) continue;
+          // Skip records with in-flight optimistic mutations. Their absence
+          // from `records` doesn't mean the server deleted them — the server
+          // just hasn't observed our create/update yet. Synthesizing a delete
+          // here would tear down the user's own optimistic row mid-write.
+          // The pending mutation's eventual ack (or reject) will reconcile
+          // server state for real.
+          if (queue.hasPending(g.collection, r.id)) continue;
           queue.applyServer(g.collection, r.id, null);
           notifySubscribers(g.collection, "delete", r);
         }
