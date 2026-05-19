@@ -11,6 +11,7 @@ export type AppEnv = {
     userEmail: string;
     userToken: string;
     isApiKey: boolean;
+    tokenRoles: string[];
     pb: import("pocketbase").default;
   };
 };
