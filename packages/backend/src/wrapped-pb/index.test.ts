@@ -17,6 +17,12 @@ interface StubCollection {
   realtimeCbs: Set<RealtimeCb>;
   /** Lets a test reject the next operation. */
   rejectNext: { create?: unknown; update?: unknown; delete?: unknown };
+  /**
+   * When non-null, the next create awaits this gate before returning. Tests
+   * use it to keep a create's network ack pending while exercising paths
+   * that race against in-flight optimistic mutations.
+   */
+  gateCreate: Promise<void> | null;
 }
 
 interface StubRealtime {
@@ -36,7 +42,7 @@ function makeStubPb(): {
   const get = (n: string): StubCollection => {
     let c = cols.get(n);
     if (!c) {
-      c = { records: new Map(), realtimeCbs: new Set(), rejectNext: {} };
+      c = { records: new Map(), realtimeCbs: new Set(), rejectNext: {}, gateCreate: null };
       cols.set(n, c);
     }
     return c;
@@ -66,6 +72,10 @@ function makeStubPb(): {
       const c = get(name);
       return {
         async create(body: Record<string, unknown>): Promise<RecordModel> {
+          if (c.gateCreate) {
+            await c.gateCreate;
+            c.gateCreate = null;
+          }
           if (c.rejectNext.create !== undefined) {
             const err = c.rejectNext.create;
             c.rejectNext.create = undefined;
@@ -625,6 +635,55 @@ describe("wrapPocketBase resync", () => {
 
     await wpb.resync();
     expect(events.find((e) => e.id === "peer"), "resync should skip a recently-live channel").toBeUndefined();
+  });
+
+  it("does not emit a ghost delete for an in-flight optimistic create during resync stale-sweep", async () => {
+    // Bug C repro: resync's stale-sweep for filtered "*" subscribers calls
+    // viewCollection(predicate) which includes records whose only state is a
+    // pending optimistic create (no server snapshot yet). On resync those
+    // records aren't in `seen` (server's getFullList hasn't observed them
+    // yet — the create is still in flight). Pre-fix, applyServer(null) +
+    // notifySubscribers("delete") fires for a record the user is in the
+    // middle of creating, making their optimistic row vanish briefly.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    const events: Array<{ action: string; id: string }> = [];
+    await wpb.collection("items").subscribe(
+      "*",
+      (e) => events.push({ action: e.action, id: e.record.id }),
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+    events.length = 0;
+
+    // Hold the create's network ack open with a gate so the pending
+    // mutation persists through the resync call.
+    let releaseCreate: () => void = () => {};
+    stub.col("items").gateCreate = new Promise<void>((res) => { releaseCreate = res; });
+
+    // Fire optimistic create. The pending mutation is now in the queue.
+    const creating = wpb.collection("items").create({
+      id: "in-flight", list: "L1", name: "x",
+    });
+    // The optimistic create event fired synchronously before any await.
+    expect(events.find((e) => e.action === "create" && e.id === "in-flight")).toBeDefined();
+    events.length = 0;
+
+    // Trigger a resync while the create is still pending. The record is in
+    // the queue (pending) but not yet on the server stub's records map —
+    // getFullList returns []. The stale-sweep should LEAVE the in-flight
+    // record alone, not synthesize a ghost delete for it.
+    await wpb.resync();
+
+    const ghostDelete = events.find((e) => e.action === "delete" && e.id === "in-flight");
+    expect(
+      ghostDelete,
+      "resync stale-sweep must skip records with pending optimistic mutations",
+    ).toBeUndefined();
+
+    // Release the gate so the create finishes cleanly.
+    releaseCreate();
+    await creating;
   });
 
   it("emits nothing when the server state matches the local view", async () => {

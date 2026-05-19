@@ -18,9 +18,48 @@ const SLUG_FIELDS: Record<SlugNamespace, string> = {
 
 export class PocketBaseUserBackend implements UserBackend {
   private wpb: WrappedPocketBase;
+  /**
+   * Per-(userId|field) promise chain used to serialize read-modify-write
+   * operations against JSON columns (slug maps, fcm_tokens array). Two
+   * concurrent callers in the same tab would otherwise both read the same
+   * baseline, each compute a single-mutation map, each write back — last
+   * write silently drops the other's change.
+   *
+   * Scope is in-memory per process, so cross-tab / cross-device races stay
+   * possible but become rare: they require two writes landing inside the
+   * same SSE round-trip, vs. the single-millisecond window between two
+   * synchronous setSlug calls in one tab. The right long-term fix is a PB
+   * JS hook that does the merge server-side; this is the near-term
+   * mitigation. See $LINEAR_TODO for the hook plan.
+   */
+  private writeChains = new Map<string, Promise<unknown>>();
 
   constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
     this.wpb = wpb ?? wrapPocketBase(pb);
+  }
+
+  /**
+   * Serialize `task` against any in-flight operation sharing `chainKey`.
+   * The chain stores the most recent tail; we await it, run the task, then
+   * publish our own promise as the new tail. Errors don't break the chain —
+   * later tasks must still run even if a predecessor rejected.
+   */
+  private async withChain<T>(chainKey: string, task: () => Promise<T>): Promise<T> {
+    const prev = this.writeChains.get(chainKey);
+    // Await prior tail but swallow its error so a rejected slug write
+    // doesn't poison every subsequent op for that user+field.
+    const wait = prev ? prev.catch(() => undefined) : Promise.resolve();
+    const next = wait.then(task);
+    this.writeChains.set(chainKey, next);
+    try {
+      return await next;
+    } finally {
+      // Only clear if we're still the tail — a later call may have chained
+      // onto us in the meantime.
+      if (this.writeChains.get(chainKey) === next) {
+        this.writeChains.delete(chainKey);
+      }
+    }
   }
 
   async getSlugs(userId: string, namespace: SlugNamespace): Promise<Record<string, string>> {
@@ -33,30 +72,36 @@ export class PocketBaseUserBackend implements UserBackend {
   }
 
   async setSlug(userId: string, namespace: SlugNamespace, slug: string, resourceId: string): Promise<void> {
-    const user = await this.readUser(userId);
     const field = SLUG_FIELDS[namespace];
-    const existing = (user[field] as Record<string, string> | undefined) || {};
-    const slugs = { ...existing, [slug]: resourceId };
-    await this.wpb.collection("users").update(userId, { [field]: slugs }, { $autoCancel: false });
+    await this.withChain(`${userId}|${field}`, async () => {
+      const user = await this.readUser(userId);
+      const existing = (user[field] as Record<string, string> | undefined) || {};
+      const slugs = { ...existing, [slug]: resourceId };
+      await this.wpb.collection("users").update(userId, { [field]: slugs }, { $autoCancel: false });
+    });
   }
 
   async removeSlug(userId: string, namespace: SlugNamespace, slug: string): Promise<void> {
-    const user = await this.readUser(userId);
     const field = SLUG_FIELDS[namespace];
-    const slugs = { ...((user[field] as Record<string, string> | undefined) || {}) };
-    delete slugs[slug];
-    await this.wpb.collection("users").update(userId, { [field]: slugs });
+    await this.withChain(`${userId}|${field}`, async () => {
+      const user = await this.readUser(userId);
+      const slugs = { ...((user[field] as Record<string, string> | undefined) || {}) };
+      delete slugs[slug];
+      await this.wpb.collection("users").update(userId, { [field]: slugs });
+    });
   }
 
   async renameSlug(userId: string, namespace: SlugNamespace, oldSlug: string, newSlug: string): Promise<void> {
-    const user = await this.readUser(userId);
     const field = SLUG_FIELDS[namespace];
-    const slugs = { ...((user[field] as Record<string, string> | undefined) || {}) };
-    if (slugs[oldSlug]) {
-      slugs[newSlug] = slugs[oldSlug];
-      delete slugs[oldSlug];
-      await this.wpb.collection("users").update(userId, { [field]: slugs });
-    }
+    await this.withChain(`${userId}|${field}`, async () => {
+      const user = await this.readUser(userId);
+      const slugs = { ...((user[field] as Record<string, string> | undefined) || {}) };
+      if (slugs[oldSlug]) {
+        slugs[newSlug] = slugs[oldSlug];
+        delete slugs[oldSlug];
+        await this.wpb.collection("users").update(userId, { [field]: slugs });
+      }
+    });
   }
 
   /**
@@ -80,15 +125,28 @@ export class PocketBaseUserBackend implements UserBackend {
 
     // wpb.subscribe(id) auto-loads the user record (delivered as a "create"
     // event), seeds the optimistic queue, then forwards live updates.
-    let unsub: (() => void) | undefined;
+    //
+    // Cancel-before-resolve guard: if the consumer unsubscribes before the
+    // inner subscribe-promise lands, we still receive the underlying
+    // teardown function — call it immediately so we don't leak a SSE
+    // subscription + LocalSubscriber registration. This is the same shape
+    // as the recipes / shopping / life cleanup races fixed earlier in the
+    // week (c1bcf22, c63af4a, c6297e8).
+    let unsub: (() => void) | null = null;
     let initialDone = false;
     this.wpb.collection("users").subscribe(userId, (e) => {
       if (cancelled) return;
       if (e.action === "delete") return;
       onSlugs((e.record as Record<string, unknown>)[field] as Record<string, string> || {});
     }).then((fn) => {
+      if (cancelled) {
+        // Teardown ran before the promise resolved. Drop the late-arriving
+        // unsubscribe now so the underlying subscription isn't orphaned.
+        try { fn(); } catch { /* nothing to do */ }
+        return;
+      }
       unsub = fn;
-      if (!cancelled && !initialDone) {
+      if (!initialDone) {
         initialDone = true;
         // If the user record didn't exist (404 on initial getOne), no event
         // fired above. Emit empty slugs so consumers don't hang on the
@@ -101,24 +159,33 @@ export class PocketBaseUserBackend implements UserBackend {
 
     return () => {
       cancelled = true;
-      unsub?.();
+      if (unsub) {
+        try { unsub(); } catch { /* nothing to do */ }
+        unsub = null;
+      }
     };
   }
 
   async saveFcmToken(userId: string, token: string): Promise<void> {
     // `fcm_tokens` is a JSON field, not a relation, so PB's `+=` array op
     // doesn't apply. Read current list (cache-first) and write merged.
-    const user = await this.readUser(userId);
-    const tokens = (user.fcm_tokens as string[] | undefined) || [];
-    if (tokens.includes(token)) return;
-    await this.wpb.collection("users").update(userId, { fcm_tokens: [...tokens, token] });
+    // Serialize against other fcm_tokens writes to keep cross-device
+    // installs from clobbering each other.
+    await this.withChain(`${userId}|fcm_tokens`, async () => {
+      const user = await this.readUser(userId);
+      const tokens = (user.fcm_tokens as string[] | undefined) || [];
+      if (tokens.includes(token)) return;
+      await this.wpb.collection("users").update(userId, { fcm_tokens: [...tokens, token] });
+    });
   }
 
   async removeFcmToken(userId: string, token: string): Promise<void> {
-    const user = await this.readUser(userId);
-    const tokens = (user.fcm_tokens as string[] | undefined) || [];
-    await this.wpb.collection("users").update(userId, {
-      fcm_tokens: tokens.filter((t) => t !== token),
+    await this.withChain(`${userId}|fcm_tokens`, async () => {
+      const user = await this.readUser(userId);
+      const tokens = (user.fcm_tokens as string[] | undefined) || [];
+      await this.wpb.collection("users").update(userId, {
+        fcm_tokens: tokens.filter((t) => t !== token),
+      });
     });
   }
 
@@ -128,7 +195,9 @@ export class PocketBaseUserBackend implements UserBackend {
   }
 
   async clearAllFcmTokens(userId: string): Promise<void> {
-    await this.wpb.collection("users").update(userId, { fcm_tokens: [] });
+    await this.withChain(`${userId}|fcm_tokens`, async () => {
+      await this.wpb.collection("users").update(userId, { fcm_tokens: [] });
+    });
   }
 
   async getNotificationMode(userId: string): Promise<NotificationMode> {
