@@ -34,6 +34,19 @@ for arg in "$@"; do
     esac
 done
 
+# Fail fast on SSH/1Password breakage so we don't waste a 5-minute build
+# cycle just to die at the manifest-apply step. The common failure mode
+# is "sign_and_send_pubkey: signing failed ... communication with agent
+# failed" when 1Password's SSH agent has gone idle. Re-running an
+# interactive `ssh $VPS true` re-establishes it.
+if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$VPS" 'true' >/dev/null 2>&1; then
+    echo "[deploy.sh] SSH to $VPS failed before build (10s timeout)." >&2
+    echo "[deploy.sh] Likely the 1Password SSH agent is locked or stalled." >&2
+    echo "[deploy.sh] Fix: run \`ssh $VPS true\` once in your terminal to trigger" >&2
+    echo "[deploy.sh] the 1P unlock prompt, then re-run this script." >&2
+    exit 1
+fi
+
 # Deployment recording — POSTs a row to the monitor's deployments collection
 # via api.kirkl.in. Tracks success/failure via DEPLOY_STATUS, set just before
 # the final "Deploy complete" echo. Trap on EXIT so failures get recorded too.
