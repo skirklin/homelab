@@ -25,6 +25,8 @@ interface StubCollection {
   gateCreate: Promise<void> | null;
   /** Number of times `pb.collection(name).subscribe("*", ...)` was invoked. */
   subscribeCalls: number;
+  /** Number of times `pb.collection(name).getFullList(...)` was invoked. */
+  getFullListCalls: number;
 }
 
 interface StubRealtime {
@@ -55,7 +57,7 @@ function makeStubPb(): {
   const get = (n: string): StubCollection => {
     let c = cols.get(n);
     if (!c) {
-      c = { records: new Map(), realtimeCbs: new Set(), rejectNext: {}, gateCreate: null, subscribeCalls: 0 };
+      c = { records: new Map(), realtimeCbs: new Set(), rejectNext: {}, gateCreate: null, subscribeCalls: 0, getFullListCalls: 0 };
       cols.set(n, c);
     }
     return c;
@@ -160,6 +162,7 @@ function makeStubPb(): {
         // string — tests that need filtered initial-load behavior should pre-
         // populate `c.records` with only the records they want returned.
         async getFullList(_opts?: unknown): Promise<RecordModel[]> {
+          c.getFullListCalls += 1;
           return Array.from(c.records.values());
         },
       };
@@ -1027,5 +1030,105 @@ describe("wrapPocketBase realtime watchdog", () => {
     await vi.advanceTimersByTimeAsync(2000);
 
     expect(stub.col("items").subscribeCalls).toBe(1);
+  });
+
+  it("recovery does not multiply getFullList calls across collections (the cascade bug)", async () => {
+    // The bug Angela hit in production: watchdog walks N collections, calls
+    // ensureRealSubscription on each, SDK does close+reopen per call, each
+    // reopen fires PB_CONNECT, each PB_CONNECT (pre-fix) triggered resync()
+    // which itself fetches N collections → N×N getFullList requests per
+    // watchdog cycle. With 13 active subscriptions and a 10s tick, that's
+    // 169 requests every 10s → 30k requests/hour.
+    //
+    // Post-fix: PB_CONNECT during recovery is gated on `recoveryInFlight`
+    // and skipped, so resync fires once at end-of-cascade instead of N times.
+    vi.useFakeTimers();
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb, { watchdogIntervalMs: 100 });
+
+    // Seed 5 collections with filtered subscribers — same shape as the home
+    // shell mounting recipes/shopping/travel/upkeep providers concurrently.
+    for (const col of ["a", "b", "c", "d", "e"]) {
+      await wpb.collection(col).subscribe(
+        "*",
+        () => { /* noop */ },
+        { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+      );
+    }
+    // Reset call counts to focus on what the watchdog itself triggers.
+    const baselineFullList = stub.col("a").getFullListCalls + stub.col("b").getFullListCalls +
+      stub.col("c").getFullListCalls + stub.col("d").getFullListCalls + stub.col("e").getFullListCalls;
+
+    stub.realtime.simulateSilentDisconnect();
+    await vi.advanceTimersByTimeAsync(200);
+    // Let microtasks settle.
+    await Promise.resolve();
+
+    const cols = ["a", "b", "c", "d", "e"];
+    const totalFullList = cols.reduce((acc, c) => acc + stub.col(c).getFullListCalls, 0) - baselineFullList;
+
+    // Pre-fix: 5 collections × 5 PB_CONNECTs = 25 getFullList calls.
+    // Post-fix: exactly 5 (one resync run, one getFullList per collection).
+    expect(
+      totalFullList,
+      `watchdog cascade made ${totalFullList} getFullList calls; expected ≤ 5`,
+    ).toBeLessThanOrEqual(5);
+
+    wpb.dispose?.();
+  });
+
+  it("cooldown: when recovery doesn't fix isConnected, doesn't fire again within 60s", async () => {
+    // If the underlying SSE channel stays broken (server hard-down, network
+    // gone), the watchdog must not hammer the API every 10s with N getFullList
+    // requests. After one recovery, hold off for the cooldown window.
+    vi.useFakeTimers();
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb, { watchdogIntervalMs: 100 });
+
+    await wpb.collection("items").subscribe(
+      "*",
+      () => { /* noop */ },
+      { filter: "list = 'L1'", local: (r) => r.list === "L1" },
+    );
+
+    // Force the stub to KEEP isConnected=false even after subscribe (the bug
+    // scenario where the SDK can't actually reconnect).
+    const originalSubscribe = (stub.pb.collection("items") as { subscribe: unknown }).subscribe;
+    const _ = originalSubscribe;  // suppress unused warning
+    stub.realtime.simulateSilentDisconnect();
+    // Override subscribe behavior just for items so it doesn't flip
+    // isConnected back to true (mimicking the SDK failing to reconnect).
+    const itemsCol = stub.col("items");
+    let stuckMode = true;
+    const callsAtStart = itemsCol.subscribeCalls;
+
+    // Replace the stub's items.subscribe to NOT toggle isConnected.
+    // We do this by wrapping the existing pb.collection function below; but
+    // for this test it's simpler to just set isConnected false on every tick.
+    const tickAndKeepDisconnected = async (ms: number) => {
+      const stepMs = 100;
+      for (let elapsed = 0; elapsed < ms; elapsed += stepMs) {
+        if (stuckMode) stub.realtime.isConnected = false;
+        await vi.advanceTimersByTimeAsync(stepMs);
+      }
+    };
+
+    // First 200ms — one watchdog tick should fire ONE recovery.
+    await tickAndKeepDisconnected(200);
+    const afterFirst = itemsCol.subscribeCalls;
+    expect(afterFirst - callsAtStart, "one recovery should run").toBeGreaterThanOrEqual(1);
+
+    // Now advance another 30s while still stuck. The watchdog ticks every
+    // 100ms; without a cooldown we'd see many more recoveries. With the
+    // 60s cooldown, none.
+    await tickAndKeepDisconnected(30_000);
+    const afterStuck = itemsCol.subscribeCalls;
+    expect(
+      afterStuck - afterFirst,
+      "no additional recoveries should fire within the cooldown window",
+    ).toBe(0);
+
+    stuckMode = false;
+    wpb.dispose?.();
   });
 });

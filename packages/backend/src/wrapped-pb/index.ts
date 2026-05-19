@@ -224,12 +224,31 @@ interface CollectionState {
 const SSE_FRESH_MS = 90 * 1000;
 
 /**
- * Default cadence for the silent-disconnect watchdog. 10 s is fast enough that
- * a stuck tab self-heals well before the user notices, slow enough that a
- * healthy app pays approximately nothing (one `isConnected` getter read per
- * 10 s — no network, no allocation beyond the getter).
+ * Default cadence for the silent-disconnect watchdog. **Disabled by default
+ * (0 = no watchdog).**
+ *
+ * Why it's off: the watchdog was added for a PB SDK bug where the
+ * EventSource can die without `onDisconnect` firing
+ * (RealtimeService.disconnect guards onDisconnect behind a clientId
+ * check). In production the watchdog turned out to be net-negative —
+ * the SDK's `isConnected` flips false during normal reconnect cycles
+ * (pendingConnects non-empty), so the watchdog triggers recovery on a
+ * tab that's already self-healing. Each recovery walks every collection
+ * and re-subscribes, the SDK closes+reopens its EventSource on each
+ * subscribe, each reopen fires PB_CONNECT, each PB_CONNECT (pre-fix)
+ * triggered a full resync. With ~13 active subscriptions that's
+ * ~169 getFullList requests per tick, every 10 s, until the SDK
+ * stabilizes — Angela observed 30 k requests/hour from this.
+ *
+ * The watchdog code + tests are kept so we can re-enable per-call if
+ * we ever isolate the silent-disconnect case in production. Until
+ * then, focus-driven resync (BackendProvider's useRealtimeResync) and
+ * the SDK's own onDisconnect path are the recovery mechanisms.
+ *
+ * Pass `watchdogIntervalMs: 10_000` (or any positive value) at construction
+ * to opt back in.
  */
-const DEFAULT_WATCHDOG_INTERVAL_MS = 10 * 1000;
+const DEFAULT_WATCHDOG_INTERVAL_MS = 0;
 
 export function wrapPocketBase(pb: () => PocketBase, options?: WrapPocketBaseOptions): WrappedPocketBase {
   const queue = new MutationQueue();
@@ -317,6 +336,15 @@ export function wrapPocketBase(pb: () => PocketBase, options?: WrapPocketBaseOpt
       // failed precisely because the network was down, and now isn't.
       // Cheap when the errored map is empty (early return inside).
       void retryErrored();
+      // Don't resync during a watchdog-driven recovery. Recovery walks each
+      // collection and re-calls ensureRealSubscription, and the SDK closes
+      // and reopens the EventSource on every subscribe — so during a 13-
+      // collection recovery, PB_CONNECT fires 13 times. Without this guard,
+      // each one would trigger a full resync (N getFullList requests), and
+      // we'd issue N×13 = 169 requests per recovery instead of N. The
+      // watchdog itself does one coalesced resync after the cascade
+      // completes (see watchdogTick).
+      if (recoveryInFlight) return;
       if (!realtimeDirty) return;
       realtimeDirty = false;
       void resync();
@@ -357,9 +385,17 @@ export function wrapPocketBase(pb: () => PocketBase, options?: WrapPocketBaseOpt
     watchdogTimer = null;
   }
 
+  /** Cooldown: minimum ms between watchdog recoveries. If recovery doesn't
+   *  fix isConnected (e.g. server is hard-down), we don't want to fire every
+   *  10s — that'd flood the API with getFullList requests after each cascade. */
+  const WATCHDOG_COOLDOWN_MS = 60_000;
+  let lastRecoveryAt = 0;
+
   async function watchdogTick(): Promise<void> {
     if (recoveryInFlight) return;
     if (!hasActiveSubscribers()) return;
+    const now = Date.now();
+    if (now - lastRecoveryAt < WATCHDOG_COOLDOWN_MS) return;
     const client = pb();
     const rt = client?.realtime;
     if (!rt) return;
@@ -372,9 +408,10 @@ export function wrapPocketBase(pb: () => PocketBase, options?: WrapPocketBaseOpt
     if (rt.isConnected) return;
 
     recoveryInFlight = true;
+    lastRecoveryAt = now;
     try {
-      // Arm resync so the next PB_CONNECT delivers any events we missed
-      // during the silent-disconnect window. Mirrors the onDisconnect path.
+      // Arm resync so the final coalesced resync at end-of-recovery delivers
+      // any events we missed during the silent-disconnect window.
       realtimeDirty = true;
       // Tear down every collection's stale `realUnsub` and re-establish.
       // The SDK's `collection(name).subscribe(...)` internally triggers
@@ -397,6 +434,13 @@ export function wrapPocketBase(pb: () => PocketBase, options?: WrapPocketBaseOpt
       }
     } finally {
       recoveryInFlight = false;
+    }
+    // Coalesced resync. PB_CONNECT during the cascade above is gated on
+    // `recoveryInFlight` and skipped (see hookRealtimeLifecycle). Now that
+    // the cascade is done, do one resync to deliver missed events.
+    if (realtimeDirty) {
+      realtimeDirty = false;
+      void resync();
     }
   }
 
