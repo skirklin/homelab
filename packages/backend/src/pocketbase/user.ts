@@ -80,15 +80,28 @@ export class PocketBaseUserBackend implements UserBackend {
 
     // wpb.subscribe(id) auto-loads the user record (delivered as a "create"
     // event), seeds the optimistic queue, then forwards live updates.
-    let unsub: (() => void) | undefined;
+    //
+    // Cancel-before-resolve guard: if the consumer unsubscribes before the
+    // inner subscribe-promise lands, we still receive the underlying
+    // teardown function — call it immediately so we don't leak a SSE
+    // subscription + LocalSubscriber registration. This is the same shape
+    // as the recipes / shopping / life cleanup races fixed earlier in the
+    // week (c1bcf22, c63af4a, c6297e8).
+    let unsub: (() => void) | null = null;
     let initialDone = false;
     this.wpb.collection("users").subscribe(userId, (e) => {
       if (cancelled) return;
       if (e.action === "delete") return;
       onSlugs((e.record as Record<string, unknown>)[field] as Record<string, string> || {});
     }).then((fn) => {
+      if (cancelled) {
+        // Teardown ran before the promise resolved. Drop the late-arriving
+        // unsubscribe now so the underlying subscription isn't orphaned.
+        try { fn(); } catch { /* nothing to do */ }
+        return;
+      }
       unsub = fn;
-      if (!cancelled && !initialDone) {
+      if (!initialDone) {
         initialDone = true;
         // If the user record didn't exist (404 on initial getOne), no event
         // fired above. Emit empty slugs so consumers don't hang on the
@@ -101,7 +114,10 @@ export class PocketBaseUserBackend implements UserBackend {
 
     return () => {
       cancelled = true;
-      unsub?.();
+      if (unsub) {
+        try { unsub(); } catch { /* nothing to do */ }
+        unsub = null;
+      }
     };
   }
 
