@@ -3,10 +3,37 @@
  * The frontend doesn't use these — it talks to PocketBase directly.
  */
 import { Hono } from "hono";
+import type PocketBase from "pocketbase";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 
 export const dataRoutes = new Hono<AppEnv>();
+
+/**
+ * Verify `userId` is in `shopping_lists[listId].owners`. Returns `false` if
+ * the list doesn't exist OR the user isn't an owner. Mirrors the PB rule
+ * `@request.auth.id ?= owners.id` on shopping_lists (migration 0001).
+ *
+ * `hlk_`/`mcpat_` tokens authenticate against a superuser PB client
+ * (services/api/src/middleware/auth.ts); that client ignores PB collection
+ * rules entirely, so the route layer is the only ownership gate on this
+ * surface for write paths that hit shopping_lists or list-scoped child
+ * collections (shopping_items, shopping_history, shopping_trips).
+ */
+async function userOwnsShoppingList(
+  pb: PocketBase,
+  listId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!listId || !userId) return false;
+  try {
+    const list = await pb.collection("shopping_lists").getOne(listId);
+    const owners = list.owners;
+    return Array.isArray(owners) && owners.includes(userId);
+  } catch {
+    return false;
+  }
+}
 
 // List recipe boxes for the authenticated user
 dataRoutes.get("/boxes", handler(async (c) => {
@@ -76,11 +103,18 @@ dataRoutes.get("/shopping/lists", handler(async (c) => {
   return c.json(lists);
 }));
 
-// List items in a shopping list
+// List items in a shopping list. Admin-PB bypasses PB's list/view rules,
+// so without this check any token holder could enumerate any list's items
+// by ID. Mirror shopping_lists.viewRule (the parent gate) — items are only
+// surfaced to a caller who owns the list.
 dataRoutes.get("/shopping/items", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const listId = c.req.query("list");
   if (!listId) return c.json({ error: "list query param required" }, 400);
+  if (!(await userOwnsShoppingList(pb, listId, userId))) {
+    return c.json({ error: "not found" }, 404);
+  }
 
   const items = await pb.collection("shopping_items").getFullList({ filter: pb.filter("list = {:listId}", { listId }) });
   return c.json(items.map((i) => ({
@@ -92,7 +126,9 @@ dataRoutes.get("/shopping/items", handler(async (c) => {
   })));
 }));
 
-// Add an item to a shopping list
+// Add an item to a shopping list. Without the ownership check the route
+// would happily plant an item under any list — see audit notes / commit
+// message for the smoking gun.
 dataRoutes.post("/shopping/items", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -106,6 +142,9 @@ dataRoutes.post("/shopping/items", handler(async (c) => {
   if (!list || !ingredient) {
     return c.json({ error: "list and ingredient required" }, 400);
   }
+  if (!(await userOwnsShoppingList(pb, list, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const record = await pb.collection("shopping_items").create({
     list,
@@ -118,18 +157,34 @@ dataRoutes.post("/shopping/items", handler(async (c) => {
   return c.json({ id: record.id, ingredient: record.ingredient }, 201);
 }));
 
-// Delete a shopping item
+// Delete a shopping item. Fetch the item first so we know which list to
+// authorize against; admin-PB skips PB's child-rule ownership check.
 dataRoutes.delete("/shopping/items/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const item = await pb.collection("shopping_items").getOne(id).catch(() => null);
+  if (!item) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsShoppingList(pb, item.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("shopping_items").delete(id);
   return c.json({ success: true });
 }));
 
-// Update a shopping item — checked toggle, note, or category
+// Update a shopping item — checked toggle, note, or category. Note: `list`
+// is intentionally NOT in the typed body. Even if a caller passes it the
+// destructure silently drops it, which blocks the reparent-attack vector
+// (move a victim's item into the attacker's own list).
 dataRoutes.patch("/shopping/items/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const item = await pb.collection("shopping_items").getOne(id).catch(() => null);
+  if (!item) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsShoppingList(pb, item.list as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const body = await c.req.json<{
     checked?: boolean;
     note?: string;
@@ -174,11 +229,15 @@ dataRoutes.post("/shopping/lists", handler(async (c) => {
   return c.json({ id: record.id, name: record.name, slug: finalSlug }, 201);
 }));
 
-// Update a shopping list — rename or change its slug in the user's map
+// Update a shopping list — rename or change its slug in the user's map.
+// Mirrors shopping_lists.updateRule which admin-PB ignores.
 dataRoutes.patch("/shopping/lists/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  if (!(await userOwnsShoppingList(pb, id, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const body = await c.req.json<{ name?: string; slug?: string }>();
 
   if (body.name !== undefined) {
@@ -199,11 +258,17 @@ dataRoutes.patch("/shopping/lists/:id", handler(async (c) => {
   return c.json({ id: record.id, name: record.name });
 }));
 
-// Delete a shopping list (and remove from user's slug map)
+// Delete a shopping list (and remove from user's slug map). Mirrors
+// shopping_lists.deleteRule which admin-PB ignores. Pre-fix this cascaded
+// into items/history/trips on the victim's list — the most destructive
+// path on the shopping surface.
 dataRoutes.delete("/shopping/lists/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  if (!(await userOwnsShoppingList(pb, id, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("shopping_lists").delete(id);
   try {
     const user = await pb.collection("users").getOne(userId);
@@ -217,11 +282,17 @@ dataRoutes.delete("/shopping/lists/:id", handler(async (c) => {
   return c.json({ success: true });
 }));
 
-// Clear all checked items from a shopping list
+// Clear all checked items from a shopping list. Bulk-delete on someone
+// else's list would silently nuke their data on admin-PB; gate on list
+// ownership.
 dataRoutes.post("/shopping/clear-checked", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const { list } = await c.req.json<{ list: string }>();
   if (!list) return c.json({ error: "list required" }, 400);
+  if (!(await userOwnsShoppingList(pb, list, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const items = await pb.collection("shopping_items").getFullList({
     filter: pb.filter("list = {:list} && checked = true", { list }),
