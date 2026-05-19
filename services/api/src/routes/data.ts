@@ -31,6 +31,94 @@ async function userOwnsTravelLog(
   }
 }
 
+/**
+ * Verify `userId` is in `recipe_boxes[boxId].owners`. Returns `false` if the
+ * box doesn't exist OR the user isn't an owner. Mirrors `userOwnsTravelLog`
+ * — admin-PB bypasses PB's tightened (0024) rules so the route layer is the
+ * only ownership gate for `hlk_`/`mcpat_` callers writing into another
+ * user's box, recipes, or cooking log.
+ */
+async function userOwnsRecipeBox(
+  pb: PocketBase,
+  boxId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!boxId || !userId) return false;
+  try {
+    const box = await pb.collection("recipe_boxes").getOne(boxId);
+    const owners = box.owners;
+    return Array.isArray(owners) && owners.includes(userId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Authorization for recipe-level writes: caller must be in `recipe.owners`
+ * OR in `box.owners`. Mirrors the PB updateRule/deleteRule for `recipes`
+ * from 0001 (unchanged by 0024). Returns `null` (recipe is missing) so the
+ * caller can reply 404 separately from 403.
+ */
+async function userCanWriteRecipe(
+  pb: PocketBase,
+  recipeId: string,
+  userId: string,
+): Promise<"ok" | "denied" | "notfound"> {
+  if (!recipeId || !userId) return "denied";
+  let recipe;
+  try {
+    recipe = await pb.collection("recipes").getOne(recipeId);
+  } catch {
+    return "notfound";
+  }
+  const recipeOwners = recipe.owners;
+  if (Array.isArray(recipeOwners) && recipeOwners.includes(userId)) return "ok";
+  if (await userOwnsRecipeBox(pb, recipe.box as string, userId)) return "ok";
+  return "denied";
+}
+
+/**
+ * Authorization for recipe READS via the data routes (token surface only).
+ * Mirrors PB's tightened visRule (migration 0024):
+ *   - visibility === "public" → always allowed
+ *   - caller in recipe.owners → allowed
+ *   - caller in box.owners → allowed
+ *   - (authed AND visibility !== "private") → allowed
+ * The `userId` will always be set on this surface (authMiddleware refuses
+ * unauthed requests), so the authed-and-not-private clause effectively
+ * means "unlisted is visible to anyone with a token." This matches the
+ * PB rule. Returns `"notfound"` when the recipe doesn't exist so the
+ * caller can hide the 404 vs 403 distinction.
+ */
+async function userCanReadRecipe(
+  pb: PocketBase,
+  recipeId: string,
+  userId: string,
+): Promise<{ status: "ok"; recipe: Record<string, unknown> } | { status: "denied" | "notfound" }> {
+  if (!recipeId) return { status: "notfound" };
+  let recipe;
+  try {
+    recipe = await pb.collection("recipes").getOne(recipeId);
+  } catch {
+    return { status: "notfound" };
+  }
+  const visibility = recipe.visibility;
+  if (visibility === "public") {
+    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
+  }
+  const recipeOwners = recipe.owners;
+  if (userId && Array.isArray(recipeOwners) && recipeOwners.includes(userId)) {
+    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
+  }
+  if (userId && await userOwnsRecipeBox(pb, recipe.box as string, userId)) {
+    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
+  }
+  if (userId && visibility !== "private") {
+    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
+  }
+  return { status: "denied" };
+}
+
 // List recipe boxes for the authenticated user
 dataRoutes.get("/boxes", handler(async (c) => {
   const pb = c.get("pb");
@@ -64,11 +152,16 @@ dataRoutes.get("/recipes", handler(async (c) => {
   })));
 }));
 
-// Get a single recipe with full data
+// Get a single recipe with full data. Admin-PB bypasses PB rules, so
+// without this check the route would happily return any private recipe
+// to any token holder. Mirror PB's tightened (0024) visRule here.
 dataRoutes.get("/recipes/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
-  const r = await pb.collection("recipes").getOne(id);
+  const check = await userCanReadRecipe(pb, id, userId);
+  if (check.status !== "ok") return c.json({ error: "not found" }, 404);
+  const r = check.recipe;
   return c.json({
     id: r.id,
     box: r.box,
@@ -277,6 +370,9 @@ dataRoutes.post("/recipes", handler(async (c) => {
   const userId = c.get("userId") as string;
   const { boxId, data } = await c.req.json<{ boxId: string; data: Record<string, unknown> }>();
   if (!boxId || !data) return c.json({ error: "boxId and data required" }, 400);
+  if (!(await userOwnsRecipeBox(pb, boxId, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
 
   const record = await pb.collection("recipes").create({
     box: boxId,
@@ -291,7 +387,11 @@ dataRoutes.post("/recipes", handler(async (c) => {
 // Update a recipe box (name, description, visibility)
 dataRoutes.patch("/boxes/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  if (!(await userOwnsRecipeBox(pb, id, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const body = await c.req.json<{
     name?: string;
     description?: string;
@@ -312,6 +412,9 @@ dataRoutes.delete("/boxes/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  if (!(await userOwnsRecipeBox(pb, id, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("recipe_boxes").delete(id);
   try {
     const user = await pb.collection("users").getOne(userId);
@@ -323,11 +426,24 @@ dataRoutes.delete("/boxes/:id", handler(async (c) => {
   return c.json({ success: true });
 }));
 
-// Subscribe authenticated user to a box
+// Subscribe authenticated user to a box. Requires the caller be able to
+// SEE the box per PB's box viewRule (boxVisRule from 0001):
+//   visibility=public OR caller in owners OR (authed AND visibility!=private)
+// Otherwise an attacker could subscribe to (and pollute the subscribers
+// list of) a victim's private box via admin-PB.
 dataRoutes.post("/boxes/:id/subscribe", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const box = await pb.collection("recipe_boxes").getOne(id).catch(() => null);
+  if (!box) return c.json({ error: "not found" }, 404);
+  const owners = (box.owners as string[] | undefined) ?? [];
+  const visibility = box.visibility as string | undefined;
+  const canSeeBox =
+    visibility === "public" ||
+    owners.includes(userId) ||
+    (visibility !== "private");
+  if (!canSeeBox) return c.json({ error: "not found" }, 404);
   const user = await pb.collection("users").getOne(userId);
   const boxes = (user.recipe_boxes || []) as string[];
   await Promise.all([
@@ -353,11 +469,19 @@ dataRoutes.post("/boxes/:id/unsubscribe", handler(async (c) => {
   return c.json({ success: true });
 }));
 
-// Update a recipe (data and/or visibility)
+// Update a recipe (data and/or visibility). Note: `box` is NOT in the
+// typed body — even pre-fix, PB schema enforces visibility/data shape, but
+// the route should never accept a reparenting `box` field from the body
+// (it would let an attacker move a victim's recipe into their own box).
+// We don't read `body.box` explicitly, but the type-narrowed destructure
+// already drops it.
 dataRoutes.patch("/recipes/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const body = await c.req.json<{
     data?: Record<string, unknown>;
     visibility?: "private" | "public" | "unlisted";
@@ -436,6 +560,9 @@ dataRoutes.patch("/recipes/:id/data", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const body = await c.req.json<{ fields: Record<string, unknown> }>();
   if (!body.fields || typeof body.fields !== "object") {
     return c.json({ error: "fields object required" }, 400);
@@ -457,6 +584,9 @@ dataRoutes.post("/recipes/:id/ingredients", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const body = await c.req.json<{ ingredient: string; position?: number }>();
   if (!body.ingredient || typeof body.ingredient !== "string") {
     return c.json({ error: "ingredient string required" }, 400);
@@ -479,6 +609,9 @@ dataRoutes.patch("/recipes/:id/ingredients/:index", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const idx = parseInt(c.req.param("index")!, 10);
   const { ingredient } = await c.req.json<{ ingredient: string }>();
   if (!ingredient || typeof ingredient !== "string") {
@@ -501,6 +634,9 @@ dataRoutes.delete("/recipes/:id/ingredients/:index", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const idx = parseInt(c.req.param("index")!, 10);
 
   const out = await mutateRecipeData(pb, userId, id, (data) => {
@@ -519,6 +655,9 @@ dataRoutes.post("/recipes/:id/ingredients/reorder", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const { order } = await c.req.json<{ order: number[] }>();
   if (!Array.isArray(order)) return c.json({ error: "order must be an array of integers" }, 400);
 
@@ -540,6 +679,9 @@ dataRoutes.post("/recipes/:id/steps", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const body = await c.req.json<{ text: string; ingredients?: string[]; position?: number }>();
   if (!body.text || typeof body.text !== "string") {
     return c.json({ error: "text required" }, 400);
@@ -566,6 +708,9 @@ dataRoutes.patch("/recipes/:id/steps/:index", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const idx = parseInt(c.req.param("index")!, 10);
   const body = await c.req.json<{ text?: string; ingredients?: string[] | null }>();
 
@@ -588,6 +733,9 @@ dataRoutes.delete("/recipes/:id/steps/:index", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const idx = parseInt(c.req.param("index")!, 10);
 
   const out = await mutateRecipeData(pb, userId, id, (data) => {
@@ -606,6 +754,9 @@ dataRoutes.post("/recipes/:id/steps/reorder", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   const { order } = await c.req.json<{ order: number[] }>();
   if (!Array.isArray(order)) return c.json({ error: "order must be an array of integers" }, 400);
 
@@ -634,18 +785,27 @@ function validatePermutation(order: number[], n: number): string | null {
 // Delete a recipe
 dataRoutes.delete("/recipes/:id", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const check = await userCanWriteRecipe(pb, id, userId);
+  if (check === "notfound") return c.json({ error: "not found" }, 404);
+  if (check === "denied") return c.json({ error: "access denied" }, 403);
   await pb.collection("recipes").delete(id);
   return c.json({ success: true });
 }));
 
-// List cooking log events for a recipe
+// List cooking log events for a recipe. Read-gated through the same recipe
+// read check as GET /recipes/:id — if you can't see the recipe, you can't
+// see when it was cooked.
 dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
-  const recipe = await pb.collection("recipes").getOne(id);
+  const check = await userCanReadRecipe(pb, id, userId);
+  if (check.status !== "ok") return c.json({ error: "not found" }, 404);
+  const recipe = check.recipe;
   const events = await pb.collection("recipe_events").getFullList({
-    filter: pb.filter("box = {:boxId} && subject_id = {:recipeId}", { boxId: recipe.box, recipeId: id }),
+    filter: pb.filter("box = {:boxId} && subject_id = {:recipeId}", { boxId: recipe.box as string, recipeId: id }),
     sort: "-timestamp",
   });
   return c.json(events.map((e) => ({
@@ -657,15 +817,22 @@ dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
   })));
 }));
 
-// Add a cooking log entry for a recipe
+// Add a cooking log entry for a recipe. Cooking-log events belong to the
+// recipe's box (recipe_events.box → recipe_boxes), so authorization must
+// flow through `box.owners`. Recipe-level owners aren't enough — PB's own
+// `recipe_events` updateRule (childRules-based) requires box ownership.
 dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
+  const recipe = await pb.collection("recipes").getOne(id).catch(() => null);
+  if (!recipe) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsRecipeBox(pb, recipe.box as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const body = await c.req.json<{ notes?: string; timestamp?: string }>().catch(
     () => ({} as { notes?: string; timestamp?: string }),
   );
-  const recipe = await pb.collection("recipes").getOne(id);
   const record = await pb.collection("recipe_events").create({
     box: recipe.box,
     subject_id: id,
@@ -678,12 +845,17 @@ dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
 
 // Update notes and/or timestamp on a cooking log entry. Empty-string notes
 // clears the notes. Timestamp lets callers fix a wrong-day cook entry without
-// delete + re-add.
+// delete + re-add. Authorization flows through the event's parent box.
 dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const eventId = c.req.param("eventId")!;
+  const record = await pb.collection("recipe_events").getOne(eventId).catch(() => null);
+  if (!record) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsRecipeBox(pb, record.box as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   const body = await c.req.json<{ notes?: string; timestamp?: string }>();
-  const record = await pb.collection("recipe_events").getOne(eventId);
   const update: Record<string, unknown> = {};
   if (body.notes !== undefined) {
     const data = { ...((record.data as Record<string, unknown>) || {}) };
@@ -702,10 +874,16 @@ dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
   });
 }));
 
-// Delete a cooking log entry
+// Delete a cooking log entry. Same box-ownership gate as PATCH.
 dataRoutes.delete("/cooking-log/:eventId", handler(async (c) => {
   const pb = c.get("pb");
+  const userId = c.get("userId") as string;
   const eventId = c.req.param("eventId")!;
+  const record = await pb.collection("recipe_events").getOne(eventId).catch(() => null);
+  if (!record) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsRecipeBox(pb, record.box as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
   await pb.collection("recipe_events").delete(eventId);
   return c.json({ success: true });
 }));
