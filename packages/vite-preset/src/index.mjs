@@ -58,8 +58,24 @@ export function kirklPlugins(opts) {
         navigateFallbackDenylist: [/^\/fn\//, /^\/api\//],
         runtimeCaching: [
           {
-            urlPattern: ({ url, request }) =>
-              request.method === "GET" && (url.pathname.startsWith("/fn/") || url.pathname.startsWith("/api/")),
+            // GET to /api/ or /fn/, but ABSOLUTELY NOT EventSource.
+            //
+            // workbox's StaleWhileRevalidate buffers the entire response
+            // before serving — fine for normal JSON, fatal for SSE.
+            // PocketBase opens its realtime channel at /api/realtime with
+            // an `Accept: text/event-stream` header; if workbox intercepts
+            // that, the stream never establishes and the client thinks
+            // realtime is permanently down (Angela's 2026-05-19 bug —
+            // hard refresh bypasses the SW and works; plain refresh
+            // installs the SW and SSE breaks until the SW is unregistered).
+            urlPattern: ({ url, request }) => {
+              if (request.method !== "GET") return false;
+              if (!(url.pathname.startsWith("/fn/") || url.pathname.startsWith("/api/"))) return false;
+              // Belt + suspenders — match by path AND Accept header.
+              if (url.pathname === "/api/realtime") return false;
+              if ((request.headers.get("accept") || "").includes("text/event-stream")) return false;
+              return true;
+            },
             handler: "StaleWhileRevalidate",
             options: {
               cacheName: "kirkl-api",
