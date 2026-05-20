@@ -141,7 +141,6 @@ Every PB adapter `create*` signature gains an optional `id` parameter:
 | [pocketbase/travel.ts:91](packages/backend/src/pocketbase/travel.ts#L91) | `addTrip` | accept `id` |
 | [pocketbase/travel.ts:108](packages/backend/src/pocketbase/travel.ts#L108) | `addActivity` | accept `id` |
 | [pocketbase/travel.ts:121](packages/backend/src/pocketbase/travel.ts#L121) | `addItinerary` | accept `id` |
-| [pocketbase/travel.ts:145](packages/backend/src/pocketbase/travel.ts#L145) | `createProposal` | accept `id` |
 
 Interface signatures in `packages/backend/src/interfaces/*.ts` get the same optional param. Existing callers keep working — PB still mints one if absent.
 

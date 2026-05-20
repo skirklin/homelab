@@ -5,7 +5,7 @@
  * pass through to the underlying backend (and will reject when offline).
  */
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, Itinerary, TripProposal, DayEntry } from "../types/travel";
+import type { TravelLog, Trip, Activity, Itinerary, DayEntry } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
 import { cachedRead, cached, hydrateOne } from "./helpers";
 
@@ -13,9 +13,6 @@ export function withTravelCache(inner: TravelBackend): TravelBackend {
   return {
     // Reads
     getOrCreateLog: (userId) => cachedRead(`travel:logId:${userId}`, () => inner.getOrCreateLog(userId)),
-    getProposal: (id) => cachedRead<TripProposal | null>(`travel:proposal:${id}`, () => inner.getProposal(id)),
-    listProposals: (tripId, state) =>
-      cachedRead<TripProposal[]>(`travel:proposals:${tripId}:${state ?? "all"}`, () => inner.listProposals(tripId, state)),
 
     // Writes — pass through; offline calls will reject naturally.
     addTrip: (logId, trip) => inner.addTrip(logId, trip),
@@ -29,10 +26,6 @@ export function withTravelCache(inner: TravelBackend): TravelBackend {
     updateItinerary: (id, u) => inner.updateItinerary(id, u),
     setItineraryDays: (id, days) => inner.setItineraryDays(id, days),
     deleteItinerary: (id) => inner.deleteItinerary(id),
-    addProposal: (tripId, p) => inner.addProposal(tripId, p),
-    updateProposal: (id, u) => inner.updateProposal(id, u),
-    resolveProposal: (id) => inner.resolveProposal(id),
-    deleteProposal: (id) => inner.deleteProposal(id),
     upsertDayEntry: (logId, tripId, date, fields) => inner.upsertDayEntry(logId, tripId, date, fields),
     deleteDayEntry: (id) => inner.deleteDayEntry(id),
 

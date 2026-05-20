@@ -17,7 +17,6 @@ import {
   EditOutlined,
   EnvironmentOutlined,
   CalendarOutlined,
-  InboxOutlined,
   ScheduleOutlined,
   UnorderedListOutlined,
   CheckSquareOutlined,
@@ -39,7 +38,6 @@ import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
-import { ProposalsTab } from "./ProposalsTab";
 
 const TwoColumn = styled.div`
   display: grid;
@@ -311,15 +309,10 @@ export function TripDetail() {
           trip.status === "Ongoing" ||
           trip.status === "Completed" ||
           (trip.startDate != null && trip.startDate <= new Date());
-        const defaultTab = itineraries.length > 0 ? "itinerary" : "proposals";
+        const defaultTab = "itinerary";
         const hasMap = hasMapData && activeItin;
 
         const tabItems = [
-          {
-            key: "proposals",
-            label: <span><InboxOutlined /> Proposals</span>,
-            children: <ProposalsTab tripId={trip.id} activityMap={activityMap} />,
-          },
           {
             key: "itinerary",
             label: <span><ScheduleOutlined /> Itinerary</span>,

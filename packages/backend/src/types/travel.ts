@@ -40,31 +40,6 @@ export interface FlightInfo {
   toIsHome?: boolean;     // arrival is the user's home airport
 }
 
-/** A proposal is a curated comparison of candidate activities Claude presents
- *  to the user for feedback during trip planning. */
-export interface CandidateFeedback {
-  vote?: "up" | "down";
-  picked?: boolean;
-  notes?: string;
-}
-
-export interface TripProposal {
-  id: string;
-  trip: string;
-  question: string;
-  reasoning: string;
-  candidateIds: string[];
-  claudePicks: string[];
-  feedback: Record<string, CandidateFeedback>;
-  overallFeedback: string;
-  state: "open" | "resolved";
-  resolvedAt?: string;
-  userRespondedAt?: string;
-  claudeLastSeenAt?: string;
-  created: string;
-  updated: string;
-}
-
 export type ActivityVerdict = "loved" | "liked" | "meh" | "skip";
 
 export interface Activity {
