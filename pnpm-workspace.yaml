@@ -2,7 +2,6 @@ packages:
   - "apps/*"
   - "apps/*/app"
   - "packages/*"
-  - "services/functions"
   - "services/scripts"
   - "services/api"
   - "services/event-watcher"

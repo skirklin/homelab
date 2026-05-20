@@ -843,64 +843,6 @@ importers:
         specifier: ~5.9.3
         version: 5.9.3
 
-  services/functions:
-    dependencies:
-      '@anthropic-ai/sdk':
-        specifier: ^0.71.2
-        version: 0.71.2(zod@4.3.6)
-      axios:
-        specifier: ^1.13.2
-        version: 1.14.0
-      date-fns:
-        specifier: ^4.1.0
-        version: 4.1.0
-      date-fns-tz:
-        specifier: ^3.2.0
-        version: 3.2.0(date-fns@4.1.0)
-      firebase:
-        specifier: ^9.6.2
-        version: 9.23.0
-      firebase-admin:
-        specifier: ^13.6.0
-        version: 13.7.0
-      firebase-functions:
-        specifier: ^7.0.2
-        version: 7.2.3(firebase-admin@13.7.0)
-      form-data:
-        specifier: ^4.0.5
-        version: 4.0.5
-      jsdom:
-        specifier: ^19.0.0
-        version: 19.0.0
-      node:
-        specifier: ^16.13.1
-        version: 16.20.2
-      node-fetch:
-        specifier: ^2.7.0
-        version: 2.7.0
-      schema-dts:
-        specifier: ^1.0.0
-        version: 1.1.5
-    devDependencies:
-      '@types/jsdom':
-        specifier: ^16.2.14
-        version: 16.2.15
-      '@types/node':
-        specifier: ^20.19.27
-        version: 20.19.39
-      '@typescript-eslint/eslint-plugin':
-        specifier: ^8.51.0
-        version: 8.58.0(@typescript-eslint/parser@8.58.0(eslint@8.57.1)(typescript@4.9.5))(eslint@8.57.1)(typescript@4.9.5)
-      eslint:
-        specifier: ^8.6.0
-        version: 8.57.1
-      firebase-functions-test:
-        specifier: ^0.2.0
-        version: 0.2.3(firebase-admin@13.7.0)(firebase-functions@7.2.3(firebase-admin@13.7.0))
-      typescript:
-        specifier: ^4.5.4
-        version: 4.9.5
-
   services/scripts:
     dependencies:
       '@anthropic-ai/sdk':
