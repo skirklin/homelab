@@ -653,15 +653,6 @@ if (shouldRun("life")) {
 
       fireLogIdToPbId.set(logDoc.id, pbLogId);
 
-      // Update manifest if present — only if PB doesn't already have one,
-      // to avoid later Firebase logs for the same user overwriting earlier data
-      if (logData.manifest) {
-        const existing = await adminPb.collection("life_logs").getOne(pbLogId);
-        if (!existing.manifest || Object.keys(existing.manifest).length === 0) {
-          await life.updateManifest(pbLogId, logData.manifest);
-        }
-      }
-
       console.log(`  Created/found: life log -> ${pbLogId} for ${userMap.get(primaryOwner)!.email}`);
       logStats.created++;
 

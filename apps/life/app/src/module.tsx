@@ -1,6 +1,6 @@
 /**
- * Life tracker module for embedding in the home app.
- * Provides routes that can be mounted at /life/*
+ * Life tracker route tree. Used by the standalone app entry in App.tsx and by
+ * the optional `LifeModule` (kept for parity with other domain packages).
  */
 import { useEffect, lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
@@ -10,11 +10,10 @@ import { useAuth } from "@kirkl/shared";
 import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { DisplaySettingsProvider } from "./display-settings";
-import type { LifeLog } from "./types";
-import { DEFAULT_MANIFEST } from "./types";
 import { LifeDashboard } from "./components/LifeDashboard";
+import { SessionRunner } from "./components/SessionRunner";
+import type { LifeLog } from "./types";
 
-// Lazy load heavy visualization component
 const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
 
 const LoadingContainer = styled.div`
@@ -23,12 +22,6 @@ const LoadingContainer = styled.div`
   align-items: center;
   min-height: 200px;
 `;
-
-function hasWidgets(manifest: unknown): boolean {
-  if (!manifest || typeof manifest !== "object") return false;
-  const m = manifest as Record<string, unknown>;
-  return Array.isArray(m.widgets) && m.widgets.length > 0;
-}
 
 interface LifeRoutesProps {
   /** When true, hides sign-out and other account actions (handled by parent shell) */
@@ -47,15 +40,9 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     const loadLog = async () => {
       const backendLog = await life.getOrCreateLog(user.uid);
       if (cancelled) return;
-      // Convert backend LifeLog to app LifeLog
       const log: LifeLog = {
         id: backendLog.id,
-        name: "",
-        owners: [],
-        manifest: hasWidgets(backendLog.manifest) ? (backendLog.manifest as unknown as LifeLog["manifest"]) : DEFAULT_MANIFEST,
         sampleSchedule: backendLog.sampleSchedule as LifeLog["sampleSchedule"],
-        created: new Date(),
-        updated: new Date(),
       };
       dispatch({ type: "SET_LOG", log });
     };
@@ -77,6 +64,8 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     <DisplaySettingsProvider>
       <Routes>
         <Route path="/" element={<LifeDashboard embedded={embedded} />} />
+        <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
+        <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
         <Route path="/insights" element={
           <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
             <Visualizations />

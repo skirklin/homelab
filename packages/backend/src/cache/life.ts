@@ -10,7 +10,6 @@ export function withLifeCache(inner: LifeBackend): LifeBackend {
   return {
     getOrCreateLog: (userId) => cachedRead<LifeLog>(`life:log:${userId}`, () => inner.getOrCreateLog(userId)),
 
-    updateManifest: (id, m) => inner.updateManifest(id, m),
     clearSampleSchedule: (id) => inner.clearSampleSchedule(id),
     addEntry: (id, w, d, u, o) => inner.addEntry(id, w, d, u, o),
     updateEntry: (id, u) => inner.updateEntry(id, u),

@@ -23,7 +23,6 @@ import {
 } from "@kirkl/shared/test-utils";
 import { PocketBaseLifeBackend } from "@homelab/backend/pocketbase";
 import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
-import { DEFAULT_MANIFEST } from "../types";
 
 let ctx: TestContext;
 let life: PocketBaseLifeBackend;
@@ -163,7 +162,6 @@ describe("addEntry", () => {
     const log2 = await ctx.pb.collection("life_logs").create({
       name: "Second Log",
       owners: [user.id],
-      manifest: DEFAULT_MANIFEST,
     });
     cleanup.track("life_logs", log2.id);
 
@@ -267,59 +265,6 @@ describe("deleteEntry", () => {
   });
 });
 
-describe("updateManifest", () => {
-  it("updates the manifest on a life log", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await life.getOrCreateLog(user.id);
-    const logId = log.id;
-    cleanup.track("life_logs", logId);
-
-    const newManifest = {
-      ...DEFAULT_MANIFEST,
-      widgets: [
-        { id: "meds", type: "counter" as const, label: "Meds" },
-        { id: "mood", type: "rating" as const, label: "Mood", max: 5 },
-      ],
-    };
-
-    await life.updateManifest(logId, newManifest);
-
-    const record = await ctx.pb.collection("life_logs").getOne(logId);
-    expect(record.manifest.widgets).toHaveLength(2);
-    expect(record.manifest.widgets[1].id).toBe("mood");
-
-    await cleanup.cleanup();
-  });
-
-  it("accepts explicit logId", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await ctx.pb.collection("life_logs").create({
-      name: "Override Log",
-      owners: [user.id],
-      manifest: DEFAULT_MANIFEST,
-    });
-    cleanup.track("life_logs", log.id);
-
-    const updatedManifest = {
-      ...DEFAULT_MANIFEST,
-      widgets: [{ id: "custom", type: "counter" as const, label: "Custom" }],
-    };
-
-    await life.updateManifest(log.id, updatedManifest);
-
-    const record = await ctx.pb.collection("life_logs").getOne(log.id);
-    expect(record.manifest.widgets[0].id).toBe("custom");
-
-    await cleanup.cleanup();
-  });
-});
-
 describe("addSampleResponse", () => {
   it("creates a sample event", async () => {
     const user = await createTestUser(ctx);
@@ -350,7 +295,6 @@ describe("addSampleResponse", () => {
     const log = await ctx.pb.collection("life_logs").create({
       name: "Sample Override Log",
       owners: [user.id],
-      manifest: DEFAULT_MANIFEST,
     });
     cleanup.track("life_logs", log.id);
 

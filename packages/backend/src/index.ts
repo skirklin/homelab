@@ -27,7 +27,7 @@ export type {
   TripProposal, CandidateFeedback,
   DayEntry,
 } from "./types/travel";
-export type { LifeLog, LifeManifest, WidgetConfig, LifeEntry } from "./types/life";
+export type { LifeLog, LifeEntry } from "./types/life";
 
 // --- Interfaces ---
 export type { AuthBackend } from "./interfaces/auth";

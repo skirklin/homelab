@@ -1,17 +1,17 @@
 /**
  * Life tracker backend interface.
  *
- * Covers: log management, manifest (widget config), entries/events.
+ * Covers: log management and entries/events. Widget config lives in the
+ * frontend as a code-defined manifest — no DB-driven config.
  */
 import type { Unsubscribe } from "../types/common";
-import type { LifeLog, LifeManifest, LifeEntry } from "../types/life";
+import type { LifeLog, LifeEntry } from "../types/life";
 
 export interface LifeBackend {
   // --- Log ---
 
-  /** Get or create the user's life log. Returns log ID and data. */
+  /** Get or create the user's life log. Returns log ID and runtime state. */
   getOrCreateLog(userId: string): Promise<LifeLog>;
-  updateManifest(logId: string, manifest: LifeManifest): Promise<void>;
   clearSampleSchedule(logId: string): Promise<void>;
 
   // --- Entries ---

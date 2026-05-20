@@ -7,7 +7,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { LifeBackend } from "../interfaces/life";
-import type { LifeLog, LifeManifest, LifeEntry } from "../types/life";
+import type { LifeLog, LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
@@ -15,7 +15,6 @@ import type { WrappedPocketBase } from "../wrapped-pb";
 function logFromRecord(r: RecordModel): LifeLog {
   return {
     id: r.id,
-    manifest: r.manifest || { widgets: [] },
     sampleSchedule: r.sample_schedule || null,
     created: r.created,
     updated: r.updated,
@@ -80,14 +79,9 @@ export class PocketBaseLifeBackend implements LifeBackend {
       id,
       name: "Life Log",
       owners: [userId],
-      manifest: { widgets: [] },
     });
     await this.wpb.collection("users").update(userId, { life_log_id: id });
     return logFromRecord(r as RecordModel);
-  }
-
-  async updateManifest(logId: string, manifest: LifeManifest): Promise<void> {
-    await this.wpb.collection("life_logs").update(logId, { manifest });
   }
 
   async clearSampleSchedule(logId: string): Promise<void> {
