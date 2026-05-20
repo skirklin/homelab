@@ -17,6 +17,7 @@ import {
 import styled from "styled-components";
 // Google Maps API key from env
 import type { Activity, Itinerary } from "../types";
+import { computeDayRoutePath, buildDayLegMap, type LegKey, type DayLegMap } from "./dayRoute";
 
 // React-side key passed to <Map id={...}> and looked up via useMap(MAP_KEY).
 // Distinct from MAP_STYLE_ID (the Google Cloud Map Style ID) — those used to
@@ -177,11 +178,31 @@ function MarkerDot({ color, isAccommodation }: { color: string; isAccommodation:
 // Routes are cached by a hash of the coordinate path so each unique
 // route is only computed once per page view.
 export interface LegInfo { durationMinutes: number; distanceMiles: number }
-export interface RouteInfo { durationMinutes: number; distanceMiles: number; legs: LegInfo[] }
+/**
+ * Per-day route summary. `legs` is positional along the constructed path
+ * (start lodging → stops → end lodging). Consumers should NOT index `legs`
+ * by `day.slots` index — flights, missing-coords slots, and lodging
+ * bookends shift the offsets. Use `legMap` (built from `legKeys`) instead.
+ */
+export interface RouteInfo {
+  durationMinutes: number;
+  distanceMiles: number;
+  legs: LegInfo[];
+  /** Slot-indexed lookup of "the drive arriving at this slot" + end-lodging. */
+  legMap: DayLegMap;
+}
 
 // Module-level cache: pathKey → encoded polyline path or null (pending/failed)
 const routeCache = new Map<string, google.maps.LatLng[] | "pending" | "failed">();
-const routeInfoCache = new Map<string, RouteInfo>();
+// Cache the raw legs / totals indexed by path. `legMap` is rebuilt per call
+// because it depends on the caller's current `legKeys` (slot indices may
+// shift between renders even when the path is unchanged).
+type CachedRouteCore = { durationMinutes: number; distanceMiles: number; legs: LegInfo[] };
+const routeInfoCache = new Map<string, CachedRouteCore>();
+
+function withLegMap(core: CachedRouteCore, legKeys: LegKey[]): RouteInfo {
+  return { ...core, legMap: buildDayLegMap(legKeys, core.legs) };
+}
 
 function pathKey(path: { lat: number; lng: number }[]): string {
   return path.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("|");
@@ -199,7 +220,7 @@ function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: 
 }
 
 /** Estimate route info from straight-line distances (1.3x detour factor, 45mph avg) */
-function estimateRouteInfo(path: { lat: number; lng: number }[]): RouteInfo {
+function estimateRouteCore(path: { lat: number; lng: number }[]): CachedRouteCore {
   const legs: LegInfo[] = [];
   let totalMiles = 0;
   for (let i = 1; i < path.length; i++) {
@@ -215,8 +236,14 @@ function estimateRouteInfo(path: { lat: number; lng: number }[]): RouteInfo {
   };
 }
 
-function DayRoute({ pathCoords, color, onRouteComputed }: {
+/** Stable string serialization of legKeys for use as a useEffect dep. */
+function legKeysToString(legKeys: LegKey[]): string {
+  return legKeys.map((k) => k.kind === "slot" ? `s${k.slotIndex}` : "e").join(",");
+}
+
+function DayRoute({ pathCoords, legKeys, color, onRouteComputed }: {
   pathCoords: string; // stable string key from pathKey()
+  legKeys: LegKey[]; // parallel to legs: identifies the destination slot of each leg
   color: string;
   onRouteComputed?: (info: RouteInfo) => void;
 }) {
@@ -229,6 +256,7 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
     }),
     [pathCoords],
   );
+  const legKeysKey = useMemo(() => legKeysToString(legKeys), [legKeys]);
 
   useEffect(() => {
     if (!map || path.length < 2) return;
@@ -247,9 +275,9 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
       drawFallback();
       // Provide estimated route info from straight-line distances
       if (!routeInfoCache.has(key)) {
-        const est = estimateRouteInfo(path);
+        const est = estimateRouteCore(path);
         routeInfoCache.set(key, est);
-        onRouteComputed?.(est);
+        onRouteComputed?.(withLegMap(est, legKeys));
       }
     }
 
@@ -257,7 +285,7 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
       if (cached === "failed") {
         drawFallback();
         const info = routeInfoCache.get(key);
-        if (info) onRouteComputed?.(info);
+        if (info) onRouteComputed?.(withLegMap(info, legKeys));
         return;
       }
 
@@ -300,16 +328,16 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
               durationMinutes: Math.round((leg.durationMillis ?? 0) / 60000),
               distanceMiles: Math.round((leg.distanceMeters ?? 0) / 1609),
             }));
-            const info: RouteInfo = {
+            const core: CachedRouteCore = {
               durationMinutes: Math.round((route.durationMillis ?? 0) / 60000),
               distanceMiles: Math.round((route.distanceMeters ?? 0) / 1609),
               legs,
             };
-            routeInfoCache.set(key, info);
+            routeInfoCache.set(key, core);
 
             // Draw from cache
             drawCached(allPoints);
-            onRouteComputed?.(info);
+            onRouteComputed?.(withLegMap(core, legKeys));
           } else {
             failWithEstimate();
           }
@@ -321,7 +349,7 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
       // Cache hit — draw the cached polyline
       drawCached(cached);
       const info = routeInfoCache.get(key);
-      if (info) onRouteComputed?.(info);
+      if (info) onRouteComputed?.(withLegMap(info, legKeys));
     }
 
     function drawCached(points: google.maps.LatLng[]) {
@@ -350,7 +378,9 @@ function DayRoute({ pathCoords, color, onRouteComputed }: {
     return () => {
       polylinesRef.current.forEach((p) => p.setMap(null));
     };
-  }, [map, pathCoords, color]); // pathCoords is a stable string, not a new array
+    // legKeysKey is a stable serialization of legKeys content — drives a
+    // re-emit when slot indices shift even though the geometry didn't.
+  }, [map, pathCoords, color, legKeysKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return null;
 }
@@ -559,7 +589,10 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
             style={{ width: "100%", height: "100%" }}
           >
             <FitBoundsToDay visibleDays={visibleDays} selectedDay={selectedDay} />
-            {/* Day routes — start from previous day's lodging, end at this day's lodging */}
+            {/* Day routes — start from previous day's lodging, end at this day's lodging.
+                Path construction + per-leg slot mapping live in `dayRoute.ts` so the
+                consumer (DayView/ItinerarySection) can address legs by slot index
+                instead of fragile positional offsets into legs[]. */}
             {visibleDays.map((da) => {
               // This day's lodging (where you sleep tonight)
               const todayLodging = da.lodging
@@ -567,32 +600,20 @@ export function ItineraryMap({ itinerary, activities, activityMap, focusDay, onR
 
               // Previous day's lodging (where you woke up) — or arrival airport for day 1
               const prevLodging = dayActivities.slice(0, da.dayIndex).reverse().find((d) => d.lodging)?.lodging;
-              const startLodging = prevLodging || todayLodging;
 
-              const startCoord = startLodging && startLodging.lat != null
-                ? { lat: startLodging.lat!, lng: startLodging.lng! }
-                : null;
-
-              const endCoord = todayLodging && todayLodging.lat != null
-                ? { lat: todayLodging.lat!, lng: todayLodging.lng! }
-                : startCoord; // fallback to same if no lodging change
-
-              const activityCoords = da.nonLodging
-                .filter((a) => a.lat != null && a.lng != null)
-                .map((a) => ({ lat: a.lat!, lng: a.lng! }));
-
-              // Build path: start lodging → activities → end lodging
-              const path = [
-                ...(startCoord ? [startCoord] : []),
-                ...activityCoords,
-                ...(endCoord && (endCoord.lat !== startCoord?.lat || endCoord.lng !== startCoord?.lng) ? [endCoord] : []),
-                // If same lodging, still add it to complete the loop
-                ...(endCoord && startCoord && endCoord.lat === startCoord.lat && endCoord.lng === startCoord.lng ? [endCoord] : []),
-              ];
+              const { path, legKeys } = computeDayRoutePath(da.day, activityMap, {
+                todayLodging,
+                prevLodging,
+              });
 
               const coords = pathKey(path);
-              return <DayRoute key={da.dayIndex} pathCoords={coords} color={da.color}
-                onRouteComputed={(info) => onRouteInfo?.({ [da.dayIndex]: info })} />;
+              return <DayRoute
+                key={da.dayIndex}
+                pathCoords={coords}
+                legKeys={legKeys}
+                color={da.color}
+                onRouteComputed={(info) => onRouteInfo?.({ [da.dayIndex]: info })}
+              />;
             })}
 
             {/* Scheduled activity markers */}

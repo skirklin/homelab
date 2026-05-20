@@ -419,7 +419,10 @@ export function DayView() {
           {day.slots.flatMap((slot, j) => {
             const activity = activityMap.get(slot.activityId);
             const actUrl = activity ? mapsUrl(activity) : null;
-            const leg = ri?.legs?.[j];
+            // Look up "the drive arriving at slot j" by slot index, not by
+            // positional offset into legs — flights, missing-coords slots,
+            // and lodging bookends shift positional indices.
+            const leg = ri?.legMap?.legBySlotIndex.get(j);
             const elements: React.ReactNode[] = [];
             if (leg && leg.durationMinutes > 0) {
               elements.push(
@@ -485,7 +488,10 @@ export function DayView() {
           })}
 
           {(() => {
-            const lastLeg = ri?.legs?.[day.slots.length];
+            // "Last leg" is the drive from the final slot/stop back to today's
+            // lodging. The helper labels this explicitly as `end-lodging` so
+            // we no longer have to guess by `day.slots.length`.
+            const lastLeg = ri?.legMap?.endLodgingLeg;
             if (!lastLeg || lastLeg.durationMinutes <= 0) return null;
             return (
               <DriveTimeBadge>
