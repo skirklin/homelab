@@ -1,9 +1,9 @@
 import { getBackend } from '@kirkl/shared';
 import type { Recipe } from "schema-dts"
-import { BoxEntry, RecipeEntry, UserEntry } from './storage';
-import { Visibility } from './types';
+import { type PlainBox, type PlainRecipe, type PlainUser } from './storage';
+import { EnrichmentStatus, Visibility } from './types';
 
-export function createNewRecipe(user: UserEntry) {
+export function createNewRecipe(user: PlainUser): PlainRecipe {
   const owners = [user.id];
   const data: Recipe = {
     "@type": "Recipe",
@@ -12,34 +12,47 @@ export function createNewRecipe(user: UserEntry) {
     "recipeIngredient": [],
     "description": "",
   }
-  return new RecipeEntry(
+  return {
+    id: "placeholder",
     data,
     owners,
-    Visibility.private,
-    user.id,
-    "placeholder",
-    new Date(),
-    new Date(),
-    user.id
-  )
+    editing: false,
+    creator: user.id,
+    visibility: Visibility.private,
+    created: new Date(),
+    updated: new Date(),
+    lastUpdatedBy: user.id,
+    enrichmentStatus: EnrichmentStatus.needed,
+  };
 }
 
 
-export function createNewBox(user: UserEntry) {
+export function createNewBox(user: PlainUser): PlainBox {
   const name = "New box"
-  return new BoxEntry({ name }, [user.id], Visibility.private, user.id, "placeholder", new Date(), new Date(), user.id)
+  return {
+    id: "placeholder",
+    data: { name },
+    owners: [user.id],
+    subscribers: [],
+    creator: user.id,
+    visibility: Visibility.private,
+    recipes: new Map(),
+    created: new Date(),
+    updated: new Date(),
+    lastUpdatedBy: user.id,
+  };
 }
 
-const objIdMap = new WeakMap();
+const objIdMap = new WeakMap<object, number>();
 let objectCount = 0;
-export function getUniqueId(rcp: RecipeEntry) {
+export function getUniqueId(rcp: PlainRecipe) {
   if (!objIdMap.has(rcp)) objIdMap.set(rcp, ++objectCount);
   return objIdMap.get(rcp);
 }
 
-export function download(recipe: RecipeEntry) {
+export function download(recipe: PlainRecipe) {
   const downloadLink = document.createElement("a");
-  downloadLink.download = recipe.data.name + ".json"
+  downloadLink.download = (recipe.data.name as string) + ".json"
   downloadLink.innerHTML = "Download File";
 
   // Create a "file" to download
@@ -76,7 +89,7 @@ export function userSignOut() {
   getBackend().authStore.clear();
 }
 
-export function canUpdateRecipe(recipe: RecipeEntry | undefined, box: BoxEntry | undefined, user: UserEntry | undefined) {
+export function canUpdateRecipe(recipe: PlainRecipe | undefined, box: PlainBox | undefined, user: PlainUser | undefined) {
   if (user === undefined || recipe === undefined || box === undefined) return false
   const owner = recipe.owners.includes(user.id) || box.owners.includes(user.id)
   return owner

@@ -5,6 +5,7 @@ import { LinkOutlined } from '@ant-design/icons';
 import { Context } from '../context';
 import { Title } from '../StyledComponents';
 import { getRecipeFromState } from '../state';
+import { getRecipeData, getRecipeName } from '../storage';
 import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import { Input } from 'antd';
 import { useAuth } from '@kirkl/shared';
@@ -28,14 +29,14 @@ function RecipeName(props: RecipeCardProps) {
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const [editable, setEditablePrimitive] = useState(false);
 
-  const name = recipe ? recipe.getName() : undefined
+  const name = recipe ? getRecipeName(recipe) : undefined
   const [value, setValue] = useState(name);
   const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive, authUser?.uid)
   if (recipe === undefined) {
     return null
   }
 
-  const url = recipe.getData().url
+  const url = getRecipeData(recipe).url
   if (recipe === undefined) { return null }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {

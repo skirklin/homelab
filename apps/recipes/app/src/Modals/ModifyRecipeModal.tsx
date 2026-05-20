@@ -6,6 +6,7 @@ import { Context } from '../context';
 import { useRecipesBackend } from '@kirkl/shared';
 import { pendingChangesToBackend } from '../adapters';
 import { getRecipeFromState } from '../state';
+import { getRecipeData } from '../storage';
 import { type BoxId, type PendingChanges, type RecipeId } from '../types';
 import { RecipeDiffView } from './RecipeDiffView';
 
@@ -29,7 +30,7 @@ function ModifyRecipeModal(props: ModifyRecipeModalProps) {
   const recipesBackend = useRecipesBackend();
 
   const recipe = getRecipeFromState(state, boxId, recipeId);
-  const recipeData = recipe?.getData();
+  const recipeData = recipe ? getRecipeData(recipe) : undefined;
 
   async function handleGenerate() {
     if (!feedback.trim()) return;

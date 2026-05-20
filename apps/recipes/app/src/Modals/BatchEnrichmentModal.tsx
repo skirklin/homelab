@@ -5,7 +5,7 @@ import styled from 'styled-components';
 import { Context } from '../context';
 import { useRecipesBackend } from '@kirkl/shared';
 import { pendingChangesToBackend } from '../adapters';
-import { RecipeEntry } from '../storage';
+import { type PlainRecipe, getRecipeData, getRecipeName } from '../storage';
 import type { BoxId, RecipeId } from '../types';
 import { Section, SectionLabel, SuggestedDescription, TagsContainer, Reasoning } from './EnrichmentStyles';
 
@@ -66,7 +66,7 @@ const EmptyState = styled.div`
 interface PendingRecipe {
   boxId: BoxId;
   recipeId: RecipeId;
-  recipe: RecipeEntry;
+  recipe: PlainRecipe;
 }
 
 interface BatchEnrichmentModalProps {
@@ -119,7 +119,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
         if (selectedIds.has(getKey(boxId, recipeId)) && recipe.pendingChanges) {
-          const recipeData = recipe.getData();
+          const recipeData = getRecipeData(recipe);
           const currentTags = recipeData.recipeCategory;
           const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
           await recipesBackend.applyChanges(recipeId, pendingChangesToBackend(recipe.pendingChanges), {
@@ -153,7 +153,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
     try {
       for (const { boxId, recipeId, recipe } of pendingRecipes) {
         if (recipe.pendingChanges) {
-          const recipeData = recipe.getData();
+          const recipeData = getRecipeData(recipe);
           const currentTags = recipeData.recipeCategory;
           const tags = Array.isArray(currentTags) ? currentTags : currentTags ? [currentTags] : [];
           await recipesBackend.applyChanges(recipeId, pendingChangesToBackend(recipe.pendingChanges), {
@@ -230,7 +230,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
             {pendingRecipes.map(({ boxId, recipeId, recipe }) => {
               const key = getKey(boxId, recipeId);
               const changes = recipe.pendingChanges!;
-              const currentDescription = recipe.getData().description;
+              const currentDescription = getRecipeData(recipe).description;
               const hasNewDescription = changes.data?.description && changes.data.description !== currentDescription;
               const suggestedTags = changes.data?.recipeCategory || [];
 
@@ -241,7 +241,7 @@ function BatchEnrichmentModal({ open, onClose }: BatchEnrichmentModalProps) {
                       checked={selectedIds.has(key)}
                       onChange={() => toggleSelection(boxId, recipeId)}
                     />
-                    <RecipeName>{recipe.getName()}</RecipeName>
+                    <RecipeName>{getRecipeName(recipe)}</RecipeName>
                   </ItemHeader>
 
                   {hasNewDescription && (

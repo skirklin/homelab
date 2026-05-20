@@ -20,7 +20,7 @@ import { PickBoxModal } from '../Modals/PickBoxModal';
 import BatchEnrichmentModal from '../Modals/BatchEnrichmentModal';
 import { ActionButton } from '../StyledComponents';
 import './RecipeTable.css'
-import type { BoxEntry, RecipeEntry } from '../storage';
+import { type PlainBox, type PlainRecipe, getBoxName, getRecipeDescription, getRecipeName } from '../storage';
 import { type BoxId, Visibility } from '../types';
 import styled from 'styled-components';
 import { useMediaQuery } from 'react-responsive'
@@ -98,8 +98,8 @@ function sortfunc(a: string, b: string) {
 }
 
 export interface RowType {
-  box: BoxEntry,
-  recipe: RecipeEntry
+  box: PlainBox,
+  recipe: PlainRecipe
   key: string
 }
 
@@ -195,7 +195,7 @@ export function RecipeTable(props: RecipeTableProps) {
       title: 'Name',
       render: (_value, record) => (
         <NameCell>
-          <RecipeName>{record.recipe.getName()}</RecipeName>
+          <RecipeName>{getRecipeName(record.recipe)}</RecipeName>
           {record.recipe.pendingChanges && (
             <Tooltip title="AI suggestions available">
               <AIIndicator><RobotOutlined /></AIIndicator>
@@ -203,7 +203,7 @@ export function RecipeTable(props: RecipeTableProps) {
           )}
         </NameCell>
       ),
-      sorter: (a: RowType, b: RowType) => sortfunc(a.recipe.getName() || "", b.recipe.getName() || ""),
+      sorter: (a: RowType, b: RowType) => sortfunc(getRecipeName(a.recipe) || "", getRecipeName(b.recipe) || ""),
       onCell: onNameCell,
       className: "recipe-table-clickable-column",
       width: 200,
@@ -216,7 +216,7 @@ export function RecipeTable(props: RecipeTableProps) {
         key: 'box',
         title: 'Box',
         onCell: onBoxCell,
-        render: (_value, record) => <BoxName>{record.box.getName()}</BoxName>,
+        render: (_value, record) => <BoxName>{getBoxName(record.box)}</BoxName>,
         className: "recipe-table-clickable-column",
         width: 150,
       }
@@ -229,7 +229,7 @@ export function RecipeTable(props: RecipeTableProps) {
       {
         key: 'description',
         title: 'Description',
-        render: (_value, record) => <Description>{record.recipe.getDescription()}</Description>,
+        render: (_value, record) => <Description>{getRecipeDescription(record.recipe)}</Description>,
         ellipsis: true,
       }
     )

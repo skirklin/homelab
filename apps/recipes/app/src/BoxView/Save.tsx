@@ -6,7 +6,7 @@ import { useContext } from 'react';
 
 import { Context } from '../context';
 import { getAppUserFromState, getBoxFromState } from '../state';
-import _ from 'lodash';
+import { cloneBox } from '../storage';
 import type { BoxProps } from './BoxView';
 import { useAuth } from '@kirkl/shared';
 
@@ -29,7 +29,7 @@ function SaveButton(props: BoxProps) {
     if (box.changed === undefined) {
       return
     }
-    const newBox = _.cloneDeep(box)
+    const newBox = cloneBox(box)
     newBox.data = box.changed
     newBox.changed = undefined
     await getBackend().collection("recipe_boxes").update(boxId, {

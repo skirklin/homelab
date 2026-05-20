@@ -6,6 +6,7 @@ import { useMediaQuery } from 'react-responsive'
 
 import './Header.css';
 import type { AppState } from '../types';
+import { getBoxName, getRecipeName } from '../storage';
 import { EllipsisOutlined } from '@ant-design/icons';
 import type { ItemType } from 'antd/es/breadcrumb/Breadcrumb';
 
@@ -16,13 +17,13 @@ function getPartMap(params: Readonly<Params<string>>, state: AppState) {
   if (boxId !== undefined) {
     const box = state.boxes.get(boxId)
     if (box !== undefined) {
-      const boxName = box.getName()
+      const boxName = getBoxName(box)
       if (boxName) partMap.set(boxId, boxName)
 
       if (recipeId !== undefined) {
         const recipe = box.recipes.get(recipeId)
         if (recipe !== undefined) {
-          const recipeName = recipe.getName()
+          const recipeName = getRecipeName(recipe)
           if (recipeName) partMap.set(recipeId, recipeName)
         }
       }

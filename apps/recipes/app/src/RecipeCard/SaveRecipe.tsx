@@ -9,9 +9,9 @@ import { Context } from '../context';
 import { useRecipesBackend } from '@kirkl/shared';
 import { recipeDataToBackend } from '../adapters';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
+import { cloneRecipe } from '../storage';
 import { canUpdateRecipe } from '../utils';
 import type { RecipeCardProps } from './RecipeCard';
-import _ from 'lodash';
 import { useAuth } from '@kirkl/shared';
 
 const StyledButton = styled(Button)`
@@ -37,7 +37,7 @@ function SaveButton(props: RecipeCardProps) {
     if (recipe.changed === undefined || user === undefined ) {
       return
     }
-    const newRecipe = _.cloneDeep(recipe)
+    const newRecipe = cloneRecipe(recipe)
     newRecipe.data = recipe.changed
     newRecipe.changed = undefined
     newRecipe.editing = false
