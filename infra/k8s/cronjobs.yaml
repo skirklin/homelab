@@ -28,6 +28,38 @@ spec:
                 - secretRef:
                     name: api-secrets
 ---
+# Life session reminders — every minute. The function decides per-log
+# whether the current minute matches the configured morning/evening
+# reminder time in the owner's timezone (±1 min window).
+# Idempotent via last_{morning,evening}_reminder_sent = "YYYY-MM-DD".
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: life-reminders-check
+  namespace: homelab
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  curl -sf -X POST \
+                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
+                    http://functions.homelab.svc.cluster.local:3000/notifications/life-reminders-check
+              envFrom:
+                - secretRef:
+                    name: api-secrets
+---
 # Travel notifications — hourly tick. The function decides whether each
 # active trip is at its local 7am (morning push) or 8pm (evening prompt).
 # Per-trip timezone is derived from the day's first activity coords.
