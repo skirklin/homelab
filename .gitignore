@@ -20,6 +20,10 @@ services/scripts/export/data/
 # Three Man Team working files + skills (embedded git repos)
 .claude/settings.json
 .claude/skills/
+.claude/worktrees/
+
+# Local snapshots of prod data pulled during dev (not for commit)
+.life-log-snapshot.json
 ARCHITECT-BRIEF.md
 BUILD-LOG.md
 REVIEW-REQUEST.md
