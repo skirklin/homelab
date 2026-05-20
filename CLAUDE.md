@@ -13,6 +13,17 @@ Multiple Claude Code sessions run against this repo at the same time. Editing fi
 
 If you are unsure whether a change is "substantive," default to dispatching a worktree agent. The cost of an extra agent run is low; the cost of trampling a sibling session's WIP is high.
 
+## Continuous improvement — leave it better than you found it
+
+Whenever a feature lands or any code is touched, follow up by looking at the surrounding code with fresh eyes. Ask:
+
+- Is this still the right shape, or was it a choice that made sense then and is stale now?
+- Is there dead code, an unused abstraction, or a simpler structure waiting to come out?
+- Did this change just make a nearby pattern redundant, smelly, or worth promoting/inlining?
+- Is there a follow-up cleanup worth flagging even if it's out of scope for this turn?
+
+A great codebase is the result of constantly questioning previous choices, not just stacking new code on top. Aim to leave a better world for our future selves — small, scoped cleanups beat big rewrites. Out-of-scope improvements you spot should be raised explicitly so the user can decide whether to chase them now, defer them, or skip.
+
 ## What this is
 
 Personal web apps monorepo, self-hosted on PocketBase + Caddy on a VPS (Hetzner, 5.78.200.161, user `scott`).
