@@ -28,6 +28,7 @@ const Column = styled.div<{ $urgency: UrgencyLevel }>`
   flex-direction: column;
   min-height: 300px;
   max-height: calc(100vh - 140px);
+  max-height: calc(100dvh - 140px);
 `;
 
 const ColumnHeader = styled.div<{ $urgency: UrgencyLevel }>`
@@ -58,6 +59,7 @@ const TaskList = styled.div`
   flex: 1;
   padding: var(--space-sm);
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);

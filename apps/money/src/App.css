@@ -225,6 +225,7 @@ header h1 {
   border-radius: 8px;
   padding: 8px 0;
   max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 120px);
   overflow-y: auto;
 }
 
