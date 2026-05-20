@@ -266,6 +266,23 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     const unsubs: Array<() => void> = [];
     const isCancelled = () => cancelled;
 
+    // Cancel-before-resolve guard: each inner subscribe(...).then(u =>
+    // unsubs.push(u)) chain is async, so if the consumer tears down before
+    // any of those .then callbacks land, the unsubs array is empty when the
+    // returned cleanup runs — and the underlying pb realtime subscriptions
+    // leak forever. Route every late-arriving unsub through this helper so
+    // a teardown that ran first still tears down the late-resolved sub. Same
+    // shape as subscribeSlugs / recipes / life / upkeep fixes.
+    const trackUnsub = (p: Promise<() => void>) => {
+      p.then((u) => {
+        if (cancelled) {
+          try { u(); } catch { /* nothing to do */ }
+        } else {
+          unsubs.push(u);
+        }
+      }).catch(() => { /* upstream errors are surfaced elsewhere */ });
+    };
+
     // We track items in a map so we can deliver full state on each change.
     const itemsMap = new Map<string, ShoppingItem>();
 
@@ -275,14 +292,14 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
     // List metadata — wpb.subscribe(id) auto-loads + delivers initial state
     // as a "create" event, then forwards live updates.
-    this.wpb.collection("shopping_lists").subscribe(listId, (e) => {
+    trackUnsub(this.wpb.collection("shopping_lists").subscribe(listId, (e) => {
       if (cancelled) return;
       if (e.action === "delete") {
         handlers.onDeleted?.();
       } else {
         handlers.onList(listFromRecord(e.record));
       }
-    }).then((u) => unsubs.push(u));
+    }));
 
     // Items — wpb.subscribe("*", { filter }) auto-loads matching records,
     // seeds the optimistic queue, and delivers each as a "create" event,
@@ -290,7 +307,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     // into itemsMap and emit a single onItems batch once the subscribe
     // promise resolves; subsequent live events emit per-change.
     let itemsInitialDone = false;
-    this.wpb.collection("shopping_items").subscribe("*", (e) => {
+    const itemsPromise = this.wpb.collection("shopping_items").subscribe("*", (e) => {
       if (cancelled || (e.record as RecordModel).list !== listId) return;
       if (e.action === "delete") {
         itemsMap.delete(e.record.id);
@@ -301,36 +318,39 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     }, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       local: (r) => r.list === listId,
-    }).then((u) => {
-      unsubs.push(u);
+    });
+    trackUnsub(itemsPromise);
+    itemsPromise.then(() => {
       if (!cancelled) {
         itemsInitialDone = true;
         emitItems();
       }
-    });
+    }).catch(() => { /* surfaced via wpb's error channel */ });
 
     // History — full reload on any change. Stays on raw pb subscribe; writes
     // still go through wpb so persistence + replay-on-reload work.
-    this.subscribeToCollectionReload("shopping_history", isCancelled, {
+    trackUnsub(this.subscribeToCollectionReload("shopping_history", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-last_added",
       perPage: HISTORY_PAGE_SIZE,
       belongsTo: (r) => r.list === listId,
       onData: (records) => handlers.onHistory(records.map(historyFromRecord)),
-    }).then((u) => unsubs.push(u));
+    }));
 
     // Trips — full reload on any change.
-    this.subscribeToCollectionReload("shopping_trips", isCancelled, {
+    trackUnsub(this.subscribeToCollectionReload("shopping_trips", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
       sort: "-completed_at",
       perPage: TRIPS_PAGE_SIZE,
       belongsTo: (r) => r.list === listId,
       onData: (records) => handlers.onTrips(records.map(tripFromRecord)),
-    }).then((u) => unsubs.push(u));
+    }));
 
     return () => {
       cancelled = true;
-      unsubs.forEach((u) => u());
+      unsubs.forEach((u) => {
+        try { u(); } catch { /* nothing to do */ }
+      });
     };
   }
 

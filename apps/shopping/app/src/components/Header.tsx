@@ -51,22 +51,25 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
 
   const shareUrl = `${window.location.origin}/join/${listId}`;
 
-  const handleDoneShopping = async () => {
+  const handleDoneShopping = () => {
     if (checkedCount === 0 || !listId) return;
-    try {
-      // Backend only needs the identifying + display fields; passing dates
-      // tripped up items whose checkedAt/addedAt Date was invalid.
-      const snapshot = items.map((item) => ({
-        id: item.id,
-        ingredient: item.ingredient,
-        note: item.note || "",
-        categoryId: item.categoryId,
-        checked: item.checked,
-      }));
-      await shopping.clearCheckedItems(listId, snapshot);
-    } catch (error) {
-      console.error("Failed to clear items:", error);
-    }
+    // Backend only needs the identifying + display fields; passing dates
+    // tripped up items whose checkedAt/addedAt Date was invalid.
+    const snapshot = items.map((item) => ({
+      id: item.id,
+      ingredient: item.ingredient,
+      note: item.note || "",
+      categoryId: item.categoryId,
+      checked: item.checked,
+    }));
+    // Fire and forget — transient errors stay queued in wpb for automatic
+    // retry on PB_CONNECT/focus, and permanent failures propagate as
+    // unhandled WrappedPbError rejections that BackendProvider's global
+    // useOptimisticErrorToast surfaces with a "Couldn't save" message. A
+    // local try/catch + console.error here used to swallow both, which is
+    // exactly the silent-data-loss shape the SyncDot work was trying to
+    // eliminate.
+    void shopping.clearCheckedItems(listId, snapshot);
   };
 
   const handleSignOut = () => {

@@ -141,8 +141,12 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   const [newSlug, setNewSlug] = useState(slug);
   const [submitting, setSubmitting] = useState(false);
 
-  // Category management
-  const [localCategories, setLocalCategories] = useState<CategoryDef[]>(state.list?.categories || []);
+  // Category management — derived from state, not shadowed in local state.
+  // The optimistic write settles via the wpb subscription, so any local
+  // shadow inevitably drifts when a peer (or our own retry) reconciles a
+  // different shape. Last-write-wins on `state.list.categories` keeps the UI
+  // and the backend in lockstep without a second source of truth.
+  const categories = state.list?.categories || [];
   const [newCategory, setNewCategory] = useState("");
   const [editingCategory, setEditingCategory] = useState<CategoryDef | null>(null);
   const [editCategoryName, setEditCategoryName] = useState("");
@@ -155,31 +159,26 @@ export function ListSettings({ slug, listId, onBack }: Props) {
     const id = trimmed.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
     // Check if ID already exists
-    if (localCategories.some(c => c.id === id)) {
+    if (categories.some(c => c.id === id)) {
       message.warning("A category with this name already exists");
       return;
     }
 
     const newCat: CategoryDef = { id, name: trimmed };
-    const updated = [...localCategories, newCat];
-    setLocalCategories(updated);
-    shopping.updateCategories(listId, updated);
+    shopping.updateCategories(listId, [...categories, newCat]);
     setNewCategory("");
   };
 
   const handleRemoveCategory = (cat: CategoryDef) => {
-    const updated = localCategories.filter((c) => c.id !== cat.id);
-    setLocalCategories(updated);
-    shopping.updateCategories(listId, updated);
+    shopping.updateCategories(listId, categories.filter((c) => c.id !== cat.id));
   };
 
   const handleRenameCategory = () => {
     if (!editingCategory || !editCategoryName.trim()) return;
 
-    const updated = localCategories.map(c =>
+    const updated = categories.map(c =>
       c.id === editingCategory.id ? { ...c, name: editCategoryName.trim() } : c
     );
-    setLocalCategories(updated);
     shopping.updateCategories(listId, updated);
     setEditingCategory(null);
     setEditCategoryName("");
@@ -187,17 +186,15 @@ export function ListSettings({ slug, listId, onBack }: Props) {
 
   const handleMoveCategoryUp = (index: number) => {
     if (index === 0) return;
-    const updated = [...localCategories];
+    const updated = [...categories];
     [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]];
-    setLocalCategories(updated);
     shopping.updateCategories(listId, updated);
   };
 
   const handleMoveCategoryDown = (index: number) => {
-    if (index === localCategories.length - 1) return;
-    const updated = [...localCategories];
+    if (index === categories.length - 1) return;
+    const updated = [...categories];
     [updated[index], updated[index + 1]] = [updated[index + 1], updated[index]];
-    setLocalCategories(updated);
     shopping.updateCategories(listId, updated);
   };
 
@@ -328,7 +325,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
         <Section>
           <SectionTitle>Categories</SectionTitle>
           <CategoryList>
-            {localCategories.map((cat, index) => (
+            {categories.map((cat, index) => (
               <CategoryRow key={cat.id}>
                 <CategoryName>{cat.name}</CategoryName>
                 <Button
@@ -352,7 +349,7 @@ export function ListSettings({ slug, listId, onBack }: Props) {
                   size="small"
                   icon={<ArrowDownOutlined />}
                   onClick={() => handleMoveCategoryDown(index)}
-                  disabled={index === localCategories.length - 1}
+                  disabled={index === categories.length - 1}
                 />
                 <Button
                   type="text"
