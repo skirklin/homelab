@@ -11,7 +11,7 @@ import type { RecipesBackend, RecipesUser } from "../interfaces/recipes";
 import type { RecipeBox, Recipe, RecipeData, PendingChanges, CookingLogEvent } from "../types/recipes";
 import type { Visibility, Unsubscribe, Event } from "../types/common";
 import { newId } from "../cache/ids";
-import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
+import type { WrappedPocketBase } from "../wrapped-pb";
 
 // --- Record → domain type mappers ---
 
@@ -70,8 +70,8 @@ function eventFromRecord(r: RecordModel): CookingLogEvent {
 export class PocketBaseRecipesBackend implements RecipesBackend {
   private wpb: WrappedPocketBase;
 
-  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
-    this.wpb = wpb ?? wrapPocketBase(pb);
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+    this.wpb = wpb;
   }
 
   // --- User ---

@@ -12,6 +12,7 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseShoppingBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
+import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
 import type { ShoppingItem } from "@homelab/backend";
 
 let ctx: TestContext;
@@ -20,8 +21,10 @@ let userBackend: PocketBaseUserBackend;
 
 beforeAll(async () => {
   ctx = await initTestPocketBase();
-  shopping = new PocketBaseShoppingBackend(() => ctx.userPb);
-  userBackend = new PocketBaseUserBackend(() => ctx.userPb);
+  const pb = () => ctx.userPb;
+  const wpb = wrapPocketBase(pb);
+  shopping = new PocketBaseShoppingBackend(pb, wpb);
+  userBackend = new PocketBaseUserBackend(pb, wpb);
 });
 
 afterAll(async () => {

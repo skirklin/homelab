@@ -8,7 +8,7 @@
 import type PocketBase from "pocketbase";
 import type { UserBackend, SlugNamespace } from "../interfaces/user";
 import type { NotificationMode, Unsubscribe } from "../types/common";
-import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
+import type { WrappedPocketBase } from "../wrapped-pb";
 
 const SLUG_FIELDS: Record<SlugNamespace, string> = {
   shopping: "shopping_slugs",
@@ -34,8 +34,8 @@ export class PocketBaseUserBackend implements UserBackend {
    */
   private writeChains = new Map<string, Promise<unknown>>();
 
-  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
-    this.wpb = wpb ?? wrapPocketBase(pb);
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+    this.wpb = wpb;
   }
 
   /**

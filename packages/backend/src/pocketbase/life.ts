@@ -10,7 +10,7 @@ import type { LifeBackend } from "../interfaces/life";
 import type { LifeLog, LifeManifest, LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
-import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
+import type { WrappedPocketBase } from "../wrapped-pb";
 
 function logFromRecord(r: RecordModel): LifeLog {
   return {
@@ -39,8 +39,8 @@ function entryFromRecord(r: RecordModel): LifeEntry {
 export class PocketBaseLifeBackend implements LifeBackend {
   private wpb: WrappedPocketBase;
 
-  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
-    this.wpb = wpb ?? wrapPocketBase(pb);
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+    this.wpb = wpb;
   }
 
   async getOrCreateLog(userId: string): Promise<LifeLog> {

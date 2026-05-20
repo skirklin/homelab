@@ -14,7 +14,7 @@ import type { UpkeepBackend } from "../interfaces/upkeep";
 import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
-import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
+import type { WrappedPocketBase } from "../wrapped-pb";
 
 function listFromRecord(r: RecordModel): TaskList {
   return {
@@ -63,8 +63,8 @@ function completionFromRecord(r: RecordModel): TaskCompletion {
 export class PocketBaseUpkeepBackend implements UpkeepBackend {
   private wpb: WrappedPocketBase;
 
-  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
-    this.wpb = wpb ?? wrapPocketBase(pb);
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+    this.wpb = wpb;
   }
 
   async createList(name: string, userId: string): Promise<string> {

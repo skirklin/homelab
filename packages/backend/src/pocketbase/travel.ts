@@ -13,7 +13,7 @@ import type { TravelBackend } from "../interfaces/travel";
 import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, TripProposal, DayEntry } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
-import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
+import type { WrappedPocketBase } from "../wrapped-pb";
 
 function logFromRecord(r: RecordModel): TravelLog {
   return {
@@ -100,8 +100,8 @@ function itineraryFromRecord(r: RecordModel): Itinerary {
 export class PocketBaseTravelBackend implements TravelBackend {
   private wpb: WrappedPocketBase;
 
-  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
-    this.wpb = wpb ?? wrapPocketBase(pb);
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+    this.wpb = wpb;
   }
 
   async getOrCreateLog(userId: string): Promise<string> {

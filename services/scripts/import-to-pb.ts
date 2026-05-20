@@ -19,6 +19,7 @@ import {
   PocketBaseLifeBackend,
   PocketBaseUserBackend,
 } from "@homelab/backend/pocketbase";
+import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -55,12 +56,13 @@ await pb.collection("_superusers").authWithPassword("scott.kirklin@gmail.com", p
 console.log("  PB auth OK\n");
 
 const getPb = () => pb;
-const recipes = new PocketBaseRecipesBackend(getPb);
-const shopping = new PocketBaseShoppingBackend(getPb);
-const upkeep = new PocketBaseUpkeepBackend(getPb);
-const travel = new PocketBaseTravelBackend(getPb);
-const life = new PocketBaseLifeBackend(getPb);
-const user = new PocketBaseUserBackend(getPb);
+const wpb = wrapPocketBase(getPb);
+const recipes = new PocketBaseRecipesBackend(getPb, wpb);
+const shopping = new PocketBaseShoppingBackend(getPb, wpb);
+const upkeep = new PocketBaseUpkeepBackend(getPb, wpb);
+const travel = new PocketBaseTravelBackend(getPb, wpb);
+const life = new PocketBaseLifeBackend(getPb, wpb);
+const user = new PocketBaseUserBackend(getPb, wpb);
 
 // ---------------------------------------------------------------------------
 // Helpers

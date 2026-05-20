@@ -22,6 +22,7 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseLifeBackend } from "@homelab/backend/pocketbase";
+import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
 import { DEFAULT_MANIFEST } from "../types";
 
 let ctx: TestContext;
@@ -29,7 +30,8 @@ let life: PocketBaseLifeBackend;
 
 beforeAll(async () => {
   ctx = await initTestPocketBase();
-  life = new PocketBaseLifeBackend(() => ctx.userPb);
+  const pb = () => ctx.userPb;
+  life = new PocketBaseLifeBackend(pb, wrapPocketBase(pb));
 });
 
 afterAll(async () => {

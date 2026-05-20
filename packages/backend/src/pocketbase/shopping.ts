@@ -11,7 +11,7 @@ import type { ShoppingBackend } from "../interfaces/shopping";
 import type { ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTrip } from "../types/shopping";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
-import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
+import type { WrappedPocketBase } from "../wrapped-pb";
 
 // --- Pagination limits ---
 
@@ -77,8 +77,8 @@ function normalizeIngredient(ingredient: string): string {
 export class PocketBaseShoppingBackend implements ShoppingBackend {
   private wpb: WrappedPocketBase;
 
-  constructor(private pb: () => PocketBase, wpb?: WrappedPocketBase) {
-    this.wpb = wpb ?? wrapPocketBase(pb);
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+    this.wpb = wpb;
   }
 
   async createList(name: string, userId: string): Promise<string> {

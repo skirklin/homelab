@@ -115,23 +115,27 @@ function useRealtimeResync() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     let inFlight: Promise<void> | null = null;
+    // Single probe — guards against re-entry while a resync is in flight, and
+    // gates on document.visibility so visibilitychange events that fire while
+    // hiding the tab are no-ops. focus/pageshow trivially imply visible, so
+    // the gate is a no-op on those paths.
     const probe = () => {
       if (inFlight) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       inFlight = Promise.all([
         wpb.resync().catch(() => { /* offline or auth blip */ }),
         wpb.retryErrored().catch(() => { /* same */ }),
       ]).then(() => undefined).finally(() => { inFlight = null; });
     };
 
-    window.addEventListener("focus", probe);
-    window.addEventListener("pageshow", probe);
-    const visHandler = () => { if (document.visibilityState === "visible") probe(); };
-    document.addEventListener("visibilitychange", visHandler);
-
+    const events: Array<[EventTarget, string]> = [
+      [window, "focus"],
+      [window, "pageshow"],
+      [document, "visibilitychange"],
+    ];
+    for (const [target, ev] of events) target.addEventListener(ev, probe);
     return () => {
-      window.removeEventListener("focus", probe);
-      window.removeEventListener("pageshow", probe);
-      document.removeEventListener("visibilitychange", visHandler);
+      for (const [target, ev] of events) target.removeEventListener(ev, probe);
     };
   }, []);
 }
