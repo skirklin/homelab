@@ -136,6 +136,7 @@ declare -A APP_BUILDS=(
     [recipes]="apps/recipes/app:build"
     [shopping]="apps/shopping/app:dist"
     [upkeep]="apps/upkeep/app:dist"
+    [life]="apps/life/app:dist"
     [travel]="apps/travel/app:dist"
     [money]="apps/money:dist:infra/docker/nginx-money.conf"
     [monitor]="apps/monitor/app:dist:apps/monitor/nginx.conf.template:/etc/nginx/templates/default.conf.template"

@@ -11,7 +11,6 @@ import {
   ClockCircleOutlined,
   CopyOutlined,
   DeleteOutlined,
-  ExperimentOutlined,
   CheckSquareOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
@@ -493,28 +492,6 @@ export function Settings() {
                 { label: "Off", value: "off" },
               ]}
             />
-          </SettingRow>
-        </Section>
-
-        {/* Life Tracker Section */}
-        <Section>
-          <SectionHeader>
-            <SectionIcon><ExperimentOutlined /></SectionIcon>
-            <SectionTitle>Life Tracker</SectionTitle>
-          </SectionHeader>
-
-          <SettingRow>
-            <SettingInfo>
-              <SettingLabel>Random Sampling</SettingLabel>
-              <SettingDescription>
-                Configure sampling schedule in the Life Tracker app settings
-              </SettingDescription>
-            </SettingInfo>
-            <Button
-              onClick={() => window.location.href = "/life"}
-            >
-              Open Life Tracker
-            </Button>
           </SettingRow>
         </Section>
 

@@ -9,6 +9,15 @@ export default defineConfig({
     themeColor: '#13c2c2',
     importScripts: ['/push-sw.js'],
   }),
+  server: {
+    proxy: {
+      '/fn': {
+        target: process.env.VITE_API_URL || 'http://127.0.0.1:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/fn/, ''),
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',

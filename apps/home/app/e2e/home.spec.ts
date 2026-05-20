@@ -109,11 +109,6 @@ test.describe("Navigation", () => {
     await expect(page).toHaveURL(/\/upkeep/);
   });
 
-  test("can navigate to Life module", async ({ page }) => {
-    await page.getByRole("button", { name: /life/i }).click();
-    await expect(page).toHaveURL(/\/life/);
-  });
-
   test("can navigate between modules without going home", async ({ page }) => {
     await dismissModals(page);
 
@@ -418,56 +413,6 @@ test.describe("Upkeep Module - Task CRUD", () => {
   });
 });
 
-test.describe("Life Module", () => {
-  test.beforeEach(async ({ page }) => {
-    await signIn(page);
-    await page.getByRole("button", { name: /life/i }).click();
-    await expect(page).toHaveURL(/\/life/);
-  });
-
-  test("shows life tracker content", async ({ page }) => {
-    // Life module creates a log for new users — wait for spinner to clear
-    await expect(page.locator('.ant-spin-spinning')).not.toBeVisible({ timeout: 15000 });
-    // Should show either the dashboard or some life-related content
-    await expect(page.locator("body")).toBeVisible();
-  });
-});
-
-test.describe("Life Module - Widget Interaction", () => {
-  test.beforeEach(async ({ page }) => {
-    await signIn(page);
-    await page.getByRole("button", { name: /life/i }).click();
-    await expect(page).toHaveURL(/\/life/);
-    // Wait for spinner to clear — life log creation can be slow
-    await expect(page.locator('.ant-spin-spinning')).not.toBeVisible({ timeout: 20000 });
-  });
-
-  test("shows life tracker with default widgets and date nav", async ({ page }) => {
-    // New user gets default widgets: Meds, Vitamins, Sleep
-    await expect(page.getByText("Life Tracker")).toBeVisible({ timeout: 10000 });
-
-    // Should show date navigation with "Today"
-    await expect(page.getByText("Today")).toBeVisible({ timeout: 5000 });
-
-    // Should show at least one default widget label
-    const hasMeds = await page.getByText("Meds").isVisible().catch(() => false);
-    const hasVitamins = await page.getByText("Vitamins").isVisible().catch(() => false);
-    expect(hasMeds || hasVitamins).toBe(true);
-  });
-
-  test("date navigation works", async ({ page }) => {
-    await expect(page.getByText("Today")).toBeVisible({ timeout: 10000 });
-
-    // Click left arrow to go to yesterday
-    await page.locator("[aria-label='left']").click();
-    await expect(page.getByText("Yesterday")).toBeVisible({ timeout: 3000 });
-
-    // Click right arrow to go back to today
-    await page.locator("[aria-label='right']").click();
-    await expect(page.getByText("Today")).toBeVisible({ timeout: 3000 });
-  });
-});
-
 test.describe("Travel Module - Trip Creation", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page);
@@ -547,8 +492,5 @@ test.describe("Cross-module Navigation Regression", () => {
 
     await page.getByRole("button", { name: /upkeep/i }).click();
     await expect(page).toHaveURL(/\/upkeep/);
-
-    await page.getByRole("button", { name: /life/i }).click();
-    await expect(page).toHaveURL(/\/life/);
   });
 });

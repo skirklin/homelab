@@ -23,11 +23,12 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 | `shopping.kirkl.in` | shopping |
 | `upkeep.kirkl.in` | upkeep (Kanban view) |
 | `travel.kirkl.in` | travel |
+| `life.kirkl.in` | life |
 | `me.kirkl.in` | homepage |
 | `api.kirkl.in` | pocketbase (direct) + functions (under `/fn/`) |
 | `registry.kirkl.in` | private Docker registry (auth required) |
 
-Home app also serves `/tasks/*` (unified task outliner) and `/life/*` (life module).
+Home app also serves `/tasks/*` (unified task outliner).
 Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.net`).
 
 ## MCP Server
