@@ -11,7 +11,6 @@ import Filterbox from './Filterbox';
 import NewButton from '../Buttons/NewRecipe';
 import UploadButton from '../Buttons/UploadRecipes';
 import ImportButton from '../Buttons/ImportRecipes';
-import GenerateButton from '../Buttons/GenerateRecipe';
 import { useRecipesBackend } from '@kirkl/shared';
 import { recipeDataToBackend } from '../adapters';
 import { getRecentViews } from '../recentlyViewed';
@@ -245,7 +244,6 @@ export function RecipeTable(props: RecipeTableProps) {
           <NewButton boxId={boxId} disabled={!writeable} element="button" />
           <UploadButton boxId={boxId} disabled={!writeable} element="button" />
           <ImportButton boxId={boxId} disabled={!writeable} element="button" />
-          <GenerateButton boxId={boxId} disabled={!writeable} />
           {pendingChangesCount > 0 && (
             <Tooltip title={`Review ${pendingChangesCount} AI suggestion${pendingChangesCount > 1 ? 's' : ''}`}>
               <ActionButton

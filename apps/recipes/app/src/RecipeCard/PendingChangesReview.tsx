@@ -8,7 +8,6 @@ import { pendingChangesToBackend } from '../adapters';
 import { getRecipeFromState } from '../state';
 import { getRecipeData } from '../storage';
 import type { RecipeCardProps } from './RecipeCard';
-import { RecipeDiffView } from '../Modals/RecipeDiffView';
 
 const ChangesBanner = styled.div`
   background: linear-gradient(135deg, var(--color-bg-muted) 0%, rgba(147, 112, 219, 0.1) 100%);
@@ -99,21 +98,9 @@ function PendingChangesReview(props: RecipeCardProps) {
   const currentDescription = typeof recipeData.description === 'string' ? recipeData.description : undefined;
   const currentTags = recipeData.recipeCategory;
 
-  // Extract current recipe data for diff comparison
-  const currentIngredients = Array.isArray(recipeData.recipeIngredient)
-    ? recipeData.recipeIngredient as string[]
-    : [];
-  const currentInstructions = Array.isArray(recipeData.recipeInstructions)
-    ? (recipeData.recipeInstructions as Array<{ text?: string } | string>).map(i =>
-        typeof i === 'string' ? i : i.text || ''
-      )
-    : [];
-
   // Check what's being changed
   const hasNewDescription = changes.data?.description && changes.data.description !== currentDescription;
   const hasNewTags = changes.data?.recipeCategory && changes.data.recipeCategory.length > 0;
-  const hasIngredientChanges = changes.data?.recipeIngredient !== undefined;
-  const hasInstructionChanges = changes.data?.recipeInstructions !== undefined;
   const hasStepIngredients = changes.stepIngredients && Object.keys(changes.stepIngredients).length > 0;
 
   async function handleAccept() {
@@ -143,23 +130,6 @@ function PendingChangesReview(props: RecipeCardProps) {
         <PromptText>
           Based on your feedback: "{changes.prompt}"
         </PromptText>
-      )}
-
-      {/* Show diff for ingredient/instruction changes */}
-      {(hasIngredientChanges || hasInstructionChanges) && (
-        <RecipeDiffView
-          original={{
-            ingredients: currentIngredients,
-            instructions: currentInstructions,
-          }}
-          modified={{
-            ingredients: changes.data?.recipeIngredient || currentIngredients,
-            instructions: (changes.data?.recipeInstructions || []).map(i =>
-              typeof i === 'string' ? i : i.text || ''
-            ),
-          }}
-          compact
-        />
       )}
 
       {/* Show description suggestion */}

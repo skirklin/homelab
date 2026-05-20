@@ -23,7 +23,7 @@ async function api(path: string, init?: RequestInit): Promise<unknown> {
   return apiFetch(url, init);
 }
 
-/** Call a non-data route (e.g. /recipes/scrape, /ai/generate, /sharing/invite) */
+/** Call a non-data route (e.g. /recipes/scrape, /ai/enrich, /sharing/invite) */
 async function apiRaw(path: string, init?: RequestInit): Promise<unknown> {
   const url = `${API_BASE}${path}`;
   return apiFetch(url, init);
@@ -453,19 +453,6 @@ server.tool(
     const data = await apiRaw("/recipes/scrape", {
       method: "POST",
       body: JSON.stringify({ url }),
-    });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-  },
-);
-
-server.tool(
-  "generate_recipe",
-  "Generate a recipe from a text prompt using AI",
-  { prompt: z.string().describe("Description of the recipe to generate (e.g. 'spicy Thai basil chicken')") },
-  async ({ prompt }) => {
-    const data = await apiRaw("/ai/generate", {
-      method: "POST",
-      body: JSON.stringify({ prompt }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },

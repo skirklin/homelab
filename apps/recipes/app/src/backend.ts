@@ -42,20 +42,8 @@ export const getRecipes = async (args: { url: string | undefined }): Promise<{ e
   });
 };
 
-export const generateRecipe = async (args: { prompt: string }): Promise<{ recipeJson: string }> => {
-  return apiFetch<{ recipeJson: string }>("/ai/generate", {
-    body: { prompt: args.prompt },
-  });
-};
-
 export const enrichRecipeManual = async (args: { boxId: string; recipeId: string }): Promise<{ success: boolean; enrichment: unknown }> => {
   return apiFetch<{ success: boolean; enrichment: unknown }>("/ai/enrich", {
-    body: args,
-  });
-};
-
-export const modifyRecipe = async (args: { boxId: string; recipeId: string; feedback: string }): Promise<{ success: boolean; modificationJson: string }> => {
-  return apiFetch<{ success: boolean; modificationJson: string }>("/ai/modify", {
     body: args,
   });
 };

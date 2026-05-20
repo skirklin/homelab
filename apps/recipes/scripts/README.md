@@ -22,84 +22,29 @@ CLI scripts for managing recipes.
    gcloud auth application-default login
    ```
 
-3. Set your Anthropic API key:
-   ```bash
-   export ANTHROPIC_API_KEY=your-key-here
-   ```
-
 ## Scripts
 
-### enrich-recipes.ts
+### seed-emulator.ts
 
-Analyzes recipes with Claude and stores suggestions for later review in the UI.
+Seeds the Firebase emulator with a test user (`test@example.com` / `testpassword123`) and sample recipes, some with pending enrichments.
 
 ```bash
-# Dry run first (no changes written)
-npm run enrich -- --dry-run
-
-# Process just 2 recipes to test
-npm run enrich -- --dry-run --limit 2
-
-# Process only recipes owned by a specific user (by email)
-npm run enrich -- --user you@example.com --limit 2 --dry-run
-
-# Process only recipes in a specific box (partial name match)
-npm run enrich -- --box "Family" --limit 2 --dry-run
-
-# Combine filters
-npm run enrich -- --user you@example.com --box "Favorites" --limit 2
-
-# Run for real (only adds pendingChanges field, never modifies existing data)
-npm run enrich
+npm run seed
 ```
 
-**Options:**
-- `--dry-run` - Preview without writing any changes
-- `--limit N` - Process only N recipes
-- `--user <email|uid>` - Only process recipes owned by this user
-- `--box <name>` - Only process recipes in boxes matching this name (case-insensitive partial match)
-- `--emulator` - Connect to local Firebase emulator instead of production
+### lowercase-tags.ts
 
-**Safety features:**
-- Only adds `pendingChanges` and `lastEnrichedAt` fields to recipes
-- Never modifies existing recipe data (description, tags, etc.)
-- Skips recipes that already have pending enrichments
-- Skips recipes that haven't changed since last enrichment (safe to run daily)
-- Re-processes recipes that users have edited since last enrichment
+One-off migration script that lowercases all `recipeCategory` tags.
 
-Users can then review and approve suggestions in the web UI.
-
-### Testing with Emulator
-
-You can test the enrichment workflow locally without affecting production data:
-
-1. Start the Firebase emulators:
-   ```bash
-   firebase emulators:start
-   ```
-
-2. Seed test data (in another terminal):
-   ```bash
-   npm run seed
-   ```
-   This creates a test user (`test@example.com` / `testpassword123`) with sample recipes, some with pending enrichments.
-
-3. Run the app pointing to emulators:
-   ```bash
-   cd ../app
-   npm run dev
-   ```
-
-4. Log in and test the review UI.
-
-To run the enrichment script against the emulator:
 ```bash
-npm run enrich -- --emulator --dry-run
+npm run lowercase-tags
 ```
 
 ## Reviewing Suggestions in the UI
 
-After running the enrichment script, suggestions appear in two places:
+Suggestions are produced by the `POST /fn/ai/enrich` endpoint (triggered from the
+recipe card "AI Enrich" menu item or the batch review modal) — see
+`services/api/src/routes/ai.ts`. They appear in two places:
 
 1. **Individual recipes** - A purple "AI Suggestions Available" banner shows on recipe cards with pending suggestions. Click Accept to apply or Dismiss to ignore.
 

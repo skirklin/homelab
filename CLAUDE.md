@@ -60,7 +60,7 @@ Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.
 
 The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the user asks about their recipes, shopping lists, travel plans, tasks, or life data.
 
-### Available tools (65 total):
+### Available tools (64 total):
 
 **Recipes (read):**
 - `list_boxes` — list all recipe boxes
@@ -70,7 +70,6 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 
 **Recipes (write):**
 - `scrape_recipe` — scrape a recipe from a URL
-- `generate_recipe` — AI recipe generation from a text prompt
 - `create_recipe_box` — create a new box
 - `update_recipe_box` — rename, change description, or set visibility
 - `delete_recipe_box` — delete a box (cascades to recipes + cooking log)
