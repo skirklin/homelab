@@ -337,7 +337,13 @@ export class PocketBaseTravelBackend implements TravelBackend {
         if (e.action === "delete") cb.onDelete?.();
         else cb.onData(e.record);
       })
-      .then((unsub) => unsubs.push(unsub));
+      .then((unsub) => unsubs.push(unsub))
+      .catch((err) => {
+        // Network blip on initial subscribe shouldn't escape as an
+        // unhandled rejection. Live updates will be missed for this record
+        // until something else re-subscribes (e.g. a route remount).
+        console.warn(`[travel] subscribeToLog: failed to subscribe to ${col}/${id}`, err);
+      });
   }
 
   /** Subscribe to a filtered collection with optimistic events. */
@@ -369,6 +375,12 @@ export class PocketBaseTravelBackend implements TravelBackend {
           initialDone = true;
           opts.onInitial(initial);
         }
+      })
+      .catch((err) => {
+        // Network blip on initial subscribe shouldn't escape as an
+        // unhandled rejection. The collection just stays empty until
+        // something else re-subscribes.
+        console.warn(`[travel] subscribeToLog: failed to subscribe to ${col}`, err);
       });
   }
 }

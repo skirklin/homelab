@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
   Tag,
@@ -157,6 +157,7 @@ const SourceRef = styled.div<{ $type: string }>`
 export function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { state } = useTravelContext();
   const travel = useTravelBackend();
 
@@ -237,7 +238,8 @@ export function TripDetail() {
   };
 
   const hasMapData = activities.some((a) => a.lat != null && a.lng != null);
-  const searchParams = new URLSearchParams(window.location.search);
+  // useSearchParams (not window.location.search) so React re-renders when the
+  // URL's `?itin=…` changes — matches DayView/ItinerarySection.
   const selectedItinId = searchParams.get("itin");
   const activeItin = (selectedItinId ? itineraries.find((i) => i.id === selectedItinId) : null)
     || itineraries.find((i) => i.isActive)
