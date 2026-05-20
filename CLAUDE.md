@@ -60,7 +60,7 @@ Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.
 
 The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the user asks about their recipes, shopping lists, travel plans, tasks, or life data.
 
-### Available tools (64 total):
+### Available tools:
 
 **Recipes (read):**
 - `list_boxes` — list all recipe boxes
@@ -118,6 +118,7 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 - `get_travel_trip` — single trip with activities + itineraries
 - `get_travel_activity` — full activity details (geocoding, flight info, verdict/notes)
 - `search_travel` — search trips/activities by destination/name
+- `get_trip_issues` — per-day validation (overlap, out-of-order, drive-gap); same data the travel UI surfaces as "N issues"
 
 **Travel (write):**
 - `add_travel_trip` — create a trip

@@ -11,6 +11,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { API_BASE } from "./config";
+import { validateDay, type ValidationActivity, type ValidationSlot } from "./lib/travel-validation";
 
 // Builds a configured MCP server bound to a specific API token. Inner closures
 // capture `apiToken`, so each caller (stdio bootstrap, per-request HTTP handler)
@@ -243,7 +244,7 @@ server.tool(
 
 server.tool(
   "list_travel_trips",
-  "List travel trips (summary view — use get_travel_trip for full details). Optionally filter by status.",
+  "List travel trips (summary view — use get_travel_trip for full details). Optionally filter by status. Each trip includes an `issue_count` summary across all its itineraries; drill into `get_trip_issues` or `get_travel_trip` for the per-day breakdown.",
   {
     status: z.string().optional().describe("Filter by status: Completed, Booked, Researching, Idea, Ongoing"),
   },
@@ -253,7 +254,26 @@ server.tool(
     for (const log of logs) {
       const qs = status ? `&status=${encodeURIComponent(status)}` : "";
       const trips = (await api(`/travel/trips?log=${log.id}${qs}`)) as Array<Record<string, unknown>>;
-      allTrips.push(...trips.map((t) => ({ ...t, logName: log.name })));
+      // For each trip in this log, sum issue counts across all itinerary days.
+      // N+1 in trip count: fine for single-digit active trips, premature to optimize.
+      const enriched = await Promise.all(trips.map(async (t) => {
+        const tripId = t.id as string;
+        const [activities, itineraries] = await Promise.all([
+          api(`/travel/activities?log=${log.id}&trip_id=${tripId}`) as Promise<Array<ValidationActivity & Record<string, unknown>>>,
+          api(`/travel/itineraries?log=${log.id}&trip_id=${tripId}`) as Promise<Array<{ days?: Array<{ slots?: ValidationSlot[] }> }>>,
+        ]);
+        const activityMap = new Map<string, ValidationActivity>(
+          activities.map((a) => [a.id, a as ValidationActivity]),
+        );
+        let issueCount = 0;
+        for (const itin of itineraries) {
+          for (const day of itin.days ?? []) {
+            issueCount += validateDay(day.slots ?? [], activityMap).length;
+          }
+        }
+        return { ...t, logName: log.name, issue_count: issueCount };
+      }));
+      allTrips.push(...enriched);
     }
     // Sort by status priority: Ongoing > Booked > Researching > Idea > Completed
     const statusOrder: Record<string, number> = {
@@ -270,7 +290,7 @@ server.tool(
 
 server.tool(
   "get_travel_trip",
-  "Get full details for a single trip including notes, activities, and itineraries",
+  "Get full details for a single trip including notes, activities, and itineraries. Each itinerary day is annotated with `issue_count` (and `issues[]` when nonzero) — overlap/out-of-order/drive-gap planning conflicts. Address these before considering the day's schedule final.",
   { id: z.string().describe("The travel trip record ID") },
   async ({ id }) => {
     // Get full trip details directly
@@ -281,10 +301,27 @@ server.tool(
       api(`/travel/activities?log=${logId}&trip_id=${id}`) as Promise<Array<Record<string, unknown>>>,
       api(`/travel/itineraries?log=${logId}&trip_id=${id}`) as Promise<Array<Record<string, unknown>>>,
     ]);
+    // Annotate each day with validation results.
+    const activityMap = new Map<string, ValidationActivity>(
+      tripActivities.map((a) => [a.id as string, a as ValidationActivity & Record<string, unknown>]),
+    );
+    const enrichedItineraries = tripItineraries.map((itin) => {
+      const days = (itin.days as Array<Record<string, unknown>> | undefined) ?? [];
+      const annotatedDays = days.map((day) => {
+        const slots = (day.slots as ValidationSlot[] | undefined) ?? [];
+        const issues = validateDay(slots, activityMap);
+        return {
+          ...day,
+          issue_count: issues.length,
+          ...(issues.length > 0 ? { issues } : {}),
+        };
+      });
+      return { ...itin, days: annotatedDays };
+    });
     return {
       content: [{
         type: "text",
-        text: JSON.stringify({ ...trip, activities: tripActivities, itineraries: tripItineraries }, null, 2),
+        text: JSON.stringify({ ...trip, activities: tripActivities, itineraries: enrichedItineraries }, null, 2),
       }],
     };
   },
@@ -321,6 +358,53 @@ server.tool(
       content: [{
         type: "text",
         text: total ? JSON.stringify(result, null, 2) : `No travel results matching "${query}"`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  "get_trip_issues",
+  "Validate a trip's itineraries and return per-day issues (overlap, out-of-order, drive-gap). Mirrors what the travel app shows as 'N issues' on each day. Use this — and the inline issue_count fields on get_travel_trip / list_travel_trips — to spot planning conflicts before treating an itinerary as final.",
+  { trip_id: z.string().describe("The travel trip record ID") },
+  async ({ trip_id }) => {
+    const trip = (await api(`/travel/trips/${trip_id}`)) as Record<string, unknown>;
+    const logId = trip.log as string;
+    const destination = trip.destination as string;
+    const [activities, itineraries] = await Promise.all([
+      api(`/travel/activities?log=${logId}&trip_id=${trip_id}`) as Promise<Array<ValidationActivity & Record<string, unknown>>>,
+      api(`/travel/itineraries?log=${logId}&trip_id=${trip_id}`) as Promise<Array<{
+        id: string;
+        name: string;
+        is_active: boolean;
+        days?: Array<{ date?: string; label?: string; slots?: ValidationSlot[] }>;
+      }>>,
+    ]);
+    const activityMap = new Map<string, ValidationActivity>(
+      activities.map((a) => [a.id, a as ValidationActivity]),
+    );
+    const itinSummaries = itineraries.map((itin) => {
+      const days = (itin.days ?? []).map((day, dayIndex) => {
+        const issues = validateDay(day.slots ?? [], activityMap);
+        return {
+          day_index: dayIndex,
+          date: day.date,
+          label: day.label,
+          issue_count: issues.length,
+          ...(issues.length > 0 ? { issues } : {}),
+        };
+      });
+      return {
+        id: itin.id,
+        name: itin.name,
+        is_active: itin.is_active,
+        days,
+      };
+    });
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ trip_id, destination, itineraries: itinSummaries }, null, 2),
       }],
     };
   },
