@@ -417,21 +417,26 @@ Don't, unless absolutely necessary. We have three (`hlk_`, `mcpat_`, PB JWT) and
 
 These are gaps the policy implies but the code doesn't yet meet, or places where the model is rougher than the rest of the doc suggests. Each one is a candidate for the next-touch.
 
-### 8.1 🚨 Self-mintable `infra` role via direct PB write
+### 8.1 done: self-mintable `infra` role via direct PB write — closed by silent-strip hook
 
-**File:** `infra/pocketbase/pb_migrations/0024_tighten_access_rules.js:36` and `0025_infra_role_field.js:23-30`.
+**File:** `infra/pocketbase/pb_hooks/api_tokens.pb.js`. Tests: `services/api/src/e2e/api-tokens-roles-strip.test.ts`.
 
-The `api_tokens.createRule` is `'@request.auth.id != "" && user = @request.auth.id'`. This gates row insertion, but PB rules do not gate individual fields by default. The `roles` field added in 0025 has no per-field restriction.
+**Original gap.** `api_tokens.createRule` (set in 0024) is `'@request.auth.id != "" && user = @request.auth.id'`. This gates row insertion but not individual fields — PB has no per-field rule expression. The `roles` JSON field added in 0025 was therefore world-writable by any authed user on the rows they could already create.
 
-**Exploit:** any authenticated user can POST to `api_tokens` with `{user: self, token_hash: <known>, token_prefix: "hlk_xxx", roles: ["infra"]}` and the row will be created. They then present `hlk_<raw>` to the API service, which loads the row, sees `roles: ["infra"]`, and admits the call to `/data/deployments` POST or `/data/pod_events` DELETE.
+**Original exploit.** Any authenticated user could POST to `api_tokens` with `{user: self, token_hash: <known>, token_prefix: "hlk_xxx", roles: ["infra"]}` and the row would be created with the elevated role. They then present `hlk_<raw>` to the API service, which loads the row, sees `roles: ["infra"]`, and admits the call to `POST /data/deployments` or `DELETE /data/pod_events` — letting a regular user forge deployment history or retention-delete real cluster events.
 
-**Fix options, in order of preference:**
+**Fix.** A PB hook (`onRecordCreateRequest` + `onRecordUpdateRequest`) intercepts every write to `api_tokens` and **silently blanks `roles` to `[]` unless the request authenticates as a superuser**. Discriminator: `e.requestInfo()?.auth?.collection().name === "_superusers"` (the `.collection()` method form, not the undefined `.collectionName` property — see §8.12 for the same string-property gotcha in `sharing.pb.js`).
 
-1. **PB hook in `infra/pocketbase/pb_hooks/`** that intercepts `api_tokens` create/update and blanks the `roles` field unless the caller is a superuser. Keeps the PB-rule string simple. (PB supports this via `onRecordBeforeCreateRequest` and similar.)
-2. **Migrate `roles` off `api_tokens`** to a separate `api_token_roles` collection with admin-only write rules. Joined at auth-time in the middleware. More moving parts but enforces the principle of "only admins can grant privilege."
-3. **Audit log + alert on any non-empty `roles` write that didn't come from the admin UI**. Low confidence in this as the primary defense — it's a detection control, not a prevention control.
+Silent-strip (not throw) deliberately: throwing would distinguish "request that tried to set roles" from "request that didn't", letting an attacker enumerate `roles` as a privileged field. The exploit path now produces a row identical to an honest create — the attacker has no signal that anything was filtered.
 
-This is the single most important followup. **Schedule it for the next touch on the auth surface.**
+The legit operator path (PB admin UI / admin PB client used to stamp `HOMELAB_API_TOKEN` with `roles: ["infra"]`) authenticates as superuser and passes through untouched. The legit Settings UI path (`POST /auth/tokens`) never sends `roles` in the payload, so the strip is a no-op there too.
+
+Update is wired as belt-and-suspenders. Today `api_tokens.updateRule = null` (immutable from PB-direct), so the update branch never fires in practice — but if the rule is ever relaxed (e.g. to allow renaming a token), the hook keeps elevation off the table.
+
+**Pinned by tests** in `services/api/src/e2e/api-tokens-roles-strip.test.ts`:
+- User-context CREATE with `roles: ["infra"]` produces a row whose stored `roles` does not contain `"infra"` (the original exploit, now a no-op).
+- Superuser-context CREATE with `roles: ["infra"]` preserves roles (the operator path stays open).
+- A user-minted token whose payload tried to set `roles: ["infra"]` returns 403 when used against `POST /data/deployments` — the end-to-end smoking gun.
 
 ### 8.2 ⚠️ `GET /data/deployments` and `GET /data/pod_events` are authed-only, not role-gated
 
@@ -491,6 +496,18 @@ The `SUPPORTED_SCOPES = ["mcp"]` in `lib/oauth.ts:9` is a single coarse scope. A
 ### 8.11 note: API service uses the admin PB client across the board for token-auth callers
 
 This is fundamental: by setting `c.set("pb", adminPb)` in `auth.ts:75, 122, 186`, every route gets a client that can read/write anything. Route-level gates are the entire enforcement. The alternative — a per-user PB JWT minted on the fly — is conceivable but materially more complex (no built-in PB API for "act as user X without their password"). We accept the design and pay for it with paranoia at the route layer. **Anyone adding a route should internalize this** — if the gate isn't there, the data isn't either, regardless of what PB rules say.
+
+### 8.12 ⚠️ `sharing.pb.js` uses `auth.collectionName` (undefined in PB 0.25 goja)
+
+**File:** `infra/pocketbase/pb_hooks/sharing.pb.js:133`.
+
+The invite-create hook discriminates user-token vs superuser context via `authRecord?.collectionName`, but in PB 0.25's goja runtime the auth record exposes `.collection()` as a method — `auth.collectionName` is undefined. So the comparison `authCollection === "users"` is always false, and the hook unconditionally falls into the "superuser or unauthed — trust server-set created_by" branch.
+
+This was discovered during the §8.1 fix when the same property failed on `api_tokens.pb.js`. The new hook uses the method form (`auth.collection().name`).
+
+For `sharing.pb.js` the consequence is not as severe — the hook still verifies that the resolved actor owns the target before allowing the invite — but it does mean we are reading `record.created_by` from the client payload for user-token requests (which can be forged) rather than from `auth.id` (which cannot). A user could create an invite on behalf of an account they have access to anyway (since the owner-check still applies), so the impact is **limited**, but the discriminator is broken and should be fixed for the same reason: defense in depth and predictable hook behavior.
+
+Fix: replace `authRecord?.collectionName` with `authRecord?.collection()?.name` at `sharing.pb.js:133`. Add a regression test that an invite created via a user-token correctly stamps `created_by` from `auth.id` regardless of what the client payload claims.
 
 ---
 
