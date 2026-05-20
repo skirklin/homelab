@@ -19,6 +19,11 @@ type RealtimeCb = (e: { action: string; record: RecordModel }) => void;
 interface StubCollection {
   records: Map<string, RecordModel>;
   realtimeCbs: Set<RealtimeCb>;
+  /** Total subscribe(...) invocations on this collection, regardless of
+   *  whether the resulting cb is later unsubscribed. Lets tests assert the
+   *  inner pb.subscribe was never called at all (vs. called-then-unsubscribed,
+   *  which is what the outer trackUnsub fix would leave behind). */
+  subscribeCalls: number;
   /** Gates pending reads; tests use this to keep wpb.subscribe / getList
    *  promises pending while exercising cancel-before-resolve. */
   gateReads: Promise<void> | null;
@@ -37,7 +42,7 @@ function makeStubPb(): {
   const get = (n: string): StubCollection => {
     let c = cols.get(n);
     if (!c) {
-      c = { records: new Map(), realtimeCbs: new Set(), gateReads: null };
+      c = { records: new Map(), realtimeCbs: new Set(), subscribeCalls: 0, gateReads: null };
       cols.set(n, c);
     }
     return c;
@@ -78,6 +83,7 @@ function makeStubPb(): {
           return true;
         },
         async subscribe(_topic: string, cb: RealtimeCb): Promise<UnsubscribeFunc> {
+          c.subscribeCalls += 1;
           c.realtimeCbs.add(cb);
           return async () => { c.realtimeCbs.delete(cb); };
         },
@@ -190,6 +196,65 @@ describe("PocketBaseShoppingBackend.subscribeToList cancellation", () => {
       totalSubscribers(stub),
       "subscribeToList leaked realtime subscribers when teardown raced the inner subscribe promises",
     ).toBe(0);
+  });
+
+  it("subscribeToCollectionReload does not invoke pb.subscribe when cancelled between reload() and subscribe()", async () => {
+    // Internal-race repro: subscribeToCollectionReload awaits reload() *then*
+    // awaits pb.subscribe(). The outer trackUnsub fix catches the leaked
+    // unsub if cancellation lands between those two awaits — but the
+    // subscribe call itself still fires, briefly registering a realtime cb
+    // that's immediately torn down. The tighter fix threads an isCancelled
+    // check between the two awaits so the subscribe never happens at all.
+    //
+    // Net subscriber count returns to 0 either way (the outer trackUnsub
+    // tidies up). What differs is `subscribeCalls`: pre-fix it's 1 per
+    // reload-based collection; post-fix it's 0.
+    const stub = makeStubPb();
+    stub.col("shopping_lists").records.set("L1", {
+      id: "L1",
+      collectionId: "shopping_lists",
+      collectionName: "shopping_lists",
+      created: "",
+      updated: "",
+      name: "Groceries",
+      owners: ["u1"],
+      category_defs: [],
+    } as unknown as RecordModel);
+
+    // Hold reads so the inner `await reload()` (which calls getList) stays
+    // pending. Cancellation then lands before the subsequent pb.subscribe.
+    stub.hold();
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+
+    const unsubscribe = shopping.subscribeToList("L1", {
+      onList: () => {},
+      onItems: () => {},
+      onHistory: () => {},
+      onTrips: () => {},
+    });
+
+    // Tear down before getList resolves — sets cancelled=true.
+    unsubscribe();
+
+    // Release: getList resolves, reload() finishes, then the function
+    // proceeds to (or short-circuits before) pb.subscribe(...).
+    stub.release();
+    for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
+
+    // The reload-based collections must not have hit pb.subscribe at all.
+    expect(
+      stub.col("shopping_history").subscribeCalls,
+      "subscribeToCollectionReload called pb.subscribe on shopping_history after cancellation",
+    ).toBe(0);
+    expect(
+      stub.col("shopping_trips").subscribeCalls,
+      "subscribeToCollectionReload called pb.subscribe on shopping_trips after cancellation",
+    ).toBe(0);
+
+    // And the outer invariant from the first test still holds.
+    expect(totalSubscribers(stub)).toBe(0);
   });
 
   it("normal teardown after the promises resolve still releases everything", async () => {
