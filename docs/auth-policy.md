@@ -497,17 +497,25 @@ The `SUPPORTED_SCOPES = ["mcp"]` in `lib/oauth.ts:9` is a single coarse scope. A
 
 This is fundamental: by setting `c.set("pb", adminPb)` in `auth.ts:75, 122, 186`, every route gets a client that can read/write anything. Route-level gates are the entire enforcement. The alternative — a per-user PB JWT minted on the fly — is conceivable but materially more complex (no built-in PB API for "act as user X without their password"). We accept the design and pay for it with paranoia at the route layer. **Anyone adding a route should internalize this** — if the gate isn't there, the data isn't either, regardless of what PB rules say.
 
-### 8.12 ⚠️ `sharing.pb.js` uses `auth.collectionName` (undefined in PB 0.25 goja)
+### 8.12 ✅ CLOSED — `sharing.pb.js` PB 0.25 goja bugs (discriminator + array push)
 
-**File:** `infra/pocketbase/pb_hooks/sharing.pb.js:133`.
+**File:** `infra/pocketbase/pb_hooks/sharing.pb.js`.
 
-The invite-create hook discriminates user-token vs superuser context via `authRecord?.collectionName`, but in PB 0.25's goja runtime the auth record exposes `.collection()` as a method — `auth.collectionName` is undefined. So the comparison `authCollection === "users"` is always false, and the hook unconditionally falls into the "superuser or unauthed — trust server-set created_by" branch.
+**Closed by:** worktree commit (see history), 2026-05-20.
 
-This was discovered during the §8.1 fix when the same property failed on `api_tokens.pb.js`. The new hook uses the method form (`auth.collection().name`).
+Two goja sharp edges, both fixed in one pass:
 
-For `sharing.pb.js` the consequence is not as severe — the hook still verifies that the resolved actor owns the target before allowing the invite — but it does mean we are reading `record.created_by` from the client payload for user-token requests (which can be forged) rather than from `auth.id` (which cannot). A user could create an invite on behalf of an account they have access to anyway (since the owner-check still applies), so the impact is **limited**, but the discriminator is broken and should be fixed for the same reason: defense in depth and predictable hook behavior.
+1. **Discriminator** (the originally-tagged §8.12 bug). The invite-create hook discriminated user-token vs superuser context via `authRecord?.collectionName`, but in PB 0.25's goja runtime the auth record exposes `.collection()` as a method — `auth.collectionName` is undefined. So the comparison `authCollection === "users"` was always false, and the hook unconditionally fell into the "superuser or unauthed — trust server-set `created_by`" branch.
 
-Fix: replace `authRecord?.collectionName` with `authRecord?.collection()?.name` at `sharing.pb.js:133`. Add a regression test that an invite created via a user-token correctly stamps `created_by` from `auth.id` regardless of what the client payload claims.
+   **Impact (worse than the original §8.12 entry suggested):** because the user-token branch was never taken, a non-owner could forge `created_by` to a real owner's ID in the client payload and slip past the owner check entirely — the hook would see `created_by = aliceId`, find Alice in `target.owners`, and let the invite through. The new regression test `services/api/src/e2e/sharing-created-by.test.ts > "non-owner is blocked even if they forge created_by to a real owner"` covers this directly.
+
+   **Fix:** use the method form `authRecord.collection().name` (matches `api_tokens.pb.js` from §8.1).
+
+2. **Array push corruption** (a separate goja bug surfaced while debugging #1). When `record.get(jsonArrayField)` returns a goja-wrapped Go slice that has never been set, `Array.isArray` returns true but `.push(stringValue)` pushes `0` instead of the supplied value. This caused the `recipes-app > Sharing invites > redeem invite adds user to box owners` test to fail with a 500 ("Must be a valid json value") that the policy doc had incorrectly attributed to bug #1. Confirmed via `console.log("after push=", JSON.stringify(boxes))` printing `[0]` instead of `[targetId]`.
+
+   **Fix:** before mutating a value returned by `record.get(...)`, copy it into a fresh JS array via `Array.prototype.slice.call(raw)`. The hook does this everywhere it pushes onto a `recipe_boxes` or `owners` value it just read.
+
+**Scope caveat:** in this hook file, module-level helper functions (e.g. `function toJsArray(...)`) are not reachable from inside inline callbacks passed to `routerAdd`/`onRecordCreateRequest` — calls to them throw `<name> is not defined`. Confirmed empirically (the first attempted fix put `toJsArray` and `authCollectionName` at module scope, called them from inline arrows passed to the hook registrars, and every call threw). The workaround used here: inline the helper as a `function` declaration *inside* each callback. (`api_tokens.pb.js` sidesteps this by defining a single named function at module scope and passing it as the callback itself — no inline-vs-module split. Either pattern is fine; mixing them is not.)
 
 ---
 

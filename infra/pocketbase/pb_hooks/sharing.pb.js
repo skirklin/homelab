@@ -6,11 +6,53 @@
  * POST /api/sharing/redeem  { code }
  *   - Validates the invite code
  *   - Adds the authenticated user to the target's owners
+ *   - Wires the shared resource into the redeemer's user record
  *   - Marks the invite as redeemed
+ *
+ * onRecordCreateRequest("sharing_invites")
+ *   - Resolves the acting principal (user-token: auth.id ; superuser-context:
+ *     trust server-set record.created_by).
+ *   - Verifies the actor owns the target before allowing the invite create.
+ *   - Stamps record.created_by from the resolved actor (auth.id wins over
+ *     any client-supplied value on the user-token path).
+ *
+ * --------------------------------------------------------------------------
+ * Two goja sharp edges this file works around (auth-policy.md §8.12):
+ *
+ *   (a) The auth Record exposes `.collection()` as a METHOD, not a property.
+ *       Older docs reference `auth.collectionName` — that property is
+ *       undefined here, so any `=== "users"` comparison against it is
+ *       unconditionally false and the discriminator silently falls into
+ *       its else branch. Fix: call `auth.collection().name`.
+ *
+ *   (b) When a Record's JSON-array field has never been set (or comes from
+ *       a multi-relation), `record.get(field)` returns a goja-wrapped Go
+ *       slice that LOOKS like a JS array (Array.isArray → true) but whose
+ *       `.push()` does not actually append the supplied value — it pushes
+ *       `0` instead. This caused a "Must be a valid json value" save error
+ *       on user.recipe_boxes and silent corruption on travel_slugs.
+ *       Fix: copy into a fresh JS array via Array.prototype.slice.call(...)
+ *       before mutating.
+ *
+ * Helpers are inlined into each callback (rather than refactored to module
+ * scope) because module-level helper functions are NOT reachable from
+ * inside an inline callback passed to routerAdd/onRecordCreateRequest —
+ * calls throw `<name> is not defined`. The api_tokens.pb.js pattern
+ * (define a named function at module scope and pass it directly as the
+ * callback) works fine; what doesn't work is the mix — inline arrow
+ * callback that references a module-scope helper.
  */
 
-// Custom route: redeem an invite
+// ---- POST /api/sharing/redeem -------------------------------------------
 routerAdd("POST", "/api/sharing/redeem", (e) => {
+  // Inlined helper: see header note (b). Copy a maybe-Go-slice into a
+  // fresh JS array so push/indexOf behave as standard JS values.
+  function toJsArray(raw) {
+    if (!raw) return [];
+    try { return Array.prototype.slice.call(raw); }
+    catch (_) { return []; }
+  }
+
   const authRecord = e.auth;
   if (!authRecord) {
     return e.json(401, { error: "Authentication required" });
@@ -59,7 +101,7 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
     }
 
     const target = $app.findRecordById(collection, targetId);
-    const owners = target.get("owners") || [];
+    const owners = toJsArray(target.get("owners"));
 
     // Check if already an owner
     if (owners.indexOf(userId) === -1) {
@@ -73,7 +115,7 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
     // not by querying collections where auth is in owners).
     const user = $app.findRecordById("users", userId);
     if (targetType === "box") {
-      const boxes = user.get("recipe_boxes") || [];
+      const boxes = toJsArray(user.get("recipe_boxes"));
       if (boxes.indexOf(targetId) === -1) {
         boxes.push(targetId);
         user.set("recipe_boxes", boxes);
@@ -83,7 +125,7 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
       // For recipe-level shares, add the parent box to the user's list
       const boxId = target.get("box");
       if (boxId) {
-        const boxes = user.get("recipe_boxes") || [];
+        const boxes = toJsArray(user.get("recipe_boxes"));
         if (boxes.indexOf(boxId) === -1) {
           boxes.push(boxId);
           user.set("recipe_boxes", boxes);
@@ -123,24 +165,46 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
   }
 });
 
-// Validate invite creation — ensure the creator owns the target.
-// Works for both user-token requests (auth.id is the user) and superuser
-// requests from the API service (auth.id is empty; trust the server-set
-// created_by field which the API populates from the authenticated user).
+// ---- onRecordCreateRequest("sharing_invites") ---------------------------
+//
+// Ensures the creator owns the target before allowing the invite to be
+// created. Works for both:
+//
+//   - User-token requests: discriminator picks the `"users"` branch via
+//     auth.collection().name; authId = auth.id (CLIENT-SUPPLIED
+//     created_by is IGNORED — we overwrite below).
+//   - Superuser-context requests (API service with admin PB client):
+//     discriminator falls to the else branch and trusts the server-set
+//     created_by, since the API server has already verified the caller.
 onRecordCreateRequest((e) => {
   const record = e.record;
   const authRecord = e.requestInfo()?.auth;
-  const authCollection = authRecord?.collectionName;
 
-  // Identify the ACTING user. For requests authed as a regular user, use
-  // auth.id. For superuser-context requests (API service with admin PB client),
-  // trust record.created_by since the API server sets that from the verified
-  // authenticated user's ID.
+  // Inlined helper: see header note (a). Resolve the auth record's
+  // collection NAME using the method form `auth.collection().name`; the
+  // `auth.collectionName` property is undefined in PB v0.25 goja.
+  let authCollection = "";
+  if (authRecord) {
+    try {
+      if (authRecord.collection) {
+        const coll = authRecord.collection();
+        if (coll && typeof coll.name === "string") authCollection = coll.name;
+      }
+    } catch (_) {
+      // Defensive — fall through to "" so the discriminator fails closed.
+    }
+  }
+
   let authId;
   if (authCollection === "users") {
+    // Regular user. auth.id is the source of truth, period — never trust
+    // a client-supplied created_by here. Pre-fix this branch was never
+    // taken (auth.collectionName was undefined), so a non-owner could
+    // forge created_by to a real owner and slip past the owner check.
     authId = authRecord.id;
   } else {
-    // superuser or unauthed — trust server-set created_by
+    // Superuser / admin context — the API server has already verified the
+    // actor and stamps created_by from the JWT it validated. Trust it.
     authId = record.get("created_by");
   }
 
@@ -162,14 +226,17 @@ onRecordCreateRequest((e) => {
     throw new BadRequestError("Invalid target_type");
   }
 
-  // Verify caller is an owner
+  // Verify caller is an owner. Reading via indexOf on the raw owners
+  // value works fine — it's the push side that goja mangles (header
+  // note (b)), and we don't push here.
   const target = $app.findRecordById(collection, targetId);
   const owners = target.get("owners") || [];
   if (owners.indexOf(authId) === -1) {
     throw new ForbiddenError("Must be an owner to create invites");
   }
 
-  // Set the creator
+  // Stamp the creator — overwrites any client-supplied value on the
+  // user-token path. Idempotent on the superuser path.
   record.set("created_by", authId);
 
   // Continue with the create
