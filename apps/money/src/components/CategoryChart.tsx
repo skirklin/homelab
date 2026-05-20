@@ -9,6 +9,7 @@
  */
 import { useCallback, useMemo, useState } from 'react'
 import Plot from 'react-plotly.js'
+import type { Data as PlotlyData } from 'plotly.js'
 import type { Transaction } from '../api'
 import { reclassifyTransaction } from '../api'
 
@@ -152,7 +153,7 @@ export function CategoryChart({
 
   const colorMap = useMemo(() => buildColorMap(stats.map((s) => s.category)), [stats])
 
-  const traces: Plotly.Data[] = chartData.categories.map((cat) => ({
+  const traces: PlotlyData[] = chartData.categories.map((cat) => ({
     x: chartData.months,
     y: chartData.months.map((m) => chartData.monthCats.get(m)?.get(cat) ?? 0),
     name: cat,

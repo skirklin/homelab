@@ -236,6 +236,9 @@ importers:
       '@types/node':
         specifier: ^24.10.1
         version: 24.12.2
+      '@types/plotly.js':
+        specifier: ^3.0.10
+        version: 3.0.10
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.14
@@ -2958,6 +2961,9 @@ packages:
 
   '@types/pbf@3.0.5':
     resolution: {integrity: sha512-j3pOPiEcWZ34R6a6mN07mUkM4o4Lwf6hPNt8eilOeZhTFbxFXmKhvXl9Y28jotFPaI1bpPDJsbCprUoNke6OrA==}
+
+  '@types/plotly.js@3.0.10':
+    resolution: {integrity: sha512-q+MgO4aajC2HrO7FllTYWzrpdfbTjboSMfjkz/aXKjg1v7HNo1zMEFfAW7quKfk6SL+bH74A5ThBEps/7hZxOA==}
 
   '@types/prettier@2.7.3':
     resolution: {integrity: sha512-+68kP9yzs4LMp7VNh8gdzMSPZFL44MLGqiHWvttYJe+6qnuVr4Ek9wSBQoveqY/r+LwjCcU29kNVkidwim+kYA==}
@@ -10801,6 +10807,8 @@ snapshots:
   '@types/parse5@6.0.3': {}
 
   '@types/pbf@3.0.5': {}
+
+  '@types/plotly.js@3.0.10': {}
 
   '@types/prettier@2.7.3': {}
 

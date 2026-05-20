@@ -40,7 +40,6 @@ export function AccountSummary({ accounts }: Props) {
     <div className="account-sidebar">
       {sorted.map(([inst, accts]) => {
         const total = accts.reduce((s, a) => s + (a.latest_balance ?? 0), 0)
-        const anyStale = accts.some(isStale)
         return (
           <div key={inst} className="sidebar-group">
             <div className="sidebar-group-header">

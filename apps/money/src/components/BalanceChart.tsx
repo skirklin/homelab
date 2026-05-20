@@ -8,11 +8,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { Account, BalancePoint } from '../api'
+import type { BalancePoint } from '../api'
 
 interface Props {
   balances: BalancePoint[]
-  accounts: Account[]
 }
 
 const COLORS = [
@@ -32,7 +31,7 @@ function formatDollar(value: number): string {
   return `$${value.toFixed(0)}`
 }
 
-export function BalanceChart({ balances, accounts }: Props) {
+export function BalanceChart({ balances }: Props) {
   if (balances.length === 0) {
     return <div style={{ textAlign: 'center', padding: '4rem', opacity: 0.5 }}>No balance data yet</div>
   }
@@ -92,9 +91,11 @@ export function BalanceChart({ balances, accounts }: Props) {
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: 8,
             }}
-            formatter={(value: number) =>
-              `$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-            }
+            formatter={(value) => {
+              const n = typeof value === 'number' ? value : Number(value)
+              if (!Number.isFinite(n)) return '—'
+              return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+            }}
             labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
           />
           <Legend />

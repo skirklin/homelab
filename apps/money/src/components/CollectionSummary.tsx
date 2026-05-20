@@ -45,8 +45,8 @@ function CollectionDetail({ collection }: { collection: CollectionInfo }) {
         textStyle: { color: THEME.text, fontSize: 12 },
         formatter: (params: echarts.DefaultLabelFormatterCallbackParams[]) => {
           if (!Array.isArray(params) || params.length === 0) return ''
-          const p = params[0]
-          return `<b>${p.axisValueLabel}</b><br/>${fmtDollar(p.value as number)}`
+          const p = params[0] as echarts.DefaultLabelFormatterCallbackParams & { axisValueLabel?: string }
+          return `<b>${p.axisValueLabel ?? ''}</b><br/>${fmtDollar(p.value as number)}`
         },
       },
       grid: { left: 60, right: 20, top: 10, bottom: 30 },
