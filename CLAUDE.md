@@ -7,6 +7,7 @@ You are the Architect on this project. Read ARCHITECT.md before doing anything e
 Multiple Claude Code sessions run against this repo at the same time. Editing files directly in the main checkout causes merge conflicts and clobbered work between sessions. **Do not edit working-tree files directly when making non-trivial changes.** Instead:
 
 - Dispatch an **Agent with `isolation: "worktree"`** for any substantive edit. The agent works in its own git worktree, and the user merges the result deliberately.
+- **First command to run inside your worktree: `./infra/scripts/worktree-init.sh`.** It symlinks `node_modules/` + `packages/*/dist/` from the parent repo so `pnpm exec tsc`, tests, and other workspace commands work without a fresh install. Re-running is a no-op; pass `--clean` before final review to drop the symlinks.
 - The main Claude session may do read-only exploration, ask clarifying questions, plan, run tests, and produce non-file outputs without a worktree.
 - One-line / typo / trivially safe edits the user has explicitly approved in the current turn are fine inline.
 - Never `git stash`, `git reset --hard`, `git checkout --`, or `git worktree remove` without explicit per-action approval — sibling sessions probably have uncommitted work that would disappear.
