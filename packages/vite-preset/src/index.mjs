@@ -84,8 +84,24 @@ export function kirklPlugins(opts) {
             },
           },
           {
-            urlPattern: ({ url }) =>
-              url.hostname.endsWith("googleapis.com") || url.hostname.endsWith("gstatic.com"),
+            // ONLY cache fonts.gstatic.com — static font binaries that are
+            // safe to keep around for a month.
+            //
+            // Do NOT widen this to googleapis.com / gstatic.com in general.
+            // The Google Maps JS loader (maps.googleapis.com/maps/api/js)
+            // and the Identity / GSI loaders have a self-check that throws
+            // NotLoadingAPIFromGoogleMapsError (and equivalents) when the
+            // script is served from anywhere other than a fresh fetch off
+            // their own host — replaying a cached copy via the SW trips
+            // that check and produces cascading `Cannot read properties
+            // of undefined` errors from main.js. Travel app died on soft
+            // refresh from exactly this; hard refresh worked because it
+            // bypasses the SW. Same shape as the /api/realtime SSE
+            // carve-out above (commit ee90aad).
+            //
+            // Anything else under googleapis.com / gstatic.com should fall
+            // through to the network like any other un-handled request.
+            urlPattern: ({ url }) => url.hostname === "fonts.gstatic.com",
             handler: "CacheFirst",
             options: {
               cacheName: "kirkl-google",
