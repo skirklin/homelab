@@ -388,6 +388,13 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
     await reload();
 
+    // Defense-in-depth alongside the outer trackUnsub wrapper: if the caller
+    // tore down between `await reload()` and here, short-circuit so we never
+    // open a pb realtime subscription only to immediately tear it back down.
+    // trackUnsub still catches the leak if cancellation lands during the
+    // subscribe() await below — this just avoids the wasted round-trip.
+    if (cancelled()) return () => {};
+
     const unsub = await this.pb().collection(collection).subscribe("*", (e) => {
       if (cancelled() || !options.belongsTo(e.record)) return;
       reload();
