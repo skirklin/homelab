@@ -122,16 +122,32 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
     // Lodging
     if (activeItin) {
       const daysWithLodging = activeItin.days.filter((d) => d.lodgingActivityId);
-      // Suppress lodging-needed warnings for departure days: if any flight on
-      // this day flies to the user's home (`toIsHome`), you check out that
-      // morning and the trip's last "night" is on the plane home.
-      const isDepartureDay = (d: Itinerary["days"][number]) =>
-        (d.flights || []).some((f) => {
-          const a = activities.find((x) => x.id === f.activityId);
-          return a?.flightInfo?.toIsHome === true;
-        });
+      // A day counts as a "departure day" (no lodging needed) when either:
+      //   1. Any flight activity on the day has flightInfo.toIsHome === true
+      //      (explicit signal — preferred when present), OR
+      //   2. It's the last day of the itinerary AND the day contains at least
+      //      one Flight-category activity (in slots or flights). Last day +
+      //      flight is overwhelmingly a fly-home day; intermediate days with
+      //      internal flights aren't suppressed.
+      const isDepartureDay = (
+        day: typeof activeItin.days[number],
+        dayIndex: number,
+        days: typeof activeItin.days,
+      ): boolean => {
+        const allSlots = [...(day.flights || []), ...day.slots];
+        const slotActivities = allSlots
+          .map((s) => activities.find((a) => a.id === s.activityId))
+          .filter((a): a is Activity => a != null);
+        if (slotActivities.some((a) => a.flightInfo?.toIsHome === true)) {
+          return true;
+        }
+        if (dayIndex === days.length - 1) {
+          return slotActivities.some((a) => a.category === "Flight");
+        }
+        return false;
+      };
       const daysWithout = activeItin.days.filter(
-        (d) => !d.lodgingActivityId && d.slots.length > 0 && !isDepartureDay(d),
+        (d, i, days) => !d.lodgingActivityId && d.slots.length > 0 && !isDepartureDay(d, i, days),
       );
       if (daysWithLodging.length > 0) {
         const lodgingNames = [...new Set(
