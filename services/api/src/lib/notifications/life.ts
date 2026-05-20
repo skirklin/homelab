@@ -3,15 +3,23 @@
  * Generates random sample times daily and sends push notifications when they're due.
  */
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
+import type { SampleSchedule } from "@homelab/backend";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
+import { safeTz } from "./tz";
 
 // Life is reachable both as a subdomain (life.kirkl.in) and as a module under
 // the home shell (kirkl.in/life). preferredOrigins picks one per user so we
 // don't double-push to the same device.
 const LIFE_SUBDOMAIN_BASE = `https://life.${DOMAIN}`;
 const LIFE_ORIGINS = [LIFE_SUBDOMAIN_BASE, `https://${DOMAIN}`];
+
+// Used when a log's RandomSamplesConfig is missing/garbage timezone. Differs
+// from travel's "America/Denver" default — for random sampling we want
+// deterministic times for users without a tz preference, not the
+// system-owner's clock.
+const FALLBACK_TZ = "UTC";
 
 interface SampleQuestion {
   id: string;
@@ -26,12 +34,6 @@ interface RandomSamplesConfig {
   activeHours: [number, number];
   timezone?: string;
   questions: SampleQuestion[];
-}
-
-interface SampleSchedule {
-  date: string;
-  times: number[];
-  sentTimes: number[];
 }
 
 function getDateStringInTimezone(date: Date, timezone: string): string {
@@ -98,7 +100,7 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
     if (!Array.isArray(config.activeHours) || config.activeHours.length !== 2 ||
         config.activeHours[0] >= config.activeHours[1]) continue;
 
-    const timezone = config.timezone || "UTC";
+    const timezone = safeTz(config.timezone, FALLBACK_TZ);
     const today = getDateStringInTimezone(nowDate, timezone);
 
     let schedule = logDoc.sample_schedule as SampleSchedule | null;
@@ -197,16 +199,6 @@ const SESSION_REMINDERS = {
   },
 } as const;
 
-function safeTz(tz: unknown): string {
-  if (typeof tz !== "string" || !tz) return "UTC";
-  try {
-    formatInTimeZone(new Date(), tz, "yyyy");
-    return tz;
-  } catch {
-    return "UTC";
-  }
-}
-
 /**
  * Returns true if `target` ("HH:MM") matches `current` ("HH:MM") within a
  * ±windowMin window. Both inputs are interpreted as wall-clock times on the
@@ -277,7 +269,7 @@ export async function runLifeReminderCheck(
     if (hit) return hit;
     try {
       const u = await pb.collection("users").getOne(userId, { $autoCancel: false });
-      const tz = safeTz(u.timezone);
+      const tz = safeTz(u.timezone, FALLBACK_TZ);
       userTzCache.set(userId, tz);
       return tz;
     } catch {

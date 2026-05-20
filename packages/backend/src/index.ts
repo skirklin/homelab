@@ -26,7 +26,7 @@ export type {
   ActivitySlot, FlightSlot, FlightInfo,
   DayEntry,
 } from "./types/travel";
-export type { LifeLog, LifeEntry } from "./types/life";
+export type { LifeLog, LifeEntry, SampleSchedule } from "./types/life";
 
 // --- Travel validation (canonical impl shared by travel UI + MCP server) ---
 export {

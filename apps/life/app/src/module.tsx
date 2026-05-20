@@ -12,7 +12,6 @@ import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { DisplaySettingsProvider } from "./display-settings";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { SessionRunner } from "./components/SessionRunner";
-import type { LifeLog } from "./types";
 
 const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
 
@@ -38,14 +37,8 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
 
     let cancelled = false;
     const loadLog = async () => {
-      const backendLog = await life.getOrCreateLog(user.uid);
+      const log = await life.getOrCreateLog(user.uid);
       if (cancelled) return;
-      const log: LifeLog = {
-        id: backendLog.id,
-        sampleSchedule: backendLog.sampleSchedule as LifeLog["sampleSchedule"],
-        morningReminderTime: backendLog.morningReminderTime ?? null,
-        eveningReminderTime: backendLog.eveningReminderTime ?? null,
-      };
       dispatch({ type: "SET_LOG", log });
     };
 
