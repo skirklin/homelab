@@ -2,13 +2,16 @@
  * Life Tracker random sampling notification trigger.
  * Generates random sample times daily and sends push notifications when they're due.
  */
-import { fromZonedTime, toZonedTime } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 
-// Life only lives as a module under <domain>/life — no subdomain.
-const LIFE_ORIGINS = [`https://${DOMAIN}`];
+// Life is reachable both as a subdomain (life.kirkl.in) and as a module under
+// the home shell (kirkl.in/life). preferredOrigins picks one per user so we
+// don't double-push to the same device.
+const LIFE_SUBDOMAIN_BASE = `https://life.${DOMAIN}`;
+const LIFE_ORIGINS = [LIFE_SUBDOMAIN_BASE, `https://${DOMAIN}`];
 
 interface SampleQuestion {
   id: string;
@@ -172,4 +175,171 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   }
 
   return { sent: totalSent, skipped: totalSkipped };
+}
+
+// ---------------------------------------------------------------------------
+// Morning / evening session reminders
+// ---------------------------------------------------------------------------
+
+// Greetings shown as the push body. Kept in sync with the SESSIONS entries in
+// apps/life/app/src/manifest.ts. Duplicated here rather than imported because
+// the api service doesn't depend on the life app and the strings rarely move.
+const SESSION_REMINDERS = {
+  morning: {
+    title: "Morning check-in",
+    body: "Good morning. A few questions before the day gets going.",
+    url: `${LIFE_SUBDOMAIN_BASE}/morning`,
+  },
+  evening: {
+    title: "Evening wind-down",
+    body: "Wind-down time. Three quick reflections.",
+    url: `${LIFE_SUBDOMAIN_BASE}/evening`,
+  },
+} as const;
+
+function safeTz(tz: unknown): string {
+  if (typeof tz !== "string" || !tz) return "UTC";
+  try {
+    formatInTimeZone(new Date(), tz, "yyyy");
+    return tz;
+  } catch {
+    return "UTC";
+  }
+}
+
+/**
+ * Returns true if `target` ("HH:MM") matches `current` ("HH:MM") within a
+ * ±windowMin window. Both inputs are interpreted as wall-clock times on the
+ * same day; the comparison wraps midnight (23:59 vs 00:00 within window).
+ */
+function withinWindow(target: string, current: string, windowMin: number): boolean {
+  const toMin = (s: string): number | null => {
+    const m = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = parseInt(m[1], 10);
+    const mn = parseInt(m[2], 10);
+    if (h < 0 || h > 23 || mn < 0 || mn > 59) return null;
+    return h * 60 + mn;
+  };
+  const t = toMin(target);
+  const c = toMin(current);
+  if (t === null || c === null) return false;
+  const dayMin = 24 * 60;
+  let diff = Math.abs(t - c);
+  if (diff > dayMin / 2) diff = dayMin - diff;
+  return diff <= windowMin;
+}
+
+interface ReminderKind {
+  field: "morning_reminder_time" | "evening_reminder_time";
+  sentField: "last_morning_reminder_sent" | "last_evening_reminder_sent";
+  kind: "morning" | "evening";
+}
+
+const REMINDER_KINDS: ReminderKind[] = [
+  {
+    field: "morning_reminder_time",
+    sentField: "last_morning_reminder_sent",
+    kind: "morning",
+  },
+  {
+    field: "evening_reminder_time",
+    sentField: "last_evening_reminder_sent",
+    kind: "evening",
+  },
+];
+
+/**
+ * Per-minute cron tick. Fires the morning or evening session reminder to
+ * each log's owners when their local wall-clock time matches the configured
+ * "HH:MM" (within ±1 min). Idempotent via last_{morning,evening}_reminder_sent
+ * = "YYYY-MM-DD" in the user's tz.
+ */
+export async function runLifeReminderCheck(
+  now: Date = new Date(),
+): Promise<{ checked: number; sent: number; skipped: number }> {
+  const pb = await getAdminPb();
+
+  // PB can't filter `field != null && field != ""` over JSON or empty strings
+  // uniformly; pull all logs and let JS decide. Volume is tiny (single-user
+  // for now; one row per life log).
+  const logs = await pb.collection("life_logs").getFullList({
+    $autoCancel: false,
+  });
+
+  let checked = 0;
+  let sent = 0;
+  let skipped = 0;
+
+  const userTzCache = new Map<string, string>();
+  async function tzForUser(userId: string): Promise<string> {
+    const hit = userTzCache.get(userId);
+    if (hit) return hit;
+    try {
+      const u = await pb.collection("users").getOne(userId, { $autoCancel: false });
+      const tz = safeTz(u.timezone);
+      userTzCache.set(userId, tz);
+      return tz;
+    } catch {
+      userTzCache.set(userId, "UTC");
+      return "UTC";
+    }
+  }
+
+  for (const logDoc of logs) {
+    for (const kind of REMINDER_KINDS) {
+      const target = (logDoc[kind.field] as string | undefined) || "";
+      if (!target) continue;
+      checked++;
+
+      const ownerIds: string[] = logDoc.owners || [];
+      if (ownerIds.length === 0) {
+        skipped++;
+        continue;
+      }
+
+      // Use the first owner's timezone for the reminder. Multi-owner logs are
+      // a future concern; for now there's one user per log.
+      const tz = await tzForUser(ownerIds[0]);
+      const currentHHmm = formatInTimeZone(now, tz, "HH:mm");
+      const todayYmd = formatInTimeZone(now, tz, "yyyy-MM-dd");
+
+      if (!withinWindow(target, currentHHmm, 1)) {
+        skipped++;
+        continue;
+      }
+
+      const lastSent = (logDoc[kind.sentField] as string | undefined) || "";
+      if (lastSent === todayYmd) {
+        skipped++;
+        continue;
+      }
+
+      // Mark as sent BEFORE pushing — a failed send means no retry today,
+      // which is preferable to firing twice.
+      await pb.collection("life_logs").update(
+        logDoc.id,
+        { [kind.sentField]: todayYmd },
+        { $autoCancel: false },
+      );
+
+      const payload = SESSION_REMINDERS[kind.kind];
+      for (const ownerId of ownerIds) {
+        try {
+          const result = await sendPushToUser(pb, ownerId, {
+            title: payload.title,
+            body: payload.body,
+            url: payload.url,
+            data: { type: `life_${kind.kind}_reminder`, logId: logDoc.id },
+          }, { preferredOrigins: LIFE_ORIGINS });
+          console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);
+        } catch (err) {
+          console.error(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId}:`, err);
+        }
+      }
+      sent++;
+    }
+  }
+
+  return { checked, sent, skipped };
 }
