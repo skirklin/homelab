@@ -2,8 +2,11 @@
  * PocketBase implementation of ShoppingBackend.
  *
  * Writes route through the optimistic wrapper (wrapPocketBase) so the UI
- * sees changes within a frame. Reads on history/trips stay direct because
- * those collections are write-once-read-many and don't need optimistic UI.
+ * sees changes within a frame. Reads on every collection go through PBMirror
+ * — one centralized subscription engine that handles cancel-before-resolve,
+ * SSE coalescing, mutation-queue overlay, and full-state delivery. This file
+ * is the first backend to adopt the mirror; the others migrate in follow-up
+ * PRs (see `packages/backend/src/wrapped-pb/mirror.ts`).
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
@@ -12,6 +15,7 @@ import type { ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTri
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
+import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
 // --- Pagination limits ---
 
@@ -20,49 +24,53 @@ const TRIPS_PAGE_SIZE = 50;
 
 // --- Record → domain type mappers ---
 
-function listFromRecord(r: RecordModel): ShoppingList {
+function listFromRecord(r: RecordModel | RawRecord): ShoppingList {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    name: r.name || "",
-    owners: Array.isArray(r.owners) ? r.owners : [],
-    categories: Array.isArray(r.category_defs) ? r.category_defs : [],
-    created: r.created,
-    updated: r.updated,
+    name: (x.name as string) || "",
+    owners: Array.isArray(x.owners) ? (x.owners as string[]) : [],
+    categories: Array.isArray(x.category_defs) ? (x.category_defs as CategoryDef[]) : [],
+    created: (x.created as string) ?? "",
+    updated: (x.updated as string) ?? "",
   };
 }
 
-function itemFromRecord(r: RecordModel): ShoppingItem {
+function itemFromRecord(r: RecordModel | RawRecord): ShoppingItem {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    list: r.list,
-    ingredient: r.ingredient || "",
-    note: r.note || "",
-    categoryId: r.category_id || "uncategorized",
-    checked: !!r.checked,
-    checkedBy: r.checked_by || undefined,
-    checkedAt: r.checked_at || undefined,
-    addedBy: r.added_by || undefined,
-    addedAt: r.created,
-    created: r.created,
-    updated: r.updated,
+    list: x.list as string,
+    ingredient: (x.ingredient as string) || "",
+    note: (x.note as string) || "",
+    categoryId: (x.category_id as string) || "uncategorized",
+    checked: !!x.checked,
+    checkedBy: (x.checked_by as string) || undefined,
+    checkedAt: (x.checked_at as string) || undefined,
+    addedBy: (x.added_by as string) || undefined,
+    addedAt: x.created as string,
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
-function historyFromRecord(r: RecordModel): HistoryEntry {
+function historyFromRecord(r: RecordModel | RawRecord): HistoryEntry {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    ingredient: r.ingredient || "",
-    categoryId: r.category_id || "uncategorized",
-    lastAdded: new Date(r.last_added),
+    ingredient: (x.ingredient as string) || "",
+    categoryId: (x.category_id as string) || "uncategorized",
+    lastAdded: new Date(x.last_added as string),
   };
 }
 
-function tripFromRecord(r: RecordModel): ShoppingTrip {
+function tripFromRecord(r: RecordModel | RawRecord): ShoppingTrip {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    list: r.list,
-    completedAt: new Date(r.completed_at),
-    items: (r.items || []).map((item: Record<string, string>) => ({
+    list: x.list as string,
+    completedAt: new Date(x.completed_at as string),
+    items: ((x.items as Array<Record<string, string>>) || []).map((item) => ({
       ingredient: item.ingredient || item.name || "",
       note: item.note || "",
       categoryId: item.categoryId || "uncategorized",
@@ -76,9 +84,11 @@ function normalizeIngredient(ingredient: string): string {
 
 export class PocketBaseShoppingBackend implements ShoppingBackend {
   private wpb: WrappedPocketBase;
+  private mirror: PBMirror;
 
-  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase, mirror: PBMirror) {
     this.wpb = wpb;
+    this.mirror = mirror;
   }
 
   async createList(name: string, userId: string): Promise<string> {
@@ -123,9 +133,6 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     note?: string,
   ): Promise<string> {
     const itemId = newId();
-    // Both writes go optimistic via wpb; awaiting both ensures sequencing for
-    // callers (e.g. updateItemCategory immediately after addItem) sees the
-    // history row already in place.
     await Promise.all([
       this.wpb.collection("shopping_items").create({
         id: itemId,
@@ -252,6 +259,22 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     }
   }
 
+  /**
+   * Subscribe to all shopping data for a list via the mirror.
+   *
+   * Replaces the prior bespoke implementation that ran four separate
+   * `wpb.subscribe` / `pb.subscribe` chains, each with its own
+   * cancelled-flag bookkeeping, `trackUnsub` helper, and `itemsMap`
+   * delta-buffering. All of that lived to work around the underlying
+   * async-unsubscribe + delta-event-stream APIs; the mirror inverts both
+   * concerns (synchronous teardown, full-state delivery) so the backend
+   * code becomes four declarative slice descriptions plus a tear-down.
+   *
+   * The mirror's `WatchHandle.unsubscribe()` is synchronous and safe at
+   * any time (including before initial state lands), so we no longer need
+   * `cancelled` flags or `trackUnsub`. Every cancel-before-resolve fix
+   * we made here lives in the mirror now, exercised by mirror.test.ts.
+   */
   subscribeToList(
     listId: string,
     handlers: {
@@ -262,144 +285,68 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       onDeleted?: () => void;
     },
   ): Unsubscribe {
-    let cancelled = false;
-    const unsubs: Array<() => void> = [];
-    const isCancelled = () => cancelled;
+    // Track whether we've ever observed the list existing. An initial 404
+    // is "doesn't exist yet" (don't fire onDeleted); a transition from
+    // exists → empty after we've seen it is "deleted."
+    let listKnownExisted = false;
 
-    // Cancel-before-resolve guard: each inner subscribe(...).then(u =>
-    // unsubs.push(u)) chain is async, so if the consumer tears down before
-    // any of those .then callbacks land, the unsubs array is empty when the
-    // returned cleanup runs — and the underlying pb realtime subscriptions
-    // leak forever. Route every late-arriving unsub through this helper so
-    // a teardown that ran first still tears down the late-resolved sub. Same
-    // shape as subscribeSlugs / recipes / life / upkeep fixes.
-    const trackUnsub = (p: Promise<() => void>) => {
-      p.then((u) => {
-        if (cancelled) {
-          try { u(); } catch { /* nothing to do */ }
-        } else {
-          unsubs.push(u);
+    const listHandle = this.mirror.watch(
+      { collection: "shopping_lists", topic: listId },
+      (records) => {
+        if (records.length === 0) {
+          if (listKnownExisted) handlers.onDeleted?.();
+          return;
         }
-      }).catch(() => { /* upstream errors are surfaced elsewhere */ });
-    };
+        listKnownExisted = true;
+        handlers.onList(listFromRecord(records[0]));
+      },
+    );
 
-    // We track items in a map so we can deliver full state on each change.
-    const itemsMap = new Map<string, ShoppingItem>();
+    const itemsHandle = this.mirror.watch(
+      {
+        collection: "shopping_items",
+        topic: "*",
+        filter: this.pb().filter("list = {:listId}", { listId }),
+        predicate: (r) => r.list === listId,
+      },
+      (records) => {
+        handlers.onItems(records.map(itemFromRecord));
+      },
+    );
 
-    const emitItems = () => {
-      if (!cancelled) handlers.onItems(Array.from(itemsMap.values()));
-    };
+    const historyHandle = this.mirror.watch(
+      {
+        collection: "shopping_history",
+        topic: "*",
+        filter: this.pb().filter("list = {:listId}", { listId }),
+        sort: "-last_added",
+        limit: HISTORY_PAGE_SIZE,
+        predicate: (r) => r.list === listId,
+      },
+      (records) => {
+        handlers.onHistory(records.map(historyFromRecord));
+      },
+    );
 
-    // List metadata — wpb.subscribe(id) auto-loads + delivers initial state
-    // as a "create" event, then forwards live updates.
-    trackUnsub(this.wpb.collection("shopping_lists").subscribe(listId, (e) => {
-      if (cancelled) return;
-      if (e.action === "delete") {
-        handlers.onDeleted?.();
-      } else {
-        handlers.onList(listFromRecord(e.record));
-      }
-    }));
-
-    // Items — wpb.subscribe("*", { filter }) auto-loads matching records,
-    // seeds the optimistic queue, and delivers each as a "create" event,
-    // then forwards live create/update/delete. We buffer initial creates
-    // into itemsMap and emit a single onItems batch once the subscribe
-    // promise resolves; subsequent live events emit per-change.
-    let itemsInitialDone = false;
-    const itemsPromise = this.wpb.collection("shopping_items").subscribe("*", (e) => {
-      if (cancelled || (e.record as RecordModel).list !== listId) return;
-      if (e.action === "delete") {
-        itemsMap.delete(e.record.id);
-      } else {
-        itemsMap.set(e.record.id, itemFromRecord(e.record));
-      }
-      if (itemsInitialDone) emitItems();
-    }, {
-      filter: this.pb().filter("list = {:listId}", { listId }),
-      local: (r) => r.list === listId,
-    });
-    trackUnsub(itemsPromise);
-    itemsPromise.then(() => {
-      if (!cancelled) {
-        itemsInitialDone = true;
-        emitItems();
-      }
-    }).catch(() => { /* surfaced via wpb's error channel */ });
-
-    // History — full reload on any change. Stays on raw pb subscribe; writes
-    // still go through wpb so persistence + replay-on-reload work.
-    trackUnsub(this.subscribeToCollectionReload("shopping_history", isCancelled, {
-      filter: this.pb().filter("list = {:listId}", { listId }),
-      sort: "-last_added",
-      perPage: HISTORY_PAGE_SIZE,
-      belongsTo: (r) => r.list === listId,
-      onData: (records) => handlers.onHistory(records.map(historyFromRecord)),
-    }));
-
-    // Trips — full reload on any change.
-    trackUnsub(this.subscribeToCollectionReload("shopping_trips", isCancelled, {
-      filter: this.pb().filter("list = {:listId}", { listId }),
-      sort: "-completed_at",
-      perPage: TRIPS_PAGE_SIZE,
-      belongsTo: (r) => r.list === listId,
-      onData: (records) => handlers.onTrips(records.map(tripFromRecord)),
-    }));
+    const tripsHandle = this.mirror.watch(
+      {
+        collection: "shopping_trips",
+        topic: "*",
+        filter: this.pb().filter("list = {:listId}", { listId }),
+        sort: "-completed_at",
+        limit: TRIPS_PAGE_SIZE,
+        predicate: (r) => r.list === listId,
+      },
+      (records) => {
+        handlers.onTrips(records.map(tripFromRecord));
+      },
+    );
 
     return () => {
-      cancelled = true;
-      unsubs.forEach((u) => {
-        try { u(); } catch { /* nothing to do */ }
-      });
+      listHandle.unsubscribe();
+      itemsHandle.unsubscribe();
+      historyHandle.unsubscribe();
+      tripsHandle.unsubscribe();
     };
-  }
-
-  // --- Internal subscription helpers ---
-
-  /**
-   * Subscribe to a collection that fully reloads on any change. Used for
-   * history/trips where ordering and pagination matter more than per-record
-   * deltas. Stays on raw pb.subscribe — writes go through wpb so the server
-   * event we receive already reflects ack'd state.
-   */
-  private async subscribeToCollectionReload(
-    collection: string,
-    cancelled: () => boolean,
-    options: {
-      filter: string;
-      sort: string;
-      perPage: number;
-      belongsTo: (r: RecordModel) => boolean;
-      onData: (records: RecordModel[]) => void;
-    },
-  ): Promise<() => void> {
-    const reload = async () => {
-      try {
-        const result = await this.pb().collection(collection).getList(1, options.perPage, {
-          filter: options.filter,
-          sort: options.sort,
-          $autoCancel: false,
-        });
-        if (!cancelled()) options.onData(result.items);
-      } catch {
-        if (!cancelled()) options.onData([]);
-      }
-    };
-
-    await reload();
-
-    // Defense-in-depth alongside the outer trackUnsub wrapper: if the caller
-    // tore down between `await reload()` and here, short-circuit so we never
-    // open a pb realtime subscription only to immediately tear it back down.
-    // trackUnsub still catches the leak if cancellation lands during the
-    // subscribe() await below — this just avoids the wasted round-trip.
-    if (cancelled()) return () => {};
-
-    const unsub = await this.pb().collection(collection).subscribe("*", (e) => {
-      if (cancelled() || !options.belongsTo(e.record)) return;
-      reload();
-    });
-
-    return unsub;
   }
 }

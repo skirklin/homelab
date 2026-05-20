@@ -14,11 +14,13 @@ import { PocketBaseUpkeepBackend } from "./upkeep";
 import { PocketBaseTravelBackend } from "./travel";
 import { PocketBaseLifeBackend } from "./life";
 import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
+import { createMirror, type PBMirror } from "../wrapped-pb/mirror";
 
 export function createPocketBaseBackends(getPb: () => PocketBase) {
   const wpb: WrappedPocketBase = wrapPocketBase(getPb);
+  const mirror: PBMirror = createMirror(getPb, wpb);
   return {
-    shopping: new PocketBaseShoppingBackend(getPb, wpb) as import("../interfaces/shopping").ShoppingBackend,
+    shopping: new PocketBaseShoppingBackend(getPb, wpb, mirror) as import("../interfaces/shopping").ShoppingBackend,
     user: new PocketBaseUserBackend(getPb, wpb) as import("../interfaces/user").UserBackend,
     recipes: new PocketBaseRecipesBackend(getPb, wpb) as import("../interfaces/recipes").RecipesBackend,
     upkeep: new PocketBaseUpkeepBackend(getPb, wpb) as import("../interfaces/upkeep").UpkeepBackend,
@@ -26,6 +28,8 @@ export function createPocketBaseBackends(getPb: () => PocketBase) {
     life: new PocketBaseLifeBackend(getPb, wpb) as import("../interfaces/life").LifeBackend,
     /** Shared optimistic-write wrapper. Call replayPending() once after auth ready. */
     wpb,
+    /** Shared realtime mirror. Domain backends adopt it incrementally. */
+    mirror,
   };
 }
 

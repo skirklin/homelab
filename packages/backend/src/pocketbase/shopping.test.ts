@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type PocketBase from "pocketbase";
 import type { RecordModel, UnsubscribeFunc } from "pocketbase";
 import { wrapPocketBase } from "../wrapped-pb";
+import { createMirror } from "../wrapped-pb/mirror";
 import { clearAllMutations } from "../wrapped-pb/persistence";
 import { PocketBaseShoppingBackend } from "./shopping";
 
@@ -175,7 +176,8 @@ describe("PocketBaseShoppingBackend.subscribeToList cancellation", () => {
     stub.hold();
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb, mirror);
 
     const unsubscribe = shopping.subscribeToList("L1", {
       onList: () => {},
@@ -226,7 +228,8 @@ describe("PocketBaseShoppingBackend.subscribeToList cancellation", () => {
     stub.hold();
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb, mirror);
 
     const unsubscribe = shopping.subscribeToList("L1", {
       onList: () => {},
@@ -274,7 +277,8 @@ describe("PocketBaseShoppingBackend.subscribeToList cancellation", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb, mirror);
 
     const unsubscribe = shopping.subscribeToList("L1", {
       onList: () => {},
