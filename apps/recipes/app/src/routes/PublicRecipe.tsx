@@ -8,8 +8,8 @@ import styled from "styled-components";
 import { Spin, Button, Alert } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
 import { useRecipesBackend } from "@kirkl/shared";
-import { boxFromBackend, recipeFromBackend } from "../adapters";
-import type { RecipeEntry, BoxEntry } from "../storage";
+import { boxFromBackendPlain, recipeFromBackendPlain } from "../adapters";
+import { getRecipeData, getBoxName, type PlainRecipe, type PlainBox } from "../storage";
 import { decodeStr } from "../converters";
 import { PageContainer, AppHeader } from "@kirkl/shared";
 
@@ -107,8 +107,8 @@ export function PublicRecipe() {
   const { boxId, recipeId } = useParams<{ boxId: string; recipeId: string }>();
   const navigate = useNavigate();
   const recipesBackend = useRecipesBackend();
-  const [recipe, setRecipe] = useState<RecipeEntry | null>(null);
-  const [box, setBox] = useState<BoxEntry | null>(null);
+  const [recipe, setRecipe] = useState<PlainRecipe | null>(null);
+  const [box, setBox] = useState<PlainBox | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -129,7 +129,7 @@ export function PublicRecipe() {
           return;
         }
 
-        const boxData = boxFromBackend(result.box);
+        const boxData = boxFromBackendPlain(result.box);
         setBox(boxData);
 
         // Find the specific recipe in the box
@@ -140,7 +140,7 @@ export function PublicRecipe() {
           return;
         }
 
-        const recipeData = recipeFromBackend(backendRecipe);
+        const recipeData = recipeFromBackendPlain(backendRecipe);
 
         // Check if recipe is accessible (public box or public recipe)
         if (boxData.visibility !== "public" && recipeData.visibility !== "public") {
@@ -196,7 +196,7 @@ export function PublicRecipe() {
     );
   }
 
-  const data = recipe.getData();
+  const data = getRecipeData(recipe);
   const name = decodeStr(data.name as string) || "Untitled Recipe";
   const description = decodeStr(data.description as string);
 
@@ -265,7 +265,7 @@ export function PublicRecipe() {
   return (
     <>
       <AppHeader
-        title={box?.getName() || "Recipe"}
+        title={(box ? getBoxName(box) : undefined) || "Recipe"}
         onBack={() => navigate("/")}
       />
       <PageContainer>

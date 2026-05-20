@@ -6,7 +6,7 @@
  */
 import type { Recipe as BackendRecipe, RecipeBox, RecipeData } from "@homelab/backend";
 import type { RecipesUser } from "@homelab/backend";
-import { BoxEntry, RecipeEntry, UserEntry } from "./storage";
+import { BoxEntry, RecipeEntry, UserEntry, type PlainRecipe, type PlainBox, type PlainUser, getRecipeData } from "./storage";
 import { type CookingLogEntry, EnrichmentStatus, Visibility } from "./types";
 import { CURRENT_UPDATE_VERSION } from "./Modals/WhatsNew";
 
@@ -67,8 +67,59 @@ export function userFromBackend(u: RecipesUser): UserEntry {
 }
 
 /** Extract plain RecipeData from a RecipeEntry for backend calls */
-export function recipeDataToBackend(r: RecipeEntry): RecipeData {
-  return r.getData() as unknown as RecipeData;
+export function recipeDataToBackend(r: RecipeEntry | PlainRecipe): RecipeData {
+  if (r instanceof RecipeEntry) {
+    return r.getData() as unknown as RecipeData;
+  }
+  return getRecipeData(r) as unknown as RecipeData;
+}
+
+// ─── Plain-object adapters (parallel to the class-based ones above) ────────
+// Used while the recipes app migrates off RecipeEntry/BoxEntry/UserEntry.
+// Returns plain objects matching PlainRecipe/PlainBox/PlainUser.
+
+export function recipeFromBackendPlain(r: BackendRecipe): PlainRecipe {
+  return {
+    id: r.id,
+    data: r.data as import("schema-dts").Recipe,
+    owners: r.owners || [],
+    editing: false,
+    creator: r.creator || r.owners?.[0] || "",
+    visibility: (r.visibility as Visibility) || Visibility.private,
+    created: new Date(r.created),
+    updated: new Date(r.updated),
+    lastUpdatedBy: r.lastUpdatedBy || "",
+    pendingChanges: r.pendingChanges || undefined,
+    stepIngredients: r.stepIngredients || undefined,
+    enrichmentStatus: (r.enrichmentStatus as EnrichmentStatus) || EnrichmentStatus.needed,
+  };
+}
+
+export function boxFromBackendPlain(b: RecipeBox): PlainBox {
+  return {
+    id: b.id,
+    data: { name: b.name || "", description: b.description || undefined },
+    owners: b.owners || [],
+    subscribers: b.subscribers || [],
+    creator: b.creator || b.owners?.[0] || "",
+    visibility: (b.visibility as Visibility) || Visibility.private,
+    recipes: new Map(),
+    created: new Date(b.created),
+    updated: new Date(b.updated),
+    lastUpdatedBy: b.lastUpdatedBy || "",
+  };
+}
+
+export function userFromBackendPlain(u: RecipesUser): PlainUser {
+  return {
+    id: u.id,
+    name: "",
+    visibility: Visibility.private,
+    boxes: u.boxes,
+    lastSeen: new Date(),
+    newSeen: new Date(),
+    lastSeenUpdateVersion: u.lastSeenUpdateVersion || CURRENT_UPDATE_VERSION,
+  };
 }
 
 /** Convert app PendingChanges to backend PendingChanges (data is required in backend type) */
