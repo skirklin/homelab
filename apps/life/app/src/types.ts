@@ -2,6 +2,10 @@ import type { Event, EventStore } from "@kirkl/shared";
 export type { Event, EventStore };
 export { eventFromStore, eventToStore } from "@kirkl/shared";
 
+// Re-exported from @homelab/backend so the api scheduler, the PB mapper, and
+// the life UI all share one source of truth for the sample-prompt schedule.
+export type { SampleSchedule, LifeLog } from "@homelab/backend";
+
 export type WidgetType = "counter" | "counter-group" | "number" | "rating" | "text" | "combo" | "checkbox";
 
 export interface BaseWidget {
@@ -116,17 +120,6 @@ export function getSource(entry: Event): "manual" | "sample" {
 
 export function getNotes(entry: Event): string | undefined {
   return entry.data.notes as string | undefined;
-}
-
-export interface SampleSchedule {
-  date: string; // YYYY-MM-DD
-  times: number[]; // Unix timestamps
-  sentTimes: number[]; // Times that have been sent
-}
-
-export interface LifeLog {
-  id: string;
-  sampleSchedule?: SampleSchedule;
 }
 
 export function getWidget(manifest: LifeManifest, id: string): Widget | undefined {

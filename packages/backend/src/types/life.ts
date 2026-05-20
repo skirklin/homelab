@@ -1,8 +1,22 @@
 /** Life tracker domain types */
 
+/**
+ * Per-day schedule of random-sample prompt times for a life log.
+ * Stored on `life_logs.sample_schedule` (JSON), regenerated daily by the
+ * api-service cron in the user's configured timezone.
+ */
+export interface SampleSchedule {
+  /** YYYY-MM-DD in the schedule's timezone */
+  date: string;
+  /** Unix-ms timestamps for each scheduled prompt */
+  times: number[];
+  /** Subset of `times` that have already triggered a push */
+  sentTimes: number[];
+}
+
 export interface LifeLog {
   id: string;
-  sampleSchedule: unknown;
+  sampleSchedule: SampleSchedule | null;
   created: string;
   updated: string;
 }

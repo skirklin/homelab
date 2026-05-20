@@ -3,6 +3,7 @@
  * Generates random sample times daily and sends push notifications when they're due.
  */
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
+import type { SampleSchedule } from "@homelab/backend";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
@@ -23,12 +24,6 @@ interface RandomSamplesConfig {
   activeHours: [number, number];
   timezone?: string;
   questions: SampleQuestion[];
-}
-
-interface SampleSchedule {
-  date: string;
-  times: number[];
-  sentTimes: number[];
 }
 
 function getDateStringInTimezone(date: Date, timezone: string): string {
