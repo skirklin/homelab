@@ -10,7 +10,6 @@ import type {
   Activity,
   Itinerary,
   ItineraryDay,
-  TripProposal,
   DayEntry,
 } from "../types/travel";
 
@@ -39,15 +38,6 @@ export interface TravelBackend {
   updateItinerary(itineraryId: string, updates: Partial<Omit<Itinerary, "id" | "log" | "trip" | "created" | "updated">>): Promise<void>;
   setItineraryDays(itineraryId: string, days: ItineraryDay[]): Promise<void>;
   deleteItinerary(itineraryId: string): Promise<void>;
-
-  // --- Trip Proposals ---
-
-  addProposal(tripId: string, proposal: Omit<TripProposal, "id" | "trip" | "state" | "resolvedAt" | "created" | "updated">): Promise<string>;
-  updateProposal(proposalId: string, updates: Partial<Omit<TripProposal, "id" | "trip" | "created" | "updated">>): Promise<void>;
-  resolveProposal(proposalId: string): Promise<void>;
-  deleteProposal(proposalId: string): Promise<void>;
-  getProposal(proposalId: string): Promise<TripProposal | null>;
-  listProposals(tripId: string, state?: "open" | "resolved"): Promise<TripProposal[]>;
 
   // --- Day journal entries ---
 

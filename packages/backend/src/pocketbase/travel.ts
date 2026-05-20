@@ -10,7 +10,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, TripProposal, DayEntry } from "../types/travel";
+import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, DayEntry } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
@@ -65,25 +65,6 @@ function dayEntryFromRecord(r: RecordModel): DayEntry {
     text: r.text || "",
     highlight: r.highlight || undefined,
     mood: typeof r.mood === "number" ? r.mood : undefined,
-    created: r.created,
-    updated: r.updated,
-  };
-}
-
-function proposalFromRecord(r: RecordModel): TripProposal {
-  return {
-    id: r.id,
-    trip: r.trip,
-    question: r.question || "",
-    reasoning: r.reasoning || "",
-    candidateIds: Array.isArray(r.candidate_ids) ? r.candidate_ids : [],
-    claudePicks: Array.isArray(r.claude_picks) ? r.claude_picks : [],
-    feedback: (r.feedback || {}) as TripProposal["feedback"],
-    overallFeedback: r.overall_feedback || "",
-    state: (r.state as "open" | "resolved") || "open",
-    resolvedAt: r.resolved_at || undefined,
-    userRespondedAt: r.user_responded_at || undefined,
-    claudeLastSeenAt: r.claude_last_seen_at || undefined,
     created: r.created,
     updated: r.updated,
   };
@@ -204,69 +185,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
 
   async deleteItinerary(itineraryId: string): Promise<void> {
     await this.wpb.collection("travel_itineraries").delete(itineraryId);
-  }
-
-  // --- Trip Proposals ---
-
-  async addProposal(tripId: string, proposal: Omit<TripProposal, "id" | "trip" | "state" | "resolvedAt" | "created" | "updated">): Promise<string> {
-    const id = newId();
-    await this.wpb.collection("trip_proposals").create({
-      id,
-      trip: tripId,
-      question: proposal.question || "",
-      reasoning: proposal.reasoning || "",
-      candidate_ids: proposal.candidateIds || [],
-      claude_picks: proposal.claudePicks || [],
-      feedback: proposal.feedback || {},
-      overall_feedback: proposal.overallFeedback || "",
-      state: "open",
-    });
-    return id;
-  }
-
-  async updateProposal(proposalId: string, updates: Partial<Omit<TripProposal, "id" | "trip" | "created" | "updated">>): Promise<void> {
-    const d: Record<string, unknown> = {};
-    if (updates.question !== undefined) d.question = updates.question;
-    if (updates.reasoning !== undefined) d.reasoning = updates.reasoning;
-    if (updates.candidateIds !== undefined) d.candidate_ids = updates.candidateIds;
-    if (updates.claudePicks !== undefined) d.claude_picks = updates.claudePicks;
-    if (updates.feedback !== undefined) d.feedback = updates.feedback;
-    if (updates.overallFeedback !== undefined) d.overall_feedback = updates.overallFeedback;
-    if (updates.state !== undefined) d.state = updates.state;
-    if (updates.resolvedAt !== undefined) d.resolved_at = updates.resolvedAt;
-    if (updates.userRespondedAt !== undefined) d.user_responded_at = updates.userRespondedAt;
-    if (updates.claudeLastSeenAt !== undefined) d.claude_last_seen_at = updates.claudeLastSeenAt;
-    await this.wpb.collection("trip_proposals").update(proposalId, d);
-  }
-
-  async resolveProposal(proposalId: string): Promise<void> {
-    await this.wpb.collection("trip_proposals").update(proposalId, {
-      state: "resolved",
-      resolved_at: new Date().toISOString(),
-    });
-  }
-
-  async deleteProposal(proposalId: string): Promise<void> {
-    await this.wpb.collection("trip_proposals").delete(proposalId);
-  }
-
-  async getProposal(proposalId: string): Promise<TripProposal | null> {
-    try {
-      const r = await this.pb().collection("trip_proposals").getOne(proposalId);
-      return proposalFromRecord(r);
-    } catch {
-      return null;
-    }
-  }
-
-  async listProposals(tripId: string, state?: "open" | "resolved"): Promise<TripProposal[]> {
-    let filter = this.pb().filter("trip = {:tripId}", { tripId });
-    if (state) filter += ` && state = "${state}"`;
-    const records = await this.pb().collection("trip_proposals").getFullList({
-      filter,
-      sort: "-created",
-    });
-    return records.map(proposalFromRecord);
   }
 
   // --- Day entries ---
