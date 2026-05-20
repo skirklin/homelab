@@ -1,194 +1,41 @@
 /**
- * Read endpoints for MCP/curl access to app data.
+ * Read/write endpoints for MCP/curl access to app data.
  * The frontend doesn't use these — it talks to PocketBase directly.
+ *
+ * Authorization helpers live in `../lib/authz` (see docs/auth-policy.md
+ * §5.1). They are re-exported below for backward-compat with anything
+ * that may have been importing them from this module.
  */
 import { Hono } from "hono";
-import type { Context } from "hono";
-import type PocketBase from "pocketbase";
-import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
+import type { AppEnv } from "../index";
+import {
+  userOwnsTravelLog,
+  userOwnsRecipeBox,
+  userCanWriteRecipe,
+  userOwnsTaskList,
+  userOwnsLifeLog,
+  userOwnsShoppingList,
+  userCanReadRecipe,
+  requireRole,
+  stripParentPointers,
+} from "../lib/authz";
 
 export const dataRoutes = new Hono<AppEnv>();
 
-/**
- * Verify `userId` is in `travel_logs[logId].owners`. Returns `false` if the
- * log doesn't exist OR the user isn't an owner. Use to gate every write
- * route on the travel surface — admin-PB bypasses collection rules, so
- * route-level enforcement is the only thing standing between an `hlk_`
- * token holder and cross-tenant writes into another user's log.
- */
-async function userOwnsTravelLog(
-  pb: PocketBase,
-  logId: string,
-  userId: string,
-): Promise<boolean> {
-  if (!logId || !userId) return false;
-  try {
-    const log = await pb.collection("travel_logs").getOne(logId);
-    const owners = log.owners;
-    return Array.isArray(owners) && owners.includes(userId);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Verify `userId` is in `recipe_boxes[boxId].owners`. Returns `false` if the
- * box doesn't exist OR the user isn't an owner. Mirrors `userOwnsTravelLog`
- * — admin-PB bypasses PB's tightened (0024) rules so the route layer is the
- * only ownership gate for `hlk_`/`mcpat_` callers writing into another
- * user's box, recipes, or cooking log.
- */
-async function userOwnsRecipeBox(
-  pb: PocketBase,
-  boxId: string,
-  userId: string,
-): Promise<boolean> {
-  if (!boxId || !userId) return false;
-  try {
-    const box = await pb.collection("recipe_boxes").getOne(boxId);
-    const owners = box.owners;
-    return Array.isArray(owners) && owners.includes(userId);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Authorization for recipe-level writes: caller must be in `recipe.owners`
- * OR in `box.owners`. Mirrors the PB updateRule/deleteRule for `recipes`
- * from 0001 (unchanged by 0024). Returns `null` (recipe is missing) so the
- * caller can reply 404 separately from 403.
- */
-async function userCanWriteRecipe(
-  pb: PocketBase,
-  recipeId: string,
-  userId: string,
-): Promise<"ok" | "denied" | "notfound"> {
-  if (!recipeId || !userId) return "denied";
-  let recipe;
-  try {
-    recipe = await pb.collection("recipes").getOne(recipeId);
-  } catch {
-    return "notfound";
-  }
-  const recipeOwners = recipe.owners;
-  if (Array.isArray(recipeOwners) && recipeOwners.includes(userId)) return "ok";
-  if (await userOwnsRecipeBox(pb, recipe.box as string, userId)) return "ok";
-  return "denied";
-}
-
-/**
- * Verify `userId` is in `task_lists[listId].owners`. Returns `false` if the
- * list doesn't exist OR the user isn't an owner. Mirrors `userOwnsTravelLog`
- * — admin-PB bypasses PB collection rules, so the route layer is the only
- * ownership gate for `hlk_`/`mcpat_` callers writing into another user's
- * task list or its child tasks/events.
- */
-async function userOwnsTaskList(
-  pb: PocketBase,
-  listId: string,
-  userId: string,
-): Promise<boolean> {
-  if (!listId || !userId) return false;
-  try {
-    const list = await pb.collection("task_lists").getOne(listId);
-    const owners = list.owners;
-    return Array.isArray(owners) && owners.includes(userId);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Verify `userId` is in `life_logs[logId].owners`. Returns `false` if the
- * log doesn't exist OR the user isn't an owner. Mirrors `userOwnsTravelLog`
- * — admin-PB bypasses PB collection rules, so the route layer is the only
- * ownership gate for `hlk_`/`mcpat_` callers writing into another user's
- * life log or its child entries.
- */
-async function userOwnsLifeLog(
-  pb: PocketBase,
-  logId: string,
-  userId: string,
-): Promise<boolean> {
-  if (!logId || !userId) return false;
-  try {
-    const log = await pb.collection("life_logs").getOne(logId);
-    const owners = log.owners;
-    return Array.isArray(owners) && owners.includes(userId);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Verify `userId` is in `shopping_lists[listId].owners`. Returns `false` if
- * the list doesn't exist OR the user isn't an owner. Mirrors the PB rule
- * `@request.auth.id ?= owners.id` on shopping_lists (migration 0001).
- *
- * `hlk_`/`mcpat_` tokens authenticate against a superuser PB client
- * (services/api/src/middleware/auth.ts); that client ignores PB collection
- * rules entirely, so the route layer is the only ownership gate on this
- * surface for write paths that hit shopping_lists or list-scoped child
- * collections (shopping_items, shopping_history, shopping_trips).
- */
-async function userOwnsShoppingList(
-  pb: PocketBase,
-  listId: string,
-  userId: string,
-): Promise<boolean> {
-  if (!listId || !userId) return false;
-  try {
-    const list = await pb.collection("shopping_lists").getOne(listId);
-    const owners = list.owners;
-    return Array.isArray(owners) && owners.includes(userId);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Authorization for recipe READS via the data routes (token surface only).
- * Mirrors PB's tightened visRule (migration 0024):
- *   - visibility === "public" → always allowed
- *   - caller in recipe.owners → allowed
- *   - caller in box.owners → allowed
- *   - (authed AND visibility !== "private") → allowed
- * The `userId` will always be set on this surface (authMiddleware refuses
- * unauthed requests), so the authed-and-not-private clause effectively
- * means "unlisted is visible to anyone with a token." This matches the
- * PB rule. Returns `"notfound"` when the recipe doesn't exist so the
- * caller can hide the 404 vs 403 distinction.
- */
-async function userCanReadRecipe(
-  pb: PocketBase,
-  recipeId: string,
-  userId: string,
-): Promise<{ status: "ok"; recipe: Record<string, unknown> } | { status: "denied" | "notfound" }> {
-  if (!recipeId) return { status: "notfound" };
-  let recipe;
-  try {
-    recipe = await pb.collection("recipes").getOne(recipeId);
-  } catch {
-    return { status: "notfound" };
-  }
-  const visibility = recipe.visibility;
-  if (visibility === "public") {
-    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
-  }
-  const recipeOwners = recipe.owners;
-  if (userId && Array.isArray(recipeOwners) && recipeOwners.includes(userId)) {
-    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
-  }
-  if (userId && await userOwnsRecipeBox(pb, recipe.box as string, userId)) {
-    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
-  }
-  if (userId && visibility !== "private") {
-    return { status: "ok", recipe: recipe as unknown as Record<string, unknown> };
-  }
-  return { status: "denied" };
-}
+// Re-export the authz helpers for backward compatibility. New code should
+// import directly from `../lib/authz` instead.
+export {
+  userOwnsTravelLog,
+  userOwnsRecipeBox,
+  userCanWriteRecipe,
+  userOwnsTaskList,
+  userOwnsLifeLog,
+  userOwnsShoppingList,
+  userCanReadRecipe,
+  requireRole,
+  stripParentPointers,
+};
 
 // List recipe boxes for the authenticated user
 dataRoutes.get("/boxes", handler(async (c) => {
@@ -1209,7 +1056,7 @@ dataRoutes.patch("/travel/trips/:id", handler(async (c) => {
   }
   // Reparenting (changing `log`) is not a legitimate operation through this
   // endpoint — strip it so an attacker can't move the trip into their own log.
-  const { log: _droppedLog, ...safeBody } = body;
+  const safeBody = stripParentPointers(body, "log");
   const record = await pb.collection("travel_trips").update(id, safeBody);
   return c.json({
     id: record.id,
@@ -1386,7 +1233,7 @@ dataRoutes.patch("/travel/itineraries/:id", handler(async (c) => {
     return c.json({ error: "access denied" }, 403);
   }
   // Same reparent-block as trips/activities.
-  const { log: _droppedLog, ...safeBody } = body;
+  const safeBody = stripParentPointers(body, "log");
   const record = await pb.collection("travel_itineraries").update(id, safeBody);
   return c.json({
     id: record.id,
@@ -2620,30 +2467,18 @@ dataRoutes.delete("/travel/proposals/:id", handler(async (c) => {
 // Monitor — deployment history
 // =============================================================================
 
-/**
- * Authorize an infra-only write. `deployments` and `pod_events` are global
- * infrastructure collections — not tenant-scoped — so the per-user ownership
- * pattern doesn't apply. Instead we require the caller's `api_tokens` record
- * to carry `roles: ["infra"]`. User-minted Settings tokens, OAuth `mcpat_`
- * tokens, and PB user JWTs never carry this role and are rejected with 403.
- *
- * Legitimate callers today: deploy.sh (records deployments via the EXIT
- * trap) and event-watcher (records pod_events). Both are wired with the
- * single `HOMELAB_API_TOKEN` from the k8s `api-secrets` Secret; that token's
- * PB record needs `roles: ["infra"]` set once after migration 0025 ships
- * (otherwise both writers will 403).
- */
-function requireInfraRole(c: Context<AppEnv>) {
-  const roles = c.get("tokenRoles") ?? [];
-  if (!roles.includes("infra")) {
-    return c.json({ error: "Forbidden: infra role required" }, 403);
-  }
-  return null;
-}
+// `requireRole(c, "infra")` (imported from ../lib/authz) gates the
+// global-infra writes below. Legitimate callers today: deploy.sh (records
+// deployments via the EXIT trap) and event-watcher (records pod_events).
+// Both are wired with the single `HOMELAB_API_TOKEN` from the k8s
+// `api-secrets` Secret; that token's PB record needs `roles: ["infra"]`
+// set once after migration 0025 ships (otherwise both writers will 403).
+// User-minted Settings tokens, OAuth `mcpat_` tokens, and PB user JWTs
+// never carry this role and are rejected with 403.
 
 // Record a deployment. Called by infra/deploy.sh after each run.
 dataRoutes.post("/deployments", handler(async (c) => {
-  const denied = requireInfraRole(c);
+  const denied = requireRole(c, "infra");
   if (denied) return denied;
   const pb = c.get("pb");
   const body = await c.req.json<{
@@ -2706,7 +2541,7 @@ dataRoutes.get("/deployments", handler(async (c) => {
 
 // Delete a deployment record (for cleaning up stray entries).
 dataRoutes.delete("/deployments/:id", handler(async (c) => {
-  const denied = requireInfraRole(c);
+  const denied = requireRole(c, "infra");
   if (denied) return denied;
   const pb = c.get("pb");
   const id = c.req.param("id")!;
@@ -2722,7 +2557,7 @@ dataRoutes.delete("/deployments/:id", handler(async (c) => {
 // Same uid is sent multiple times as count grows; we update last_seen + count
 // rather than inserting duplicates.
 dataRoutes.post("/pod_events", handler(async (c) => {
-  const denied = requireInfraRole(c);
+  const denied = requireRole(c, "infra");
   if (denied) return denied;
   const pb = c.get("pb");
   const body = await c.req.json<{
@@ -2813,7 +2648,7 @@ dataRoutes.get("/pod_events", handler(async (c) => {
 
 // Delete pod_events older than `before` (ISO timestamp). Used for retention.
 dataRoutes.delete("/pod_events", handler(async (c) => {
-  const denied = requireInfraRole(c);
+  const denied = requireRole(c, "infra");
   if (denied) return denied;
   const pb = c.get("pb");
   const before = c.req.query("before");

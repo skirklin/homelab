@@ -183,15 +183,15 @@ Future tokens may carry multiple roles. The single CI deployer token, for exampl
 
 ## 5. Code organization
 
-### 5.1 Where helpers live (current and proposed)
+### 5.1 Where helpers live
 
-**Today**: all the `userOwns*` / `userCan*` helpers live at the top of `services/api/src/routes/data.ts` (lines 20-191), and `requireInfraRole` lives near the bottom (line 2636). The file is 2829 lines. Helpers are file-private (no `export`).
+**Done (migration 0026 / this commit)**: the `userOwns*` / `userCan*` / `requireRole` / `stripParentPointers` helpers live in `services/api/src/lib/authz.ts` and are re-exported from `services/api/src/routes/data.ts` for backward compat. The canonical PB rule strings live in `infra/pocketbase/pb_migrations/lib/authz-rules.js` as `PB_RULES`, also re-exported from `lib/authz.ts`. Reasons:
 
-**Proposed**: extract into `services/api/src/lib/authz.ts` and re-export from `data.ts`. Reasons:
-
-1. Other route files will need them. Today only `routes/data.ts` uses them, but the moment a new route module (e.g. a future `routes/recipes.ts` enrichment endpoint, the existing `routes/sharing.ts` for invite creation) needs to gate by ownership, the helper either gets duplicated or imported via a tortured relative path. Extract preemptively.
-2. The auth helpers are the single most security-sensitive code in the repo. They should live in a file whose name advertises that fact — anyone grepping for "authz" finds them. `data.ts` advertises "data routes," which is half-true.
+1. Other route files will need them. Today only `routes/data.ts` uses them, but the moment a new route module (e.g. a future `routes/recipes.ts` enrichment endpoint, the existing `routes/sharing.ts` for invite creation) needs to gate by ownership, the helper either gets duplicated or imported via a tortured relative path. Extracted preemptively.
+2. The auth helpers are the single most security-sensitive code in the repo. They live in a file whose name advertises that fact — anyone grepping for "authz" finds them.
 3. Tests can target `lib/authz.ts` directly with unit tests in addition to the e2e cross-tenant tests, without spinning up the full Hono app.
+
+**Caveat on cross-runtime source-of-truth**: PB v0.25's migration JSVM uses `goja_nodejs/require` with no filesystem resolver — migrations cannot `require()` arbitrary files. So `lib/authz-rules.js` is the truth for the TS side, but the migration `0026_authz_strings_source_of_truth.js` inlines a copy of the same rules. The property test `src/e2e/authz-mirror.test.ts` enforces equality between (a) the inlined rules, (b) the live PB schema, and (c) the TS helpers' decisions. Drift cannot survive CI.
 
 ```
 services/api/src/
@@ -466,17 +466,17 @@ const filter = status
 
 This is **safe** as written — `pb.filter` parameter-binds, it's not string-interpolated. The same pattern is used throughout `data.ts` and was the subject of `filter-injection.test.ts`. Not a finding, but kept here so future readers don't re-flag it.
 
-### 8.6 note: `requireInfraRole` should be generalized to `requireRole`
+### 8.6 done: `requireInfraRole` generalized to `requireRole`
 
-Already discussed in §5.2. Bottom line: one literal in one call site is cheaper than two functions. Convert when the second role appears, no later.
+Per §5.2, generalized to `requireRole(c, "infra")` in `lib/authz.ts`. All four call sites in `data.ts` updated.
 
-### 8.7 note: `stripParentPointers` helper not yet extracted
+### 8.7 done: `stripParentPointers` helper extracted
 
-Today each PATCH route inlines its own field-deletion. The pattern is consistent enough that the extraction will be mechanical when it happens. Not blocking.
+Per §5.4, lives in `lib/authz.ts`. The two PATCH routes that had inlined `_droppedLog` destructuring (`/data/travel/trips/:id`, `/data/travel/itineraries/:id`) now call it.
 
-### 8.8 note: `userCanReadRecipe` does not currently live in a shared module
+### 8.8 note: `userCanReadRecipe` lives in `lib/authz.ts` but `RECIPE_VIS_RULE` is the truth for both sides
 
-Discussed §5.5. The PB rule and the TS function need to be kept in sync by hand. They are in sync today (verified against migration 0024). Whenever the recipe vis logic changes, both must move together — a single shared module would make that constraint visible.
+Discussed §5.5. The TS function in `lib/authz.ts` and the PB rule string in `lib/authz-rules.js` (`RECIPE_VIS_RULE`) encode the same predicate. They are exercised together by the property test `src/e2e/authz-mirror.test.ts`. A change to recipe vis logic now requires updating both, and the test catches drift.
 
 ### 8.9 note: `/oauth/revoke` is unauthenticated
 
