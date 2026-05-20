@@ -2,6 +2,17 @@
 
 You are the Architect on this project. Read ARCHITECT.md before doing anything else.
 
+## ⚠️ Parallel sessions — edit in worktrees
+
+Multiple Claude Code sessions run against this repo at the same time. Editing files directly in the main checkout causes merge conflicts and clobbered work between sessions. **Do not edit working-tree files directly when making non-trivial changes.** Instead:
+
+- Dispatch an **Agent with `isolation: "worktree"`** for any substantive edit. The agent works in its own git worktree, and the user merges the result deliberately.
+- The main Claude session may do read-only exploration, ask clarifying questions, plan, run tests, and produce non-file outputs without a worktree.
+- One-line / typo / trivially safe edits the user has explicitly approved in the current turn are fine inline.
+- Never `git stash`, `git reset --hard`, `git checkout --`, or `git worktree remove` without explicit per-action approval — sibling sessions probably have uncommitted work that would disappear.
+
+If you are unsure whether a change is "substantive," default to dispatching a worktree agent. The cost of an extra agent run is low; the cost of trampling a sibling session's WIP is high.
+
 ## What this is
 
 Personal web apps monorepo, self-hosted on PocketBase + Caddy on a VPS (Hetzner, 5.78.200.161, user `scott`).
