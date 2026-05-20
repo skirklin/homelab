@@ -7,7 +7,6 @@ Built with React, Firebase, and Firestore.
 ## Features
 
 - **Recipe Import**: Import recipes from any URL with structured recipe data (schema.org/Recipe)
-- **AI Recipe Generation**: Generate new recipes from a text description using Claude
 - **Automatic Enrichment**: AI-powered descriptions and tags for imported recipes
 - **Cooking Log**: Track when you make recipes with optional notes
 - **Recipe Boxes**: Organize recipes into collections
@@ -25,7 +24,6 @@ Built with React, Firebase, and Firestore.
 
 ### Cloud Functions (`/functions` at repo root)
 - `getRecipes`: Fetches and parses recipe data from URLs
-- `generateRecipe`: Generates recipes using Claude AI
 - `addRecipeOwner` / `addBoxOwner`: Manages recipe/box sharing
 - `enrichRecipes`: Scheduled function for automatic AI enrichment
 

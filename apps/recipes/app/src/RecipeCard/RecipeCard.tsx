@@ -9,7 +9,6 @@ import RecipeDescription from './RecipeDescription';
 import PendingChangesReview from './PendingChangesReview';
 import Notes from './Notes'
 import CookingLog from './CookingLog'
-import ModifyRecipeModal from '../Modals/ModifyRecipeModal';
 import DeleteButton from '../Buttons/DeleteRecipe'
 import DownloadButton from '../Buttons/DownloadRecipe';
 import VisibilityControl from '../Buttons/Visibility';
@@ -20,7 +19,7 @@ import { Divider, RecipeActionGroup } from '../StyledComponents';
 import ByLine from './Byline';
 import Tags from './Tags';
 import { Button, Dropdown, Menu, Input, Modal } from 'antd';
-import { MoreOutlined, CheckCircleOutlined, RobotOutlined, EditOutlined } from '@ant-design/icons';
+import { MoreOutlined, CheckCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import { useContext, useState } from 'react';
 import { Context } from '../context';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
@@ -172,7 +171,6 @@ function ActionMenu(props: RecipeCardProps) {
   const { state } = useContext(Context);
   const recipesBackend = useRecipesBackend();
   const [enriching, setEnriching] = useState(false);
-  const [modifyModalVisible, setModifyModalVisible] = useState(false);
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) {
     return null
@@ -203,9 +201,6 @@ function ActionMenu(props: RecipeCardProps) {
       <Menu.Item key="enrich" icon={<RobotOutlined />} onClick={handleEnrich} disabled={enriching}>
         {enriching ? 'Enriching...' : 'AI Enrich'}
       </Menu.Item>
-      <Menu.Item key="modify" icon={<EditOutlined style={{ color: '#9370db' }} />} onClick={() => setModifyModalVisible(true)}>
-        AI Modify
-      </Menu.Item>
       <Menu.Divider />
       <DeleteButton {...props} element="menu" />
       <DownloadButton {...props} element="menu" />
@@ -226,12 +221,6 @@ function ActionMenu(props: RecipeCardProps) {
           <MoreOutlined style={{ fontSize: "24px" }} />
         </MenuButton>
       </Dropdown>
-      <ModifyRecipeModal
-        boxId={boxId}
-        recipeId={recipeId}
-        isVisible={modifyModalVisible}
-        setIsVisible={setModifyModalVisible}
-      />
     </RecipeActionGroup>
   )
 }
