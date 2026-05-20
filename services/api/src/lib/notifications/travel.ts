@@ -19,6 +19,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
+import { safeTz } from "./tz";
 
 const TRAVEL_ORIGINS = [`https://travel.${DOMAIN}`, `https://${DOMAIN}`];
 
@@ -58,17 +59,6 @@ function ymdInTz(d: Date, tz: string): string {
 
 function hourInTzOf(d: Date, tz: string): number {
   return parseInt(formatInTimeZone(d, tz, "H"), 10);
-}
-
-function safeTz(tz: unknown): string {
-  if (typeof tz !== "string" || !tz) return FALLBACK_TZ;
-  try {
-    // Validate by attempting a format — invalid tz throws.
-    formatInTimeZone(new Date(), tz, "yyyy");
-    return tz;
-  } catch {
-    return FALLBACK_TZ;
-  }
 }
 
 /**
@@ -116,7 +106,7 @@ async function findActiveContexts(pb: PocketBase, now: Date): Promise<ActiveCont
     const hit = userTzCache.get(userId);
     if (hit) return hit;
     const u = await pb.collection("users").getOne(userId, { $autoCancel: false });
-    const tz = safeTz(u.timezone);
+    const tz = safeTz(u.timezone, FALLBACK_TZ);
     userTzCache.set(userId, tz);
     return tz;
   }

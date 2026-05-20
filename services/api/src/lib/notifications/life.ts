@@ -7,9 +7,16 @@ import type { SampleSchedule } from "@homelab/backend";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
+import { safeTz } from "./tz";
 
 // Life only lives as a module under <domain>/life — no subdomain.
 const LIFE_ORIGINS = [`https://${DOMAIN}`];
+
+// Used when a log's RandomSamplesConfig is missing/garbage timezone. Differs
+// from travel's "America/Denver" default — for random sampling we want
+// deterministic times for users without a tz preference, not the
+// system-owner's clock.
+const FALLBACK_TZ = "UTC";
 
 interface SampleQuestion {
   id: string;
@@ -90,7 +97,7 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
     if (!Array.isArray(config.activeHours) || config.activeHours.length !== 2 ||
         config.activeHours[0] >= config.activeHours[1]) continue;
 
-    const timezone = config.timezone || "UTC";
+    const timezone = safeTz(config.timezone, FALLBACK_TZ);
     const today = getDateStringInTimezone(nowDate, timezone);
 
     let schedule = logDoc.sample_schedule as SampleSchedule | null;
