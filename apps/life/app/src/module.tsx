@@ -43,6 +43,8 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
       const log: LifeLog = {
         id: backendLog.id,
         sampleSchedule: backendLog.sampleSchedule as LifeLog["sampleSchedule"],
+        morningReminderTime: backendLog.morningReminderTime ?? null,
+        eveningReminderTime: backendLog.eveningReminderTime ?? null,
       };
       dispatch({ type: "SET_LOG", log });
     };

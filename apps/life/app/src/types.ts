@@ -127,6 +127,10 @@ export interface SampleSchedule {
 export interface LifeLog {
   id: string;
   sampleSchedule?: SampleSchedule;
+  /** "HH:MM" 24h. Null/undefined = no morning reminder set. */
+  morningReminderTime?: string | null;
+  /** "HH:MM" 24h. Null/undefined = no evening reminder set. */
+  eveningReminderTime?: string | null;
 }
 
 export function getWidget(manifest: LifeManifest, id: string): Widget | undefined {
