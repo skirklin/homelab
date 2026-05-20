@@ -1,5 +1,5 @@
 /**
- * AI/Anthropic utilities — ported from services/functions/src/utils/ai.ts
+ * AI/Anthropic utilities.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import type PocketBase from "pocketbase";
