@@ -245,6 +245,19 @@ export function TripDetail() {
     || itineraries.find((i) => i.isActive)
     || itineraries[0];
 
+  // Activity IDs referenced anywhere on the active itinerary (slots + flights
+  // + lodging). Used by ActivityList to badge scheduled items.
+  const scheduledIds = (() => {
+    const ids = new Set<string>();
+    if (!activeItin) return ids;
+    for (const d of activeItin.days) {
+      if (d.lodgingActivityId) ids.add(d.lodgingActivityId);
+      for (const s of d.slots) ids.add(s.activityId);
+      for (const f of d.flights || []) ids.add(f.activityId);
+    }
+    return ids;
+  })();
+
   return (
     <WideContainer>
       <BackLink onClick={() => navigate("..")}>
@@ -339,6 +352,7 @@ export function TripDetail() {
               <ActivityList
                 activities={activities}
                 showReflection={tripHasStarted}
+                scheduledIds={scheduledIds}
               />
             ),
           },

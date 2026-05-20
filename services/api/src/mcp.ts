@@ -900,7 +900,7 @@ const activityFields = {
   name: z.string().optional().describe("Activity name"),
   category: z.string().optional().describe("Activity category (Flight, Transportation, Accommodation, Hiking, etc.)"),
   location: z.string().optional().describe("Location (e.g. 'Phoenix, AZ')"),
-  description: z.string().optional().describe("Brief qualifying note. NOT costs/durations/logistics."),
+  description: z.string().optional().describe("Brief qualifying note. NOT costs/durations/logistics, and NOT booking instructions — put advance-booking needs in `booking_reqs` so the readiness dashboard can track them."),
   cost_notes: z.string().optional().describe("Cost notes (e.g. '$25/person')"),
   duration_estimate: z.string().optional().describe("Duration (e.g. '2h', 'half day')"),
   walk_miles: z.number().optional().describe("Distance walked or hiked in miles (e.g. trail length)"),
@@ -908,10 +908,14 @@ const activityFields = {
   difficulty: z.enum(["easy", "moderate", "hard", "strenuous", ""]).optional().describe("Hike difficulty rating"),
   setting: z.enum(["outdoor", "indoor", "either"]).optional(),
   trip_id: z.string().optional().describe("Trip this activity belongs to"),
-  confirmation_code: z.string().optional().describe("Booking confirmation code"),
+  confirmation_code: z.string().optional().describe("Booking confirmation code — set this once the booking is done; the readiness dashboard treats it as the 'confirmed' signal."),
   details: z.string().optional().describe("Freeform details text"),
   flight_info: flightInfoSchema.optional(),
-  booking_reqs: z.record(z.unknown()).optional().describe("Booking requirements (JSON)"),
+  booking_reqs: z.array(z.object({
+    action: z.string().describe("What to do, e.g. 'Book tickets at museofridakahlo.org.mx'"),
+    daysBefore: z.number().describe("How many days before trip start the action is due"),
+    done: z.boolean().optional().describe("Mark true once the action is complete"),
+  })).optional().describe("Structured advance-booking requirements. The readiness dashboard surfaces these by deadline; populate this (not the description) whenever an activity requires reservations/permits/timed entry/etc."),
   verdict: z.enum(["loved", "liked", "meh", "skip", ""]).optional().describe("Post-experience reflection"),
   personal_notes: z.string().optional().describe("Private notes about this activity (post-trip journal)"),
   experienced_at: z.string().optional().describe("ISO date when the activity was actually done"),
@@ -1320,7 +1324,7 @@ const taskFrequencySchema = z.object({
 
 server.tool(
   "add_task",
-  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), tags, and notification subscribers.",
+  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), tags, and notification subscribers. For trip-prep tasks, prefer add_trip_task — it handles the Trips/<destination>/ container nesting that this tool doesn't.",
   {
     list: z.string().describe("The task list ID"),
     name: z.string().describe("Task name"),
@@ -1336,6 +1340,121 @@ server.tool(
     const data = await api("/tasks", {
       method: "POST",
       body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+// Canonical way to add a trip-prep task. Hides the Trips/<destination>/ container
+// orchestration that TripChecklist.tsx does in the UI (ensureTripContainer + handleAdd).
+// All defaults — task_type "one_shot", frequency { value: 1, unit: "days" }, completed
+// false, snoozed null, collapsed false — match exactly what the UI writes so MCP-created
+// trip tasks are indistinguishable from UI-created ones. Edit the resulting task later
+// with tag_task / update_task.
+server.tool(
+  "add_trip_task",
+  "Add a trip-prep task to a trip's checklist. This is the canonical way to add tasks tied to a travel trip: it automatically nests the new task under Trips/<destination>/ (creating those container tasks on demand) and tags it with travel:<trip_id>, matching the Travel app's checklist UI. Use this instead of raw add_task whenever the task is associated with a trip — raw add_task does not create the container hierarchy and would leave the task as a top-level outliner item. Edit the resulting task later with tag_task / update_task.",
+  {
+    trip_id: z.string().describe("The travel trip record ID this task belongs to"),
+    name: z.string().describe("Task name (the user-facing prep item, e.g. 'Pack adapters')"),
+    description: z.string().optional().describe("Optional task description"),
+    list_id: z.string().optional().describe("Task list to add into. Defaults to the caller's first household task list (matching the Travel UI's behavior)."),
+    position: z.number().optional().describe("Sort position among siblings under the per-trip container. Defaults to max-sibling-position + 1."),
+    notify_users: z.array(z.string()).optional().describe("User IDs to notify on completion/due"),
+  },
+  async ({ trip_id, name, description, list_id, position, notify_users }) => {
+    // 1. Resolve list. If none given, fall back to the first task list owned by the
+    // caller. The Travel UI uses user.household_slugs (first entry), but no API
+    // endpoint exposes that map — /data/task-lists already filters to lists the
+    // caller owns, so the first entry is a faithful server-side equivalent in
+    // practice (household_slugs is the only namespace that registers task lists).
+    let resolvedListId = list_id;
+    if (!resolvedListId) {
+      const lists = (await api("/task-lists")) as Array<{ id: string; name: string }>;
+      if (!lists.length) {
+        throw new Error("No task list found for caller. Create one in the Tasks app first, or pass list_id explicitly.");
+      }
+      resolvedListId = lists[0].id;
+    }
+
+    // 2. Fetch the trip for its destination (used as per-trip container name).
+    const trip = (await api(`/travel/trips/${trip_id}`)) as { id: string; destination: string };
+    const tripContainerTag = `container:trip:${trip_id}`;
+    const tripTag = `travel:${trip_id}`;
+
+    type TaskLite = { id: string; name: string; parent_id: string; position: number; tags?: string[] };
+
+    // Helper: list tasks under a parent (used to find containers + compute next position).
+    const listChildren = async (parentId: string): Promise<TaskLite[]> => {
+      const params = new URLSearchParams({ list: resolvedListId!, parent_id: parentId });
+      return (await api(`/tasks?${params}`)) as TaskLite[];
+    };
+    // Race-tolerant find: pick the first match by id sort so concurrent creates
+    // resolve to a single canonical container instead of one caller seeing the
+    // other's duplicate. (UI has the same race; not solving it server-side, just
+    // making the resolution deterministic.)
+    const pickFirst = (matches: TaskLite[]): TaskLite | undefined =>
+      matches.sort((a, b) => a.id.localeCompare(b.id))[0];
+
+    const maxPos = (siblings: TaskLite[]): number =>
+      siblings.reduce((m, t) => Math.max(m, t.position), 0);
+
+    // 3. Find or create the "Trips" root container (parent_id = "", tag container:trips).
+    const rootTasks = await listChildren("");
+    let tripsRoot = pickFirst(rootTasks.filter((t) => t.tags?.includes("container:trips")));
+    if (!tripsRoot) {
+      const created = (await api("/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          list: resolvedListId,
+          parent_id: "",
+          position: maxPos(rootTasks) + 1,
+          name: "Trips",
+          description: "",
+          task_type: "one_shot",
+          frequency: { value: 1, unit: "days" },
+          tags: ["container:trips"],
+        }),
+      })) as { id: string; name: string };
+      tripsRoot = { id: created.id, name: created.name, parent_id: "", position: maxPos(rootTasks) + 1, tags: ["container:trips"] };
+    }
+
+    // 4. Find or create the per-trip container (parent = tripsRoot, tag container:trip:<id>).
+    const tripsChildren = await listChildren(tripsRoot.id);
+    let tripContainer = pickFirst(tripsChildren.filter((t) => t.tags?.includes(tripContainerTag)));
+    if (!tripContainer) {
+      const created = (await api("/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          list: resolvedListId,
+          parent_id: tripsRoot.id,
+          position: maxPos(tripsChildren) + 1,
+          name: trip.destination,
+          description: "",
+          task_type: "one_shot",
+          frequency: { value: 1, unit: "days" },
+          tags: [tripContainerTag],
+        }),
+      })) as { id: string; name: string };
+      tripContainer = { id: created.id, name: created.name, parent_id: tripsRoot.id, position: maxPos(tripsChildren) + 1, tags: [tripContainerTag] };
+    }
+
+    // 5. Create the actual leaf task, tagged travel:<trip_id>.
+    const leafSiblings = await listChildren(tripContainer.id);
+    const leafPosition = position ?? maxPos(leafSiblings) + 1;
+    const data = await api("/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        list: resolvedListId,
+        parent_id: tripContainer.id,
+        position: leafPosition,
+        name,
+        description: description ?? "",
+        task_type: "one_shot",
+        frequency: { value: 1, unit: "days" },
+        tags: [tripTag],
+        notify_users,
+      }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },

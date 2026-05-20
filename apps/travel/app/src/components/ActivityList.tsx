@@ -119,9 +119,12 @@ interface ActivityListProps {
   activities: Activity[];
   /** When true, render the post-experience verdict row on each activity. */
   showReflection?: boolean;
+  /** Set of activity IDs that appear on the active itinerary. Used to badge
+   *  scheduled items so the user can tell them apart from saved options. */
+  scheduledIds?: Set<string>;
 }
 
-export function ActivityList({ activities, showReflection = false }: ActivityListProps) {
+export function ActivityList({ activities, showReflection = false, scheduledIds }: ActivityListProps) {
   const navigate = useNavigate();
   const travel = useTravelBackend();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -196,6 +199,11 @@ export function ActivityList({ activities, showReflection = false }: ActivityLis
                   {a.category && (
                     <Tag color={CATEGORY_COLORS[a.category] || "default"} style={{ fontSize: 10, lineHeight: "16px", margin: 0 }}>
                       {a.category}
+                    </Tag>
+                  )}
+                  {scheduledIds && scheduledIds.has(a.id) && (
+                    <Tag color="processing" style={{ fontSize: 10, lineHeight: "16px", margin: 0 }} title="On the active itinerary">
+                      📅 scheduled
                     </Tag>
                   )}
                   {isFlight && fi?.departsAt && (

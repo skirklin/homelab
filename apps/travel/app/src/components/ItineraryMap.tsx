@@ -369,13 +369,24 @@ function FitBoundsToDay({ visibleDays, selectedDay }: {
   useEffect(() => {
     if (!map || visibleDays.length === 0) return;
 
+    // Bounds fit to activity coords only — flight endpoints are excluded so a
+    // far-away departure (e.g. home airport, or a companion's separate
+    // arrival/departure city) doesn't stretch the view across a continent.
+    // The flight line still renders as a dashed segment; it just doesn't
+    // drive the camera. Fallback to flight endpoints only when a focused day
+    // has no activity coords at all (e.g. a fly-only day with no arrival
+    // activities) — there, framing the journey is the right behavior.
     const points: Array<{ lat: number; lng: number }> = [];
     for (const d of visibleDays) {
       for (const a of d.activities) {
         if (a.lat != null && a.lng != null) points.push({ lat: a.lat, lng: a.lng });
       }
-      for (const seg of d.flightSegments) {
-        points.push(seg.from, seg.to);
+    }
+    if (points.length === 0) {
+      for (const d of visibleDays) {
+        for (const seg of d.flightSegments) {
+          points.push(seg.from, seg.to);
+        }
       }
     }
     if (points.length === 0) return;

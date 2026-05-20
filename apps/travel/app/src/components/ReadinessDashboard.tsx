@@ -77,6 +77,19 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
       ? Math.ceil((trip.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
       : null;
 
+    // Set of activity IDs that are actually scheduled on the active itinerary
+    // (slots + flights + lodging). Used to scope warnings so we don't flag
+    // unscheduled "option" activities the user saved but never committed to.
+    const activeItin = itineraries.find((i) => i.isActive) || itineraries[0];
+    const scheduledIds = new Set<string>();
+    if (activeItin) {
+      for (const d of activeItin.days) {
+        if (d.lodgingActivityId) scheduledIds.add(d.lodgingActivityId);
+        for (const s of d.slots) scheduledIds.add(s.activityId);
+        for (const f of d.flights || []) scheduledIds.add(f.activityId);
+      }
+    }
+
     // Flights
     const flights = activities.filter((a) => a.category === "Flight");
     if (flights.length > 0) {
@@ -107,10 +120,19 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
     }
 
     // Lodging
-    const activeItin = itineraries.find((i) => i.isActive) || itineraries[0];
     if (activeItin) {
       const daysWithLodging = activeItin.days.filter((d) => d.lodgingActivityId);
-      const daysWithout = activeItin.days.filter((d) => !d.lodgingActivityId && d.slots.length > 0);
+      // Suppress lodging-needed warnings for departure days: if any flight on
+      // this day flies to the user's home (`toIsHome`), you check out that
+      // morning and the trip's last "night" is on the plane home.
+      const isDepartureDay = (d: Itinerary["days"][number]) =>
+        (d.flights || []).some((f) => {
+          const a = activities.find((x) => x.id === f.activityId);
+          return a?.flightInfo?.toIsHome === true;
+        });
+      const daysWithout = activeItin.days.filter(
+        (d) => !d.lodgingActivityId && d.slots.length > 0 && !isDepartureDay(d),
+      );
       if (daysWithLodging.length > 0) {
         const lodgingNames = [...new Set(
           daysWithLodging
@@ -147,20 +169,11 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
       });
     }
 
-    // Activities needing booking
-    const needsBooking = activities.filter((a) =>
-      a.description.toLowerCase().includes("book") ||
-      a.description.toLowerCase().includes("reserve") ||
-      a.description.toLowerCase().includes("waitlist")
-    );
-    for (const a of needsBooking) {
-      result.push({
-        status: a.confirmationCode ? "done" : "warning",
-        category: "Bookings",
-        title: a.name,
-        detail: a.confirmationCode ? `Confirmed: ${a.confirmationCode}` : a.description,
-      });
-    }
+    // Booking needs are now exclusively driven by structured `bookingReqs` on
+    // each activity (see the "Booking Tasks" block below). The old
+    // description-keyword heuristic that lived here was removed because it
+    // double-counted with bookingReqs and produced false positives whenever an
+    // activity's description happened to contain "book"/"reserve"/"waitlist".
 
     // Itinerary completeness
     if (activeItin) {
@@ -201,6 +214,8 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
     if (daysUntil != null && daysUntil > 0) {
       const allReqs: { activity: Activity; req: BookingRequirement }[] = [];
       for (const a of activities) {
+        // Same scoping as Bookings — don't remind about reqs on unscheduled options.
+        if (!scheduledIds.has(a.id)) continue;
         for (const req of a.bookingReqs || []) {
           allReqs.push({ activity: a, req });
         }

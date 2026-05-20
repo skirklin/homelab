@@ -48,7 +48,7 @@ Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.
 
 The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the user asks about their recipes, shopping lists, travel plans, tasks, or life data.
 
-### Available tools (64 total):
+### Available tools (65 total):
 
 **Recipes (read):**
 - `list_boxes` — list all recipe boxes
@@ -92,6 +92,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 
 **Tasks (write):**
 - `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot, notify_users)
+- `add_trip_task` — add a trip-prep task; auto-nests under `Trips/<destination>/` and tags `travel:<tripId>` (use this for trip prep instead of raw `add_task`)
 - `update_task` — update fields (typed schema; pass only the fields to change). To reparent or move between lists use `move_task` instead.
 - `move_task` — reparent and/or move between lists; recomputes descendant `path` atomically
 - `tag_task` — add and/or remove tags atomically (avoids the get-then-set race of `update_task(tags=...)`)
@@ -99,7 +100,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `complete_task` — toggle completion (recurring sets last_completed; one_shot toggles completed)
 - `snooze_task` / `unsnooze_task` — snooze until a date or clear snooze
 
-Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner.
+Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner. The easy path is `add_trip_task` — it resolves the destination, finds-or-creates the containers, and tags the leaf. Using raw `add_task` is the hard path: you have to find the "Trips" root + per-trip container yourself, or the task ends up at the top level.
 
 **Travel (read):**
 - `list_travel_trips` — all trips across logs
@@ -160,7 +161,7 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 | `name` | Short name. No "Overnight in" prefix for lodging. | `Desert Botanical Garden`, `SpringHill Suites Phoenix` |
 | `category` | Type of activity | `Transportation`, `Accommodation`, `Hiking`, `Adventure`, `Food & Dining`, `Sightseeing`, `Shopping`, `Nightlife`, `Culture`, `Relaxation`, `Other` |
 | `location` | City or area | `Phoenix, AZ`, `Taos, NM` |
-| `description` | Brief qualifying note only — what makes this specific. NOT costs, durations, or logistics. | `Ancient Puebloan great houses, 650+ rooms. Unpaved road in.` |
+| `description` | Brief qualifying note only — what makes this specific. NOT costs, durations, logistics, or booking instructions. | `Ancient Puebloan great houses, 650+ rooms. Unpaved road in.` |
 | `duration_estimate` | How long the activity takes (not including travel to/from) | `2h`, `half day`, `1.5h` |
 | `walk_miles` | Distance on foot — for hikes, the trail length | `3.2`, `5.5` |
 | `elevation_gain_feet` | Elevation gain (Hiking only) | `1400`, `3200` |
@@ -168,8 +169,10 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 | `cost_notes` | Price info | `$25/person`, `Free`, `$15 parking` |
 | `setting` | Indoor/outdoor/both | `outdoor`, `indoor`, `both` |
 | `trip_id` | Which trip this belongs to | (record ID) |
+| `booking_reqs` | Structured advance-booking todos. The readiness dashboard surfaces these by deadline; **use this, not the description**, for any activity requiring reservations/permits/timed entry. Array of `{ action, daysBefore, done? }`. | `[{ "action": "Book Frida Kahlo tickets at museofridakahlo.org.mx", "daysBefore": 30 }]` |
+| `confirmation_code` | Set once a booking is complete — the readiness dashboard treats it as the "confirmed" signal. | `ABC123` |
 
-**Do not** put durations in the description. **Do not** prefix lodging names with "Overnight in". Use the actual hotel/property name.
+**Do not** put durations or booking instructions in the description. **Do not** prefix lodging names with "Overnight in". Use the actual hotel/property name.
 
 ### MCP auth
 Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.

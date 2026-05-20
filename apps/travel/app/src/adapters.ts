@@ -5,6 +5,29 @@
  * while the app uses richer types (Date objects, typed enums, etc.).
  */
 
+/**
+ * Decode HTML entities in user-visible text. AI-generated activities have
+ * occasionally landed with HTML-escaped strings (e.g. "Food &amp; Drink"),
+ * either because the model thought it was writing into an HTML context or
+ * because a source page already had the escapes. Decoding once at the adapter
+ * means every consumer (lists, maps, exports) sees clean text without each
+ * site having to remember to decode.
+ *
+ * Named entities cover the common cases; the numeric branch handles &#39;,
+ * &#8211; etc. Anything unknown is left as-is.
+ */
+function decodeEntities(s: string): string {
+  if (!s || s.indexOf("&") === -1) return s;
+  const named: Record<string, string> = {
+    amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ",
+  };
+  return s.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z]+));/g, (m, dec, hex, name) => {
+    if (dec) return String.fromCodePoint(parseInt(dec, 10));
+    if (hex) return String.fromCodePoint(parseInt(hex, 16));
+    return named[name] ?? m;
+  });
+}
+
 import type {
   Trip as BackendTrip,
   Activity as BackendActivity,
@@ -31,12 +54,12 @@ import type {
 export function tripFromBackend(bt: BackendTrip): Trip {
   return {
     id: bt.id,
-    destination: bt.destination || bt.name || "",
+    destination: decodeEntities(bt.destination || bt.name || ""),
     status: (bt.status as TripStatus) || "Idea",
-    region: bt.region || "",
+    region: decodeEntities(bt.region || ""),
     startDate: bt.startDate ? new Date(bt.startDate) : null,
     endDate: bt.endDate ? new Date(bt.endDate) : null,
-    notes: bt.notes || "",
+    notes: decodeEntities(bt.notes || ""),
     sourceRefs: bt.sourceRefs || "",
     flaggedForReview: bt.flagged || false,
     reviewComment: bt.flagComment || "",
@@ -48,20 +71,20 @@ export function tripFromBackend(bt: BackendTrip): Trip {
 export function activityFromBackend(ba: BackendActivity): Activity {
   return {
     id: ba.id,
-    name: ba.name || "",
-    category: (ba.category as ActivityCategory) || "Other",
-    location: ba.location || "",
+    name: decodeEntities(ba.name || ""),
+    category: (decodeEntities(ba.category || "") as ActivityCategory) || "Other",
+    location: decodeEntities(ba.location || ""),
     placeId: ba.placeId || "",
     lat: ba.lat ?? null,
     lng: ba.lng ?? null,
-    description: ba.description || "",
-    costNotes: ba.costNotes || "",
+    description: decodeEntities(ba.description || ""),
+    costNotes: decodeEntities(ba.costNotes || ""),
     durationEstimate: ba.durationEstimate || "",
     walkMiles: ba.walkMiles ?? null,
     elevationGainFeet: ba.elevationGainFeet ?? null,
     difficulty: (ba.difficulty as Activity["difficulty"]) || "",
     confirmationCode: ba.confirmationCode || "",
-    details: ba.details || "",
+    details: decodeEntities(ba.details || ""),
     setting: (ba.setting as Activity["setting"]) || "",
     bookingReqs: (ba.bookingReqs as Activity["bookingReqs"]) || [],
     rating: ba.rating ?? null,
@@ -69,7 +92,7 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     photoRef: ba.photoRef || "",
     flightInfo: ba.flightInfo,
     verdict: (ba.verdict as ActivityVerdict | undefined) || undefined,
-    personalNotes: ba.personalNotes || undefined,
+    personalNotes: ba.personalNotes ? decodeEntities(ba.personalNotes) : undefined,
     experiencedAt: ba.experiencedAt ? new Date(ba.experiencedAt) : undefined,
     tripId: ba.trip || "",
     created: new Date(ba.created),
