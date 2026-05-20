@@ -3,7 +3,7 @@ import { AutoComplete, Button, Input } from "antd";
 import type { BaseSelectRef } from "rc-select";
 import { PlusOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth } from "@kirkl/shared";
+import { useAuth, useFeedback } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend } from "@kirkl/shared";
 import { getItemsFromState } from "../selectors";
@@ -30,6 +30,7 @@ const NoteWrapper = styled.div`
 export function AddItem() {
   const { user } = useAuth();
   const { state } = useShoppingContext();
+  const { message } = useFeedback();
   const shopping = useShoppingBackend();
   const [ingredient, setIngredient] = useState("");
   const [note, setNote] = useState("");
@@ -86,7 +87,7 @@ export function AddItem() {
     );
 
     if (duplicate) {
-      alert(`"${duplicate.ingredient}" is already on the list`);
+      message.warning(`"${duplicate.ingredient}" is already on the list`);
       return;
     }
 
