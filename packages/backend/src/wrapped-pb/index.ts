@@ -207,6 +207,20 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   const origin = newId(); // session id for this wrapper instance
   /** Per-collection timestamp of the most recent SSE-delivered event. */
   const lastSseEventAt = new Map<string, number>();
+  /**
+   * Hook listeners for "any mutation was pushed/drained/applied". PBMirror
+   * uses this to re-emit slices when an optimistic write lands or is rolled
+   * back. Kept as a tiny event-emitter rather than widening the public
+   * WrappedPocketBase interface — the mirror lives in the same package and
+   * grabs the hook via the `__onMutation` side-channel on the returned
+   * object. Other code paths don't need this and won't see it.
+   */
+  const mutationListeners = new Set<(collection: string, recordId: string) => void>();
+  function notifyMutationListeners(collection: string, recordId: string): void {
+    for (const cb of mutationListeners) {
+      try { cb(collection, recordId); } catch (err) { console.error("[wpb] mutation listener threw", err); }
+    }
+  }
   /** Ring buffer of recent internal events for debugging. */
   const debugRing: WpbEvent[] = [];
   function recordEvent(ev: Omit<WpbEvent, "t">) {
@@ -396,6 +410,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       } else if (view) {
         notifySubscribers(collection, "update", view);
       }
+      notifyMutationListeners(collection, recordId);
       return result;
     } catch (err) {
       const status = (err as { status?: number })?.status;
@@ -451,6 +466,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       } else {
         notifySubscribers(collection, "update", view);
       }
+      notifyMutationListeners(collection, recordId);
       throw new WrappedPbError({ kind, collection, recordId }, err);
     }
   }
@@ -489,6 +505,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         queue.pushPending(name, id, mutation, mutationId);
         recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "create" } });
         notifySubscribers(name, "create", record);
+        notifyMutationListeners(name, id);
         void persistMutation({
           id: mutationId,
           collection: name,
@@ -513,6 +530,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const { after } = queue.pushPending(name, id, mutation, mutationId);
         recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "update" } });
         if (after) notifySubscribers(name, "update", after);
+        notifyMutationListeners(name, id);
         void persistMutation({
           id: mutationId,
           collection: name,
@@ -540,6 +558,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         const { before } = queue.pushPending(name, id, mutation, mutationId);
         recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "delete" } });
         notifySubscribers(name, "delete", before ?? { id });
+        notifyMutationListeners(name, id);
         void persistMutation({
           id: mutationId,
           collection: name,
@@ -905,6 +924,16 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       },
       clear: () => { debugRing.length = 0; },
     },
+    // Side-channels for PBMirror (same package). Not part of the public
+    // WrappedPocketBase contract — cast to access. See mirror.ts for why.
+    __queue: queue,
+    __onMutation: (cb: (collection: string, recordId: string) => void) => {
+      mutationListeners.add(cb);
+      return () => { mutationListeners.delete(cb); };
+    },
+  } as WrappedPocketBase & {
+    __queue: MutationQueue;
+    __onMutation: (cb: (collection: string, recordId: string) => void) => () => void;
   };
 }
 
