@@ -7,6 +7,7 @@ import { useAuth, getBackend, useFeedback } from "@kirkl/shared";
 
 const Container = styled.div`
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 `;

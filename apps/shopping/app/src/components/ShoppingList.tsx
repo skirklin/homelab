@@ -45,6 +45,7 @@ import type { ShoppingItem, CategoryId, CategoryDef } from "../types";
 
 const Container = styled.div`
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 `;
@@ -84,6 +85,7 @@ const DragItem = styled.div`
 
 const NotFoundContainer = styled.div`
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 `;

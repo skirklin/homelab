@@ -25,6 +25,7 @@ const AppWrapper = styled.div`
   max-width: 1200px;
   margin: 0 auto;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--color-bg);
   box-shadow: var(--shadow-md);
 
