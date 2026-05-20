@@ -19,7 +19,6 @@
     { "path": "../../../packages/ui" },
     { "path": "../../shopping/app/tsconfig.app.json" },
     { "path": "../../recipes/app/tsconfig.app.json" },
-    { "path": "../../life/app/tsconfig.app.json" },
     { "path": "../../upkeep/app/tsconfig.app.json" },
     { "path": "../../travel/app/tsconfig.app.json" }
   ]

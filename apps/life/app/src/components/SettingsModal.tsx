@@ -4,6 +4,7 @@ import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useDisplaySettings, type WidgetSize } from "../display-settings";
 import type { LifeLog } from "../types";
+import { MANIFEST } from "../manifest";
 import { useUserBackend } from "@kirkl/shared";
 
 const SettingRow = styled.div`
@@ -91,7 +92,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   const [loadingTokens, setLoadingTokens] = useState(false);
 
   const schedule = log?.sampleSchedule;
-  const config = log?.manifest?.randomSamples;
+  const config = MANIFEST.randomSamples;
   const now = Date.now();
 
   // Load FCM token count when debug is shown

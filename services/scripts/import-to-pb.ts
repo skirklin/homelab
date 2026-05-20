@@ -401,8 +401,6 @@ async function importLife() {
       const pbLogId = pbLog.id;
       getMap("life_logs").set(log._id, pbLogId);
 
-      if (log.manifest) await life.updateManifest(pbLogId, log.manifest);
-
       console.log(`  Log for ${uidMap.get(deRefs(log.owners)[0]) || "?"} -> ${pbLogId}`);
       logStats.created++;
 

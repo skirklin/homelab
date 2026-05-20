@@ -3,7 +3,6 @@ import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect } from "react";
 import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary } from "@kirkl/shared";
 import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
-import { LifeProvider, LifeRoutes } from "@kirkl/life";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
 import { UpkeepProvider, UpkeepRoutes, TasksRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
@@ -50,7 +49,6 @@ function AuthenticatedRoutes() {
         <Route path="/invite/:code" element={<InviteRedirect />} />
         <Route path="/timeline" element={<Timeline />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/life/*" element={<ErrorBoundary label="Life"><LifeRoutes embedded /></ErrorBoundary>} />
         <Route path="/shopping/*" element={<ErrorBoundary label="Shopping"><ShoppingRoutes embedded /></ErrorBoundary>} />
         <Route path="/recipes/*" element={<ErrorBoundary label="Recipes"><RecipesRoutes embedded /></ErrorBoundary>} />
         <Route path="/travel/*" element={<ErrorBoundary label="Travel"><TravelRoutes embedded /></ErrorBoundary>} />
@@ -107,19 +105,17 @@ export function App() {
         <AuthProvider>
           <BackendProvider>
             <ShoppingProvider>
-              <LifeProvider>
-                <RecipesProvider>
-                  <CookingModeProvider>
-                    <ShoppingIntegrationProvider>
-                      <TravelProvider>
-                        <UpkeepProvider>
-                          <AppRoutes />
-                        </UpkeepProvider>
-                      </TravelProvider>
-                    </ShoppingIntegrationProvider>
-                  </CookingModeProvider>
-                </RecipesProvider>
-              </LifeProvider>
+              <RecipesProvider>
+                <CookingModeProvider>
+                  <ShoppingIntegrationProvider>
+                    <TravelProvider>
+                      <UpkeepProvider>
+                        <AppRoutes />
+                      </UpkeepProvider>
+                    </TravelProvider>
+                  </ShoppingIntegrationProvider>
+                </CookingModeProvider>
+              </RecipesProvider>
             </ShoppingProvider>
           </BackendProvider>
         </AuthProvider>

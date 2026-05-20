@@ -15,6 +15,7 @@ import {
   Area,
 } from "recharts";
 import { useLifeContext } from "../life-context";
+import { MANIFEST } from "../manifest";
 import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType, ComboWidget as ComboWidgetType, SampleQuestion } from "../types";
 
 // Helper to extract numeric values from an entry based on widget type
@@ -632,8 +633,8 @@ export function Visualizations() {
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const widgets = state.log?.manifest.widgets || [];
-  const sampleQuestions = state.log?.manifest.randomSamples?.questions || [];
+  const widgets = MANIFEST.widgets;
+  const sampleQuestions = MANIFEST.randomSamples?.questions || [];
   const entries = Array.from(state.entries.values());
 
   // Build flat list of visualizable items

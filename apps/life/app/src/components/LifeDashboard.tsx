@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
-import { SettingOutlined, DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -29,11 +29,9 @@ const TitleWithStatus = styled.div`
 import { useLifeContext } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
 import { WidgetRenderer } from "./widgets";
-import { ManifestEditor } from "./ManifestEditor";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
-import type { LifeManifest } from "../types";
-import { DEFAULT_MANIFEST } from "../types";
+import { MANIFEST, SESSIONS } from "../manifest";
 import {
   initializeMessaging,
   requestNotificationPermission,
@@ -110,6 +108,39 @@ const SwipeContainer = styled.div`
   user-select: none;
 `;
 
+const SessionRow = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+`;
+
+const SessionCard = styled.button`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  min-height: 64px;
+  transition: background 0.15s, border-color 0.15s;
+
+  .anticon {
+    font-size: 20px;
+    color: var(--color-primary);
+  }
+
+  &:hover {
+    background: var(--color-bg-muted);
+    border-color: var(--color-primary);
+  }
+`;
+
 interface LifeDashboardProps {
   /** When true, hides sign-out (handled by parent shell) */
   embedded?: boolean;
@@ -118,11 +149,10 @@ interface LifeDashboardProps {
 export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const { message } = useFeedback();
   const { user } = useAuth();
-  const { state, dispatch } = useLifeContext();
+  const { state } = useLifeContext();
   const navigate = useNavigate();
   const life = useLifeBackend();
   const wpbDebug = useWpbDebug();
-  const [showManifestEditor, setShowManifestEditor] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -251,7 +281,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const logId = state.log?.id ?? null;
   useEntriesSubscription(logId);
 
-  const manifest = state.log?.manifest ?? DEFAULT_MANIFEST;
+  const manifest = MANIFEST;
   const allEntries = Array.from(state.entries.values());
 
   // Check notification status on mount
@@ -379,10 +409,6 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     URL.revokeObjectURL(url);
   };
 
-  const handleManifestUpdated = (updatedManifest: LifeManifest) => {
-    dispatch({ type: "UPDATE_MANIFEST", manifest: updatedManifest });
-  };
-
   const samplingEnabled = manifest.randomSamples?.enabled;
 
   const handleSignOut = () => {
@@ -449,21 +475,31 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       <AppHeader
         title={
           <TitleWithStatus>
-            Life Tracker
+            Life
             <SyncDot debug={wpbDebug} collections={LIFE_COLLECTIONS} />
           </TitleWithStatus>
         }
-        primaryAction={{
-          label: "Configure",
-          icon: <SettingOutlined />,
-          onClick: () => setShowManifestEditor(true),
-        }}
         menuItems={menuItems}
         desktopActions={desktopActions}
         mobileActions={mobileActions}
       />
 
       <PageContainer>
+        <Section>
+          <SectionTitle>Sessions</SectionTitle>
+          <SessionRow>
+            {SESSIONS.map((session) => (
+              <SessionCard
+                key={session.id}
+                onClick={() => navigate(session.id)}
+              >
+                {session.id === "morning" ? <SunOutlined /> : <MoonOutlined />}
+                <span>{session.title}</span>
+              </SessionCard>
+            ))}
+          </SessionRow>
+        </Section>
+
         <Section>
           <SectionTitle>Track</SectionTitle>
           <DateNav>
@@ -517,14 +553,6 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
           </SwipeContainer>
         </Section>
       </PageContainer>
-
-      <ManifestEditor
-        open={showManifestEditor}
-        onClose={() => setShowManifestEditor(false)}
-        manifest={manifest}
-        logId={state.log?.id}
-        onManifestUpdated={handleManifestUpdated}
-      />
 
       <SampleResponseModal
         open={showSampleModal}

@@ -3,7 +3,6 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Tooltip } from "antd";
 import {
-  ExperimentOutlined,
   ShoppingCartOutlined,
   CheckSquareOutlined,
   UnorderedListOutlined,
@@ -128,7 +127,7 @@ export function Shell() {
 
   // Save current path per module so we can restore it when switching back
   useEffect(() => {
-    const subApps = ["/life", "/shopping", "/recipes", "/travel", "/upkeep", "/tasks"];
+    const subApps = ["/shopping", "/recipes", "/travel", "/upkeep", "/tasks"];
     for (const app of subApps) {
       if (location.pathname.startsWith(app)) {
         localStorage.setItem(LAST_PATH_KEY, location.pathname);
@@ -155,13 +154,6 @@ export function Shell() {
     <Container>
       <Header>
         <Nav>
-          <NavButton
-            $active={isActive("/life")}
-            onClick={() => goTo("/life")}
-          >
-            <NavIcon $active={isActive("/life")}><ExperimentOutlined /></NavIcon>
-            <span className="nav-label">Life</span>
-          </NavButton>
           <NavButton
             $active={isActive("/recipes")}
             onClick={() => goTo("/recipes")}

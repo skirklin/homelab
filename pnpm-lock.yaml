@@ -17,9 +17,6 @@ importers:
       '@ant-design/icons':
         specifier: ^5.6.1
         version: 5.6.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@kirkl/life':
-        specifier: workspace:*
-        version: link:../../life/app
       '@kirkl/recipes':
         specifier: workspace:*
         version: link:../../recipes/app

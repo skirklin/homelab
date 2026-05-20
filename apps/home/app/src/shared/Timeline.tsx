@@ -4,7 +4,6 @@ import styled from "styled-components";
 import { Spin, Empty, Tag } from "antd";
 import {
   CheckCircleOutlined,
-  HeartOutlined,
   ExperimentOutlined,
   RightOutlined,
 } from "@ant-design/icons";
@@ -133,7 +132,7 @@ const DateHeader = styled.div`
 
 interface TimelineEvent {
   id: string;
-  type: "recipe" | "life" | "upkeep";
+  type: "recipe" | "upkeep";
   subjectId: string;
   subjectName?: string;
   timestamp: Date;
@@ -148,11 +147,6 @@ const eventConfig = {
     icon: <ExperimentOutlined />,
     color: "#f59e0b",
     label: "Cooked",
-  },
-  life: {
-    icon: <HeartOutlined />,
-    color: "#ec4899",
-    label: "Logged",
   },
   upkeep: {
     icon: <CheckCircleOutlined />,
@@ -256,13 +250,9 @@ export function Timeline() {
 
       try {
         // Phase 1: Fetch user profile and all event types in parallel
-        const [userRecord, recipeEvents, lifeEvents, taskEvents] = await Promise.all([
+        const [userRecord, recipeEvents, taskEvents] = await Promise.all([
           pb.collection("users").getOne(user.uid),
           pb.collection("recipe_events").getList(1, 50, {
-            filter: `created_by = "${user.uid}"`,
-            sort: "-timestamp",
-          }),
-          pb.collection("life_events").getList(1, 50, {
             filter: `created_by = "${user.uid}"`,
             sort: "-timestamp",
           }),
@@ -295,20 +285,6 @@ export function Timeline() {
             createdBy: record.created_by,
             data: record.data || {},
             containerId: record.box || record.container_id || "",
-          });
-        }
-
-        // Map life events
-        for (const record of lifeEvents.items) {
-          allEvents.push({
-            id: record.id,
-            type: "life",
-            subjectId: record.subject_id,
-            subjectName: record.subject_name || record.subject_id,
-            timestamp: new Date(record.timestamp),
-            createdBy: record.created_by,
-            data: record.data || {},
-            containerId: record.log || record.container_id || "",
           });
         }
 
@@ -479,8 +455,6 @@ export function Timeline() {
         const slug = upkeepSlugMap.get(event.containerId);
         return slug ? `/upkeep/${slug}` : null;
       }
-      case "life":
-        return `/life`;
       default:
         return null;
     }

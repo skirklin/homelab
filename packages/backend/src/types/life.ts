@@ -2,22 +2,9 @@
 
 export interface LifeLog {
   id: string;
-  manifest: LifeManifest;
   sampleSchedule: unknown;
   created: string;
   updated: string;
-}
-
-export interface LifeManifest {
-  widgets: WidgetConfig[];
-  [key: string]: unknown;
-}
-
-export interface WidgetConfig {
-  id: string;
-  type: string;
-  label: string;
-  [key: string]: unknown;
 }
 
 export interface LifeEntry {

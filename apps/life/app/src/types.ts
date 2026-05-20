@@ -2,10 +2,6 @@ import type { Event, EventStore } from "@kirkl/shared";
 export type { Event, EventStore };
 export { eventFromStore, eventToStore } from "@kirkl/shared";
 
-// ============================================
-// Widget Types
-// ============================================
-
 export type WidgetType = "counter" | "counter-group" | "number" | "rating" | "text" | "combo" | "checkbox";
 
 export interface BaseWidget {
@@ -73,10 +69,6 @@ export type Widget =
   | CheckboxWidget
   | ComboWidget;
 
-// ============================================
-// Random Sampling Configuration
-// ============================================
-
 export interface SampleQuestion {
   id: string;
   type: "rating" | "text" | "number";
@@ -94,10 +86,6 @@ export interface RandomSamplesConfig {
   questions: SampleQuestion[];
 }
 
-// ============================================
-// Entry Migrations
-// ============================================
-
 export interface EntryMigration {
   /** Old standalone widget id */
   from: string;
@@ -109,10 +97,6 @@ export interface EntryMigration {
   dataKey?: string;
 }
 
-// ============================================
-// Manifest
-// ============================================
-
 export interface LifeManifest {
   widgets: Widget[];
   randomSamples: RandomSamplesConfig;
@@ -120,52 +104,19 @@ export interface LifeManifest {
   migrations?: EntryMigration[];
 }
 
-export const DEFAULT_MANIFEST: LifeManifest = {
-  widgets: [
-    { id: "meds", type: "counter", label: "Meds" },
-    { id: "vitamins", type: "counter", label: "Vitamins" },
-    { id: "sleep", type: "combo", label: "Sleep", fields: [
-      { id: "hours", type: "number", label: "Hours", min: 0, max: 24 },
-      { id: "quality", type: "rating", label: "Quality", max: 5 },
-    ]},
-  ],
-  randomSamples: {
-    enabled: false,
-    timesPerDay: 3,
-    activeHours: [9, 22],
-    questions: [
-      { id: "mood", type: "rating", label: "How are you feeling?", max: 5 },
-    ],
-  },
-};
-
-// ============================================
-// Log Entry (now uses unified Event type)
-// ============================================
-
-// LogEntry is now an alias for Event with life-specific data
-// Event.data contains: { source?: "manual" | "sample", notes?: string, ...widgetData }
-// Event.subjectId is the widgetId
 export type LogEntry = Event;
 
-// Helper to get widgetId from an event
 export function getWidgetId(entry: Event): string {
   return entry.subjectId;
 }
 
-// Helper to get source from event data
 export function getSource(entry: Event): "manual" | "sample" {
   return (entry.data.source as "manual" | "sample") ?? "manual";
 }
 
-// Helper to get notes from event data
 export function getNotes(entry: Event): string | undefined {
   return entry.data.notes as string | undefined;
 }
-
-// ============================================
-// Life Log Container
-// ============================================
 
 export interface SampleSchedule {
   date: string; // YYYY-MM-DD
@@ -175,42 +126,8 @@ export interface SampleSchedule {
 
 export interface LifeLog {
   id: string;
-  name: string;
-  owners: string[];
-  manifest: LifeManifest;
   sampleSchedule?: SampleSchedule;
-  created: Date;
-  updated: Date;
 }
-
-export interface LifeLogStore {
-  name: string;
-  owners: string[];
-  manifest?: LifeManifest;
-  sampleSchedule?: SampleSchedule;
-  created: string;
-  updated: string;
-}
-
-// ============================================
-// Conversion Functions
-// ============================================
-
-export function logFromStore(id: string, data: LifeLogStore): LifeLog {
-  return {
-    id,
-    name: data.name,
-    owners: data.owners,
-    manifest: data.manifest ?? DEFAULT_MANIFEST,
-    sampleSchedule: data.sampleSchedule,
-    created: new Date(data.created),
-    updated: new Date(data.updated),
-  };
-}
-
-// ============================================
-// Utility Functions
-// ============================================
 
 export function getWidget(manifest: LifeManifest, id: string): Widget | undefined {
   return manifest.widgets.find(w => w.id === id);
