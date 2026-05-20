@@ -16,6 +16,8 @@ function logFromRecord(r: RecordModel): LifeLog {
   return {
     id: r.id,
     sampleSchedule: r.sample_schedule || null,
+    morningReminderTime: r.morning_reminder_time || null,
+    eveningReminderTime: r.evening_reminder_time || null,
     created: r.created,
     updated: r.updated,
   };
@@ -86,6 +88,21 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
   async clearSampleSchedule(logId: string): Promise<void> {
     await this.wpb.collection("life_logs").update(logId, { sample_schedule: null });
+  }
+
+  async updateReminderTimes(
+    logId: string,
+    times: { morning?: string | null; evening?: string | null },
+  ): Promise<void> {
+    const patch: Record<string, unknown> = {};
+    if (Object.prototype.hasOwnProperty.call(times, "morning")) {
+      patch.morning_reminder_time = times.morning ?? "";
+    }
+    if (Object.prototype.hasOwnProperty.call(times, "evening")) {
+      patch.evening_reminder_time = times.evening ?? "";
+    }
+    if (Object.keys(patch).length === 0) return;
+    await this.wpb.collection("life_logs").update(logId, patch);
   }
 
   async addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string> {
