@@ -3,7 +3,7 @@ import { useAuth } from '@kirkl/shared';
 import type { ActionType, AppState } from './types';
 import { initState, recipeBoxReducer } from './reducer';
 import { useRecipesBackend } from '@kirkl/shared';
-import { boxFromBackendPlain, recipeFromBackendPlain, userFromBackendPlain } from './adapters';
+import { boxFromBackend, recipeFromBackend, userFromBackend } from './adapters';
 
 export type ContextType = {
   state: AppState
@@ -35,7 +35,7 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
 
     const unsub = recipes.subscribeToUser(user.uid, {
       onUser: (u) => {
-        const userEntry = userFromBackendPlain(u);
+        const userEntry = userFromBackend(u);
         dispatch({ type: "ADD_USER", user: userEntry });
         if (initialLoad) {
           initialLoad = false;
@@ -43,10 +43,10 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
         }
       },
       onBox: (box, boxRecipes) => {
-        const boxEntry = boxFromBackendPlain(box);
+        const boxEntry = boxFromBackend(box);
         dispatch({ type: "ADD_BOX", boxId: box.id, payload: boxEntry });
         for (const r of boxRecipes) {
-          const recipeEntry = recipeFromBackendPlain(r);
+          const recipeEntry = recipeFromBackend(r);
           dispatch({ type: "ADD_RECIPE", recipeId: r.id, boxId: box.id, payload: recipeEntry });
         }
       },
@@ -54,7 +54,7 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "REMOVE_BOX", boxId });
       },
       onRecipeChanged: (boxId, r) => {
-        const recipeEntry = recipeFromBackendPlain(r);
+        const recipeEntry = recipeFromBackend(r);
         dispatch({ type: "ADD_RECIPE", recipeId: r.id, boxId, payload: recipeEntry });
       },
       onRecipeRemoved: (boxId, recipeId) => {

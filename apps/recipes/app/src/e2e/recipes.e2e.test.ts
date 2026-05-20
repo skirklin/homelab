@@ -17,7 +17,6 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseRecipesBackend } from "@homelab/backend/pocketbase";
-import { RecipeEntry } from "../storage";
 import { EnrichmentStatus, Visibility } from "../types";
 
 let ctx: TestContext;

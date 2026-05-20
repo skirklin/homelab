@@ -8,7 +8,7 @@ import styled from "styled-components";
 import { Spin, Button, Alert } from "antd";
 import { LoginOutlined } from "@ant-design/icons";
 import { useRecipesBackend } from "@kirkl/shared";
-import { boxFromBackendPlain, recipeFromBackendPlain } from "../adapters";
+import { boxFromBackend, recipeFromBackend } from "../adapters";
 import { getRecipeData, getBoxName, type PlainRecipe, type PlainBox } from "../storage";
 import { decodeStr } from "../converters";
 import { PageContainer, AppHeader } from "@kirkl/shared";
@@ -129,7 +129,7 @@ export function PublicRecipe() {
           return;
         }
 
-        const boxData = boxFromBackendPlain(result.box);
+        const boxData = boxFromBackend(result.box);
         setBox(boxData);
 
         // Find the specific recipe in the box
@@ -140,7 +140,7 @@ export function PublicRecipe() {
           return;
         }
 
-        const recipeData = recipeFromBackendPlain(backendRecipe);
+        const recipeData = recipeFromBackend(backendRecipe);
 
         // Check if recipe is accessible (public box or public recipe)
         if (boxData.visibility !== "public" && recipeData.visibility !== "public") {

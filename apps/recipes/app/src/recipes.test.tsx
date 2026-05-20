@@ -1,11 +1,11 @@
 /**
  * Tests using real recipe JSON files from the recipes/ directory.
- * These test that our converters and storage classes work correctly
+ * These test that our converters and storage helpers work correctly
  * with actual Schema.org Recipe data scraped from real websites.
  */
 import { Recipe } from 'schema-dts';
-import { RecipeEntry } from './storage';
-import { Visibility } from './types';
+import { type PlainRecipe, getRecipeName } from './storage';
+import { EnrichmentStatus, Visibility } from './types';
 import {
   instructionsToStr,
   ingredientsToStr,
@@ -13,6 +13,21 @@ import {
   parseCategories,
   decodeStr,
 } from './converters';
+
+function makeRecipe(data: Recipe): PlainRecipe {
+  return {
+    id: 'testId',
+    data,
+    owners: ['testUser'],
+    editing: false,
+    creator: 'testUser',
+    visibility: Visibility.private,
+    created: new Date(),
+    updated: new Date(),
+    lastUpdatedBy: 'testUser',
+    enrichmentStatus: EnrichmentStatus.needed,
+  };
+}
 
 // Import recipe JSON files
 import chickenLettuceWraps from '../../recipes/Chicken Lettuce Wraps.json';
@@ -36,18 +51,9 @@ const recipes = [
 ];
 
 describe('Real recipe data', () => {
-  describe('RecipeEntry creation', () => {
-    it.each(recipes)('can create RecipeEntry from $name', ({ data }) => {
-      const entry = new RecipeEntry(
-        data as Recipe,
-        ['testUser'],
-        Visibility.private,
-        'testUser',
-        'testId',
-        new Date(),
-        new Date(),
-        'testUser'
-      );
+  describe('PlainRecipe creation', () => {
+    it.each(recipes)('can create PlainRecipe from $name', ({ data }) => {
+      const entry = makeRecipe(data as Recipe);
 
       expect(entry).toBeDefined();
       // @type can be 'Recipe' or ['Recipe'] in valid JSON-LD
@@ -56,19 +62,10 @@ describe('Real recipe data', () => {
       expect(entry.data.name).toBeDefined();
     });
 
-    it.each(recipes)('$name has extractable name via getName()', ({ data }) => {
-      const entry = new RecipeEntry(
-        data as Recipe,
-        ['testUser'],
-        Visibility.private,
-        'testUser',
-        'testId',
-        new Date(),
-        new Date(),
-        'testUser'
-      );
+    it.each(recipes)('$name has extractable name via getRecipeName()', ({ data }) => {
+      const entry = makeRecipe(data as Recipe);
 
-      const name = entry.getName();
+      const name = getRecipeName(entry);
       expect(name).toBeDefined();
       expect(typeof name).toBe('string');
       expect(name!.length).toBeGreaterThan(0);
@@ -196,16 +193,7 @@ describe('Real recipe data', () => {
       const recipe = chickenLettuceWraps as unknown as Recipe;
       expect(recipe.nutrition).toBeDefined();
 
-      const entry = new RecipeEntry(
-        recipe,
-        ['testUser'],
-        Visibility.private,
-        'testUser',
-        'testId',
-        new Date(),
-        new Date(),
-        'testUser'
-      );
+      const entry = makeRecipe(recipe);
       expect(entry.data.nutrition).toBeDefined();
     });
 

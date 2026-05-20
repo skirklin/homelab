@@ -1,6 +1,6 @@
 import { Recipe } from 'schema-dts';
-import { BoxEntry, RecipeEntry, UserEntry } from './storage';
-import { AppState, Visibility } from './types';
+import { type PlainBox, type PlainRecipe, type PlainUser } from './storage';
+import { AppState, EnrichmentStatus, Visibility } from './types';
 import {
   strToIngredients,
   ingredientsToStr,
@@ -196,32 +196,41 @@ describe('decodeStr', () => {
 });
 
 describe('canUpdateRecipe', () => {
-  const createUser = (id: string): UserEntry =>
-    new UserEntry("Test User", Visibility.private, [], new Date(), new Date(), id);
+  const createUser = (id: string): PlainUser => ({
+    id,
+    name: "Test User",
+    visibility: Visibility.private,
+    boxes: [],
+    lastSeen: new Date(),
+    newSeen: new Date(),
+    lastSeenUpdateVersion: 0,
+  });
 
-  const createRecipe = (owners: string[]): RecipeEntry =>
-    new RecipeEntry(
-      { "@type": "Recipe", name: "Test" },
-      owners,
-      Visibility.private,
-      owners[0],
-      "recipe1",
-      new Date(),
-      new Date(),
-      owners[0]
-    );
+  const createRecipe = (owners: string[]): PlainRecipe => ({
+    id: "recipe1",
+    data: { "@type": "Recipe", name: "Test" },
+    owners,
+    editing: false,
+    creator: owners[0],
+    visibility: Visibility.private,
+    created: new Date(),
+    updated: new Date(),
+    lastUpdatedBy: owners[0],
+    enrichmentStatus: EnrichmentStatus.needed,
+  });
 
-  const createBox = (owners: string[]): BoxEntry =>
-    new BoxEntry(
-      { name: "Test Box" },
-      owners,
-      Visibility.private,
-      owners[0],
-      "box1",
-      new Date(),
-      new Date(),
-      owners[0]
-    );
+  const createBox = (owners: string[]): PlainBox => ({
+    id: "box1",
+    data: { name: "Test Box" },
+    owners,
+    subscribers: [],
+    creator: owners[0],
+    visibility: Visibility.private,
+    recipes: new Map(),
+    created: new Date(),
+    updated: new Date(),
+    lastUpdatedBy: owners[0],
+  });
 
   it('returns true when user owns recipe', () => {
     const user = createUser("user1");
@@ -265,27 +274,39 @@ describe('canUpdateRecipe', () => {
 
 describe('state accessor functions', () => {
   const createTestState = (): AppState => {
-    const user = new UserEntry("Test", Visibility.private, [], new Date(), new Date(), "user1");
-    const recipe = new RecipeEntry(
-      { "@type": "Recipe", name: "Test Recipe" },
-      ["user1"],
-      Visibility.private,
-      "user1",
-      "recipe1",
-      new Date(),
-      new Date(),
-      "user1"
-    );
-    const box = new BoxEntry(
-      { name: "Test Box" },
-      ["user1"],
-      Visibility.private,
-      "user1",
-      "box1",
-      new Date(),
-      new Date(),
-      "user1"
-    );
+    const user: PlainUser = {
+      id: "user1",
+      name: "Test",
+      visibility: Visibility.private,
+      boxes: [],
+      lastSeen: new Date(),
+      newSeen: new Date(),
+      lastSeenUpdateVersion: 0,
+    };
+    const recipe: PlainRecipe = {
+      id: "recipe1",
+      data: { "@type": "Recipe", name: "Test Recipe" },
+      owners: ["user1"],
+      editing: false,
+      creator: "user1",
+      visibility: Visibility.private,
+      created: new Date(),
+      updated: new Date(),
+      lastUpdatedBy: "user1",
+      enrichmentStatus: EnrichmentStatus.needed,
+    };
+    const box: PlainBox = {
+      id: "box1",
+      data: { name: "Test Box" },
+      owners: ["user1"],
+      subscribers: [],
+      creator: "user1",
+      visibility: Visibility.private,
+      recipes: new Map(),
+      created: new Date(),
+      updated: new Date(),
+      lastUpdatedBy: "user1",
+    };
     box.recipes.set("recipe1", recipe);
 
     return {
