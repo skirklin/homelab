@@ -11,7 +11,44 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { API_BASE } from "./config";
-import { validateDay, type ValidationActivity, type ValidationSlot } from "./lib/travel-validation";
+import {
+  validateDay,
+  type DayIssue,
+  type ValidationActivity,
+  type ValidationSlot,
+} from "@homelab/backend";
+
+/**
+ * Normalize a snake_case Activity from the `/travel/activities` API endpoint
+ * into the camelCase `ValidationActivity` shape the canonical validator expects.
+ * The API response uses snake_case (`duration_estimate`); the validator is
+ * camelCase end-to-end.
+ */
+function toValidationActivity(a: Record<string, unknown>): ValidationActivity {
+  return {
+    id: a.id as string,
+    name: (a.name as string | undefined) ?? "",
+    lat: (a.lat as number | null | undefined) ?? null,
+    lng: (a.lng as number | null | undefined) ?? null,
+    durationEstimate: (a.duration_estimate as string | undefined) ?? undefined,
+  };
+}
+
+/**
+ * Translate a canonical `DayIssue` (camelCase `slotIndices`) into the
+ * snake_case wire format used by MCP JSON responses (`slot_indices`).
+ */
+function toWireIssue(issue: DayIssue): {
+  kind: DayIssue["kind"];
+  message: string;
+  slot_indices: [number, number];
+} {
+  return {
+    kind: issue.kind,
+    message: issue.message,
+    slot_indices: issue.slotIndices,
+  };
+}
 
 // Builds a configured MCP server bound to a specific API token. Inner closures
 // capture `apiToken`, so each caller (stdio bootstrap, per-request HTTP handler)
@@ -259,11 +296,11 @@ server.tool(
       const enriched = await Promise.all(trips.map(async (t) => {
         const tripId = t.id as string;
         const [activities, itineraries] = await Promise.all([
-          api(`/travel/activities?log=${log.id}&trip_id=${tripId}`) as Promise<Array<ValidationActivity & Record<string, unknown>>>,
+          api(`/travel/activities?log=${log.id}&trip_id=${tripId}`) as Promise<Array<Record<string, unknown>>>,
           api(`/travel/itineraries?log=${log.id}&trip_id=${tripId}`) as Promise<Array<{ days?: Array<{ slots?: ValidationSlot[] }> }>>,
         ]);
         const activityMap = new Map<string, ValidationActivity>(
-          activities.map((a) => [a.id, a as ValidationActivity]),
+          activities.map((a) => [a.id as string, toValidationActivity(a)]),
         );
         let issueCount = 0;
         for (const itin of itineraries) {
@@ -303,7 +340,7 @@ server.tool(
     ]);
     // Annotate each day with validation results.
     const activityMap = new Map<string, ValidationActivity>(
-      tripActivities.map((a) => [a.id as string, a as ValidationActivity & Record<string, unknown>]),
+      tripActivities.map((a) => [a.id as string, toValidationActivity(a)]),
     );
     const enrichedItineraries = tripItineraries.map((itin) => {
       const days = (itin.days as Array<Record<string, unknown>> | undefined) ?? [];
@@ -313,7 +350,7 @@ server.tool(
         return {
           ...day,
           issue_count: issues.length,
-          ...(issues.length > 0 ? { issues } : {}),
+          ...(issues.length > 0 ? { issues: issues.map(toWireIssue) } : {}),
         };
       });
       return { ...itin, days: annotatedDays };
@@ -372,7 +409,7 @@ server.tool(
     const logId = trip.log as string;
     const destination = trip.destination as string;
     const [activities, itineraries] = await Promise.all([
-      api(`/travel/activities?log=${logId}&trip_id=${trip_id}`) as Promise<Array<ValidationActivity & Record<string, unknown>>>,
+      api(`/travel/activities?log=${logId}&trip_id=${trip_id}`) as Promise<Array<Record<string, unknown>>>,
       api(`/travel/itineraries?log=${logId}&trip_id=${trip_id}`) as Promise<Array<{
         id: string;
         name: string;
@@ -381,7 +418,7 @@ server.tool(
       }>>,
     ]);
     const activityMap = new Map<string, ValidationActivity>(
-      activities.map((a) => [a.id, a as ValidationActivity]),
+      activities.map((a) => [a.id as string, toValidationActivity(a)]),
     );
     const itinSummaries = itineraries.map((itin) => {
       const days = (itin.days ?? []).map((day, dayIndex) => {
@@ -391,7 +428,7 @@ server.tool(
           date: day.date,
           label: day.label,
           issue_count: issues.length,
-          ...(issues.length > 0 ? { issues } : {}),
+          ...(issues.length > 0 ? { issues: issues.map(toWireIssue) } : {}),
         };
       });
       return {

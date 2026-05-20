@@ -28,6 +28,19 @@ export type {
 } from "./types/travel";
 export type { LifeLog, LifeEntry } from "./types/life";
 
+// --- Travel validation (canonical impl shared by travel UI + MCP server) ---
+export {
+  validateDay,
+  parseTimeOfDay,
+  parseDurationHours,
+} from "./travel-validation";
+export type {
+  DayIssue,
+  DayIssueKind,
+  ValidationActivity,
+  ValidationSlot,
+} from "./travel-validation";
+
 // --- Interfaces ---
 export type { AuthBackend } from "./interfaces/auth";
 export type { UserBackend, SlugNamespace } from "./interfaces/user";
