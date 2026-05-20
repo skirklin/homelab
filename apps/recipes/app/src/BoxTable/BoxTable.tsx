@@ -13,7 +13,7 @@ import { Context } from "../context";
 import { useRecipesBackend } from "@kirkl/shared";
 import { DeleteOutlined } from "@ant-design/icons";
 import { type BoxId, Visibility } from "../types";
-import type { UserEntry } from "../storage";
+import type { PlainUser } from "../storage";
 import VisibilityControl from "../Buttons/Visibility";
 
 const TableContainer = styled.div`
@@ -44,7 +44,7 @@ const CountCell = styled.span`
 
 export type RowType = {
   name: string
-  owners: UserEntry[]
+  owners: PlainUser[]
   numRecipes: number
   boxId: BoxId
   key: string
@@ -61,7 +61,7 @@ const columns: ColumnsType<RowType> = [
     key: 'owners',
     title: 'Owners',
     dataIndex: ['owners'],
-    render: (value: UserEntry[]) => <OwnersCell>{value.map(u => u.name).join(', ')}</OwnersCell>,
+    render: (value: PlainUser[]) => <OwnersCell>{value.map(u => u.name).join(', ')}</OwnersCell>,
   },
   {
     key: 'numRecipes',

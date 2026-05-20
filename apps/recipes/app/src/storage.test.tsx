@@ -1,26 +1,37 @@
-import { BoxEntry, RecipeEntry, UserEntry } from './storage';
-import { Visibility } from './types';
+import {
+  type PlainBox,
+  type PlainRecipe,
+  type PlainUser,
+  cloneBox,
+  cloneRecipe,
+  getBoxName,
+  getRecipeData,
+  getRecipeDescription,
+  getRecipeName,
+} from './storage';
+import { EnrichmentStatus, Visibility } from './types';
 
-describe('RecipeEntry', () => {
-  const createRecipe = (name = "Test Recipe"): RecipeEntry =>
-    new RecipeEntry(
-      {
-        "@type": "Recipe",
-        name,
-        description: "A test recipe",
-        recipeIngredient: ["flour", "sugar"],
-        recipeInstructions: [{ "@type": "HowToStep", text: "Mix well" }],
-      },
-      ["user1", "user2"],
-      Visibility.private,
-      "user1",
-      "recipe123",
-      new Date("2024-01-01"),
-      new Date("2024-06-01"),
-      "user2"
-    );
+describe('PlainRecipe helpers', () => {
+  const createRecipe = (name = "Test Recipe"): PlainRecipe => ({
+    id: "recipe123",
+    data: {
+      "@type": "Recipe",
+      name,
+      description: "A test recipe",
+      recipeIngredient: ["flour", "sugar"],
+      recipeInstructions: [{ "@type": "HowToStep", text: "Mix well" }],
+    },
+    owners: ["user1", "user2"],
+    editing: false,
+    creator: "user1",
+    visibility: Visibility.private,
+    created: new Date("2024-01-01"),
+    updated: new Date("2024-06-01"),
+    lastUpdatedBy: "user2",
+    enrichmentStatus: EnrichmentStatus.needed,
+  });
 
-  describe('constructor', () => {
+  describe('shape', () => {
     it('initializes with provided values', () => {
       const recipe = createRecipe();
 
@@ -32,26 +43,12 @@ describe('RecipeEntry', () => {
       expect(recipe.lastUpdatedBy).toBe("user2");
       expect(recipe.editing).toBe(false);
     });
-
-    it('defaults lastUpdatedBy to creator if not provided', () => {
-      const recipe = new RecipeEntry(
-        { "@type": "Recipe", name: "Test" },
-        ["user1"],
-        Visibility.private,
-        "user1",
-        "id",
-        new Date(),
-        new Date(),
-        "" // empty string
-      );
-      expect(recipe.lastUpdatedBy).toBe("user1");
-    });
   });
 
-  describe('clone', () => {
+  describe('cloneRecipe', () => {
     it('creates a deep copy of the recipe', () => {
       const original = createRecipe();
-      const cloned = original.clone();
+      const cloned = cloneRecipe(original);
 
       expect(cloned).not.toBe(original);
       expect(cloned.data).not.toBe(original.data);
@@ -59,110 +56,100 @@ describe('RecipeEntry', () => {
     });
 
     it('preserves editing state', () => {
-      const original = createRecipe();
-      original.editing = true;
-
-      const cloned = original.clone();
+      const original = { ...createRecipe(), editing: true };
+      const cloned = cloneRecipe(original);
 
       expect(cloned.editing).toBe(true);
     });
 
     it('modifications to clone do not affect original', () => {
       const original = createRecipe();
-      const cloned = original.clone();
+      const cloned = cloneRecipe(original);
 
-      cloned.data.name = "Modified Name";
+      (cloned.data as { name: string }).name = "Modified Name";
 
       expect(original.data.name).toBe("Test Recipe");
     });
   });
 
-  describe('toString', () => {
-    it('returns formatted recipe string', () => {
-      const recipe = createRecipe("Chocolate Cake");
-      expect(recipe.toString()).toBe("Recipe: Chocolate Cake");
-    });
-  });
-
-  describe('getData', () => {
+  describe('getRecipeData', () => {
     it('returns data when no changes pending', () => {
       const recipe = createRecipe();
 
-      expect(recipe.getData()).toBe(recipe.data);
+      expect(getRecipeData(recipe)).toBe(recipe.data);
     });
 
     it('returns changed when changes are pending', () => {
-      const recipe = createRecipe();
-      recipe.changed = { "@type": "Recipe", name: "Modified" };
+      const recipe = { ...createRecipe(), changed: { "@type": "Recipe" as const, name: "Modified" } };
 
-      expect(recipe.getData()).toBe(recipe.changed);
-      expect(recipe.getData().name).toBe("Modified");
+      expect(getRecipeData(recipe)).toBe(recipe.changed);
+      expect(getRecipeData(recipe).name).toBe("Modified");
     });
   });
 
-  describe('getName', () => {
+  describe('getRecipeName', () => {
     it('returns recipe name from data', () => {
       const recipe = createRecipe("Apple Pie");
-      expect(recipe.getName()).toBe("Apple Pie");
+      expect(getRecipeName(recipe)).toBe("Apple Pie");
     });
 
     it('returns changed name when pending', () => {
-      const recipe = createRecipe("Apple Pie");
-      recipe.changed = { "@type": "Recipe", name: "Cherry Pie" };
+      const recipe = { ...createRecipe("Apple Pie"), changed: { "@type": "Recipe" as const, name: "Cherry Pie" } };
 
-      expect(recipe.getName()).toBe("Cherry Pie");
+      expect(getRecipeName(recipe)).toBe("Cherry Pie");
     });
 
     it('decodes HTML entities in name', () => {
       const recipe = createRecipe("It&#39;s Good");
-      expect(recipe.getName()).toBe("It's Good");
+      expect(getRecipeName(recipe)).toBe("It's Good");
     });
   });
 
-  describe('getDescription', () => {
+  describe('getRecipeDescription', () => {
     it('returns recipe description', () => {
       const recipe = createRecipe();
-      expect(recipe.getDescription()).toBe("A test recipe");
+      expect(getRecipeDescription(recipe)).toBe("A test recipe");
     });
 
     it('returns changed description when pending', () => {
-      const recipe = createRecipe();
-      recipe.changed = { "@type": "Recipe", name: "Test", description: "New description" };
+      const recipe = { ...createRecipe(), changed: { "@type": "Recipe" as const, name: "Test", description: "New description" } };
 
-      expect(recipe.getDescription()).toBe("New description");
+      expect(getRecipeDescription(recipe)).toBe("New description");
     });
 
     it('decodes HTML entities in description', () => {
-      const recipe = new RecipeEntry(
-        { "@type": "Recipe", name: "Test", description: "It&#39;s tasty" },
-        ["user1"],
-        Visibility.private,
-        "user1",
-        "id",
-        new Date(),
-        new Date(),
-        "user1"
-      );
-      expect(recipe.getDescription()).toBe("It's tasty");
+      const recipe: PlainRecipe = {
+        id: "id",
+        data: { "@type": "Recipe", name: "Test", description: "It&#39;s tasty" },
+        owners: ["user1"],
+        editing: false,
+        creator: "user1",
+        visibility: Visibility.private,
+        created: new Date(),
+        updated: new Date(),
+        lastUpdatedBy: "user1",
+        enrichmentStatus: EnrichmentStatus.needed,
+      };
+      expect(getRecipeDescription(recipe)).toBe("It's tasty");
     });
   });
-
 });
 
-describe('BoxEntry', () => {
-  const createBox = (name = "Test Box"): BoxEntry =>
-    new BoxEntry(
-      { name, description: "A test box" },
-      ["user1", "user2"],
-      Visibility.public,
-      "user1",
-      "box123",
-      new Date("2024-01-01"),
-      new Date("2024-06-01"),
-      "user2"
-    );
+describe('PlainBox helpers', () => {
+  const createBox = (name = "Test Box"): PlainBox => ({
+    id: "box123",
+    data: { name, description: "A test box" },
+    owners: ["user1", "user2"],
+    subscribers: [],
+    creator: "user1",
+    visibility: Visibility.public,
+    recipes: new Map(),
+    created: new Date("2024-01-01"),
+    updated: new Date("2024-06-01"),
+    lastUpdatedBy: "user2",
+  });
 
-  describe('constructor', () => {
+  describe('shape', () => {
     it('initializes with provided values', () => {
       const box = createBox();
 
@@ -175,44 +162,26 @@ describe('BoxEntry', () => {
       expect(box.lastUpdatedBy).toBe("user2");
       expect(box.recipes.size).toBe(0);
     });
-
-    it('defaults lastUpdatedBy to creator if not provided', () => {
-      const box = new BoxEntry(
-        { name: "Test" },
-        ["user1"],
-        Visibility.private,
-        "user1",
-        "id",
-        new Date(),
-        new Date(),
-        ""
-      );
-      expect(box.lastUpdatedBy).toBe("user1");
-    });
   });
 
-  describe('toString', () => {
-    it('returns formatted box string', () => {
-      const box = createBox("My Recipes");
-      expect(box.toString()).toBe("Box: box123 = My Recipes");
-    });
-  });
-
-  describe('clone', () => {
+  describe('cloneBox', () => {
     it('creates a deep copy of the box', () => {
       const original = createBox();
-      original.recipes.set("r1", new RecipeEntry(
-        { "@type": "Recipe", name: "Test" },
-        ["user1"],
-        Visibility.private,
-        "user1",
-        "r1",
-        new Date(),
-        new Date(),
-        "user1"
-      ));
+      const recipe: PlainRecipe = {
+        id: "r1",
+        data: { "@type": "Recipe", name: "Test" },
+        owners: ["user1"],
+        editing: false,
+        creator: "user1",
+        visibility: Visibility.private,
+        created: new Date(),
+        updated: new Date(),
+        lastUpdatedBy: "user1",
+        enrichmentStatus: EnrichmentStatus.needed,
+      };
+      original.recipes.set("r1", recipe);
 
-      const cloned = original.clone();
+      const cloned = cloneBox(original);
 
       expect(cloned).not.toBe(original);
       expect(cloned.data).not.toBe(original.data);
@@ -223,7 +192,7 @@ describe('BoxEntry', () => {
 
     it('creates independent owners array', () => {
       const original = createBox();
-      const cloned = original.clone();
+      const cloned = cloneBox(original);
 
       cloned.owners.push("user3");
 
@@ -233,7 +202,7 @@ describe('BoxEntry', () => {
 
     it('modifications to clone do not affect original', () => {
       const original = createBox();
-      const cloned = original.clone();
+      const cloned = cloneBox(original);
 
       cloned.data.name = "Modified Name";
 
@@ -241,48 +210,84 @@ describe('BoxEntry', () => {
     });
   });
 
-  describe('getName', () => {
+  describe('getBoxName', () => {
     it('returns box name', () => {
       const box = createBox("Family Recipes");
-      expect(box.getName()).toBe("Family Recipes");
+      expect(getBoxName(box)).toBe("Family Recipes");
     });
 
     it('decodes HTML entities in name', () => {
-      const box = new BoxEntry(
-        { name: "Mom&#39;s Recipes" },
-        ["user1"],
-        Visibility.private,
-        "user1",
-        "id",
-        new Date(),
-        new Date(),
-        "user1"
-      );
-      expect(box.getName()).toBe("Mom's Recipes");
+      const box: PlainBox = {
+        id: "id",
+        data: { name: "Mom&#39;s Recipes" },
+        owners: ["user1"],
+        subscribers: [],
+        creator: "user1",
+        visibility: Visibility.private,
+        recipes: new Map(),
+        created: new Date(),
+        updated: new Date(),
+        lastUpdatedBy: "user1",
+      };
+      expect(getBoxName(box)).toBe("Mom's Recipes");
     });
   });
 });
 
-describe('UserEntry', () => {
-  describe('constructor', () => {
-    it('initializes with provided values', () => {
-      const lastSeen = new Date("2024-01-01");
-      const newSeen = new Date("2024-02-01");
-      const user = new UserEntry(
-        "John Doe",
-        Visibility.public,
-        ["box1", "box2"],
-        lastSeen,
-        newSeen,
-        "user123"
-      );
+describe('adapters lastUpdatedBy fallback', () => {
+  // The previous class-based code defaulted lastUpdatedBy to creator when the
+  // backend didn't supply it; the adapters preserve that fallback so the
+  // ownership UI stays meaningful for legacy records.
+  it('recipeFromBackend defaults lastUpdatedBy to creator when missing', async () => {
+    const { recipeFromBackend } = await import('./adapters');
+    const recipe = recipeFromBackend({
+      id: 'r1',
+      data: { name: 'X' },
+      owners: ['u1'],
+      visibility: 'private',
+      creator: 'u1',
+      created: new Date().toISOString(),
+      updated: new Date().toISOString(),
+      lastUpdatedBy: '', // empty string from PB
+    } as Parameters<typeof recipeFromBackend>[0]);
+    expect(recipe.lastUpdatedBy).toBe('u1');
+  });
 
-      expect(user.name).toBe("John Doe");
-      expect(user.visibility).toBe(Visibility.public);
-      expect(user.boxes).toEqual(["box1", "box2"]);
-      expect(user.lastSeen).toBe(lastSeen);
-      expect(user.newSeen).toBe(newSeen);
-      expect(user.id).toBe("user123");
-    });
+  it('boxFromBackend defaults lastUpdatedBy to creator when missing', async () => {
+    const { boxFromBackend } = await import('./adapters');
+    const box = boxFromBackend({
+      id: 'b1',
+      name: 'My Box',
+      owners: ['u1'],
+      visibility: 'private',
+      creator: 'u1',
+      created: new Date().toISOString(),
+      updated: new Date().toISOString(),
+      lastUpdatedBy: '',
+    } as Parameters<typeof boxFromBackend>[0]);
+    expect(box.lastUpdatedBy).toBe('u1');
+  });
+});
+
+describe('PlainUser shape', () => {
+  it('holds the expected fields', () => {
+    const lastSeen = new Date("2024-01-01");
+    const newSeen = new Date("2024-02-01");
+    const user: PlainUser = {
+      id: "user123",
+      name: "John Doe",
+      visibility: Visibility.public,
+      boxes: ["box1", "box2"],
+      lastSeen,
+      newSeen,
+      lastSeenUpdateVersion: 0,
+    };
+
+    expect(user.name).toBe("John Doe");
+    expect(user.visibility).toBe(Visibility.public);
+    expect(user.boxes).toEqual(["box1", "box2"]);
+    expect(user.lastSeen).toBe(lastSeen);
+    expect(user.newSeen).toBe(newSeen);
+    expect(user.id).toBe("user123");
   });
 });

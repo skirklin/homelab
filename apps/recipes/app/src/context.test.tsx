@@ -1,33 +1,42 @@
 import { recipeBoxReducer, initState } from './context';
-import { BoxEntry, RecipeEntry, UserEntry } from './storage';
-import { AppState, Visibility } from './types';
+import { type PlainBox, type PlainRecipe, type PlainUser } from './storage';
+import { AppState, EnrichmentStatus, Visibility } from './types';
 
-const createRecipe = (name: string, id: string): RecipeEntry =>
-  new RecipeEntry(
-    { "@type": "Recipe", name, recipeIngredient: ["flour"], recipeInstructions: [] },
-    ["user1"],
-    Visibility.private,
-    "user1",
-    id,
-    new Date(),
-    new Date(),
-    "user1"
-  );
+const createRecipe = (name: string, id: string): PlainRecipe => ({
+  id,
+  data: { "@type": "Recipe", name, recipeIngredient: ["flour"], recipeInstructions: [] },
+  owners: ["user1"],
+  editing: false,
+  creator: "user1",
+  visibility: Visibility.private,
+  created: new Date(),
+  updated: new Date(),
+  lastUpdatedBy: "user1",
+  enrichmentStatus: EnrichmentStatus.needed,
+});
 
-const createBox = (name: string, id: string): BoxEntry =>
-  new BoxEntry(
-    { name },
-    ["user1"],
-    Visibility.private,
-    "user1",
-    id,
-    new Date(),
-    new Date(),
-    "user1"
-  );
+const createBox = (name: string, id: string): PlainBox => ({
+  id,
+  data: { name },
+  owners: ["user1"],
+  subscribers: [],
+  creator: "user1",
+  visibility: Visibility.private,
+  recipes: new Map(),
+  created: new Date(),
+  updated: new Date(),
+  lastUpdatedBy: "user1",
+});
 
-const createUser = (name: string, id: string): UserEntry =>
-  new UserEntry(name, Visibility.private, [], new Date(), new Date(), id);
+const createUser = (name: string, id: string): PlainUser => ({
+  id,
+  name,
+  visibility: Visibility.private,
+  boxes: [],
+  lastSeen: new Date(),
+  newSeen: new Date(),
+  lastSeenUpdateVersion: 0,
+});
 
 const createStateWithBox = (): AppState => {
   const box = createBox("Test Box", "box1");

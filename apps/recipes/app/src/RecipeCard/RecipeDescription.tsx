@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { Context } from '../context';
 import { StyledTextArea } from '../StyledComponents';
 import { getRecipeFromState } from '../state';
+import { getRecipeDescription } from '../storage';
 import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import { useAuth } from '@kirkl/shared';
 
@@ -30,7 +31,7 @@ function RecipeDescription(props: RecipeCardProps) {
   if (recipe === undefined) { return null }
   const setEditable = getEditableSetter(state, recipeId, boxId, setEditablePrimitive, authUser?.uid)
 
-  const description = recipe.getDescription()
+  const description = getRecipeDescription(recipe)
   function handleChange(value: string) {
     if (value !== description) {
       dispatch({ type: "SET_DESCRIPTION", recipeId, boxId, payload: value });

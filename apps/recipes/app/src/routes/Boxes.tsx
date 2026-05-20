@@ -3,7 +3,7 @@ import styled from "styled-components"
 import { Context } from "../context"
 import { BoxTable, type RowType } from '../BoxTable/BoxTable'
 import { getUserFromState } from "../state";
-import { UserEntry } from "../storage";
+import { type PlainUser } from "../storage";
 import { Visibility } from "../types";
 
 const PageContainer = styled.div`
@@ -35,9 +35,19 @@ function Boxes() {
   const { state } = useContext(Context)
   const { boxes } = state;
 
+  const anonUser = (uid: string): PlainUser => ({
+    id: uid,
+    name: "Anonymous",
+    visibility: Visibility.private,
+    boxes: [],
+    lastSeen: new Date(),
+    newSeen: new Date(),
+    lastSeenUpdateVersion: 0,
+  });
+
   const rows: RowType[] = Array.from(boxes).map(([key, value]) => ({
     name: value.data.name,
-    owners: value.owners.map(uid => getUserFromState(state, uid) || new UserEntry("Anonymous", Visibility.private, [], new Date(), new Date(), uid)),
+    owners: value.owners.map(uid => getUserFromState(state, uid) || anonUser(uid)),
     numRecipes: value.recipes.size,
     boxId: key,
     key: key,

@@ -27,7 +27,6 @@ import {
 import { PocketBaseRecipesBackend } from "@homelab/backend/pocketbase";
 import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
 import type { CookingLogEvent } from "@homelab/backend";
-import { RecipeEntry } from "../storage";
 import { EnrichmentStatus, Visibility } from "../types";
 
 let ctx: TestContext;

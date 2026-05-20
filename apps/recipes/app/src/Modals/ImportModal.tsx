@@ -6,8 +6,8 @@ import { useContext, useState } from 'react';
 import type { Recipe } from 'schema-dts';
 import { getRecipes } from '../backend';
 import { Context } from '../context';
-import { RecipeEntry } from '../storage';
-import { type BoxId, Visibility } from '../types';
+import { type PlainRecipe } from '../storage';
+import { EnrichmentStatus, type BoxId, Visibility } from '../types';
 import { useRecipesBackend } from '@kirkl/shared';
 import { getAppUserFromState } from '../state';
 import { useAuth } from '@kirkl/shared';
@@ -22,7 +22,7 @@ interface ImportProps {
 }
 
 interface PossibleRecipeProps {
-  recipe: RecipeEntry
+  recipe: PlainRecipe
   remove: () => void
 }
 
@@ -39,7 +39,7 @@ function ImportModal(props: ImportProps) {
   const { isVisible, setIsVisible, boxId } = props;
   const [spinning, setSpinning] = useState(false)
   const [value, setValue] = useState<string>();
-  const [discovered, setDiscovered] = useState<RecipeEntry[]>([])
+  const [discovered, setDiscovered] = useState<PlainRecipe[]>([])
   const { state } = useContext(Context)
   const { user: authUser } = useAuth();
   const recipesBackend = useRecipesBackend();
@@ -60,12 +60,23 @@ function ImportModal(props: ImportProps) {
     }
     const recipes = result.recipes as unknown as Recipe[]
     const now = new Date()
-    const fullRecipes = recipes.map(
+    const fullRecipes: PlainRecipe[] = recipes.map(
       (recipe: Recipe) => {
         delete recipe.review
         delete recipe.comment
         delete recipe.commentCount
-        return new RecipeEntry(recipe, [user.id], Visibility.private, user.id, "", now, now, user.id)
+        return {
+          id: "",
+          data: recipe,
+          owners: [user.id],
+          editing: false,
+          creator: user.id,
+          visibility: Visibility.private,
+          created: now,
+          updated: now,
+          lastUpdatedBy: user.id,
+          enrichmentStatus: EnrichmentStatus.needed,
+        };
       }
     )
     setDiscovered([...discovered, ...fullRecipes])

@@ -6,6 +6,7 @@ import { Context } from '../context';
 import { useRecipesBackend } from '@kirkl/shared';
 import { pendingChangesToBackend } from '../adapters';
 import { getRecipeFromState } from '../state';
+import { getRecipeData } from '../storage';
 import type { RecipeCardProps } from './RecipeCard';
 import { RecipeDiffView } from '../Modals/RecipeDiffView';
 
@@ -94,7 +95,7 @@ function PendingChangesReview(props: RecipeCardProps) {
   }
 
   const changes = recipe.pendingChanges;
-  const recipeData = recipe.getData();
+  const recipeData = getRecipeData(recipe);
   const currentDescription = typeof recipeData.description === 'string' ? recipeData.description : undefined;
   const currentTags = recipeData.recipeCategory;
 
