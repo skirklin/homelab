@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Plot from 'react-plotly.js'
+import type { Data as PlotlyData } from 'plotly.js'
 import type { PerformancePoint, BenchmarkSeries } from '../api'
 import { fetchPerformance, fetchBenchmarks } from '../api'
 
@@ -94,7 +95,7 @@ export function PerformanceVsBenchmark({ institution, onTimeRangeChange }: Props
 
   // Build account traces — earned/invested rebased to 0% at the start of the range
   const accountIds = Object.keys(byAccount).sort()
-  const traces: Plotly.Data[] = accountIds.map((id, i) => {
+  const traces: PlotlyData[] = accountIds.map((id, i) => {
     const { label, points: rawPoints } = byAccount[id]
     const points = rawPoints
       .filter((p) => p.date >= startDate && p.invested != null && p.invested > 0)

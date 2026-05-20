@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Plot from 'react-plotly.js'
+import type { Data as PlotlyData } from 'plotly.js'
 import type { AllocationItem, PerformancePoint } from '../api'
 import { fetchAllocation, fetchPerformance } from '../api'
 
@@ -140,7 +141,7 @@ export function AllocationOverTime() {
     return (series[b][lastMonth] ?? 0) - (series[a][lastMonth] ?? 0)
   })
 
-  const traces: Plotly.Data[] = seriesNames.map((name, i) => {
+  const traces: PlotlyData[] = seriesNames.map((name, i) => {
     const values = months.map((m) => series[name][m] ?? 0)
 
     if (valueMode === 'percent') {

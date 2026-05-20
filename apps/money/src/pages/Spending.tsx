@@ -21,7 +21,6 @@ const TIME_PRESETS: { label: string; key: string; range: TimeRange }[] = [
 
 export function Spending() {
   const [refreshKey, setRefreshKey] = useState(0)
-  const [suggestionsKey, setSuggestionsKey] = useState(0)
   const [searchParams, setSearchParams] = useSearchParams()
   const [recurringPatterns, setRecurringPatterns] = useState<RecurringPattern[]>([])
 
@@ -87,11 +86,6 @@ export function Spending() {
     setRefreshKey((k) => k + 1)
   }, [])
 
-  const _handleReclassifyRequested = useCallback(() => {
-    const polls = [5000, 15000, 30000, 60000, 90000]
-    polls.forEach((ms) => setTimeout(() => setSuggestionsKey((k) => k + 1), ms))
-  }, [])
-
   return (
     <>
       <SpendingCharts
@@ -106,7 +100,7 @@ export function Spending() {
         recurringActive={showRecurring}
         transactionFilter={transactionFilter}
       />
-      <SuggestionReview key={`sug-${suggestionsKey}`} onRulesChanged={handleRulesChanged} />
+      <SuggestionReview onRulesChanged={handleRulesChanged} />
     </>
   )
 }

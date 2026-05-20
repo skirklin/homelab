@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import * as echarts from 'echarts'
+import { useEffect, useState } from 'react'
+import Plot from 'react-plotly.js'
+import type { Data as PlotlyData } from 'plotly.js'
 import type { TripSummary } from '../api'
 import { fetchTravelTrips } from '../api'
 
@@ -27,89 +28,10 @@ const THEME = {
 
 export function TravelByTrip() {
   const [trips, setTrips] = useState<TripSummary[]>([])
-  const chartRef = useRef<HTMLDivElement | null>(null)
-  const echartsRef = useRef<echarts.ECharts | null>(null)
 
   useEffect(() => {
     fetchTravelTrips().then(setTrips)
   }, [])
-
-  useEffect(() => {
-    if (!chartRef.current || trips.length === 0) return
-    if (!echartsRef.current) {
-      echartsRef.current = echarts.init(chartRef.current)
-      const handleResize = () => echartsRef.current?.resize()
-      window.addEventListener('resize', handleResize)
-    }
-
-    const chartTrips = trips
-      .filter((t) => t.name !== 'Other Travel' && Math.abs(t.total) > 50)
-      .reverse()
-
-    const labels = chartTrips.map(
-      (t) => `${t.name}  ${formatDateRange(t.start, t.end)}`,
-    )
-    const values = chartTrips.map((t) => Math.abs(t.total))
-    const colors = chartTrips.map(
-      (_, i) => `hsl(${200 + i * 11}, 65%, 60%)`,
-    )
-
-    echartsRef.current.setOption({
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        backgroundColor: THEME.cardBg,
-        borderColor: THEME.border,
-        textStyle: { color: THEME.text, fontSize: 12 },
-        formatter: (params: echarts.DefaultLabelFormatterCallbackParams[]) => {
-          if (!Array.isArray(params) || params.length === 0) return ''
-          const p = params[0]
-          const trip = chartTrips[chartTrips.length - 1 - (p.dataIndex as number)]
-          if (!trip) return ''
-          const days = trip.duration_days ? `${trip.duration_days}d` : ''
-          return `<b>${trip.name}</b><br/>
-            ${formatDateRange(trip.start, trip.end)} ${days}<br/>
-            ${fmtDollar(p.value as number)} · ${trip.transaction_count} transactions`
-        },
-      },
-      grid: {
-        left: 180,
-        right: 30,
-        top: 10,
-        bottom: 10,
-      },
-      xAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: {
-          color: THEME.textMuted,
-          fontSize: 11,
-          formatter: (v: number) => fmtDollar(v),
-        },
-        splitLine: { lineStyle: { color: THEME.grid } },
-      },
-      yAxis: {
-        type: 'category',
-        data: labels,
-        axisLine: { lineStyle: { color: THEME.grid } },
-        axisLabel: { color: THEME.text, fontSize: 11, width: 170, overflow: 'truncate' },
-      },
-      series: [{
-        type: 'bar',
-        data: values,
-        itemStyle: {
-          color: (params: { dataIndex: number }) => colors[params.dataIndex],
-          borderRadius: [0, 4, 4, 0],
-        },
-        barMaxWidth: 24,
-        emphasis: {
-          itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' },
-        },
-      }],
-      animationDuration: 500,
-      animationEasing: 'cubicOut',
-    }, true)
-  }, [trips])
 
   if (trips.length === 0) return null
 
@@ -117,7 +39,46 @@ export function TravelByTrip() {
   const namedTrips = trips.filter((t) => t.name !== 'Other Travel')
   const otherTravel = trips.find((t) => t.name === 'Other Travel')
 
-  const chartHeight = Math.max(300, namedTrips.filter((t) => Math.abs(t.total) > 50).length * 30)
+  // Horizontal bar — keep the same orientation the ECharts version used:
+  // reverse so the most-recent trip (top of input) sits at the top of the
+  // chart. Plotly's category axis renders the first value at the bottom,
+  // so we reverse to flip that.
+  const chartTrips = trips
+    .filter((t) => t.name !== 'Other Travel' && Math.abs(t.total) > 50)
+    .reverse()
+
+  const labels = chartTrips.map(
+    (t) => `${t.name}  ${formatDateRange(t.start, t.end)}`,
+  )
+  const values = chartTrips.map((t) => Math.abs(t.total))
+  const colors = chartTrips.map((_, i) => `hsl(${200 + i * 11}, 65%, 60%)`)
+
+  // Pack the per-trip metadata into customdata so the hovertemplate can
+  // read from it without closing over chartTrips at render time.
+  const customdata = chartTrips.map((t) => [
+    t.name,
+    formatDateRange(t.start, t.end),
+    t.duration_days ? `${t.duration_days}d` : '',
+    String(t.transaction_count),
+  ])
+
+  const traces: PlotlyData[] = [
+    {
+      x: values,
+      y: labels,
+      type: 'bar' as const,
+      orientation: 'h' as const,
+      marker: { color: colors },
+      customdata,
+      hovertemplate:
+        '<b>%{customdata[0]}</b><br>' +
+        '%{customdata[1]} %{customdata[2]}<br>' +
+        '$%{x:,.0f} · %{customdata[3]} transactions' +
+        '<extra></extra>',
+    },
+  ]
+
+  const chartHeight = Math.max(300, chartTrips.length * 30)
 
   return (
     <section className="chart-section">
@@ -139,7 +100,40 @@ export function TravelByTrip() {
           </div>
         </div>
       </div>
-      <div ref={chartRef} style={{ width: '100%', height: chartHeight }} />
+      <Plot
+        data={traces}
+        layout={{
+          paper_bgcolor: 'transparent',
+          plot_bgcolor: 'transparent',
+          font: { color: THEME.text, size: 11 },
+          margin: { l: 180, r: 30, t: 10, b: 30 },
+          xaxis: {
+            tickprefix: '$',
+            separatethousands: true,
+            gridcolor: THEME.grid,
+            linecolor: THEME.grid,
+            tickfont: { color: THEME.textMuted, size: 11 },
+            zeroline: false,
+          },
+          yaxis: {
+            type: 'category',
+            gridcolor: THEME.grid,
+            linecolor: THEME.grid,
+            tickfont: { color: THEME.text, size: 11 },
+            automargin: false,
+          },
+          showlegend: false,
+          hoverlabel: {
+            bgcolor: THEME.cardBg,
+            bordercolor: THEME.border,
+            font: { color: THEME.text, size: 12 },
+          },
+          bargap: 0.35,
+        }}
+        config={{ responsive: true, displayModeBar: false }}
+        useResizeHandler
+        style={{ width: '100%', height: chartHeight }}
+      />
       {otherTravel && otherTravel.transaction_count > 0 && (
         <p style={{ color: THEME.textMuted, fontSize: 11, marginTop: 4, textAlign: 'right' }}>
           + {fmtDollar(otherTravel.total)} in {otherTravel.transaction_count} unmatched transactions

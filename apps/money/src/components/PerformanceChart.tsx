@@ -13,8 +13,6 @@ import type { PerformancePoint } from '../api'
 import { fetchPerformance } from '../api'
 import { TimeRangeSelector, type TimeRange, getStartDate } from './TimeRangeSelector'
 
-const COLORS = ['#818cf8', '#34d399', '#fb923c', '#f472b6', '#38bdf8', '#a78bfa']
-
 const fmt = (v: number) => {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
   if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
@@ -36,13 +34,6 @@ export function PerformanceChart() {
   }, [range])
 
   if (data.length === 0) return null
-
-  // Pivot: per date, show invested vs balance for each account
-  const accountIds = [...new Set(data.map((d) => d.account_id))]
-  const accountNames: Record<string, string> = {}
-  for (const d of data) {
-    accountNames[d.account_id] = `${d.institution} — ${d.account_name}`
-  }
 
   // Aggregate: total invested vs total balance by date
   const byDate: Record<string, { balance: number; invested: number }> = {}
@@ -94,7 +85,11 @@ export function PerformanceChart() {
           <YAxis tickFormatter={fmt} stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} width={70} />
           <Tooltip
             contentStyle={{ backgroundColor: '#1e1e3f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
-            formatter={(value: number, name: string) => [fmtFull(value), name]}
+            formatter={(value, name) => {
+              const n = typeof value === 'number' ? value : Number(value)
+              const label = typeof name === 'string' ? name : String(name ?? '')
+              return [Number.isFinite(n) ? fmtFull(n) : '—', label]
+            }}
             labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
           />
           <Legend />

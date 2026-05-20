@@ -93,7 +93,11 @@ export function NetWorthChart() {
           <YAxis tickFormatter={fmt} stroke="rgba(255,255,255,0.3)" tick={{ fontSize: 11 }} width={70} />
           <Tooltip
             contentStyle={{ backgroundColor: '#1e1e3f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
-            formatter={(value: number, name: string) => [fmtFull(value), name]}
+            formatter={(value, name) => {
+              const n = typeof value === 'number' ? value : Number(value)
+              const label = typeof name === 'string' ? name : String(name ?? '')
+              return [Number.isFinite(n) ? fmtFull(n) : '—', label]
+            }}
             labelStyle={{ color: 'rgba(255,255,255,0.6)' }}
           />
           {view === 'liquid' && (

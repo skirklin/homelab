@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import * as echarts from 'echarts'
+import { useEffect, useState } from 'react'
+import Plot from 'react-plotly.js'
+import type { Data as PlotlyData } from 'plotly.js'
 import type { CollectionInfo, CollectionMonthSummary } from '../api'
 import { fetchCollections, fetchCollectionByMonth } from '../api'
 
@@ -16,67 +17,22 @@ const THEME = {
 
 function CollectionDetail({ collection }: { collection: CollectionInfo }) {
   const [months, setMonths] = useState<CollectionMonthSummary[]>([])
-  const chartRef = useRef<HTMLDivElement | null>(null)
-  const echartsRef = useRef<echarts.ECharts | null>(null)
 
   useEffect(() => {
     fetchCollectionByMonth(collection.id).then(setMonths)
   }, [collection.id])
 
-  useEffect(() => {
-    if (!chartRef.current) return
-    echartsRef.current = echarts.init(chartRef.current)
-    const handleResize = () => echartsRef.current?.resize()
-    window.addEventListener('resize', handleResize)
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      echartsRef.current?.dispose()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!echartsRef.current || months.length === 0) return
-
-    echartsRef.current.setOption({
-      tooltip: {
-        trigger: 'axis',
-        backgroundColor: THEME.cardBg,
-        borderColor: THEME.border,
-        textStyle: { color: THEME.text, fontSize: 12 },
-        formatter: (params: echarts.DefaultLabelFormatterCallbackParams[]) => {
-          if (!Array.isArray(params) || params.length === 0) return ''
-          const p = params[0]
-          return `<b>${p.axisValueLabel}</b><br/>${fmtDollar(p.value as number)}`
-        },
-      },
-      grid: { left: 60, right: 20, top: 10, bottom: 30 },
-      xAxis: {
-        type: 'category',
-        data: months.map((m) => m.month),
-        axisLine: { lineStyle: { color: THEME.grid } },
-        axisLabel: { color: THEME.textMuted, fontSize: 11 },
-      },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: {
-          color: THEME.textMuted,
-          fontSize: 11,
-          formatter: (v: number) => fmtDollar(v),
-        },
-        splitLine: { lineStyle: { color: THEME.grid } },
-      },
-      series: [{
-        type: 'bar',
-        data: months.map((m) => Math.abs(m.total)),
-        itemStyle: { color: '#818cf8', borderRadius: [4, 4, 0, 0] },
-        barMaxWidth: 40,
-      }],
-      animationDuration: 400,
-    }, true)
-  }, [months])
-
   const totalSpent = months.reduce((s, m) => s + m.total, 0)
+
+  const traces: PlotlyData[] = [
+    {
+      x: months.map((m) => m.month),
+      y: months.map((m) => Math.abs(m.total)),
+      type: 'bar' as const,
+      marker: { color: '#818cf8' },
+      hovertemplate: `<b>%{x}</b><br>$%{y:,.0f}<extra></extra>`,
+    },
+  ]
 
   return (
     <section className="chart-section">
@@ -95,7 +51,38 @@ function CollectionDetail({ collection }: { collection: CollectionInfo }) {
         </div>
       </div>
       {months.length > 0 && (
-        <div ref={chartRef} style={{ width: '100%', height: 200 }} />
+        <Plot
+          data={traces}
+          layout={{
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: 'transparent',
+            font: { color: THEME.text, size: 11 },
+            margin: { l: 60, r: 20, t: 10, b: 30 },
+            xaxis: {
+              type: 'category',
+              gridcolor: THEME.grid,
+              linecolor: THEME.grid,
+              tickfont: { color: THEME.textMuted, size: 11 },
+            },
+            yaxis: {
+              gridcolor: THEME.grid,
+              linecolor: THEME.grid,
+              tickprefix: '$',
+              separatethousands: true,
+              tickfont: { color: THEME.textMuted, size: 11 },
+            },
+            showlegend: false,
+            hoverlabel: {
+              bgcolor: THEME.cardBg,
+              bordercolor: THEME.border,
+              font: { color: THEME.text, size: 12 },
+            },
+            bargap: 0.3,
+          }}
+          config={{ responsive: true, displayModeBar: false }}
+          useResizeHandler
+          style={{ width: '100%', height: 200 }}
+        />
       )}
     </section>
   )
