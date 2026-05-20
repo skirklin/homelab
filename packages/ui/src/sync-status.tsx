@@ -14,6 +14,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import type { WpbDebug, WpbEvent, WpbSnapshot, WpbCollectionSnapshot } from "@homelab/backend/wrapped-pb";
+import { useOnline } from "./online-status";
 
 /** Threshold below which "pending mutations" is treated as transient normal
  *  activity — don't show a banner for a write that's literally in-flight. */
@@ -300,6 +301,7 @@ function useSnapshot(debug: WpbDebug): WpbSnapshot {
 export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
   const snapshot = useSnapshot(debug);
   const [showPanel, setShowPanel] = useState(false);
+  const online = useOnline();
 
   const state = deriveSyncState(snapshot, Date.now());
   // Banner is only the loud surface — silent when everything looks fine.
@@ -317,10 +319,14 @@ export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
         onClick={() => setShowPanel(true)}
         style={{
           position: "fixed",
-          top: 8,
+          // When offline, the OfflineBanner sits at top:8 with pointerEvents:
+          // none on top of us (zIndex 9999 vs 9998). It visually occludes us
+          // AND blocks taps. Stack below it so both pills are visible and
+          // tappable.
+          top: online ? 8 : 44,
           left: "50%",
           transform: "translateX(-50%)",
-          zIndex: 9998, // below OfflineBanner's 9999 so both stack readably
+          zIndex: 9998,
           background: s.bg,
           color: s.fg,
           border: `1px solid ${s.border}`,
@@ -374,19 +380,36 @@ export function SyncDot({ debug, collections }: SyncDotProps) {
         title={state.label}
         onClick={() => setShowPanel(true)}
         style={{
-          width: 14,
-          height: 14,
+          // 40×40 hit area for phone taps — visible dot stays 14×14 via
+          // the inner span. Audit found 14×14 was below the iOS/Android
+          // tap-target threshold.
+          width: 40,
+          height: 40,
           padding: 0,
           borderRadius: "50%",
           border: "none",
-          background: SEVERITY_DOT[state.severity],
+          background: "transparent",
           cursor: "pointer",
           flexShrink: 0,
-          // Subtle pulse on non-ok states so motion draws the eye without
-          // being obnoxious.
-          animation: state.severity === "ok" ? undefined : "kirkl-sync-pulse 1.5s ease-in-out infinite",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
-      />
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            background: SEVERITY_DOT[state.severity],
+            display: "block",
+            // Subtle pulse on non-ok states so motion draws the eye without
+            // being obnoxious.
+            animation: state.severity === "ok" ? undefined : "kirkl-sync-pulse 1.5s ease-in-out infinite",
+          }}
+        />
+      </button>
       {/* Single keyframe definition. styled-components is used elsewhere but
           we keep this component dep-free so it can be dropped into any app
           header without extra imports. */}
