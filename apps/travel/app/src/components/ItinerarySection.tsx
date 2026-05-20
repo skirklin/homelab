@@ -21,6 +21,7 @@ import { useTravelBackend } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { daysToBackend } from "../adapters";
 import { mapsUrl } from "../utils";
+import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 import {
   calculateDayLoad,
   validateDay,
@@ -272,7 +273,7 @@ export function ItinerarySection({
   const { state } = useTravelContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("view") || "timeline";
-  const selectedItin = searchParams.get("itin") || itineraries.find((i) => i.isActive)?.id || itineraries[0]?.id;
+  const currentItin = useSelectedItinerary(itineraries);
 
   const setTab = (tab: string) => {
     setSearchParams((prev) => {
@@ -289,8 +290,6 @@ export function ItinerarySection({
       return next;
     }, { replace: true });
   };
-
-  const currentItin = itineraries.find((i) => i.id === selectedItin);
 
   const timeline = currentItin ? (
     <ItineraryTimeline
@@ -357,7 +356,7 @@ export function ItinerarySection({
           {itineraries.length > 1 && (
             <Select
               size="small"
-              value={selectedItin}
+              value={currentItin?.id}
               onChange={setSelectedItin}
               style={{ minWidth: 120 }}
               options={itineraries.map((i) => ({

@@ -7,7 +7,7 @@
  * deep-link here. Each day has its own URL.
  */
 import React, { useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeftOutlined,
   CarOutlined,
@@ -36,6 +36,7 @@ import {
 import { ActivityReflection, DayJournal, isDayReflectable } from "./InlineReflection";
 import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { hikeSummary } from "./ActivityList";
+import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 
 // ── Layout ──────────────────────────────────────────────────────
 
@@ -211,7 +212,6 @@ const DriveTimeBadge = styled.div`
 export function DayView() {
   const { tripId, date } = useParams<{ tripId: string; date: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { state } = useTravelContext();
   const travel = useTravelBackend();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -232,10 +232,7 @@ export function DayView() {
     return m;
   }, [activities]);
 
-  const selectedItinId = searchParams.get("itin");
-  const itinerary = (selectedItinId
-    ? itineraries.find((i) => i.id === selectedItinId)
-    : null) ?? itineraries.find((i) => i.isActive) ?? itineraries[0];
+  const itinerary = useSelectedItinerary(itineraries);
 
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
 

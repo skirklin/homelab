@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Button,
   Tag,
@@ -38,6 +38,7 @@ import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
+import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 
 const TwoColumn = styled.div`
   display: grid;
@@ -157,7 +158,6 @@ const SourceRef = styled.div<{ $type: string }>`
 export function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { state } = useTravelContext();
   const travel = useTravelBackend();
 
@@ -238,12 +238,7 @@ export function TripDetail() {
   };
 
   const hasMapData = activities.some((a) => a.lat != null && a.lng != null);
-  // useSearchParams (not window.location.search) so React re-renders when the
-  // URL's `?itin=…` changes — matches DayView/ItinerarySection.
-  const selectedItinId = searchParams.get("itin");
-  const activeItin = (selectedItinId ? itineraries.find((i) => i.id === selectedItinId) : null)
-    || itineraries.find((i) => i.isActive)
-    || itineraries[0];
+  const activeItin = useSelectedItinerary(itineraries);
 
   // Activity IDs referenced anywhere on the active itinerary (slots + flights
   // + lodging). Used by ActivityList to badge scheduled items.
