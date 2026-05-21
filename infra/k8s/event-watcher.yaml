@@ -85,9 +85,10 @@ spec:
             # the watcher just logs (preserves pre-alert behavior).
             #
             # ALERT_USER_ID is the PB user record id (15-char) of whoever should
-            # get woken up — leave unset until we stamp the operator user in.
-            # - name: ALERT_USER_ID
-            #   value: "<operator-user-id>"
+            # get woken up. Set to the operator's id; push fanout hits all
+            # subscribed devices under this user (5 today: phone + browsers).
+            - name: ALERT_USER_ID
+              value: "y3rp8lm6njo45t6"
             - name: ALERT_AFTER_FAILURES
               value: "10"
             - name: ALERT_COOLDOWN_MS
