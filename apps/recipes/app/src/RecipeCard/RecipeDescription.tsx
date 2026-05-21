@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Context } from '../context';
 import { StyledTextArea } from '../StyledComponents';
@@ -6,6 +6,8 @@ import { getRecipeFromState } from '../state';
 import { getRecipeDescription } from '../storage';
 import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import { useAuth } from '@kirkl/shared';
+import { LinkedText, makeStateResolver } from '../recipeLinks';
+import { useBasePath } from '../RecipesRoutes';
 
 
 const Description = styled.div`
@@ -26,6 +28,8 @@ function RecipeDescription(props: RecipeCardProps) {
   const [editable, setEditablePrimitive] = useState(false);
   const { state, dispatch } = useContext(Context);
   const { user: authUser } = useAuth();
+  const basePath = useBasePath();
+  const resolver = useMemo(() => makeStateResolver(state), [state]);
 
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) { return null }
@@ -61,7 +65,9 @@ function RecipeDescription(props: RecipeCardProps) {
   } else {
     return (
       <Description onDoubleClick={() => setEditable(true)}>
-        {description || <Placeholder>Add a description?</Placeholder>}
+        {description
+          ? <LinkedText text={description} resolver={resolver} basePath={basePath} />
+          : <Placeholder>Add a description?</Placeholder>}
       </Description>
     )
   }

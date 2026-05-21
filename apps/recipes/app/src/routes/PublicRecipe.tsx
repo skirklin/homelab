@@ -2,7 +2,7 @@
  * Public recipe view - accessible without authentication
  * Shows recipe in read-only mode with a prompt to sign in for full features
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Spin, Button, Alert } from "antd";
@@ -12,6 +12,7 @@ import { boxFromBackend, recipeFromBackend } from "../adapters";
 import { getRecipeData, getBoxName, type PlainRecipe, type PlainBox } from "../storage";
 import { decodeStr } from "../converters";
 import { PageContainer, AppHeader } from "@kirkl/shared";
+import { LinkedText, type RecipeLinkResolver } from "../recipeLinks";
 
 const RecipeContainer = styled.article`
   max-width: 800px;
@@ -161,6 +162,18 @@ export function PublicRecipe() {
     fetchRecipe();
   }, [boxId, recipeId, recipesBackend]);
 
+  // PublicRecipe loads only the current box, so cross-recipe links can only
+  // resolve to recipes in this same box. Anything else falls back to its label
+  // (or "[unknown recipe]") via the renderer's graceful-degrade path.
+  const resolver = useMemo<RecipeLinkResolver | undefined>(() => {
+    if (!box || !recipe) return undefined;
+    return (rid: string) => (rid === recipe.id ? { boxId: box.id, recipe } : undefined);
+  }, [box, recipe]);
+  // PublicRecipe is reachable both standalone (`/r/...`) and embedded under
+  // `/recipes/...`. The pathname prefix is the simplest source of truth for
+  // building hrefs that stay in-app.
+  const basePath = window.location.pathname.startsWith("/recipes") ? "/recipes" : "";
+
   const handleSignIn = () => {
     // Navigate to the main app which will show the auth screen
     // After signing in, user will be redirected back
@@ -296,7 +309,11 @@ export function PublicRecipe() {
             </TagList>
           )}
 
-          {description && <RecipeDescription>{description}</RecipeDescription>}
+          {description && (
+            <RecipeDescription>
+              <LinkedText text={description} resolver={resolver} basePath={basePath} />
+            </RecipeDescription>
+          )}
 
           {ingredients.length > 0 && (
             <Section>
@@ -307,7 +324,7 @@ export function PublicRecipe() {
                     {ingredient.startsWith("## ") ? (
                       <strong>{ingredient.slice(3)}</strong>
                     ) : (
-                      decodeStr(ingredient)
+                      <LinkedText text={ingredient} resolver={resolver} basePath={basePath} />
                     )}
                   </IngredientItem>
                 ))}
@@ -324,7 +341,7 @@ export function PublicRecipe() {
                     {instruction.startsWith("## ") ? (
                       <strong>{instruction.slice(3)}</strong>
                     ) : (
-                      decodeStr(instruction)
+                      <LinkedText text={instruction} resolver={resolver} basePath={basePath} />
                     )}
                   </InstructionItem>
                 ))}

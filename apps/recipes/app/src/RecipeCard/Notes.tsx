@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import { commentToStr, strToComment } from '../converters';
 import { getRecipeFromState } from '../state';
 import { Context } from '../context';
@@ -6,6 +6,8 @@ import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import styled from 'styled-components';
 import { StyledTextArea } from '../StyledComponents';
 import { useAuth } from '@kirkl/shared';
+import { LinkedText, makeStateResolver } from '../recipeLinks';
+import { useBasePath } from '../RecipesRoutes';
 
 const NotesSection = styled.div`
   margin-top: var(--space-md);
@@ -40,6 +42,8 @@ function Notes(props: RecipeCardProps) {
   const { recipeId, boxId } = props;
   const { state, dispatch } = useContext(Context);
   const { user: authUser } = useAuth();
+  const basePath = useBasePath();
+  const resolver = useMemo(() => makeStateResolver(state), [state]);
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) {
     return null
@@ -76,7 +80,9 @@ function Notes(props: RecipeCardProps) {
       <NotesSection>
         <SectionTitle>Notes</SectionTitle>
         <NotesContent onDoubleClick={() => setEditable(true)}>
-          {comment || <Placeholder>Add a note?</Placeholder>}
+          {comment
+            ? <LinkedText text={comment} resolver={resolver} basePath={basePath} />
+            : <Placeholder>Add a note?</Placeholder>}
         </NotesContent>
       </NotesSection>
     )

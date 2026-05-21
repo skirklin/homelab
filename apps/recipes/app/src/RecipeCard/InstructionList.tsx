@@ -1,14 +1,16 @@
 import type React from 'react';
-import { useContext, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import type { Recipe } from 'schema-dts';
-import { instructionsToStr, strToInstructions, decodeStr } from '../converters';
+import { instructionsToStr, strToInstructions } from '../converters';
 import { getRecipeFromState } from '../state';
 import { Context } from '../context';
 import { getEditableSetter, type RecipeCardProps } from './RecipeCard';
 import { StyledTextArea } from '../StyledComponents';
 import { useCookingMode } from '../CookingModeContext';
 import { useAuth } from '@kirkl/shared';
+import { LinkedText, makeStateResolver } from '../recipeLinks';
+import { useBasePath } from '../RecipesRoutes';
 
 const InstructionsSection = styled.div``
 
@@ -65,6 +67,8 @@ function InstructionList(props: RecipeCardProps) {
   const { state, dispatch } = useContext(Context);
   const { user: authUser } = useAuth();
   const { isCookingMode } = useCookingMode();
+  const basePath = useBasePath();
+  const resolver = useMemo(() => makeStateResolver(state), [state]);
   const recipe = getRecipeFromState(state, boxId, recipeId)
   if (recipe === undefined) {
     return null
@@ -75,14 +79,18 @@ function InstructionList(props: RecipeCardProps) {
   function formatInstructionList(instructions: Recipe["recipeInstructions"]) {
     let listElts: React.ReactNode[];
     if (typeof instructions === "string") {
-      listElts = [<RecipeStep key={0}>{decodeStr(instructions)}</RecipeStep>]
+      listElts = [
+        <RecipeStep key={0}>
+          <LinkedText text={instructions} resolver={resolver} basePath={basePath} />
+        </RecipeStep>,
+      ]
     } else {
       const instructionArray = Array.isArray(instructions) ? instructions : [];
       listElts = instructionArray.map((ri: any, idx) => {
         const stepIngs = isCookingMode && stepIngredients?.[idx.toString()];
         return (
           <RecipeStep key={idx}>
-            {decodeStr(String(ri.text ?? ''))}
+            <LinkedText text={String(ri.text ?? '')} resolver={resolver} basePath={basePath} />
             {stepIngs && stepIngs.length > 0 && (
               <StepIngredientsList>
                 {stepIngs.map((ing, i) => (
