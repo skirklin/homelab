@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
-import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined } from "@ant-design/icons";
+import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -417,6 +417,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
   // Menu items - always include Insights, Display, and Export for mobile access
   const menuItems = [
+    { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("journal") },
     { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("insights") },
     { key: "display", icon: <ControlOutlined />, label: "Display Settings", onClick: () => setShowSettings(true) },
     { type: "divider" as const },
@@ -430,6 +431,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
   const desktopActions = (
     <>
+      <Button
+        icon={<BookOutlined />}
+        onClick={() => navigate("journal")}
+      >
+        Journal
+      </Button>
       <Button
         icon={<LineChartOutlined />}
         onClick={() => navigate("insights")}
