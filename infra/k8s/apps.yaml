@@ -51,6 +51,60 @@ spec:
       targetPort: 80
 
 ---
+# --- home-beta (parallel deploy for beta.kirkl.in) ---
+# Mirrors home's shape exactly but pulls the `:beta` tag, so we can ship an
+# in-progress home build to beta.kirkl.in while production stays on `:latest`.
+# Use `./infra/deploy.sh --beta` from any branch to push to this Deployment
+# without touching production. See CLAUDE.md → "Beta channel" for details.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: home-beta
+  namespace: homelab
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: home-beta
+  template:
+    metadata:
+      labels:
+        app: home-beta
+    spec:
+      containers:
+        - name: home-beta
+          image: localhost:30500/homelab/home:beta
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests: { memory: 32Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: home-beta
+  namespace: homelab
+spec:
+  selector:
+    app: home-beta
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
 # --- recipes ---
 apiVersion: apps/v1
 kind: Deployment
