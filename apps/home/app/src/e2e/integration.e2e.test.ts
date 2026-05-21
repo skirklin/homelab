@@ -48,12 +48,6 @@ describe("User profile fields across modules", () => {
     expect(record).toHaveProperty("household_slugs");
   });
 
-  it("user record has life_log_id field", async () => {
-    const user = await createTestUser(ctx);
-    const record = await ctx.pb.collection("users").getOne(user.id);
-    expect(record).toHaveProperty("life_log_id");
-  });
-
   it("user record has recipe_boxes field", async () => {
     const user = await createTestUser(ctx);
     const record = await ctx.pb.collection("users").getOne(user.id);
@@ -77,25 +71,6 @@ describe("User profile fields across modules", () => {
     const record = await ctx.pb.collection("users").getOne(user.id);
     expect(record.shopping_slugs).toContain("my-list");
     expect(record.shopping_slugs).toContain("family-shop");
-
-    await cleanup.cleanup();
-  });
-
-  it("life_log_id can be set and read back", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await ctx.pb.collection("life_logs").create({
-      name: "Test Log",
-      owner: user.id,
-      manifest: { widgets: [] },
-    });
-    cleanup.track("life_logs", log.id);
-
-    await ctx.pb.collection("users").update(user.id, { life_log_id: log.id });
-    const record = await ctx.pb.collection("users").getOne(user.id);
-    expect(record.life_log_id).toBe(log.id);
 
     await cleanup.cleanup();
   });

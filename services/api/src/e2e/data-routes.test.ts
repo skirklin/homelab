@@ -220,11 +220,12 @@ beforeAll(async () => {
   lifeEventId = event.id;
 
   // --- Set user slugs ---
+  // No life_log_id here — life_logs.owner (set above) is the source of truth
+  // for the GET /data/life/log lookup post-0029.
   await adminPb.collection("users").update(userId, {
     shopping_slugs: { groceries: shoppingListId },
     household_slugs: { home: taskListId },
     travel_slugs: { main: travelLogId },
-    life_log_id: lifeLogId,
   });
 });
 
