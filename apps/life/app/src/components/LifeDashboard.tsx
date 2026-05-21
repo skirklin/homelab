@@ -28,10 +28,10 @@ const TitleWithStatus = styled.div`
 `;
 import { useLifeContext } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
-import { WidgetRenderer } from "./widgets";
+import { EventLogger } from "./EventLogger";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
-import { MANIFEST, SESSIONS } from "../manifest";
+import { TRACKABLES, GROUP_ORDER, RANDOM_SAMPLES, SESSIONS, type Trackable } from "../manifest";
 import {
   initializeMessaging,
   requestNotificationPermission,
@@ -112,6 +112,21 @@ const SessionRow = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-sm);
+`;
+
+const GroupSection = styled.div`
+  margin-bottom: var(--space-md);
+
+  &:last-child { margin-bottom: 0; }
+`;
+
+const GroupLabel = styled.div`
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+  min-height: 1em; /* keep spacing consistent for unlabeled "more" group */
 `;
 
 const SessionCard = styled.button`
@@ -281,8 +296,19 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const logId = state.log?.id ?? null;
   useEntriesSubscription(logId);
 
-  const manifest = MANIFEST;
   const allEntries = Array.from(state.entries.values());
+
+  // Group trackables for layout. Unknown groups (or trackables without a
+  // group) fall through to "more".
+  const grouped = TRACKABLES.reduce<Record<string, Trackable[]>>((acc, t) => {
+    const key = t.group ?? "more";
+    (acc[key] ??= []).push(t);
+    return acc;
+  }, {});
+  const groupKeys: string[] = [
+    ...GROUP_ORDER.filter((k) => grouped[k]?.length),
+    ...Object.keys(grouped).filter((k) => !(GROUP_ORDER as readonly string[]).includes(k)),
+  ];
 
   // Check notification status on mount
   useEffect(() => {
@@ -290,20 +316,21 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     setNotificationsEnabled(status === "granted");
   }, []);
 
-  // Handle quick response submission (from notification action buttons)
+  // Handle quick response submission (from notification action buttons).
+  // questionId is the trackable id (matches the new value-shaped event model).
   const handleQuickResponse = useCallback(async (questionId: string, value: number) => {
     if (!user?.uid || !state.log?.id) {
       console.error("Cannot submit quick response: missing user or log");
       return;
     }
     try {
-      await life.addSampleResponse(state.log.id, { [questionId]: value }, user.uid);
+      await life.addEntry(state.log.id, questionId, { value, source: "sample" }, user.uid);
       message.success("Response saved");
     } catch (error) {
       console.error("Failed to save quick response:", error);
       message.error("Failed to save response");
     }
-  }, [user?.uid, state.log?.id, life]);
+  }, [user?.uid, state.log?.id, life, message]);
 
   // Initialize messaging and listen for foreground messages
   useEffect(() => {
@@ -409,7 +436,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     URL.revokeObjectURL(url);
   };
 
-  const samplingEnabled = manifest.randomSamples?.enabled;
+  const samplingEnabled = RANDOM_SAMPLES.enabled;
 
   const handleSignOut = () => {
     getBackend().authStore.clear();
@@ -537,19 +564,23 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
-            <WidgetGrid>
-              {manifest.widgets.map((widget) => (
-                <WidgetRenderer
-                  key={widget.id}
-                  widget={widget}
-                  entries={allEntries}
-                  userId={user?.uid ?? ""}
-                  logId={state.log?.id}
-                  timestamp={getSelectedTimestamp()}
-                  migrations={manifest.migrations}
-                />
-              ))}
-            </WidgetGrid>
+            {groupKeys.map((key) => (
+              <GroupSection key={key}>
+                <GroupLabel>{key === "more" ? "" : key}</GroupLabel>
+                <WidgetGrid>
+                  {grouped[key].map((trackable) => (
+                    <EventLogger
+                      key={trackable.id}
+                      trackable={trackable}
+                      entries={allEntries}
+                      userId={user?.uid ?? ""}
+                      logId={state.log?.id}
+                      timestamp={getSelectedTimestamp()}
+                    />
+                  ))}
+                </WidgetGrid>
+              </GroupSection>
+            ))}
           </SwipeContainer>
         </Section>
       </PageContainer>
@@ -557,7 +588,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       <SampleResponseModal
         open={showSampleModal}
         onClose={() => setShowSampleModal(false)}
-        config={manifest.randomSamples}
+        config={RANDOM_SAMPLES}
         userId={user?.uid ?? ""}
         logId={state.log?.id}
       />
