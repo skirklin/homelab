@@ -2,7 +2,7 @@ import { useState } from "react";
 import styled from "styled-components";
 import { Popover, Button } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
-import type { LogEntry } from "../../types";
+import type { LogEntry } from "../types";
 import { useLifeBackend } from "@kirkl/shared";
 
 const EntryList = styled.div`

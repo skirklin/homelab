@@ -35,7 +35,6 @@ function mkAct(id: string, overrides: Partial<Activity> = {}): Activity {
     confirmationCode: "",
     details: "",
     setting: "",
-    bookingReqs: [],
     rating: null,
     ratingCount: null,
     photoRef: "",

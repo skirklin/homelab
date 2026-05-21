@@ -74,7 +74,6 @@ function makeActivity(overrides: Partial<Omit<Activity, "id">> = {}): Omit<Activ
     confirmationCode: "",
     details: "",
     setting: "",
-    bookingReqs: [],
     rating: null,
     ratingCount: null,
     photoRef: "",

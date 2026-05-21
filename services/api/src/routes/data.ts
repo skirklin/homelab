@@ -958,7 +958,6 @@ function activityResponse(a: Record<string, unknown>) {
     confirmation_code: a.confirmation_code,
     details: a.details,
     setting: a.setting,
-    booking_reqs: a.booking_reqs,
     rating: a.rating,
     rating_count: a.rating_count,
     photo_ref: a.photo_ref,
@@ -1089,7 +1088,6 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     confirmation_code?: string;
     details?: string;
     flight_info?: Record<string, unknown> | null;
-    booking_reqs?: Record<string, unknown> | null;
     verdict?: string;
     personal_notes?: string;
     experienced_at?: string;
@@ -1115,7 +1113,6 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     confirmation_code: body.confirmation_code || "",
     details: body.details || "",
     flight_info: body.flight_info ?? null,
-    booking_reqs: body.booking_reqs ?? null,
     verdict: body.verdict || "",
     personal_notes: body.personal_notes || "",
     experienced_at: body.experienced_at || "",
@@ -1140,7 +1137,7 @@ dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
     "name", "category", "location", "place_id", "lat", "lng",
     "description", "cost_notes", "duration_estimate", "walk_miles",
     "elevation_gain_feet", "difficulty", "confirmation_code",
-    "details", "setting", "booking_reqs", "rating", "rating_count",
+    "details", "setting", "rating", "rating_count",
     "photo_ref", "flight_info", "verdict", "personal_notes", "experienced_at",
     "trip_id",
   ];

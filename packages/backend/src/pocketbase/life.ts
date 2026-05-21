@@ -18,6 +18,8 @@ function logFromRecord(r: RecordModel): LifeLog {
     sampleSchedule: r.sample_schedule || null,
     morningReminderTime: r.morning_reminder_time || null,
     eveningReminderTime: r.evening_reminder_time || null,
+    weeklyReminderTime: r.weekly_reminder_time || null,
+    lastWeeklyReminderSent: r.last_weekly_reminder_sent || null,
     created: r.created,
     updated: r.updated,
   };
@@ -71,7 +73,7 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
   async updateReminderTimes(
     logId: string,
-    times: { morning?: string | null; evening?: string | null },
+    times: { morning?: string | null; evening?: string | null; weekly?: string | null },
   ): Promise<void> {
     const patch: Record<string, unknown> = {};
     if (Object.prototype.hasOwnProperty.call(times, "morning")) {
@@ -79,6 +81,9 @@ export class PocketBaseLifeBackend implements LifeBackend {
     }
     if (Object.prototype.hasOwnProperty.call(times, "evening")) {
       patch.evening_reminder_time = times.evening ?? "";
+    }
+    if (Object.prototype.hasOwnProperty.call(times, "weekly")) {
+      patch.weekly_reminder_time = times.weekly ?? "";
     }
     if (Object.keys(patch).length === 0) return;
     await this.wpb.collection("life_logs").update(logId, patch);
@@ -118,19 +123,6 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
   async deleteEntry(entryId: string): Promise<void> {
     await this.wpb.collection("life_events").delete(entryId);
-  }
-
-  async addSampleResponse(logId: string, responses: Record<string, unknown>, userId: string): Promise<string> {
-    const id = newId();
-    await this.wpb.collection("life_events").create({
-      id,
-      log: logId,
-      subject_id: "__sample__",
-      timestamp: new Date().toISOString(),
-      created_by: userId,
-      data: { ...responses, source: "sample" },
-    });
-    return id;
   }
 
   subscribeToEntries(logId: string, onEntries: (entries: LifeEntry[]) => void): Unsubscribe {

@@ -15,13 +15,13 @@ export interface LifeBackend {
   clearSampleSchedule(logId: string): Promise<void>;
 
   /**
-   * Set or clear morning/evening reminder times for a log. Each value is
-   * either a "HH:MM" 24h string or null to disable that reminder. Omitted
+   * Set or clear morning/evening/weekly reminder times for a log. Each value
+   * is either a "HH:MM" 24h string or null to disable that reminder. Omitted
    * keys are left untouched.
    */
   updateReminderTimes(
     logId: string,
-    times: { morning?: string | null; evening?: string | null },
+    times: { morning?: string | null; evening?: string | null; weekly?: string | null },
   ): Promise<void>;
 
   // --- Entries ---
@@ -29,7 +29,6 @@ export interface LifeBackend {
   addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string>;
   updateEntry(entryId: string, updates: { timestamp?: Date; data?: Record<string, unknown>; notes?: string }): Promise<void>;
   deleteEntry(entryId: string): Promise<void>;
-  addSampleResponse(logId: string, responses: Record<string, unknown>, userId: string): Promise<string>;
 
   // --- Subscriptions ---
 

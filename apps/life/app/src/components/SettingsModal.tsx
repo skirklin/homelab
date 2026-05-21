@@ -6,7 +6,7 @@ import styled from "styled-components";
 import { useDisplaySettings, type WidgetSize } from "../display-settings";
 import { useLifeContext } from "../life-context";
 import type { LifeLog } from "../types";
-import { MANIFEST } from "../manifest";
+import { RANDOM_SAMPLES } from "../manifest";
 import { useUserBackend, useLifeBackend, useFeedback } from "@kirkl/shared";
 
 const SettingRow = styled.div`
@@ -137,9 +137,10 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   const [loadingTokens, setLoadingTokens] = useState(false);
   const [savingMorning, setSavingMorning] = useState(false);
   const [savingEvening, setSavingEvening] = useState(false);
+  const [savingWeekly, setSavingWeekly] = useState(false);
 
   const schedule = log?.sampleSchedule;
-  const config = MANIFEST.randomSamples;
+  const config = RANDOM_SAMPLES;
   const now = Date.now();
 
   const userTz = useMemo(
@@ -158,14 +159,20 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   };
   const morningValue: Dayjs | null = parseHHmm(log?.morningReminderTime);
   const eveningValue: Dayjs | null = parseHHmm(log?.eveningReminderTime);
+  const weeklyValue: Dayjs | null = parseHHmm(log?.weeklyReminderTime);
 
   const saveReminder = async (
-    which: "morning" | "evening",
+    which: "morning" | "evening" | "weekly",
     value: Dayjs | null,
   ) => {
     if (!log?.id) return;
     const formatted = value ? value.format("HH:mm") : null;
-    const setSaving = which === "morning" ? setSavingMorning : setSavingEvening;
+    const setSaving =
+      which === "morning"
+        ? setSavingMorning
+        : which === "evening"
+          ? setSavingEvening
+          : setSavingWeekly;
     setSaving(true);
     try {
       await life.updateReminderTimes(log.id, { [which]: formatted });
@@ -173,6 +180,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
         ...log,
         morningReminderTime: which === "morning" ? formatted : log.morningReminderTime,
         eveningReminderTime: which === "evening" ? formatted : log.eveningReminderTime,
+        weeklyReminderTime: which === "weekly" ? formatted : log.weeklyReminderTime,
       };
       dispatch({ type: "SET_LOG", log: nextLog });
     } catch (err) {
@@ -247,7 +255,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
           <SectionTz>times in {userTz}</SectionTz>
         </SectionTitle>
         <SettingDescription>
-          Push notification to start the morning or evening session. Leave empty to disable.
+          Push notification to start a session. Leave empty to disable.
         </SettingDescription>
         <ReminderRow>
           <ReminderLabel>Morning</ReminderLabel>
@@ -273,6 +281,20 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
               onChange={(v) => saveReminder("evening", v)}
               allowClear
               disabled={savingEvening || !log?.id}
+              placeholder="Off"
+            />
+          </ReminderControls>
+        </ReminderRow>
+        <ReminderRow>
+          <ReminderLabel>Weekly review (Sunday)</ReminderLabel>
+          <ReminderControls>
+            <TimePicker
+              format="HH:mm"
+              minuteStep={5}
+              value={weeklyValue}
+              onChange={(v) => saveReminder("weekly", v)}
+              allowClear
+              disabled={savingWeekly || !log?.id}
               placeholder="Off"
             />
           </ReminderControls>

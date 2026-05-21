@@ -21,6 +21,12 @@ export interface LifeLog {
   morningReminderTime?: string | null;
   /** "HH:MM" 24h string, or null/undefined when no evening reminder is set. */
   eveningReminderTime?: string | null;
+  /** "HH:MM" 24h string for the weekly review reminder (fires Sunday). Null
+   *  or undefined disables it. */
+  weeklyReminderTime?: string | null;
+  /** "YYYY-MM-DD" in the user's tz — last day a weekly review push went
+   *  out. Server-side idempotency for the Sunday cron. */
+  lastWeeklyReminderSent?: string | null;
   created: string;
   updated: string;
 }
