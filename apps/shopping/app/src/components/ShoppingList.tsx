@@ -41,7 +41,7 @@ import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";
 import { ShoppingTrips } from "./ShoppingTrips";
 import { ListSettings } from "./ListSettings";
-import type { ShoppingItem, CategoryId, CategoryDef } from "../types";
+import { UNCATEGORIZED_CATEGORY_ID, type ShoppingItem, type CategoryId, type CategoryDef } from "../types";
 
 const Container = styled.div`
   min-height: 100vh;
@@ -234,9 +234,9 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
   const itemsByCategoryId = getItemsByCategoryId(state);
   const configuredCategories = state.list?.categories || [];
 
-  // Always include "uncategorized" at the end for new items
-  const uncategorizedDef: CategoryDef = { id: "uncategorized", name: "Uncategorized" };
-  const hasUncategorized = configuredCategories.some(c => c.id === "uncategorized");
+  // Always include the uncategorized pseudo-category at the end for new items
+  const uncategorizedDef: CategoryDef = { id: UNCATEGORIZED_CATEGORY_ID, name: "Uncategorized" };
+  const hasUncategorized = configuredCategories.some(c => c.id === UNCATEGORIZED_CATEGORY_ID);
   const categories = hasUncategorized
     ? configuredCategories
     : [...configuredCategories, uncategorizedDef];
@@ -269,16 +269,23 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
                 },
               }}
             >
-            {categories.map((category) => (
-              <CategorySection
-                key={category.id}
-                category={category}
-                items={itemsByCategoryId.get(category.id) || []}
-                collapsed={collapsedCategories.has(category.id)}
-                onToggleCollapse={() => toggleCategoryCollapse(category.id)}
-                forceCollapse={draggedItem !== null}
-              />
-            ))}
+            {categories.map((category) => {
+              const items = itemsByCategoryId.get(category.id) || [];
+              // Hide the auto-appended "Uncategorized" pseudo-category when empty.
+              // User-configured categories stay visible even when empty so they
+              // remain drop targets for drag-and-drop.
+              if (category.id === UNCATEGORIZED_CATEGORY_ID && items.length === 0) return null;
+              return (
+                <CategorySection
+                  key={category.id}
+                  category={category}
+                  items={items}
+                  collapsed={collapsedCategories.has(category.id)}
+                  onToggleCollapse={() => toggleCategoryCollapse(category.id)}
+                  forceCollapse={draggedItem !== null}
+                />
+              );
+            })}
             {createPortal(
               <DragOverlay modifiers={[snapVerticalToCursor]}>
                 {draggedItem ? (

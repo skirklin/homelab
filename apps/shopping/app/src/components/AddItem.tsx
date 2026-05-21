@@ -7,6 +7,7 @@ import { useAuth, useFeedback } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend } from "@kirkl/shared";
 import { getItemsFromState } from "../selectors";
+import { UNCATEGORIZED_CATEGORY_ID } from "../types";
 
 const Container = styled.div`
   padding: var(--space-md);
@@ -103,7 +104,7 @@ export function AddItem() {
     const historyEntry = state.history.find(
       (h) => h.ingredient.toLowerCase() === normalizedIngredient
     );
-    const categoryId = historyEntry?.categoryId || "uncategorized";
+    const categoryId = historyEntry?.categoryId || UNCATEGORIZED_CATEGORY_ID;
 
     // Fire and forget - pass category to skip network lookup. We don't
     // catch the promise: transient errors stay queued in wpb for automatic

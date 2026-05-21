@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import styled from "styled-components";
 import { Button } from "antd";
 import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
-import type { ShoppingTrip, CategoryDef } from "../types";
+import { UNCATEGORIZED_CATEGORY_ID, type ShoppingTrip, type CategoryDef } from "../types";
 import { useShoppingBackend } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 
@@ -148,7 +148,7 @@ export function ShoppingTrips({ trips, categories, userId, onBack }: Props) {
     if (!listId) return;
     const normalized = ingredient.toLowerCase().trim();
     const historyEntry = state.history.find((h) => h.ingredient.toLowerCase() === normalized);
-    const categoryId = historyEntry?.categoryId || "uncategorized";
+    const categoryId = historyEntry?.categoryId || UNCATEGORIZED_CATEGORY_ID;
     // wpb handles transient errors by queueing for retry; permanent errors
     // bubble up as unhandled WrappedPbError rejections that the global
     // useOptimisticErrorToast surfaces. Locally catching here would
