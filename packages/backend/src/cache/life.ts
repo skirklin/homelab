@@ -15,7 +15,6 @@ export function withLifeCache(inner: LifeBackend): LifeBackend {
     addEntry: (id, w, d, u, o) => inner.addEntry(id, w, d, u, o),
     updateEntry: (id, u) => inner.updateEntry(id, u),
     deleteEntry: (id) => inner.deleteEntry(id),
-    addSampleResponse: (id, r, u) => inner.addSampleResponse(id, r, u),
 
     subscribeToEntries(logId, onEntries): Unsubscribe {
       const key = `life:entries:${logId}`;

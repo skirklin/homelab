@@ -120,19 +120,6 @@ export class PocketBaseLifeBackend implements LifeBackend {
     await this.wpb.collection("life_events").delete(entryId);
   }
 
-  async addSampleResponse(logId: string, responses: Record<string, unknown>, userId: string): Promise<string> {
-    const id = newId();
-    await this.wpb.collection("life_events").create({
-      id,
-      log: logId,
-      subject_id: "__sample__",
-      timestamp: new Date().toISOString(),
-      created_by: userId,
-      data: { ...responses, source: "sample" },
-    });
-    return id;
-  }
-
   subscribeToEntries(logId: string, onEntries: (entries: LifeEntry[]) => void): Unsubscribe {
     let cancelled = false;
     const entriesMap = new Map<string, LifeEntry>();

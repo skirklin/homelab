@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import styled from "styled-components";
-import { Modal, Button, InputNumber, Input } from "antd";
-import { useFeedback } from "@kirkl/shared";
-import type { SampleQuestion, RandomSamplesConfig } from "../types";
-import { useLifeBackend } from "@kirkl/shared";
+import { Modal, Button } from "antd";
+import { useFeedback, useLifeBackend } from "@kirkl/shared";
+import { type SampleQuestion, type RandomSamplesConfig, getTrackable } from "../manifest";
 
 const QuestionContainer = styled.div`
   display: flex;
@@ -21,11 +20,6 @@ const QuestionLabel = styled.label`
   font-size: var(--font-size-base);
   font-weight: 500;
   color: var(--color-text);
-`;
-
-const InputWrapper = styled.div`
-  display: flex;
-  align-items: center;
 `;
 
 const NumberRow = styled.div`
@@ -62,101 +56,71 @@ export function SampleResponseModal({
 }: SampleResponseModalProps) {
   const { message } = useFeedback();
   const life = useLifeBackend();
-  const [responses, setResponses] = useState<Record<string, unknown>>({});
+  // Map trackableId → numeric rating chosen.
+  const [responses, setResponses] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
 
-  // Reset responses when modal opens
+  // Reset on open.
   useEffect(() => {
-    if (open) {
-      setResponses({});
-    }
+    if (open) setResponses({});
   }, [open]);
 
-  if (!config || !config.questions.length) {
-    return null;
-  }
+  if (!config || !config.questions.length) return null;
 
-  const updateResponse = (questionId: string, value: unknown) => {
-    setResponses((prev) => ({ ...prev, [questionId]: value }));
-  };
+  const setResponse = (id: string, value: number) =>
+    setResponses((prev) => ({ ...prev, [id]: value }));
 
   const handleSubmit = async () => {
     if (!logId || !userId) return;
-
-    // Check if at least one question is answered
-    const hasResponse = Object.values(responses).some(
-      (v) => v !== undefined && v !== null && v !== "" && v !== 0
-    );
-
-    if (!hasResponse) {
+    const answered = Object.entries(responses).filter(([, v]) => typeof v === "number" && v > 0);
+    if (answered.length === 0) {
       message.warning("Please answer at least one question");
       return;
     }
-
     setSaving(true);
     try {
-      await life.addSampleResponse(logId, responses, userId);
+      // Write one value-shaped event per answered question. Each lands as a
+      // normal event under the question's trackable id, so it flows into the
+      // same charts and aggregations as manually-logged ratings.
+      await Promise.all(
+        answered.map(([trackableId, value]) =>
+          life.addEntry(logId, trackableId, { value, source: "sample" }, userId),
+        ),
+      );
       message.success("Response saved");
       onClose();
-    } catch (error) {
-      console.error("Failed to save response:", error);
+    } catch (err) {
+      console.error("Failed to save response:", err);
       message.error("Failed to save response");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleSkip = () => {
-    onClose();
-  };
+  const handleSkip = () => onClose();
 
-  const renderQuestionInput = (question: SampleQuestion) => {
-    const value = responses[question.id];
+  const renderQuestion = (question: SampleQuestion) => {
+    const trackable = getTrackable(question.trackableId);
+    const label = question.label ?? trackable?.label ?? question.trackableId;
+    const max = 5;
+    const currentValue = responses[question.trackableId];
 
-    switch (question.type) {
-      case "rating": {
-        const max = question.max || 5;
-        const numbers = Array.from({ length: max }, (_, i) => i + 1);
-        const currentValue = value as number | undefined;
-        return (
-          <NumberRow>
-            {numbers.map((n) => (
-              <NumberButton
-                key={n}
-                $selected={currentValue !== undefined && n <= currentValue}
-                onClick={() => updateResponse(question.id, n)}
-              >
-                {n}
-              </NumberButton>
-            ))}
-          </NumberRow>
-        );
-      }
-
-      case "number":
-        return (
-          <InputNumber
-            value={value as number | undefined}
-            onChange={(v) => updateResponse(question.id, v)}
-            min={question.min}
-            placeholder="Enter a number"
-            style={{ width: "100%" }}
-          />
-        );
-
-      case "text":
-        return (
-          <Input.TextArea
-            value={(value as string) || ""}
-            onChange={(e) => updateResponse(question.id, e.target.value)}
-            placeholder={question.placeholder || "Enter your response"}
-            rows={3}
-          />
-        );
-
-      default:
-        return null;
-    }
+    return (
+      <QuestionItem key={question.trackableId}>
+        <QuestionLabel>{label}</QuestionLabel>
+        <NumberRow>
+          {Array.from({ length: max }, (_, i) => i + 1).map((n) => (
+            <NumberButton
+              key={n}
+              $selected={currentValue !== undefined && n <= currentValue}
+              onClick={() => setResponse(question.trackableId, n)}
+            >
+              {n}
+            </NumberButton>
+          ))}
+        </NumberRow>
+      </QuestionItem>
+    );
   };
 
   return (
@@ -165,22 +129,13 @@ export function SampleResponseModal({
       open={open}
       onCancel={handleSkip}
       footer={[
-        <Button key="skip" onClick={handleSkip}>
-          Skip
-        </Button>,
-        <Button key="submit" type="primary" onClick={handleSubmit} loading={saving}>
-          Submit
-        </Button>,
+        <Button key="skip" onClick={handleSkip}>Skip</Button>,
+        <Button key="submit" type="primary" onClick={handleSubmit} loading={saving}>Submit</Button>,
       ]}
       maskClosable={false}
     >
       <QuestionContainer>
-        {config.questions.map((question) => (
-          <QuestionItem key={question.id}>
-            <QuestionLabel>{question.label}</QuestionLabel>
-            <InputWrapper>{renderQuestionInput(question)}</InputWrapper>
-          </QuestionItem>
-        ))}
+        {config.questions.map(renderQuestion)}
       </QuestionContainer>
     </Modal>
   );
