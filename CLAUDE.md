@@ -42,6 +42,7 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 | Subdomain | k8s Service |
 |---|---|
 | `kirkl.in` | home |
+| `beta.kirkl.in` | home-beta (parallel home variant) |
 | `recipes.kirkl.in` | recipes |
 | `shopping.kirkl.in` | shopping |
 | `upkeep.kirkl.in` | upkeep (Kanban view) |
@@ -53,6 +54,8 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 
 Home app also serves `/tasks/*` (unified task outliner).
 Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.net`).
+
+**Beta channel (`beta.kirkl.in`)**: a separately-deployed `home` build that shares the same PB, API, auth, and data as production — only the home bundle differs. The `home-beta` Deployment pulls `home:beta` while prod `home` stays on `:latest`. Push to it with `./infra/deploy.sh --beta` (from any branch). The flag pins `IMAGE_TAG=beta`, builds only `home`, rolls out only the `home-beta` Deployment, and marks the deployment record with `variant: "beta"` so the monitor can partition history. Production is never touched. The `*.beta.kirkl.in` subdomain aliases on the standalone apps (recipes/shopping/…) still point at their prod Services — beta only forks `home`.
 
 ## MCP Server
 
