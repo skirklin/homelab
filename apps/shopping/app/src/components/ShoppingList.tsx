@@ -269,16 +269,21 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
                 },
               }}
             >
-            {categories.map((category) => (
-              <CategorySection
-                key={category.id}
-                category={category}
-                items={itemsByCategoryId.get(category.id) || []}
-                collapsed={collapsedCategories.has(category.id)}
-                onToggleCollapse={() => toggleCategoryCollapse(category.id)}
-                forceCollapse={draggedItem !== null}
-              />
-            ))}
+            {categories.map((category) => {
+              const items = itemsByCategoryId.get(category.id) || [];
+              // Skip empty groups — don't render headers with no items under them.
+              if (items.length === 0) return null;
+              return (
+                <CategorySection
+                  key={category.id}
+                  category={category}
+                  items={items}
+                  collapsed={collapsedCategories.has(category.id)}
+                  onToggleCollapse={() => toggleCategoryCollapse(category.id)}
+                  forceCollapse={draggedItem !== null}
+                />
+              );
+            })}
             {createPortal(
               <DragOverlay modifiers={[snapVerticalToCursor]}>
                 {draggedItem ? (
