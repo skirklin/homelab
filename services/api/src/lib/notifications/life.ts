@@ -198,6 +198,11 @@ const SESSION_REMINDERS = {
     body: "Wind-down time. Three quick reflections.",
     url: `${LIFE_SUBDOMAIN_BASE}/evening`,
   },
+  weekly: {
+    title: "Weekly review",
+    body: "Time to look back on the week.",
+    url: `${LIFE_SUBDOMAIN_BASE}/weekly`,
+  },
 } as const;
 
 /**
@@ -328,6 +333,59 @@ export async function runLifeReminderCheck(
         console.error(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId}:`, err);
       }
       sent++;
+    }
+
+    // Weekly review — Sunday only in the user's tz. Same window + idempotency
+    // pattern, but the gate is (a) day-of-week and (b) last_weekly_reminder_sent
+    // ≠ today's date.
+    const weeklyTarget = (logDoc.weekly_reminder_time as string | undefined) || "";
+    if (weeklyTarget) {
+      checked++;
+      const ownerId: string = (logDoc.owner as string) || "";
+      if (!ownerId) {
+        skipped++;
+      } else {
+        const tz = await tzForUser(ownerId);
+        const currentHHmm = formatInTimeZone(now, tz, "HH:mm");
+        const todayYmd = formatInTimeZone(now, tz, "yyyy-MM-dd");
+        // date-fns `e` token: 1..7 with default weekStartsOn=0 (Sun). Using
+        // the `i` token would be ISO (Mon=1..Sun=7); easier is to pull the
+        // day directly via the JS-style `c` token, but the simplest robust
+        // route is parsing the day name.
+        const dayName = formatInTimeZone(now, tz, "EEEE"); // "Sunday"...
+        const isSunday = dayName === "Sunday";
+
+        if (!isSunday) {
+          skipped++;
+        } else if (!withinWindow(weeklyTarget, currentHHmm, 1)) {
+          skipped++;
+        } else {
+          const lastSent = (logDoc.last_weekly_reminder_sent as string | undefined) || "";
+          if (lastSent === todayYmd) {
+            skipped++;
+          } else {
+            await pb.collection("life_logs").update(
+              logDoc.id,
+              { last_weekly_reminder_sent: todayYmd },
+              { $autoCancel: false },
+            );
+
+            const payload = SESSION_REMINDERS.weekly;
+            try {
+              const result = await sendPushToUser(pb, ownerId, {
+                title: payload.title,
+                body: payload.body,
+                url: payload.url,
+                data: { type: "life_weekly_reminder", logId: logDoc.id },
+              }, { preferredOrigins: LIFE_ORIGINS });
+              console.log(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);
+            } catch (err) {
+              console.error(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId}:`, err);
+            }
+            sent++;
+          }
+        }
+      }
     }
   }
 

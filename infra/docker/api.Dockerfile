@@ -4,16 +4,21 @@ FROM node:22-bookworm-slim AS build
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /workspace
 
-# Install deps (cache layer)
+# Install deps (cache layer) — include workspace pkgs that services/api consumes
+# so `pnpm install` can resolve workspace:* protocol entries.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
 COPY services/api/package.json services/api/package.json
+COPY packages/backend/package.json packages/backend/package.json
 RUN pnpm install --frozen-lockfile || pnpm install
 
 # Install Playwright Chromium + system deps
 RUN npx --yes playwright install --with-deps chromium
 
-# Copy source
+# Copy source — services/api + the workspace pkgs it imports. @homelab/backend
+# is consumed as TS source directly (its package.json's main points at
+# src/index.ts, and tsx loads TS at runtime), so no build step is needed.
 COPY services/api/ services/api/
+COPY packages/backend/ packages/backend/
 
 # Runtime — same base for Chromium compat
 FROM node:22-bookworm-slim
@@ -24,6 +29,7 @@ WORKDIR /workspace
 COPY --from=build /root/.cache/ms-playwright /root/.cache/ms-playwright
 COPY --from=build /workspace/node_modules ./node_modules
 COPY --from=build /workspace/services/api ./services/api
+COPY --from=build /workspace/packages/backend ./packages/backend
 COPY --from=build /workspace/package.json ./package.json
 COPY --from=build /workspace/pnpm-workspace.yaml ./pnpm-workspace.yaml
 

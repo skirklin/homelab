@@ -6,7 +6,7 @@ import {
   ClockCircleOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import type { Trip, Activity, Itinerary, BookingRequirement } from "../types";
+import type { Trip, Activity, Itinerary } from "../types";
 
 const Container = styled.div`
   display: flex;
@@ -77,18 +77,7 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
       ? Math.ceil((trip.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
       : null;
 
-    // Set of activity IDs that are actually scheduled on the active itinerary
-    // (slots + flights + lodging). Used to scope warnings so we don't flag
-    // unscheduled "option" activities the user saved but never committed to.
     const activeItin = itineraries.find((i) => i.isActive) || itineraries[0];
-    const scheduledIds = new Set<string>();
-    if (activeItin) {
-      for (const d of activeItin.days) {
-        if (d.lodgingActivityId) scheduledIds.add(d.lodgingActivityId);
-        for (const s of d.slots) scheduledIds.add(s.activityId);
-        for (const f of d.flights || []) scheduledIds.add(f.activityId);
-      }
-    }
 
     // Flights
     const flights = activities.filter((a) => a.category === "Flight");
@@ -185,11 +174,9 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
       });
     }
 
-    // Booking needs are now exclusively driven by structured `bookingReqs` on
-    // each activity (see the "Booking Tasks" block below). The old
-    // description-keyword heuristic that lived here was removed because it
-    // double-counted with bookingReqs and produced false positives whenever an
-    // activity's description happened to contain "book"/"reserve"/"waitlist".
+    // Booking/prep tasks are tracked as outliner tasks tagged `travel:<tripId>`
+    // (see TripChecklist). They surface in the Prep tab rather than here so the
+    // readiness dashboard doesn't double-count them.
 
     // Itinerary completeness
     if (activeItin) {
@@ -226,52 +213,8 @@ export function ReadinessDashboard({ trip, activities, itineraries }: ReadinessD
       });
     }
 
-    // Aggregate booking requirements from all activities
+    // General time-based reminders
     if (daysUntil != null && daysUntil > 0) {
-      const allReqs: { activity: Activity; req: BookingRequirement }[] = [];
-      for (const a of activities) {
-        // Same scoping as Bookings — don't remind about reqs on unscheduled options.
-        if (!scheduledIds.has(a.id)) continue;
-        for (const req of a.bookingReqs || []) {
-          allReqs.push({ activity: a, req });
-        }
-      }
-
-      // Sort by deadline (most urgent first)
-      allReqs.sort((a, b) => b.req.daysBefore - a.req.daysBefore);
-
-      // Show overdue and upcoming booking tasks
-      for (const { activity, req } of allReqs) {
-        const deadline = req.daysBefore;
-        const isOverdue = daysUntil <= deadline;
-        const isDone = req.done;
-
-        if (isDone) {
-          result.push({
-            status: "done",
-            category: "Booking Tasks",
-            title: `${activity.name}: ${req.action}`,
-            detail: `Due ${deadline} days before trip`,
-          });
-        } else if (isOverdue) {
-          result.push({
-            status: "needed",
-            category: "Booking Tasks",
-            title: `${activity.name}: ${req.action}`,
-            detail: `Was due ${deadline} days before trip — ${daysUntil} days left!`,
-          });
-        } else if (daysUntil <= deadline + 7) {
-          // Coming up within a week of its deadline
-          result.push({
-            status: "warning",
-            category: "Booking Tasks",
-            title: `${activity.name}: ${req.action}`,
-            detail: `Due ${deadline} days before trip (${deadline - daysUntil} days from now)`,
-          });
-        }
-      }
-
-      // General time-based reminders
       if (daysUntil <= 1) {
         result.push({ status: "warning", category: "Prep", title: "Trip is tomorrow!", detail: "Check in for flights, charge devices, download offline maps" });
       } else if (daysUntil <= 3) {
