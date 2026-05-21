@@ -2337,6 +2337,10 @@ dataRoutes.post("/deployments", handler(async (c) => {
     host?: string;
     notes?: string;
     failed_apps?: string[];
+    // Channel discriminator: "prod" (default) or "beta". Lets the monitor
+    // frontend partition deploy history when --beta is in use. See
+    // pb_migrations/0027_deployments_variant.js.
+    variant?: "prod" | "beta";
   }>();
 
   if (!body.git_sha || !body.status) {
@@ -2344,6 +2348,9 @@ dataRoutes.post("/deployments", handler(async (c) => {
   }
   if (!["success", "failure", "partial"].includes(body.status)) {
     return c.json({ error: "invalid status" }, 400);
+  }
+  if (body.variant !== undefined && !["prod", "beta"].includes(body.variant)) {
+    return c.json({ error: "invalid variant" }, 400);
   }
 
   const record = await pb.collection("deployments").create({
@@ -2357,6 +2364,7 @@ dataRoutes.post("/deployments", handler(async (c) => {
     host: body.host ?? "",
     notes: body.notes ?? "",
     failed_apps: body.failed_apps ?? [],
+    variant: body.variant ?? "prod",
   });
   return c.json({ id: record.id }, 201);
 }));
@@ -2381,6 +2389,8 @@ dataRoutes.get("/deployments", handler(async (c) => {
     host: r.host,
     notes: r.notes,
     failed_apps: r.failed_apps,
+    // Pre-migration-0027 rows have no `variant`; treat absent as "prod".
+    variant: r.variant || "prod",
   })));
 }));
 

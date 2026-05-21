@@ -7,6 +7,8 @@
 #   ./infra/deploy.sh              # build + deploy everything
 #   ./infra/deploy.sh --push-only  # skip build, just push + apply
 #   ./infra/deploy.sh home recipes # build + deploy specific apps
+#   ./infra/deploy.sh --beta       # build home as :beta, deploy to home-beta
+#                                  # (powers beta.kirkl.in; does NOT touch prod home)
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -26,13 +28,35 @@ K8S_REGISTRY="localhost:30500/homelab"
 
 # Parse flags
 PUSH_ONLY=false
+BETA=false
 APPS=()
 for arg in "$@"; do
     case "$arg" in
         --push-only) PUSH_ONLY=true ;;
+        --beta) BETA=true ;;
+        --help|-h)
+            sed -n '2,11p' "$0"
+            exit 0
+            ;;
         *) APPS+=("$arg") ;;
     esac
 done
+
+# --beta channel: only home is beta-routed (kirkl.in/<module> serves the home
+# bundled version of each app, so just the home shell needs a beta variant).
+# This flag overrides any positional APPS and pins the image tag to :beta so
+# prod home (:latest) is untouched. The home-beta Deployment in apps.yaml
+# references the :beta tag and is the only thing we roll out here.
+IMAGE_TAG="latest"
+DEPLOY_VARIANT="prod"
+if [ "$BETA" = true ]; then
+    if [ ${#APPS[@]} -gt 0 ] && [ "${APPS[*]}" != "home" ]; then
+        echo "[deploy.sh] --beta only builds 'home'; ignoring extra apps: ${APPS[*]}" >&2
+    fi
+    APPS=("home")
+    IMAGE_TAG="beta"
+    DEPLOY_VARIANT="beta"
+fi
 
 # Fail fast on SSH/1Password breakage so we don't waste a 5-minute build
 # cycle just to die at the manifest-apply step. The common failure mode
@@ -92,10 +116,11 @@ record_deployment() {
         --arg status "$DEPLOY_STATUS" \
         --arg deployer "$deployer" \
         --arg host "$host" \
+        --arg variant "${DEPLOY_VARIANT:-prod}" \
         --argjson apps "$apps_json" \
         --argjson failed_apps "$failed_json" \
         --argjson duration_seconds "$duration" \
-        '{git_sha:$git_sha, git_branch:$git_branch, git_subject:$git_subject, status:$status, deployer:$deployer, host:$host, apps:$apps, failed_apps:$failed_apps, duration_seconds:$duration_seconds}')
+        '{git_sha:$git_sha, git_branch:$git_branch, git_subject:$git_subject, status:$status, deployer:$deployer, host:$host, variant:$variant, apps:$apps, failed_apps:$failed_apps, duration_seconds:$duration_seconds}')
 
     # Retry the POST: the api/functions pod is often mid-rolling-restart
     # when this trap fires (a deploy that touched it just rotated its pod),
@@ -161,12 +186,14 @@ elapsed() {
 
 # Run `docker build` with the given args and report success/failure.
 # Usage: run_docker_build <app> <progress_prefix> <docker_build_args...>
+# Honors $IMAGE_TAG (default "latest"; --beta sets it to "beta") so a beta
+# build doesn't overwrite the prod :latest tag in the registry.
 run_docker_build() {
     local app="$1"
     local prefix="$2"
     shift 2
-    local push_tag="${PUSH_REGISTRY}/homelab/${app}:latest"
-    local k8s_tag="${K8S_REGISTRY}/${app}:latest"
+    local push_tag="${PUSH_REGISTRY}/homelab/${app}:${IMAGE_TAG}"
+    local k8s_tag="${K8S_REGISTRY}/${app}:${IMAGE_TAG}"
     local app_start=$SECONDS
     echo "${prefix} Building ${app}..."
     if docker build -q "$@" -t "${push_tag}" -t "${k8s_tag}" . > /dev/null 2>&1; then
@@ -240,11 +267,14 @@ fi
 # Push phase: docker push to registry with layer dedup
 # Determine images to push
 if [ ${#APPS[@]} -eq 0 ]; then
-    IMAGES=($(docker images --filter "reference=${PUSH_REGISTRY}/homelab/*" --format "{{.Repository}}:{{.Tag}}"))
+    # Whole-cluster deploy only operates on :latest — don't accidentally
+    # push :beta (or any other side-tag) if a prior --beta run left some
+    # tagged images in the local docker cache.
+    IMAGES=($(docker images --filter "reference=${PUSH_REGISTRY}/homelab/*:latest" --format "{{.Repository}}:{{.Tag}}"))
 else
     IMAGES=()
     for app in "${APPS[@]}"; do
-        IMAGES+=("${PUSH_REGISTRY}/homelab/${app}:latest")
+        IMAGES+=("${PUSH_REGISTRY}/homelab/${app}:${IMAGE_TAG}")
     done
 fi
 
@@ -275,7 +305,12 @@ ssh "${VPS}" "kubectl apply -k ~/homelab-manifests/"
 
 echo ""
 echo "=== Restarting deployments ==="
-if [ ${#APPS[@]} -eq 0 ]; then
+if [ "$BETA" = true ]; then
+    # Beta channel: roll out only home-beta. Production `home` Deployment
+    # is left completely untouched (and still pulling :latest).
+    echo "Restarting home-beta..."
+    ssh "${VPS}" "kubectl rollout restart -n homelab deployment/home-beta"
+elif [ ${#APPS[@]} -eq 0 ]; then
     # Full deploy: restart everything
     ssh "${VPS}" "kubectl rollout restart -n homelab deployments,statefulsets 2>/dev/null || true"
 else
