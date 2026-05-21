@@ -454,7 +454,7 @@ server.tool(
   "List recent life log entries. Defaults to the last 7 days.",
   { days: z.number().optional().describe("Number of days to look back (default 7)") },
   async ({ days }) => {
-    const log = (await api("/life/log")) as { id: string; name: string; manifest: unknown };
+    const log = (await api("/life/log")) as { id: string; name: string };
     const entries = (await api(`/life/entries?log=${log.id}`)) as Array<{
       id: string;
       subject_id: string;

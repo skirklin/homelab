@@ -215,30 +215,13 @@ export function sessionSubjectId(sessionId: Session["id"]): string {
 }
 
 // ---------- Random samples ----------
-
-export interface SampleQuestion {
-  /** Becomes the subject_id of the resulting event. Pick from TRACKABLES so
-   *  the response flows back into the same series as manual entries. */
-  trackableId: string;
-  /** Override label shown in the modal. Defaults to the trackable's label. */
-  label?: string;
-}
-
-export interface RandomSamplesConfig {
-  enabled: boolean;
-  timesPerDay: number;
-  activeHours: [number, number]; // [startHour, endHour] in 24h format
-  timezone?: string; // IANA timezone
-  questions: SampleQuestion[];
-}
-
-export const RANDOM_SAMPLES: RandomSamplesConfig = {
-  enabled: true,
-  timesPerDay: 3,
-  activeHours: [9, 22],
-  timezone: "America/Los_Angeles",
-  questions: [
-    { trackableId: "mood",    label: "How happy do you feel?" },
-    { trackableId: "content", label: "How anxious/content are you feeling?" },
-  ],
-};
+//
+// The schedule + question list moved to @homelab/backend so the api service
+// scheduler (services/api/src/lib/notifications/life.ts) and the UI render
+// the same prompts. Re-exported under the local names so existing consumers
+// (SampleResponseModal, LifeDashboard) don't churn their imports.
+export type {
+  LifeSampleQuestion as SampleQuestion,
+  LifeRandomSamplesConfig as RandomSamplesConfig,
+} from "@homelab/backend";
+export { RANDOM_SAMPLES } from "@homelab/backend";
