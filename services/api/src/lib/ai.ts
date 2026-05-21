@@ -94,5 +94,6 @@ Guidelines:
 - stepIngredients must have exactly ${instructions.length} arrays (one per step)
 - Each step's array lists the specific ingredients (with amounts) used in that step
 - If an ingredient is divided across steps, show the portion in each step
-- Steps with no ingredients (e.g., "let rest") should have an empty array []`;
+- Steps with no ingredients (e.g., "let rest") should have an empty array []
+- Any \`[[recipe:<id>|label]]\` markers you encounter in the input are cross-recipe links — preserve them verbatim in any text you echo, do not strip or rewrite them.`;
 }

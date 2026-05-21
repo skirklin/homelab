@@ -1,8 +1,8 @@
-import { useState, useContext } from 'react';
+import { useState, useContext, useMemo } from 'react';
 import styled from 'styled-components';
 import { ShoppingCartOutlined } from '@ant-design/icons';
 import type { Recipe } from 'schema-dts';
-import { ingredientsToStr, strToIngredients, decodeStr } from '../converters';
+import { ingredientsToStr, strToIngredients } from '../converters';
 import { getAppUserFromState, getBoxFromState, getRecipeFromState } from '../state';
 import { canUpdateRecipe } from '../utils';
 import { Context } from '../context';
@@ -12,6 +12,8 @@ import { useAuth } from '@kirkl/shared';
 import { useShoppingIntegration } from '../ShoppingIntegrationContext';
 import { AddToShoppingModal } from '../Modals/AddToShoppingModal';
 import { useCookingMode } from '../CookingModeContext';
+import { LinkedText, makeStateResolver } from '../recipeLinks';
+import { useBasePath } from '../RecipesRoutes';
 
 const IngredientsSection = styled.div`
   background-color: var(--color-bg-subtle);
@@ -86,6 +88,8 @@ function IngredientList(props: RecipeCardProps) {
   const { user: authUser } = useAuth();
   const shoppingIntegration = useShoppingIntegration();
   const { isCookingMode } = useCookingMode();
+  const basePath = useBasePath();
+  const resolver = useMemo(() => makeStateResolver(state), [state]);
   const recipe = getRecipeFromState(state, boxId, recipeId)
   const box = getBoxFromState(state, boxId)
 
@@ -117,7 +121,11 @@ function IngredientList(props: RecipeCardProps) {
 
   function formatIngredientList(ingredients: Recipe["recipeIngredient"]) {
     const ingredientArray = Array.isArray(ingredients) ? ingredients : [];
-    const listElts = ingredientArray.map((ri, id) => <Ingredient key={id}>{decodeStr(String(ri))}</Ingredient>);
+    const listElts = ingredientArray.map((ri, id) => (
+      <Ingredient key={id}>
+        <LinkedText text={String(ri)} resolver={resolver} basePath={basePath} />
+      </Ingredient>
+    ));
     return (
       <IngredientsList>
         {listElts.length > 0 ? listElts : <Placeholder>Add ingredients?</Placeholder>}

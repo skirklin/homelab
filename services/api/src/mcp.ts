@@ -630,7 +630,7 @@ const recipeDataSchema = z.object({
 
 server.tool(
   "add_recipe_to_box",
-  "Create a recipe in a recipe box. Recipe data follows schema.org Recipe shape; pass any sensible fields (extra fields beyond the explicit ones are preserved).",
+  "Create a recipe in a recipe box. Recipe data follows schema.org Recipe shape; pass any sensible fields (extra fields beyond the explicit ones are preserved). Free-form text fields (ingredients, step text, description, notes) may embed cross-recipe links as `[[recipe:<id>|label]]` — the UI renders them as clickable links.",
   {
     boxId: z.string().describe("The recipe box ID"),
     data: recipeDataSchema.describe("Recipe data object"),
@@ -646,7 +646,7 @@ server.tool(
 
 server.tool(
   "update_recipe",
-  "Update a recipe's structured data. Replaces the entire data object — pass the full recipe (use get_recipe first to fetch current data, modify, and pass back). Clears any pending AI enrichment changes.",
+  "Update a recipe's structured data. Replaces the entire data object — pass the full recipe (use get_recipe first to fetch current data, modify, and pass back). Clears any pending AI enrichment changes. Text fields may embed `[[recipe:<id>|label]]` cross-recipe links.",
   {
     id: z.string().describe("The recipe record ID"),
     data: recipeDataSchema.describe("Full recipe data object — replaces existing data"),
@@ -667,7 +667,7 @@ server.tool(
 
 server.tool(
   "patch_recipe",
-  "Merge top-level fields into recipe.data (name, description, recipeYield, recipeCuisine, etc). Pass null to clear a field. For ingredient/step arrays prefer the dedicated surgical ops.",
+  "Merge top-level fields into recipe.data (name, description, recipeYield, recipeCuisine, etc). Pass null to clear a field. For ingredient/step arrays prefer the dedicated surgical ops. Text fields may embed `[[recipe:<id>|label]]` cross-recipe links (not in `name`).",
   {
     id: z.string().describe("The recipe record ID"),
     fields: z.record(z.unknown()).describe("Partial recipeDataSchema fields to merge; null to clear"),
@@ -683,7 +683,7 @@ server.tool(
 
 server.tool(
   "add_recipe_ingredient",
-  "Append (or insert at position) an ingredient on a recipe. Position defaults to end.",
+  "Append (or insert at position) an ingredient on a recipe. Position defaults to end. Ingredient text may embed `[[recipe:<id>|label]]` to link a sub-recipe (e.g. \"1 batch [[recipe:abc123|Pie Dough]]\").",
   {
     id: z.string().describe("The recipe record ID"),
     ingredient: z.string().describe('The ingredient string, e.g. "1 tsp kosher salt"'),
@@ -700,7 +700,7 @@ server.tool(
 
 server.tool(
   "update_recipe_ingredient",
-  "Replace a single ingredient by index.",
+  "Replace a single ingredient by index. May embed `[[recipe:<id>|label]]` to link a sub-recipe.",
   {
     id: z.string().describe("The recipe record ID"),
     index: z.number().int().nonnegative(),
@@ -746,7 +746,7 @@ server.tool(
 
 server.tool(
   "add_recipe_step",
-  "Append (or insert at position) an instruction step on a recipe. The step takes free-form text and an optional ingredients list (subset of the recipe's recipeIngredient strings used in this step).",
+  "Append (or insert at position) an instruction step on a recipe. The step takes free-form text and an optional ingredients list (subset of the recipe's recipeIngredient strings used in this step). Step text may embed `[[recipe:<id>|label]]` to link a sub-recipe.",
   {
     id: z.string().describe("The recipe record ID"),
     text: z.string().describe("Instruction text"),
@@ -764,7 +764,7 @@ server.tool(
 
 server.tool(
   "update_recipe_step",
-  "Patch a single step. text/ingredients are independently optional. Pass ingredients=null to clear the per-step ingredients field.",
+  "Patch a single step. text/ingredients are independently optional. Pass ingredients=null to clear the per-step ingredients field. Step text may embed `[[recipe:<id>|label]]` to link a sub-recipe.",
   {
     id: z.string().describe("The recipe record ID"),
     index: z.number().int().nonnegative(),
