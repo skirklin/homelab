@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
-import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined } from "@ant-design/icons";
+import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -32,7 +32,7 @@ import { WidgetRenderer } from "./widgets";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
 import { YearHeatmap, computeStreaks } from "./YearHeatmap";
-import { MANIFEST, SESSIONS } from "../manifest";
+import { MANIFEST, SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import {
   initializeMessaging,
   requestNotificationPermission,
@@ -111,35 +111,60 @@ const SwipeContainer = styled.div`
 
 const SessionRow = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Asymmetric grid: the prominent card stretches; the secondary stays
+     narrower. Order is set per card via grid-column-start. */
+  grid-template-columns: 2fr 1fr;
   gap: var(--space-sm);
 `;
 
-const SessionCard = styled.button`
+const SessionCard = styled.button<{ $size: "primary" | "secondary"; $muted: boolean }>`
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: var(--space-xs);
-  padding: var(--space-md);
+  padding: ${(p) => (p.$size === "primary" ? "var(--space-lg) var(--space-md)" : "var(--space-sm) var(--space-md)")};
   background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  border: ${(p) =>
+    p.$size === "primary"
+      ? "2px solid var(--color-primary)"
+      : "1px solid var(--color-border)"};
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: var(--font-size-base);
-  color: var(--color-text);
-  min-height: 64px;
+  font-size: ${(p) => (p.$size === "primary" ? "var(--font-size-lg)" : "var(--font-size-base)")};
+  color: ${(p) => (p.$muted ? "var(--color-text-secondary)" : "var(--color-text)")};
+  min-height: ${(p) => (p.$size === "primary" ? "92px" : "56px")};
+  opacity: ${(p) => (p.$muted ? 0.7 : 1)};
   transition: background 0.15s, border-color 0.15s;
 
   .anticon {
-    font-size: 20px;
+    font-size: ${(p) => (p.$size === "primary" ? "28px" : "18px")};
     color: var(--color-primary);
   }
 
   &:hover {
     background: var(--color-bg-muted);
     border-color: var(--color-primary);
+    opacity: 1;
   }
+`;
+
+const SessionCardTitle = styled.span`
+  font-weight: 500;
+`;
+
+const SessionCardHint = styled.span`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+`;
+
+const SessionCardCheck = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--color-success, #52c41a);
+  font-weight: 500;
 `;
 
 const StreakCard = styled.div`
@@ -332,6 +357,75 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // SET_ENTRIES dispatch, so the dep is stable enough).
   const morningStreaks = useMemo(() => computeStreaks(allEntries, "morning"), [state.entries]);
   const eveningStreaks = useMemo(() => computeStreaks(allEntries, "evening"), [state.entries]);
+
+  // Context-aware session prominence: drive sizing and ordering off the
+  // current hour in the user's local tz. Also surface a "logged at HH:MM"
+  // chip on whichever session was already done today.
+  const sessionContext = useMemo(() => {
+    const now = new Date();
+    const hour = now.getHours();
+    const todayKey = getDateString(now);
+
+    // Find today's most recent entry per session.
+    const lastByKind: Record<Session["id"], Date | null> = { morning: null, evening: null };
+    for (const e of allEntries) {
+      if (getDateString(e.timestamp) !== todayKey) continue;
+      for (const s of SESSIONS) {
+        if (e.subjectId === sessionSubjectId(s.id)) {
+          const prev = lastByKind[s.id];
+          if (!prev || e.timestamp > prev) lastByKind[s.id] = e.timestamp;
+        }
+      }
+    }
+
+    // Layout decisions:
+    //   morning hours (0–11): morning primary, evening secondary
+    //   afternoon/evening (12–21): evening primary, morning secondary
+    //   late evening (22–23): both secondary, no nudge
+    type Prom = "primary" | "secondary";
+    let morningSize: Prom;
+    let eveningSize: Prom;
+    let morningOrder: number;
+    let eveningOrder: number;
+    let lateNight = false;
+    if (hour < 12) {
+      morningSize = "primary";
+      eveningSize = "secondary";
+      morningOrder = 1;
+      eveningOrder = 2;
+    } else if (hour < 22) {
+      morningSize = "secondary";
+      eveningSize = "primary";
+      // Evening on the left when it's prominent.
+      eveningOrder = 1;
+      morningOrder = 2;
+    } else {
+      morningSize = "secondary";
+      eveningSize = "secondary";
+      morningOrder = 1;
+      eveningOrder = 2;
+      lateNight = true;
+    }
+
+    return {
+      hour,
+      lastByKind,
+      morningSize,
+      eveningSize,
+      morningOrder,
+      eveningOrder,
+      lateNight,
+    };
+  }, [allEntries, state.entries]);
+
+  const formatHHmm = (d: Date) => {
+    let h = d.getHours();
+    const m = String(d.getMinutes()).padStart(2, "0");
+    const ampm = h >= 12 ? "pm" : "am";
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m}${ampm}`;
+  };
 
   // Check notification status on mount
   useEffect(() => {
@@ -544,15 +638,46 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         <Section>
           <SectionTitle>Sessions</SectionTitle>
           <SessionRow>
-            {SESSIONS.map((session) => (
-              <SessionCard
-                key={session.id}
-                onClick={() => navigate(session.id)}
-              >
-                {session.id === "morning" ? <SunOutlined /> : <MoonOutlined />}
-                <span>{session.title}</span>
-              </SessionCard>
-            ))}
+            {SESSIONS.map((session) => {
+              const size =
+                session.id === "morning"
+                  ? sessionContext.morningSize
+                  : session.id === "evening"
+                    ? sessionContext.eveningSize
+                    : "secondary";
+              const order =
+                session.id === "morning"
+                  ? sessionContext.morningOrder
+                  : session.id === "evening"
+                    ? sessionContext.eveningOrder
+                    : 3;
+              const logged = sessionContext.lastByKind[session.id] ?? null;
+              const isAfternoon = sessionContext.hour >= 12 && sessionContext.hour < 22;
+              // Soft hint when morning was missed and we're now in afternoon —
+              // invitations not nudges.
+              const muted =
+                sessionContext.lateNight ||
+                (session.id === "morning" && isAfternoon && !logged);
+              return (
+                <SessionCard
+                  key={session.id}
+                  $size={size}
+                  $muted={muted}
+                  style={{ gridColumn: String(order) }}
+                  onClick={() => navigate(session.id)}
+                >
+                  {session.id === "morning" ? <SunOutlined /> : <MoonOutlined />}
+                  <SessionCardTitle>{session.title}</SessionCardTitle>
+                  {logged ? (
+                    <SessionCardCheck>
+                      <CheckCircleFilled /> logged at {formatHHmm(logged)}
+                    </SessionCardCheck>
+                  ) : session.id === "morning" && isAfternoon ? (
+                    <SessionCardHint>missed earlier?</SessionCardHint>
+                  ) : null}
+                </SessionCard>
+              );
+            })}
           </SessionRow>
         </Section>
 
