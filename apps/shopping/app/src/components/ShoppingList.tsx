@@ -271,8 +271,10 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
             >
             {categories.map((category) => {
               const items = itemsByCategoryId.get(category.id) || [];
-              // Skip empty groups — don't render headers with no items under them.
-              if (items.length === 0) return null;
+              // Hide the auto-appended "Uncategorized" pseudo-category when empty.
+              // User-configured categories stay visible even when empty so they
+              // remain drop targets for drag-and-drop.
+              if (category.id === "uncategorized" && items.length === 0) return null;
               return (
                 <CategorySection
                   key={category.id}
