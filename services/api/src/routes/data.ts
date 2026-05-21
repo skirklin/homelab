@@ -2339,7 +2339,7 @@ dataRoutes.post("/deployments", handler(async (c) => {
     failed_apps?: string[];
     // Channel discriminator: "prod" (default) or "beta". Lets the monitor
     // frontend partition deploy history when --beta is in use. See
-    // pb_migrations/0027_deployments_variant.js.
+    // pb_migrations/0030_deployments_variant.js.
     variant?: "prod" | "beta";
   }>();
 
@@ -2389,7 +2389,7 @@ dataRoutes.get("/deployments", handler(async (c) => {
     host: r.host,
     notes: r.notes,
     failed_apps: r.failed_apps,
-    // Pre-migration-0027 rows have no `variant`; treat absent as "prod".
+    // Pre-migration-0030 rows have no `variant`; treat absent as "prod".
     variant: r.variant || "prod",
   })));
 }));
