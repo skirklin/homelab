@@ -958,7 +958,6 @@ function activityResponse(a: Record<string, unknown>) {
     confirmation_code: a.confirmation_code,
     details: a.details,
     setting: a.setting,
-    booking_reqs: a.booking_reqs,
     rating: a.rating,
     rating_count: a.rating_count,
     photo_ref: a.photo_ref,
@@ -1089,7 +1088,6 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     confirmation_code?: string;
     details?: string;
     flight_info?: Record<string, unknown> | null;
-    booking_reqs?: Record<string, unknown> | null;
     verdict?: string;
     personal_notes?: string;
     experienced_at?: string;
@@ -1115,7 +1113,6 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     confirmation_code: body.confirmation_code || "",
     details: body.details || "",
     flight_info: body.flight_info ?? null,
-    booking_reqs: body.booking_reqs ?? null,
     verdict: body.verdict || "",
     personal_notes: body.personal_notes || "",
     experienced_at: body.experienced_at || "",
@@ -1140,7 +1137,7 @@ dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
     "name", "category", "location", "place_id", "lat", "lng",
     "description", "cost_notes", "duration_estimate", "walk_miles",
     "elevation_gain_feet", "difficulty", "confirmation_code",
-    "details", "setting", "booking_reqs", "rating", "rating_count",
+    "details", "setting", "rating", "rating_count",
     "photo_ref", "flight_info", "verdict", "personal_notes", "experienced_at",
     "trip_id",
   ];
@@ -1877,15 +1874,21 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex/mov
 dataRoutes.get("/life/log", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
-  const user = await pb.collection("users").getOne(userId);
-  const logId = user.life_log_id as string;
-  if (!logId) return c.json({ error: "no life log configured" }, 404);
-
-  const log = await pb.collection("life_logs").getOne(logId);
+  // life_logs is single-owner (migration 0028); the back-pointer is the
+  // source of truth now that users.life_log_id is gone (0029).
+  const logs = await pb.collection("life_logs").getList(1, 1, {
+    filter: pb.filter("owner = {:uid}", { uid: userId }),
+    sort: "created",
+  });
+  if (logs.items.length === 0) return c.json({ error: "no life log configured" }, 404);
+  const log = logs.items[0];
+  // Note: `manifest` used to be returned here, sourced from a JSON column on
+  // life_logs. That column was abandoned when the frontend manifest moved to
+  // code (apps/life/.../manifest.ts) and is dropped in migration 0032. The
+  // api scheduler now reads RANDOM_SAMPLES from @homelab/backend directly.
   return c.json({
     id: log.id,
     name: log.name,
-    manifest: log.manifest,
     sample_schedule: log.sample_schedule,
   });
 }));
@@ -2334,6 +2337,10 @@ dataRoutes.post("/deployments", handler(async (c) => {
     host?: string;
     notes?: string;
     failed_apps?: string[];
+    // Channel discriminator: "prod" (default) or "beta". Lets the monitor
+    // frontend partition deploy history when --beta is in use. See
+    // pb_migrations/0030_deployments_variant.js.
+    variant?: "prod" | "beta";
   }>();
 
   if (!body.git_sha || !body.status) {
@@ -2341,6 +2348,9 @@ dataRoutes.post("/deployments", handler(async (c) => {
   }
   if (!["success", "failure", "partial"].includes(body.status)) {
     return c.json({ error: "invalid status" }, 400);
+  }
+  if (body.variant !== undefined && !["prod", "beta"].includes(body.variant)) {
+    return c.json({ error: "invalid variant" }, 400);
   }
 
   const record = await pb.collection("deployments").create({
@@ -2354,6 +2364,7 @@ dataRoutes.post("/deployments", handler(async (c) => {
     host: body.host ?? "",
     notes: body.notes ?? "",
     failed_apps: body.failed_apps ?? [],
+    variant: body.variant ?? "prod",
   });
   return c.json({ id: record.id }, 201);
 }));
@@ -2378,6 +2389,8 @@ dataRoutes.get("/deployments", handler(async (c) => {
     host: r.host,
     notes: r.notes,
     failed_apps: r.failed_apps,
+    // Pre-migration-0030 rows have no `variant`; treat absent as "prod".
+    variant: r.variant || "prod",
   })));
 }));
 

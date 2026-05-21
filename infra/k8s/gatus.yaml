@@ -47,6 +47,16 @@ data:
           - "[STATUS] == 200"
           - "[RESPONSE_TIME] < 2000"
 
+      # Beta channel — parallel home deploy at beta.kirkl.in. Separate
+      # check so we know if beta breaks without conflating it with prod.
+      - name: home-beta
+        group: frontends
+        url: https://beta.kirkl.in
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[RESPONSE_TIME] < 2000"
+
       - name: recipes
         group: frontends
         url: https://recipes.kirkl.in

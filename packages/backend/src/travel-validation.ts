@@ -1,24 +1,19 @@
 /**
- * Hand-maintained mirror of `validateDay` from `apps/travel/app/src/types.ts`.
+ * Canonical implementation of `validateDay` and its helpers.
  *
  * The travel UI surfaces day-level planning issues (overlap, out-of-order,
- * drive-gap) as the "N issues" badge per itinerary day. That algorithm lives
- * in the travel app's local types module, alongside its unit tests in
- * `apps/travel/app/src/types.test.ts`. This file is the API-side port so the
- * MCP server can return the same per-day verdicts without round-tripping
- * through the UI.
+ * drive-gap) as the "N issues" badge per itinerary day; the MCP server returns
+ * the same per-day verdicts. Both consumers import from here so the algorithm
+ * doesn't drift.
  *
- * The shapes here match the API's wire format, NOT the UI's local types:
- *   - Activities come back from `/travel/activities` via `activityResponse()`
- *     in `services/api/src/routes/data.ts` — that emitter uses **snake_case**
- *     fields (`duration_estimate`, `lat`, `lng`, `name`, `id`).
- *   - Itinerary slots live inside `itinerary.days[].slots[]`, stored as JSON
- *     in PocketBase and round-tripped with **camelCase** keys
- *     (`activityId`, `startTime`).
+ * Tests live in `packages/backend/src/travel-validation.test.ts`. If you
+ * change the algorithm, update those tests in lockstep.
  *
- * If the algorithm in `apps/travel/app/src/types.ts validateDay` changes,
- * mirror the change here. The duplication is intentional and small; a shared
- * package extraction is more risk than the cost of mirroring by hand.
+ * Field conventions: this module is **camelCase end-to-end** (`durationEstimate`,
+ * `activityId`, `startTime`, `slotIndices`). Consumers reading snake_case API
+ * responses (e.g. the MCP server reading `/travel/activities` which returns
+ * `duration_estimate`) must normalize at their boundary before calling — that
+ * keeps the validator's contract clean.
  */
 
 export type DayIssueKind = "overlap" | "out-of-order" | "drive-gap";
@@ -27,29 +22,33 @@ export interface DayIssue {
   kind: DayIssueKind;
   message: string;
   /** Slot indices involved, in the order they appear in the day's slots array. */
-  slot_indices: [number, number];
+  slotIndices: [number, number];
 }
 
-/** Activity shape this validator needs — a subset of the API's activity response. */
+/**
+ * Activity shape the validator needs. Loose enough to be satisfied by both
+ * the travel UI's local `Activity` type (`lat: number | null`) and the backend
+ * `Activity` type (`lat?: number`) without a conversion step at the callsite.
+ */
 export interface ValidationActivity {
   id: string;
   name: string;
   lat?: number | null;
   lng?: number | null;
-  duration_estimate?: string | null;
+  durationEstimate?: string;
 }
 
 /** Itinerary slot shape as stored in PB's `days[].slots[]` JSON. */
 export interface ValidationSlot {
   activityId: string;
   startTime?: string;
-  notes?: string;
 }
 
 /**
  * Parse a time-of-day string into minutes from midnight. Accepts 24-hour
  * "HH:mm" and 12-hour "h:mm AM/PM" (and minor variants); returns null if
- * the string is unparseable.
+ * the string is unparseable. Production itineraries use the 12-hour form,
+ * but the input is user-editable so we stay permissive.
  */
 export function parseTimeOfDay(time: string | undefined): number | null {
   if (!time) return null;
@@ -86,12 +85,16 @@ export function parseDurationHours(dur: string | null | undefined): number {
   if (d === "full day") return 6;
   if (d === "half day") return 3;
   if (d === "evening") return 3;
+  // "2-3 hours" -> average
   const rangeHr = d.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*h/);
   if (rangeHr) return (parseFloat(rangeHr[1]) + parseFloat(rangeHr[2])) / 2;
+  // "2h", "2 hours", "2.5h"
   const singleHr = d.match(/^(\d+(?:\.\d+)?)\s*h/);
   if (singleHr) return parseFloat(singleHr[1]);
+  // "45m", "45 min", "30 min"
   const mins = d.match(/^(\d+)\s*m/);
   if (mins) return parseInt(mins[1]) / 60;
+  // "4.5 hours"
   const hoursWord = d.match(/(\d+(?:\.\d+)?)\s*hours?/);
   if (hoursWord) return parseFloat(hoursWord[1]);
   return 0;
@@ -133,7 +136,7 @@ function estimateDriveHours(miles: number): number {
  *     the haversine-estimated drive is longer than the scheduled gap
  *
  * Activities without a startTime, or that can't be resolved in activityMap,
- * are skipped. If `duration_estimate` is unparseable (yields 0 hours), the
+ * are skipped. If `durationEstimate` is unparseable (yields 0 hours), the
  * activity contributes a zero-length point in time — overlap and drive-gap
  * checks skip it, but it still participates in out-of-order.
  */
@@ -154,7 +157,7 @@ export function validateDay(
     if (startMin == null) continue;
     const activity = activityMap.get(slot.activityId);
     if (!activity) continue;
-    const durHours = parseDurationHours(activity.duration_estimate);
+    const durHours = parseDurationHours(activity.durationEstimate);
     scheduled.push({ index: i, startMin, endMin: startMin + durHours * 60, activity });
   }
 
@@ -168,7 +171,7 @@ export function validateDay(
       issues.push({
         kind: "out-of-order",
         message: `${curr.activity.name} (${formatMin(curr.startMin)}) is listed after ${prev.activity.name} (${formatMin(prev.startMin)})`,
-        slot_indices: [prev.index, curr.index],
+        slotIndices: [prev.index, curr.index],
       });
     }
   }
@@ -184,7 +187,7 @@ export function validateDay(
         issues.push({
           kind: "overlap",
           message: `${a.activity.name} (${formatMin(a.startMin)}–${formatMin(a.endMin)}) overlaps ${b.activity.name} (${formatMin(b.startMin)}–${formatMin(b.endMin)})`,
-          slot_indices: [a.index, b.index],
+          slotIndices: [a.index, b.index],
         });
       }
     }
@@ -210,7 +213,7 @@ export function validateDay(
       issues.push({
         kind: "drive-gap",
         message: `${Math.round(driveMin)}min drive from ${a.activity.name} to ${b.activity.name}, but only ${Math.round(gapMin)}min scheduled`,
-        slot_indices: [a.index, b.index],
+        slotIndices: [a.index, b.index],
       });
     }
   }

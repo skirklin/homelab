@@ -179,6 +179,12 @@ export function TripDetail() {
     return map;
   }, [activities]);
 
+  // Must be called before the `state.loading` / `!trip` early returns below —
+  // a fresh-cache load (e.g. beta.kirkl.in's first visit) renders Spin once,
+  // then re-renders with the data, and a hook call after the early return
+  // would change the hook count between renders → React error #310.
+  const activeItin = useSelectedItinerary(itineraries);
+
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
   const [activeTabState, setActiveTabState] = useState<string | null>(null);
 
@@ -238,7 +244,6 @@ export function TripDetail() {
   };
 
   const hasMapData = activities.some((a) => a.lat != null && a.lng != null);
-  const activeItin = useSelectedItinerary(itineraries);
 
   // Activity IDs referenced anywhere on the active itinerary (slots + flights
   // + lodging). Used by ActivityList to badge scheduled items.
@@ -354,7 +359,7 @@ export function TripDetail() {
                 {showReadiness && (
                   <>
                     <ReadinessDashboard trip={trip} activities={activities} itineraries={itineraries} />
-                    <TripChecklist trip={trip} />
+                    <TripChecklist trip={trip} activities={activities} />
                   </>
                 )}
                 {trip.notes && (

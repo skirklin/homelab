@@ -11,10 +11,10 @@ export function withLifeCache(inner: LifeBackend): LifeBackend {
     getOrCreateLog: (userId) => cachedRead<LifeLog>(`life:log:${userId}`, () => inner.getOrCreateLog(userId)),
 
     clearSampleSchedule: (id) => inner.clearSampleSchedule(id),
+    updateReminderTimes: (id, t) => inner.updateReminderTimes(id, t),
     addEntry: (id, w, d, u, o) => inner.addEntry(id, w, d, u, o),
     updateEntry: (id, u) => inner.updateEntry(id, u),
     deleteEntry: (id) => inner.deleteEntry(id),
-    addSampleResponse: (id, r, u) => inner.addSampleResponse(id, r, u),
 
     subscribeToEntries(logId, onEntries): Unsubscribe {
       const key = `life:entries:${logId}`;

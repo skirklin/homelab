@@ -56,6 +56,12 @@ var RECIPE_VIS_RULE = [
 var RECIPE_WRITE_RULE =
   '@request.auth.id != "" && (@request.auth.id ?= owners.id || @request.auth.id ?= box.owners.id)';
 
+// life_logs is single-owner (migration 0028) — direct equality, no `?=`.
+var LIFE_OWNER_RULE =
+  '@request.auth.id != "" && owner = @request.auth.id';
+var LIFE_CHILD_RULE =
+  '@request.auth.id != "" && log.owner = @request.auth.id';
+
 /**
  * The per-collection PB rule strings, in canonical truthful form. Order of
  * keys mirrors the layout of 0001 for readability; do not rely on key order
@@ -128,19 +134,23 @@ var PB_RULES = Object.freeze({
   },
 
   // ===== Life =====
+  //
+  // life_logs collapsed to a single `owner` relation in migration 0028 —
+  // life is solo-user only. Rules use direct equality (`owner =`), not the
+  // `?=` "any-of" operator (which only applies to multi-relations).
   life_logs: {
-    listRule: OWNER_RULE,
-    viewRule: OWNER_RULE,
+    listRule: LIFE_OWNER_RULE,
+    viewRule: LIFE_OWNER_RULE,
     createRule: '@request.auth.id != ""',
-    updateRule: OWNER_RULE,
-    deleteRule: OWNER_RULE,
+    updateRule: LIFE_OWNER_RULE,
+    deleteRule: LIFE_OWNER_RULE,
   },
   life_events: {
-    listRule: childRule("log"),
-    viewRule: childRule("log"),
-    createRule: childRule("log"),
-    updateRule: childRule("log"),
-    deleteRule: childRule("log"),
+    listRule: LIFE_CHILD_RULE,
+    viewRule: LIFE_CHILD_RULE,
+    createRule: LIFE_CHILD_RULE,
+    updateRule: LIFE_CHILD_RULE,
+    deleteRule: LIFE_CHILD_RULE,
   },
 
   // ===== Upkeep / Tasks =====
@@ -204,4 +214,6 @@ module.exports = {
   BOX_VIS_RULE: BOX_VIS_RULE,
   RECIPE_VIS_RULE: RECIPE_VIS_RULE,
   RECIPE_WRITE_RULE: RECIPE_WRITE_RULE,
+  LIFE_OWNER_RULE: LIFE_OWNER_RULE,
+  LIFE_CHILD_RULE: LIFE_CHILD_RULE,
 };

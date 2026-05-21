@@ -4,7 +4,7 @@ import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepBackend, useAuth, useUserBackend } from "@kirkl/shared";
 import type { Task, TaskList } from "@homelab/backend";
-import type { Trip } from "../types";
+import type { Activity, Trip } from "../types";
 
 const Container = styled.div`
   display: flex;
@@ -38,11 +38,45 @@ const AddRow = styled.div`
   margin-top: 4px;
 `;
 
-interface TripChecklistProps {
-  trip: Trip;
+const GroupHeader = styled.div`
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #595959;
+`;
+
+const GroupHint = styled.span`
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #bfbfbf;
+`;
+
+// Order tasks for the General prep section (no activity link) — by position.
+// Activity-linked groups are also sorted by position within group.
+const byPosition = (a: Task, b: Task) => a.position - b.position;
+
+// Activity-linked groups are sorted lodging first, then alphabetical by name —
+// stable, predictable, and matches how the rest of the app tends to surface
+// accommodations before the day's slots.
+function compareActivities(a: Activity, b: Activity): number {
+  const aLodging = a.category === "Accommodation" ? 0 : 1;
+  const bLodging = b.category === "Accommodation" ? 0 : 1;
+  if (aLodging !== bLodging) return aLodging - bLodging;
+  return a.name.localeCompare(b.name);
 }
 
-export function TripChecklist({ trip }: TripChecklistProps) {
+function extractActivityId(task: Task): string | null {
+  const tag = task.tags?.find((t) => t.startsWith("activity:"));
+  return tag ? tag.slice("activity:".length) : null;
+}
+
+interface TripChecklistProps {
+  trip: Trip;
+  activities?: Activity[];
+}
+
+export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
   const { user } = useAuth();
   const upkeep = useUpkeepBackend();
   const userBackend = useUserBackend();
@@ -91,10 +125,39 @@ export function TripChecklist({ trip }: TripChecklistProps) {
     return { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
   }, [tasks]);
 
-  const sortedTasks = useMemo(() =>
-    [...tasks].sort((a, b) => a.position - b.position),
-    [tasks],
-  );
+  // Build a map id → activity for fast lookup. Tasks with an `activity:<id>`
+  // tag that doesn't match a real activity on this trip degrade to General prep —
+  // we don't render an "unknown activity" header and we don't auto-clean tags.
+  const activitiesById = useMemo(() => {
+    const m = new Map<string, Activity>();
+    for (const a of activities) m.set(a.id, a);
+    return m;
+  }, [activities]);
+
+  // Group tasks into general (no activity link, or stale link) + per-activity buckets.
+  const { generalTasks, activityGroups } = useMemo(() => {
+    const general: Task[] = [];
+    const groups = new Map<string, Task[]>();
+    for (const task of tasks) {
+      const aid = extractActivityId(task);
+      if (aid && activitiesById.has(aid)) {
+        const bucket = groups.get(aid) ?? [];
+        bucket.push(task);
+        groups.set(aid, bucket);
+      } else {
+        general.push(task);
+      }
+    }
+    general.sort(byPosition);
+    const orderedGroups: Array<{ activity: Activity; tasks: Task[] }> = [];
+    for (const [aid, bucket] of groups) {
+      const activity = activitiesById.get(aid)!;
+      bucket.sort(byPosition);
+      orderedGroups.push({ activity, tasks: bucket });
+    }
+    orderedGroups.sort((a, b) => compareActivities(a.activity, b.activity));
+    return { generalTasks: general, activityGroups: orderedGroups };
+  }, [tasks, activitiesById]);
 
   const ensureTripContainer = async (): Promise<string> => {
     if (!listId) throw new Error("No list");
@@ -214,13 +277,16 @@ export function TripChecklist({ trip }: TripChecklistProps) {
         )}
       </HeaderRow>
 
-      {sortedTasks.length === 0 && (
+      {tasks.length === 0 && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           No checklist items yet. Add one below.
         </Typography.Text>
       )}
 
-      {sortedTasks.map((task) => (
+      {generalTasks.length > 0 && activityGroups.length > 0 && (
+        <GroupHeader>General prep</GroupHeader>
+      )}
+      {generalTasks.map((task) => (
         <Item key={task.id} $done={task.completed}>
           <Checkbox checked={task.completed} onChange={() => handleToggle(task)} />
           <span style={{ flex: 1 }}>{task.name}</span>
@@ -234,6 +300,30 @@ export function TripChecklist({ trip }: TripChecklistProps) {
             onClick={() => handleDelete(task)}
           />
         </Item>
+      ))}
+
+      {activityGroups.map(({ activity, tasks: groupTasks }) => (
+        <div key={activity.id}>
+          <GroupHeader>
+            {activity.name}
+            <GroupHint>linked to activity</GroupHint>
+          </GroupHeader>
+          {groupTasks.map((task) => (
+            <Item key={task.id} $done={task.completed}>
+              <Checkbox checked={task.completed} onChange={() => handleToggle(task)} />
+              <span style={{ flex: 1 }}>{task.name}</span>
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                className="remove-btn"
+                style={{ opacity: 0, transition: "opacity 0.15s" }}
+                onClick={() => handleDelete(task)}
+              />
+            </Item>
+          ))}
+        </div>
       ))}
 
       <AddRow>

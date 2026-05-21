@@ -780,6 +780,9 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.71.2
         version: 0.71.2(zod@3.25.76)
+      '@homelab/backend':
+        specifier: workspace:*
+        version: link:../../packages/backend
       '@hono/node-server':
         specifier: ^1.14.3
         version: 1.19.13(hono@4.12.12)

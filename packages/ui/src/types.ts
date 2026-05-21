@@ -12,7 +12,6 @@ export interface UserProfile {
   travel_slugs?: Record<string, string>;
   upkeep_notification_mode?: NotificationMode;
   fcm_tokens?: string[];
-  life_log_id?: string;
   last_task_notification?: string;
 }
 

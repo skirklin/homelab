@@ -8,8 +8,17 @@ data:
     # Public apps — each site block lists both the production and
     # beta hostnames. Caddy auto-requests Let's Encrypt certs for all.
 
-    kirkl.in, beta.kirkl.in, home.kirkl.in {
+    kirkl.in, home.kirkl.in {
         reverse_proxy home.homelab.svc.cluster.local:80
+    }
+
+    # beta.kirkl.in routes to home-beta — a separately-tagged home image
+    # (registry.kirkl.in/homelab/home:beta) so in-progress home builds can
+    # be smoke-tested against the real PB/API without disturbing prod.
+    # Same PB, same API, same auth — only the home bundle differs.
+    # Deployed by `./infra/deploy.sh --beta`.
+    beta.kirkl.in {
+        reverse_proxy home-beta.homelab.svc.cluster.local:80
     }
 
     recipes.kirkl.in, recipes.beta.kirkl.in {

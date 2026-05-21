@@ -11,7 +11,8 @@
     "travel:migrate-all": "tsx travel/migrate-all.ts",
     "travel:migrate-sqlite": "tsx travel/migrate-sqlite.ts",
     "export:firestore": "tsx export/export-firestore.ts",
-    "migrate:firebase-to-pb": "tsx migrate-firebase.ts"
+    "migrate:firebase-to-pb": "tsx migrate-firebase.ts",
+    "prune-dangling-recipe-boxes": "tsx prune-dangling-recipe-boxes.ts"
   },
   "dependencies": {
     "@homelab/backend": "workspace:*",

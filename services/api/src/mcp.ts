@@ -11,7 +11,44 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { API_BASE } from "./config";
-import { validateDay, type ValidationActivity, type ValidationSlot } from "./lib/travel-validation";
+import {
+  validateDay,
+  type DayIssue,
+  type ValidationActivity,
+  type ValidationSlot,
+} from "@homelab/backend";
+
+/**
+ * Normalize a snake_case Activity from the `/travel/activities` API endpoint
+ * into the camelCase `ValidationActivity` shape the canonical validator expects.
+ * The API response uses snake_case (`duration_estimate`); the validator is
+ * camelCase end-to-end.
+ */
+function toValidationActivity(a: Record<string, unknown>): ValidationActivity {
+  return {
+    id: a.id as string,
+    name: (a.name as string | undefined) ?? "",
+    lat: (a.lat as number | null | undefined) ?? null,
+    lng: (a.lng as number | null | undefined) ?? null,
+    durationEstimate: (a.duration_estimate as string | undefined) ?? undefined,
+  };
+}
+
+/**
+ * Translate a canonical `DayIssue` (camelCase `slotIndices`) into the
+ * snake_case wire format used by MCP JSON responses (`slot_indices`).
+ */
+function toWireIssue(issue: DayIssue): {
+  kind: DayIssue["kind"];
+  message: string;
+  slot_indices: [number, number];
+} {
+  return {
+    kind: issue.kind,
+    message: issue.message,
+    slot_indices: issue.slotIndices,
+  };
+}
 
 // Builds a configured MCP server bound to a specific API token. Inner closures
 // capture `apiToken`, so each caller (stdio bootstrap, per-request HTTP handler)
@@ -259,11 +296,11 @@ server.tool(
       const enriched = await Promise.all(trips.map(async (t) => {
         const tripId = t.id as string;
         const [activities, itineraries] = await Promise.all([
-          api(`/travel/activities?log=${log.id}&trip_id=${tripId}`) as Promise<Array<ValidationActivity & Record<string, unknown>>>,
+          api(`/travel/activities?log=${log.id}&trip_id=${tripId}`) as Promise<Array<Record<string, unknown>>>,
           api(`/travel/itineraries?log=${log.id}&trip_id=${tripId}`) as Promise<Array<{ days?: Array<{ slots?: ValidationSlot[] }> }>>,
         ]);
         const activityMap = new Map<string, ValidationActivity>(
-          activities.map((a) => [a.id, a as ValidationActivity]),
+          activities.map((a) => [a.id as string, toValidationActivity(a)]),
         );
         let issueCount = 0;
         for (const itin of itineraries) {
@@ -303,7 +340,7 @@ server.tool(
     ]);
     // Annotate each day with validation results.
     const activityMap = new Map<string, ValidationActivity>(
-      tripActivities.map((a) => [a.id as string, a as ValidationActivity & Record<string, unknown>]),
+      tripActivities.map((a) => [a.id as string, toValidationActivity(a)]),
     );
     const enrichedItineraries = tripItineraries.map((itin) => {
       const days = (itin.days as Array<Record<string, unknown>> | undefined) ?? [];
@@ -313,7 +350,7 @@ server.tool(
         return {
           ...day,
           issue_count: issues.length,
-          ...(issues.length > 0 ? { issues } : {}),
+          ...(issues.length > 0 ? { issues: issues.map(toWireIssue) } : {}),
         };
       });
       return { ...itin, days: annotatedDays };
@@ -372,7 +409,7 @@ server.tool(
     const logId = trip.log as string;
     const destination = trip.destination as string;
     const [activities, itineraries] = await Promise.all([
-      api(`/travel/activities?log=${logId}&trip_id=${trip_id}`) as Promise<Array<ValidationActivity & Record<string, unknown>>>,
+      api(`/travel/activities?log=${logId}&trip_id=${trip_id}`) as Promise<Array<Record<string, unknown>>>,
       api(`/travel/itineraries?log=${logId}&trip_id=${trip_id}`) as Promise<Array<{
         id: string;
         name: string;
@@ -381,7 +418,7 @@ server.tool(
       }>>,
     ]);
     const activityMap = new Map<string, ValidationActivity>(
-      activities.map((a) => [a.id, a as ValidationActivity]),
+      activities.map((a) => [a.id as string, toValidationActivity(a)]),
     );
     const itinSummaries = itineraries.map((itin) => {
       const days = (itin.days ?? []).map((day, dayIndex) => {
@@ -391,7 +428,7 @@ server.tool(
           date: day.date,
           label: day.label,
           issue_count: issues.length,
-          ...(issues.length > 0 ? { issues } : {}),
+          ...(issues.length > 0 ? { issues: issues.map(toWireIssue) } : {}),
         };
       });
       return {
@@ -417,7 +454,7 @@ server.tool(
   "List recent life log entries. Defaults to the last 7 days.",
   { days: z.number().optional().describe("Number of days to look back (default 7)") },
   async ({ days }) => {
-    const log = (await api("/life/log")) as { id: string; name: string; manifest: unknown };
+    const log = (await api("/life/log")) as { id: string; name: string };
     const entries = (await api(`/life/entries?log=${log.id}`)) as Array<{
       id: string;
       subject_id: string;
@@ -593,7 +630,7 @@ const recipeDataSchema = z.object({
 
 server.tool(
   "add_recipe_to_box",
-  "Create a recipe in a recipe box. Recipe data follows schema.org Recipe shape; pass any sensible fields (extra fields beyond the explicit ones are preserved).",
+  "Create a recipe in a recipe box. Recipe data follows schema.org Recipe shape; pass any sensible fields (extra fields beyond the explicit ones are preserved). Free-form text fields (ingredients, step text, description, notes) may embed cross-recipe links as `[[recipe:<id>|label]]` — the UI renders them as clickable links.",
   {
     boxId: z.string().describe("The recipe box ID"),
     data: recipeDataSchema.describe("Recipe data object"),
@@ -609,7 +646,7 @@ server.tool(
 
 server.tool(
   "update_recipe",
-  "Update a recipe's structured data. Replaces the entire data object — pass the full recipe (use get_recipe first to fetch current data, modify, and pass back). Clears any pending AI enrichment changes.",
+  "Update a recipe's structured data. Replaces the entire data object — pass the full recipe (use get_recipe first to fetch current data, modify, and pass back). Clears any pending AI enrichment changes. Text fields may embed `[[recipe:<id>|label]]` cross-recipe links.",
   {
     id: z.string().describe("The recipe record ID"),
     data: recipeDataSchema.describe("Full recipe data object — replaces existing data"),
@@ -630,7 +667,7 @@ server.tool(
 
 server.tool(
   "patch_recipe",
-  "Merge top-level fields into recipe.data (name, description, recipeYield, recipeCuisine, etc). Pass null to clear a field. For ingredient/step arrays prefer the dedicated surgical ops.",
+  "Merge top-level fields into recipe.data (name, description, recipeYield, recipeCuisine, etc). Pass null to clear a field. For ingredient/step arrays prefer the dedicated surgical ops. Text fields may embed `[[recipe:<id>|label]]` cross-recipe links (not in `name`).",
   {
     id: z.string().describe("The recipe record ID"),
     fields: z.record(z.unknown()).describe("Partial recipeDataSchema fields to merge; null to clear"),
@@ -646,7 +683,7 @@ server.tool(
 
 server.tool(
   "add_recipe_ingredient",
-  "Append (or insert at position) an ingredient on a recipe. Position defaults to end.",
+  "Append (or insert at position) an ingredient on a recipe. Position defaults to end. Ingredient text may embed `[[recipe:<id>|label]]` to link a sub-recipe (e.g. \"1 batch [[recipe:abc123|Pie Dough]]\").",
   {
     id: z.string().describe("The recipe record ID"),
     ingredient: z.string().describe('The ingredient string, e.g. "1 tsp kosher salt"'),
@@ -663,7 +700,7 @@ server.tool(
 
 server.tool(
   "update_recipe_ingredient",
-  "Replace a single ingredient by index.",
+  "Replace a single ingredient by index. May embed `[[recipe:<id>|label]]` to link a sub-recipe.",
   {
     id: z.string().describe("The recipe record ID"),
     index: z.number().int().nonnegative(),
@@ -709,7 +746,7 @@ server.tool(
 
 server.tool(
   "add_recipe_step",
-  "Append (or insert at position) an instruction step on a recipe. The step takes free-form text and an optional ingredients list (subset of the recipe's recipeIngredient strings used in this step).",
+  "Append (or insert at position) an instruction step on a recipe. The step takes free-form text and an optional ingredients list (subset of the recipe's recipeIngredient strings used in this step). Step text may embed `[[recipe:<id>|label]]` to link a sub-recipe.",
   {
     id: z.string().describe("The recipe record ID"),
     text: z.string().describe("Instruction text"),
@@ -727,7 +764,7 @@ server.tool(
 
 server.tool(
   "update_recipe_step",
-  "Patch a single step. text/ingredients are independently optional. Pass ingredients=null to clear the per-step ingredients field.",
+  "Patch a single step. text/ingredients are independently optional. Pass ingredients=null to clear the per-step ingredients field. Step text may embed `[[recipe:<id>|label]]` to link a sub-recipe.",
   {
     id: z.string().describe("The recipe record ID"),
     index: z.number().int().nonnegative(),
@@ -971,7 +1008,7 @@ const activityFields = {
   name: z.string().optional().describe("Activity name"),
   category: z.string().optional().describe("Activity category (Flight, Transportation, Accommodation, Hiking, etc.)"),
   location: z.string().optional().describe("Location (e.g. 'Phoenix, AZ')"),
-  description: z.string().optional().describe("Brief qualifying note. NOT costs/durations/logistics, and NOT booking instructions — put advance-booking needs in `booking_reqs` so the readiness dashboard can track them."),
+  description: z.string().optional().describe("Brief qualifying note. NOT costs/durations/logistics, and NOT booking instructions — create a task tagged `travel:<tripId>` (e.g. via `add_trip_task`) so the Prep tab tracks it."),
   cost_notes: z.string().optional().describe("Cost notes (e.g. '$25/person')"),
   duration_estimate: z.string().optional().describe("Duration (e.g. '2h', 'half day')"),
   walk_miles: z.number().optional().describe("Distance walked or hiked in miles (e.g. trail length)"),
@@ -982,11 +1019,6 @@ const activityFields = {
   confirmation_code: z.string().optional().describe("Booking confirmation code — set this once the booking is done; the readiness dashboard treats it as the 'confirmed' signal."),
   details: z.string().optional().describe("Freeform details text"),
   flight_info: flightInfoSchema.optional(),
-  booking_reqs: z.array(z.object({
-    action: z.string().describe("What to do, e.g. 'Book tickets at museofridakahlo.org.mx'"),
-    daysBefore: z.number().describe("How many days before trip start the action is due"),
-    done: z.boolean().optional().describe("Mark true once the action is complete"),
-  })).optional().describe("Structured advance-booking requirements. The readiness dashboard surfaces these by deadline; populate this (not the description) whenever an activity requires reservations/permits/timed entry/etc."),
   verdict: z.enum(["loved", "liked", "meh", "skip", ""]).optional().describe("Post-experience reflection"),
   personal_notes: z.string().optional().describe("Private notes about this activity (post-trip journal)"),
   experienced_at: z.string().optional().describe("ISO date when the activity was actually done"),
@@ -1395,7 +1427,7 @@ const taskFrequencySchema = z.object({
 
 server.tool(
   "add_task",
-  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), tags, and notification subscribers. For trip-prep tasks, prefer add_trip_task — it handles the Trips/<destination>/ container nesting that this tool doesn't.",
+  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), tags, and notification subscribers. For trip-prep tasks, prefer add_trip_task — it handles the Trips/<destination>/ container nesting that this tool doesn't, and accepts an optional activity_id that tags the task `activity:<id>` so the travel Prep tab groups it under the matching activity.",
   {
     list: z.string().describe("The task list ID"),
     name: z.string().describe("Task name"),
@@ -1424,7 +1456,7 @@ server.tool(
 // with tag_task / update_task.
 server.tool(
   "add_trip_task",
-  "Add a trip-prep task to a trip's checklist. This is the canonical way to add tasks tied to a travel trip: it automatically nests the new task under Trips/<destination>/ (creating those container tasks on demand) and tags it with travel:<trip_id>, matching the Travel app's checklist UI. Use this instead of raw add_task whenever the task is associated with a trip — raw add_task does not create the container hierarchy and would leave the task as a top-level outliner item. Edit the resulting task later with tag_task / update_task.",
+  "Add a trip-prep task to a trip's checklist. This is the canonical way to add tasks tied to a travel trip: it automatically nests the new task under Trips/<destination>/ (creating those container tasks on demand) and tags it with travel:<trip_id>, matching the Travel app's checklist UI. Use this instead of raw add_task whenever the task is associated with a trip — raw add_task does not create the container hierarchy and would leave the task as a top-level outliner item. Pass activity_id to also tag the task `activity:<id>`, which makes the Prep tab group it under that specific activity (e.g. 'Book Frida Kahlo tickets' under the Frida Kahlo Museum activity). Edit the resulting task later with tag_task / update_task.",
   {
     trip_id: z.string().describe("The travel trip record ID this task belongs to"),
     name: z.string().describe("Task name (the user-facing prep item, e.g. 'Pack adapters')"),
@@ -1432,8 +1464,11 @@ server.tool(
     list_id: z.string().optional().describe("Task list to add into. Defaults to the caller's first household task list (matching the Travel UI's behavior)."),
     position: z.number().optional().describe("Sort position among siblings under the per-trip container. Defaults to max-sibling-position + 1."),
     notify_users: z.array(z.string()).optional().describe("User IDs to notify on completion/due"),
+    activity_id: z.string().optional().describe(
+      "Optional activity record ID. When provided, the task is also tagged `activity:<id>` so the Prep tab can group it under that activity (e.g. 'Book Frida Kahlo tickets' under the Frida Kahlo Museum activity).",
+    ),
   },
-  async ({ trip_id, name, description, list_id, position, notify_users }) => {
+  async ({ trip_id, name, description, list_id, position, notify_users, activity_id }) => {
     // 1. Resolve list. If none given, fall back to the first task list owned by the
     // caller. The Travel UI uses user.household_slugs (first entry), but no API
     // endpoint exposes that map — /data/task-lists already filters to lists the
@@ -1510,9 +1545,11 @@ server.tool(
       tripContainer = { id: created.id, name: created.name, parent_id: tripsRoot.id, position: maxPos(tripsChildren) + 1, tags: [tripContainerTag] };
     }
 
-    // 5. Create the actual leaf task, tagged travel:<trip_id>.
+    // 5. Create the actual leaf task, tagged travel:<trip_id> (and optionally
+    // activity:<activity_id> so the Prep tab can group it under that activity).
     const leafSiblings = await listChildren(tripContainer.id);
     const leafPosition = position ?? maxPos(leafSiblings) + 1;
+    const leafTags = activity_id ? [tripTag, `activity:${activity_id}`] : [tripTag];
     const data = await api("/tasks", {
       method: "POST",
       body: JSON.stringify({
@@ -1523,7 +1560,7 @@ server.tool(
         description: description ?? "",
         task_type: "one_shot",
         frequency: { value: 1, unit: "days" },
-        tags: [tripTag],
+        tags: leafTags,
         notify_users,
       }),
     });

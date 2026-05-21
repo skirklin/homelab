@@ -13,58 +13,13 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  LineChart,
+  Line,
 } from "recharts";
 import { useLifeContext } from "../life-context";
-import { MANIFEST } from "../manifest";
-import type { Widget, LogEntry, CounterGroupWidget as CounterGroupWidgetType, ComboWidget as ComboWidgetType, SampleQuestion } from "../types";
-
-// Helper to extract numeric values from an entry based on widget type
-// fieldId is used when extracting a specific field from combo entries
-function extractNumericValues(entry: LogEntry, widget: Widget, fieldId?: string): number[] {
-  const values: number[] = [];
-  const data = entry.data;
-
-  // If fieldId is specified, extract that specific field (for combo-derived items)
-  if (fieldId) {
-    const fieldValue = data[fieldId];
-    if (typeof fieldValue === "number") {
-      values.push(fieldValue);
-    }
-    return values;
-  }
-
-  switch (widget.type) {
-    case "counter":
-    case "counter-group":
-      // Counter entries just count as 1 occurrence
-      values.push(1);
-      break;
-
-    case "number":
-      if (typeof data.value === "number") values.push(data.value);
-      break;
-
-    case "rating":
-      if (typeof data.rating === "number") values.push(data.rating);
-      break;
-
-    case "combo":
-      // Extract numeric values from combo fields
-      for (const field of (widget as ComboWidgetType).fields) {
-        const fieldValue = data[field.id];
-        if (typeof fieldValue === "number") {
-          values.push(fieldValue);
-        }
-      }
-      break;
-
-    case "text":
-      // Text entries don't have numeric values
-      break;
-  }
-
-  return values;
-}
+import { TRACKABLES, type Trackable } from "../manifest";
+import type { LogEntry } from "../types";
+import { normalizeEntries, type NormalizedEvent } from "../lib/legacy-adapter";
 
 const Container = styled.div`
   max-width: 800px;
@@ -91,11 +46,12 @@ const Title = styled.h1`
   flex: 1;
 `;
 
-const WidgetSelect = styled(Select)`
-  min-width: 200px;
+const TrackableSelect = styled(Select)`
+  min-width: 220px;
 `;
 
-// Calendar Heat Map Styles
+// --- Calendar heatmap ---
+
 const CalendarContainer = styled.div`
   overflow-x: auto;
   padding: var(--space-sm) 0;
@@ -119,9 +75,7 @@ const NavButton = styled.button`
   align-items: center;
   color: var(--color-text);
 
-  &:hover {
-    background: var(--color-bg-muted);
-  }
+  &:hover { background: var(--color-bg-muted); }
 `;
 
 const MonthLabel = styled.span`
@@ -180,7 +134,6 @@ const DayCell = styled.div<{ $intensity: number; $isToday: boolean; $isEmpty: bo
   }
 `;
 
-// Stats Styles
 const StatsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -217,45 +170,53 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 interface DayData {
   date: Date;
   count: number;
-  values: number[];
+  /** Aggregated value (per the trackable's aggregation) for the day. */
+  value: number;
 }
 
-function getMonthData(entries: LogEntry[], widgetIds: string[], year: number, month: number, widget: Widget, fieldId?: string): DayData[] {
+/** Compute one day's aggregated value from matching normalized events. */
+function aggregateDay(events: NormalizedEvent[], agg: Trackable["aggregation"]): number {
+  if (events.length === 0) return 0;
+  const values = events
+    .map((e) => e.data.value)
+    .filter((v): v is number => typeof v === "number");
+  if (values.length === 0) return 0;
+  switch (agg) {
+    case "sum":
+      return values.reduce((a, b) => a + b, 0);
+    case "avg":
+      return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
+    case "last":
+      // events arrive newest-first
+      return values[0];
+  }
+}
+
+function getMonthData(entries: NormalizedEvent[], trackableId: string, year: number, month: number, agg: Trackable["aggregation"]): DayData[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
-  const idSet = new Set(widgetIds);
 
-  // Add empty cells for days before the first of the month
   for (let i = 0; i < firstDay.getDay(); i++) {
-    data.push({ date: new Date(year, month, -firstDay.getDay() + i + 1), count: -1, values: [] });
+    data.push({ date: new Date(year, month, -firstDay.getDay() + i + 1), count: -1, value: 0 });
   }
 
-  // Add each day of the month
   for (let day = 1; day <= lastDay.getDate(); day++) {
     const date = new Date(year, month, day);
     const dayStart = new Date(year, month, day, 0, 0, 0, 0);
     const dayEnd = new Date(year, month, day, 23, 59, 59, 999);
 
     const dayEntries = entries.filter(
-      (e) => idSet.has(e.subjectId) && e.timestamp >= dayStart && e.timestamp <= dayEnd
+      (e) => e.subjectId === trackableId && e.timestamp >= dayStart && e.timestamp <= dayEnd,
     );
-
-    const values: number[] = [];
-    dayEntries.forEach((e) => {
-      values.push(...extractNumericValues(e, widget, fieldId));
-    });
-
-    data.push({ date, count: dayEntries.length, values });
+    data.push({ date, count: dayEntries.length, value: aggregateDay(dayEntries, agg) });
   }
-
   return data;
 }
 
-function getLast30DaysData(entries: LogEntry[], widgetIds: string[], widget: Widget, fieldId?: string): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: NormalizedEvent[], trackableId: string, agg: Trackable["aggregation"]): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
   const today = new Date();
-  const idSet = new Set(widgetIds);
 
   for (let i = 29; i >= 0; i--) {
     const date = new Date(today);
@@ -265,29 +226,20 @@ function getLast30DaysData(entries: LogEntry[], widgetIds: string[], widget: Wid
     dayEnd.setHours(23, 59, 59, 999);
 
     const dayEntries = entries.filter(
-      (e) => idSet.has(e.subjectId) && e.timestamp >= date && e.timestamp <= dayEnd
+      (e) => e.subjectId === trackableId && e.timestamp >= date && e.timestamp <= dayEnd,
     );
-
-    const values: number[] = [];
-    dayEntries.forEach((e) => {
-      values.push(...extractNumericValues(e, widget, fieldId));
-    });
-
-    const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
     data.push({
       date: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      value: Math.round(avg * 10) / 10,
+      value: aggregateDay(dayEntries, agg),
       count: dayEntries.length,
     });
   }
-
   return data;
 }
 
-function getWeeklyData(entries: LogEntry[], widgetIds: string[], widget: Widget, fieldId?: string): { week: string; total: number; avg: number }[] {
-  const data: { week: string; total: number; avg: number }[] = [];
+function getWeeklyData(entries: NormalizedEvent[], trackableId: string, agg: Trackable["aggregation"]): { week: string; value: number; count: number }[] {
+  const data: { week: string; value: number; count: number }[] = [];
   const today = new Date();
-  const idSet = new Set(widgetIds);
 
   for (let w = 11; w >= 0; w--) {
     const weekStart = new Date(today);
@@ -299,43 +251,42 @@ function getWeeklyData(entries: LogEntry[], widgetIds: string[], widget: Widget,
     weekEnd.setHours(23, 59, 59, 999);
 
     const weekEntries = entries.filter(
-      (e) => idSet.has(e.subjectId) && e.timestamp >= weekStart && e.timestamp <= weekEnd
+      (e) => e.subjectId === trackableId && e.timestamp >= weekStart && e.timestamp <= weekEnd,
     );
 
-    const values: number[] = [];
-    weekEntries.forEach((e) => {
-      values.push(...extractNumericValues(e, widget, fieldId));
-    });
-
-    const total = weekEntries.length;
-    const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+    // Weekly view: sum→sum-of-days, avg→avg-of-days, last→last value in week.
+    let weekValue = 0;
+    if (agg === "sum") {
+      weekValue = weekEntries
+        .map((e) => e.data.value)
+        .filter((v): v is number => typeof v === "number")
+        .reduce((a, b) => a + b, 0);
+    } else if (agg === "avg") {
+      const vals = weekEntries.map((e) => e.data.value).filter((v): v is number => typeof v === "number");
+      weekValue = vals.length > 0 ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : 0;
+    } else {
+      const vals = weekEntries.map((e) => e.data.value).filter((v): v is number => typeof v === "number");
+      weekValue = vals[0] ?? 0;
+    }
 
     data.push({
       week: weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      total,
-      avg: Math.round(avg * 10) / 10,
+      value: weekValue,
+      count: weekEntries.length,
     });
   }
-
   return data;
 }
 
-function CalendarHeatMap({
-  entries,
-  widgetIds,
-  widget,
-  fieldId,
-}: {
-  entries: LogEntry[];
-  widgetIds: string[];
-  widget: Widget;
-  fieldId?: string;
-}) {
+function CalendarHeatMap({ entries, trackable }: { entries: NormalizedEvent[]; trackable: Trackable }) {
   const [viewDate, setViewDate] = useState(new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
-  const monthData = useMemo(() => getMonthData(entries, widgetIds, year, month, widget, fieldId), [entries, widgetIds, year, month, widget, fieldId]);
+  const monthData = useMemo(
+    () => getMonthData(entries, trackable.id, year, month, trackable.aggregation),
+    [entries, trackable, year, month],
+  );
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -343,15 +294,12 @@ function CalendarHeatMap({
 
   const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
   const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
-
   const monthName = viewDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
-  // Calculate stats
   const validDays = monthData.filter((d) => d.count >= 0);
-  const totalCount = validDays.reduce((sum, d) => sum + d.count, 0);
+  const totalValue = validDays.reduce((sum, d) => sum + d.value, 0);
   const daysWithActivity = validDays.filter((d) => d.count > 0).length;
 
-  // Calculate streak (from today backwards)
   let currentStreak = 0;
   const todayIndex = validDays.findIndex((d) => d.date.toDateString() === today.toDateString());
   if (todayIndex >= 0) {
@@ -365,8 +313,8 @@ function CalendarHeatMap({
     <CalendarContainer>
       <StatsGrid>
         <StatCard>
-          <StatValue>{totalCount}</StatValue>
-          <StatLabel>Total this month</StatLabel>
+          <StatValue>{trackable.aggregation === "avg" ? (totalValue / Math.max(daysWithActivity, 1)).toFixed(1) : totalValue}</StatValue>
+          <StatLabel>{trackable.aggregation === "avg" ? "Monthly avg" : `Monthly total (${trackable.unit})`}</StatLabel>
         </StatCard>
         <StatCard>
           <StatValue>{daysWithActivity}</StatValue>
@@ -379,27 +327,20 @@ function CalendarHeatMap({
       </StatsGrid>
 
       <MonthNav>
-        <NavButton onClick={prevMonth}>
-          <LeftOutlined />
-        </NavButton>
+        <NavButton onClick={prevMonth}><LeftOutlined /></NavButton>
         <MonthLabel>{monthName}</MonthLabel>
-        <NavButton onClick={nextMonth}>
-          <RightOutlined />
-        </NavButton>
+        <NavButton onClick={nextMonth}><RightOutlined /></NavButton>
       </MonthNav>
 
       <CalendarGrid>
-        {DAYS.map((day) => (
-          <DayLabel key={day}>{day}</DayLabel>
-        ))}
+        {DAYS.map((day) => <DayLabel key={day}>{day}</DayLabel>)}
         {monthData.map((day, i) => {
           const isToday = day.date.toDateString() === today.toDateString();
           const isEmpty = day.count < 0;
           const intensity = isEmpty ? 0 : Math.ceil((day.count / maxCount) * 4);
           const tooltip = isEmpty
             ? ""
-            : `${day.date.toLocaleDateString()}: ${day.count} ${day.count === 1 ? "entry" : "entries"}`;
-
+            : `${day.date.toLocaleDateString()}: ${day.value} ${trackable.unit} (${day.count})`;
           return (
             <DayCell
               key={i}
@@ -417,34 +358,29 @@ function CalendarHeatMap({
   );
 }
 
-function TrendChart({
-  entries,
-  widgetIds,
-  widget,
-  fieldId,
-}: {
-  entries: LogEntry[];
-  widgetIds: string[];
-  widget: Widget;
-  fieldId?: string;
-}) {
-  const data = useMemo(() => getLast30DaysData(entries, widgetIds, widget, fieldId), [entries, widgetIds, widget, fieldId]);
+function TrendChart({ entries, trackable }: { entries: NormalizedEvent[]; trackable: Trackable }) {
+  const data = useMemo(
+    () => getLast30DaysData(entries, trackable.id, trackable.aggregation),
+    [entries, trackable],
+  );
 
-  // Calculate stats
-  const values = data.filter((d) => d.value > 0).map((d) => d.value);
-  const avgValue = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-  const daysWithData = values.length;
-  const maxVal = Math.max(...values, 0);
+  const nonZero = data.filter((d) => d.value > 0).map((d) => d.value);
+  const avgValue = nonZero.length > 0 ? nonZero.reduce((a, b) => a + b, 0) / nonZero.length : 0;
+  const daysWithData = nonZero.length;
+  const maxVal = Math.max(...nonZero, 0);
 
-  // Determine if this is a counter (show bar) or value (show line)
-  const isCounter = widget.type === "counter" || widget.type === "counter-group";
+  // Chart shape per aggregation: sum→bar, avg→area, last→stepped line.
+  const ChartTag =
+    trackable.aggregation === "sum" ? "bar"
+      : trackable.aggregation === "avg" ? "area"
+        : "step";
 
   return (
     <>
       <StatsGrid>
         <StatCard>
           <StatValue>{avgValue.toFixed(1)}</StatValue>
-          <StatLabel>30-day average</StatLabel>
+          <StatLabel>30-day avg ({trackable.unit})</StatLabel>
         </StatCard>
         <StatCard>
           <StatValue>{daysWithData}</StatValue>
@@ -452,56 +388,36 @@ function TrendChart({
         </StatCard>
         <StatCard>
           <StatValue>{maxVal.toFixed(1)}</StatValue>
-          <StatLabel>Peak value</StatLabel>
+          <StatLabel>Peak</StatLabel>
         </StatCard>
       </StatsGrid>
 
       <ChartContainer>
         <ResponsiveContainer width="100%" height="100%">
-          {isCounter ? (
+          {ChartTag === "bar" ? (
             <BarChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10 }}
-                interval="preserveStartEnd"
-                tickFormatter={(v, i) => (i % 5 === 0 ? v : "")}
-              />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" tickFormatter={(v, i) => (i % 5 === 0 ? v : "")} />
               <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--color-bg)",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "8px",
-                }}
-              />
-              <Bar dataKey="count" fill="#7c3aed" radius={[2, 2, 0, 0]} />
+              <Tooltip contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }} />
+              <Bar dataKey="value" fill="#7c3aed" radius={[2, 2, 0, 0]} />
             </BarChart>
-          ) : (
+          ) : ChartTag === "area" ? (
             <AreaChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10 }}
-                interval="preserveStartEnd"
-                tickFormatter={(v, i) => (i % 5 === 0 ? v : "")}
-              />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" tickFormatter={(v, i) => (i % 5 === 0 ? v : "")} />
               <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--color-bg)",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "8px",
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="value"
-                stroke="#7c3aed"
-                fill="rgba(124, 58, 237, 0.2)"
-                strokeWidth={2}
-              />
+              <Tooltip contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }} />
+              <Area type="monotone" dataKey="value" stroke="#7c3aed" fill="rgba(124, 58, 237, 0.2)" strokeWidth={2} />
             </AreaChart>
+          ) : (
+            <LineChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" tickFormatter={(v, i) => (i % 5 === 0 ? v : "")} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }} />
+              <Line type="stepAfter" dataKey="value" stroke="#7c3aed" strokeWidth={2} dot={{ fill: "#7c3aed", r: 3 }} />
+            </LineChart>
           )}
         </ResponsiveContainer>
       </ChartContainer>
@@ -509,21 +425,11 @@ function TrendChart({
   );
 }
 
-function WeeklyChart({
-  entries,
-  widgetIds,
-  widget,
-  fieldId,
-}: {
-  entries: LogEntry[];
-  widgetIds: string[];
-  widget: Widget;
-  fieldId?: string;
-}) {
-  const data = useMemo(() => getWeeklyData(entries, widgetIds, widget, fieldId), [entries, widgetIds, widget, fieldId]);
-
-  const isCounter = widget.type === "counter" || widget.type === "counter-group";
-  const dataKey = isCounter ? "total" : "avg";
+function WeeklyChart({ entries, trackable }: { entries: NormalizedEvent[]; trackable: Trackable }) {
+  const data = useMemo(
+    () => getWeeklyData(entries, trackable.id, trackable.aggregation),
+    [entries, trackable],
+  );
 
   return (
     <ChartContainer>
@@ -532,100 +438,12 @@ function WeeklyChart({
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
           <XAxis dataKey="week" tick={{ fontSize: 10 }} />
           <YAxis tick={{ fontSize: 10 }} />
-          <Tooltip
-            contentStyle={{
-              background: "var(--color-bg)",
-              border: "1px solid var(--color-border)",
-              borderRadius: "8px",
-            }}
-          />
-          <Bar dataKey={dataKey} fill="#7c3aed" radius={[4, 4, 0, 0]} />
+          <Tooltip contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }} />
+          <Bar dataKey="value" fill="#7c3aed" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </ChartContainer>
   );
-}
-
-// Represents a selectable item for visualization
-interface VisualizableItem {
-  id: string;           // Unique ID for selection
-  label: string;        // Display name
-  widget: Widget;       // Parent widget (for type detection)
-  entryIds: string[];   // Entry IDs to filter by
-  fieldId?: string;     // For combo fields, the specific field to extract
-}
-
-// Build a flat list of all visualizable items (expands counter-groups, combo widgets, and sample questions)
-function buildVisualizableItems(widgets: Widget[], sampleQuestions: SampleQuestion[]): VisualizableItem[] {
-  const items: VisualizableItem[] = [];
-
-  for (const widget of widgets) {
-    if (widget.type === "counter-group") {
-      const groupWidget = widget as CounterGroupWidgetType;
-      // Add the group itself (all counters combined)
-      items.push({
-        id: widget.id,
-        label: `${widget.label} (all)`,
-        widget,
-        entryIds: groupWidget.counters.map(c => c.id),
-      });
-      // Add each individual counter
-      for (const counter of groupWidget.counters) {
-        items.push({
-          id: `${widget.id}:${counter.id}`,
-          label: `${widget.label} › ${counter.label}`,
-          widget: { ...widget, type: "counter" } as Widget, // Treat as single counter for viz
-          entryIds: [counter.id],
-        });
-      }
-    } else if (widget.type === "combo") {
-      const comboWidget = widget as ComboWidgetType;
-      // Add each field as a separate visualizable item
-      for (const field of comboWidget.fields) {
-        // Create a virtual widget for this field based on field type
-        const virtualWidget: Widget = field.type === "number"
-          ? { id: `${widget.id}:${field.id}`, type: "number", label: field.label, min: field.min, max: field.max, unit: field.unit }
-          : field.type === "rating"
-          ? { id: `${widget.id}:${field.id}`, type: "rating", label: field.label, max: field.max || 5 }
-          : { id: `${widget.id}:${field.id}`, type: "text", label: field.label };
-
-        items.push({
-          id: `${widget.id}:${field.id}`,
-          label: `${widget.label} › ${field.label}`,
-          widget: virtualWidget,
-          entryIds: [widget.id], // Combo entries use the parent widget ID
-          fieldId: field.id,    // Track which field to extract
-        });
-      }
-    } else {
-      items.push({
-        id: widget.id,
-        label: widget.label,
-        widget,
-        entryIds: [widget.id],
-      });
-    }
-  }
-
-  // Add sample questions as visualizable items
-  for (const question of sampleQuestions) {
-    // Create a virtual widget for this sample question based on question type
-    const virtualWidget: Widget = question.type === "number"
-      ? { id: `sample:${question.id}`, type: "number", label: question.label, min: question.min }
-      : question.type === "rating"
-      ? { id: `sample:${question.id}`, type: "rating", label: question.label, max: question.max || 5 }
-      : { id: `sample:${question.id}`, type: "text", label: question.label };
-
-    items.push({
-      id: `sample:${question.id}`,
-      label: `Sample › ${question.label}`,
-      widget: virtualWidget,
-      entryIds: ["__sample__"], // Sample entries use "__sample__" as subjectId
-      fieldId: question.id,    // Track which field to extract from sample data
-    });
-  }
-
-  return items;
 }
 
 export function Visualizations() {
@@ -633,55 +451,46 @@ export function Visualizations() {
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const widgets = MANIFEST.widgets;
-  const sampleQuestions = MANIFEST.randomSamples?.questions || [];
-  const entries = Array.from(state.entries.values());
+  // Normalize once for the whole view. Legacy combo / counter-group / sample
+  // rows get translated into per-trackable value events.
+  const allEntries: LogEntry[] = useMemo(() => Array.from(state.entries.values()), [state.entries]);
+  const normalized: NormalizedEvent[] = useMemo(() => normalizeEntries(allEntries), [allEntries]);
 
-  // Build flat list of visualizable items
-  const visualizableItems = useMemo(() => buildVisualizableItems(widgets, sampleQuestions), [widgets, sampleQuestions]);
+  const currentId = selectedId || TRACKABLES[0]?.id;
+  const trackable = TRACKABLES.find((t) => t.id === currentId);
 
-  // Find selected item (default to first)
-  const currentId = selectedId || visualizableItems[0]?.id;
-  const selectedItem = visualizableItems.find(item => item.id === currentId);
-
-  if (visualizableItems.length === 0) {
+  if (!trackable) {
     return (
       <Container>
         <Header>
           <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("..")} />
           <Title>Insights</Title>
         </Header>
-        <Empty description="No widgets configured yet" />
+        <Empty description="No trackables configured" />
       </Container>
     );
   }
 
-  const widgetOptions = visualizableItems.map((item) => ({
-    value: item.id,
-    label: item.label,
+  const options = TRACKABLES.map((t) => ({
+    value: t.id,
+    label: t.group ? `${t.group} › ${t.label}` : t.label,
   }));
 
   const tabItems = [
     {
       key: "trend",
       label: "Daily Trend",
-      children: selectedItem && (
-        <TrendChart entries={entries} widgetIds={selectedItem.entryIds} widget={selectedItem.widget} fieldId={selectedItem.fieldId} />
-      ),
+      children: <TrendChart entries={normalized} trackable={trackable} />,
     },
     {
       key: "weekly",
       label: "Weekly",
-      children: selectedItem && (
-        <WeeklyChart entries={entries} widgetIds={selectedItem.entryIds} widget={selectedItem.widget} fieldId={selectedItem.fieldId} />
-      ),
+      children: <WeeklyChart entries={normalized} trackable={trackable} />,
     },
     {
       key: "calendar",
       label: "Calendar",
-      children: selectedItem && (
-        <CalendarHeatMap entries={entries} widgetIds={selectedItem.entryIds} widget={selectedItem.widget} fieldId={selectedItem.fieldId} />
-      ),
+      children: <CalendarHeatMap entries={normalized} trackable={trackable} />,
     },
   ];
 
@@ -690,10 +499,10 @@ export function Visualizations() {
       <Header>
         <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("..")} />
         <Title>Insights</Title>
-        <WidgetSelect
+        <TrackableSelect
           value={currentId}
           onChange={(value) => setSelectedId(value as string)}
-          options={widgetOptions}
+          options={options}
         />
       </Header>
 

@@ -26,7 +26,22 @@ export type {
   ActivitySlot, FlightSlot, FlightInfo,
   DayEntry,
 } from "./types/travel";
-export type { LifeLog, LifeEntry } from "./types/life";
+export type { LifeLog, LifeEntry, SampleSchedule } from "./types/life";
+export type { LifeSampleQuestion, LifeRandomSamplesConfig } from "./types/life-config";
+export { RANDOM_SAMPLES } from "./types/life-config";
+
+// --- Travel validation (canonical impl shared by travel UI + MCP server) ---
+export {
+  validateDay,
+  parseTimeOfDay,
+  parseDurationHours,
+} from "./travel-validation";
+export type {
+  DayIssue,
+  DayIssueKind,
+  ValidationActivity,
+  ValidationSlot,
+} from "./travel-validation";
 
 // --- Interfaces ---
 export type { AuthBackend } from "./interfaces/auth";

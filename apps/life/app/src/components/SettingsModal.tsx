@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
-import { Modal, Segmented, Button } from "antd";
+import { useState, useEffect, useMemo } from "react";
+import { Modal, Segmented, Button, TimePicker } from "antd";
 import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
+import dayjs, { type Dayjs } from "dayjs";
 import styled from "styled-components";
 import { useDisplaySettings, type WidgetSize } from "../display-settings";
+import { useLifeContext } from "../life-context";
 import type { LifeLog } from "../types";
-import { MANIFEST } from "../manifest";
-import { useUserBackend } from "@kirkl/shared";
+import { RANDOM_SAMPLES } from "../manifest";
+import { useUserBackend, useLifeBackend, useFeedback } from "@kirkl/shared";
 
 const SettingRow = styled.div`
   display: flex;
@@ -28,6 +30,46 @@ const DebugSection = styled.div`
   margin-top: var(--space-lg);
   padding-top: var(--space-md);
   border-top: 1px solid var(--color-border);
+`;
+
+const Section = styled.div`
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+`;
+
+const SectionTitle = styled.div`
+  font-weight: 500;
+  margin-bottom: var(--space-xs);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+`;
+
+const SectionTz = styled.span`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: 400;
+`;
+
+const ReminderRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-xs) 0;
+  gap: var(--space-sm);
+`;
+
+const ReminderLabel = styled.div`
+  flex: 1;
+  font-weight: 500;
+`;
+
+const ReminderControls = styled.div`
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
 `;
 
 const DebugHeader = styled.div`
@@ -87,13 +129,67 @@ interface SettingsModalProps {
 export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: SettingsModalProps) {
   const { widgetSize, setWidgetSize } = useDisplaySettings();
   const user = useUserBackend();
+  const life = useLifeBackend();
+  const { message } = useFeedback();
+  const { dispatch } = useLifeContext();
   const [showDebug, setShowDebug] = useState(false);
   const [fcmTokenCount, setFcmTokenCount] = useState<number | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(false);
+  const [savingMorning, setSavingMorning] = useState(false);
+  const [savingEvening, setSavingEvening] = useState(false);
+  const [savingWeekly, setSavingWeekly] = useState(false);
 
   const schedule = log?.sampleSchedule;
-  const config = MANIFEST.randomSamples;
+  const config = RANDOM_SAMPLES;
   const now = Date.now();
+
+  const userTz = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    [],
+  );
+
+  // Parse "HH:MM" without relying on the customParseFormat plugin.
+  const parseHHmm = (s: string | null | undefined): Dayjs | null => {
+    if (!s) return null;
+    const m = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+    const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+    return dayjs().hour(h).minute(min).second(0).millisecond(0);
+  };
+  const morningValue: Dayjs | null = parseHHmm(log?.morningReminderTime);
+  const eveningValue: Dayjs | null = parseHHmm(log?.eveningReminderTime);
+  const weeklyValue: Dayjs | null = parseHHmm(log?.weeklyReminderTime);
+
+  const saveReminder = async (
+    which: "morning" | "evening" | "weekly",
+    value: Dayjs | null,
+  ) => {
+    if (!log?.id) return;
+    const formatted = value ? value.format("HH:mm") : null;
+    const setSaving =
+      which === "morning"
+        ? setSavingMorning
+        : which === "evening"
+          ? setSavingEvening
+          : setSavingWeekly;
+    setSaving(true);
+    try {
+      await life.updateReminderTimes(log.id, { [which]: formatted });
+      const nextLog: LifeLog = {
+        ...log,
+        morningReminderTime: which === "morning" ? formatted : log.morningReminderTime,
+        eveningReminderTime: which === "evening" ? formatted : log.eveningReminderTime,
+        weeklyReminderTime: which === "weekly" ? formatted : log.weeklyReminderTime,
+      };
+      dispatch({ type: "SET_LOG", log: nextLog });
+    } catch (err) {
+      console.error(`Failed to save ${which} reminder:`, err);
+      message.error(`Failed to save ${which} reminder`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Load FCM token count when debug is shown
   useEffect(() => {
@@ -152,6 +248,58 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
           ]}
         />
       </SettingRow>
+
+      <Section>
+        <SectionTitle>
+          <span>Reminders</span>
+          <SectionTz>times in {userTz}</SectionTz>
+        </SectionTitle>
+        <SettingDescription>
+          Push notification to start a session. Leave empty to disable.
+        </SettingDescription>
+        <ReminderRow>
+          <ReminderLabel>Morning</ReminderLabel>
+          <ReminderControls>
+            <TimePicker
+              format="HH:mm"
+              minuteStep={5}
+              value={morningValue}
+              onChange={(v) => saveReminder("morning", v)}
+              allowClear
+              disabled={savingMorning || !log?.id}
+              placeholder="Off"
+            />
+          </ReminderControls>
+        </ReminderRow>
+        <ReminderRow>
+          <ReminderLabel>Evening</ReminderLabel>
+          <ReminderControls>
+            <TimePicker
+              format="HH:mm"
+              minuteStep={5}
+              value={eveningValue}
+              onChange={(v) => saveReminder("evening", v)}
+              allowClear
+              disabled={savingEvening || !log?.id}
+              placeholder="Off"
+            />
+          </ReminderControls>
+        </ReminderRow>
+        <ReminderRow>
+          <ReminderLabel>Weekly review (Sunday)</ReminderLabel>
+          <ReminderControls>
+            <TimePicker
+              format="HH:mm"
+              minuteStep={5}
+              value={weeklyValue}
+              onChange={(v) => saveReminder("weekly", v)}
+              allowClear
+              disabled={savingWeekly || !log?.id}
+              placeholder="Off"
+            />
+          </ReminderControls>
+        </ReminderRow>
+      </Section>
 
       {config?.enabled && (
         <DebugSection>

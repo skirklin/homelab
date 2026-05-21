@@ -46,7 +46,7 @@ function activityFromRecord(r: RecordModel): Activity {
     difficulty: r.difficulty || undefined,
     confirmationCode: r.confirmation_code || "",
     details: r.details, setting: r.setting,
-    bookingReqs: r.booking_reqs, ratingCount: r.rating_count,
+    ratingCount: r.rating_count,
     photoRef: r.photo_ref,
     flightInfo: r.flight_info || undefined,
     verdict: (r.verdict as ActivityVerdict) || undefined,
@@ -313,7 +313,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (a.confirmationCode !== undefined) d.confirmation_code = a.confirmationCode;
     if (a.details !== undefined) d.details = a.details;
     if (a.setting !== undefined) d.setting = a.setting;
-    if (a.bookingReqs !== undefined) d.booking_reqs = a.bookingReqs;
     if (a.ratingCount !== undefined) d.rating_count = a.ratingCount;
     if (a.photoRef !== undefined) d.photo_ref = a.photoRef;
     if (a.flightInfo !== undefined) d.flight_info = a.flightInfo;

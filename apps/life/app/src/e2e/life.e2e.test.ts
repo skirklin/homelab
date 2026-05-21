@@ -47,9 +47,10 @@ describe("getOrCreateLog", () => {
 
     expect(result.id).toBeTruthy();
 
-    // Verify user record was updated with the log ID
-    const userRecord = await ctx.pb.collection("users").getOne(user.id);
-    expect(userRecord.life_log_id).toBe(result.id);
+    // Verify the back-pointer is set on the new log (life_logs.owner is the
+    // source of truth post-0028/0029 — no forward pointer to keep in sync).
+    const logRecord = await ctx.pb.collection("life_logs").getOne(result.id);
+    expect(logRecord.owner).toBe(user.id);
 
     cleanup.track("life_logs", result.id);
     await cleanup.cleanup();
@@ -66,23 +67,6 @@ describe("getOrCreateLog", () => {
     const second = await life.getOrCreateLog(user.id);
 
     expect(second.id).toBe(first.id);
-
-    await cleanup.cleanup();
-  });
-
-  it("creates a new log when existing life_log_id is stale", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    // Point the user at a nonexistent log ID
-    await ctx.pb.collection("users").update(user.id, { life_log_id: "nonexistent000000000" });
-
-    const result = await life.getOrCreateLog(user.id);
-    cleanup.track("life_logs", result.id);
-
-    expect(result.id).toBeTruthy();
-    expect(result.id).not.toBe("nonexistent000000000");
 
     await cleanup.cleanup();
   });
@@ -161,7 +145,7 @@ describe("addEntry", () => {
 
     const log2 = await ctx.pb.collection("life_logs").create({
       name: "Second Log",
-      owners: [user.id],
+      owner: user.id,
     });
     cleanup.track("life_logs", log2.id);
 
@@ -260,49 +244,6 @@ describe("deleteEntry", () => {
     } catch (e: any) {
       expect(e.status).toBe(404);
     }
-
-    await cleanup.cleanup();
-  });
-});
-
-describe("addSampleResponse", () => {
-  it("creates a sample event", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await life.getOrCreateLog(user.id);
-    const logId = log.id;
-    cleanup.track("life_logs", logId);
-
-    const eventId = await life.addSampleResponse(logId, { mood: 4, energy: 3 }, user.id);
-    cleanup.track("life_events", eventId);
-
-    const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.subject_id).toBe("__sample__");
-    expect(record.data.mood).toBe(4);
-    expect(record.data.energy).toBe(3);
-    expect(record.created_by).toBe(user.id);
-
-    await cleanup.cleanup();
-  });
-
-  it("accepts explicit logId", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await ctx.pb.collection("life_logs").create({
-      name: "Sample Override Log",
-      owners: [user.id],
-    });
-    cleanup.track("life_logs", log.id);
-
-    const eventId = await life.addSampleResponse(log.id, { mood: 5 }, user.id);
-    cleanup.track("life_events", eventId);
-
-    const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.log).toBe(log.id);
 
     await cleanup.cleanup();
   });

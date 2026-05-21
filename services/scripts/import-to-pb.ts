@@ -663,12 +663,6 @@ async function wireUserProfiles() {
       if (Object.keys(mapped).length > 0) update.travel_slugs = mapped;
     }
 
-    // Life log
-    if (fu.lifeLogId) {
-      const pbLogId = getMap("life_logs").get(fu.lifeLogId);
-      if (pbLogId) update.life_log_id = pbLogId;
-    }
-
     // Recipe boxes
     if (fu.boxes) {
       const mapped = deRefs(fu.boxes).map(fireId => getMap("recipe_boxes").get(fireId)).filter(Boolean) as string[];

@@ -42,6 +42,7 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 | Subdomain | k8s Service |
 |---|---|
 | `kirkl.in` | home |
+| `beta.kirkl.in` | home-beta (parallel home variant) |
 | `recipes.kirkl.in` | recipes |
 | `shopping.kirkl.in` | shopping |
 | `upkeep.kirkl.in` | upkeep (Kanban view) |
@@ -53,6 +54,8 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 
 Home app also serves `/tasks/*` (unified task outliner).
 Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.net`).
+
+**Beta channel (`beta.kirkl.in`)**: a separately-deployed `home` build that shares the same PB, API, auth, and data as production — only the home bundle differs. The `home-beta` Deployment pulls `home:beta` while prod `home` stays on `:latest`. Push to it with `./infra/deploy.sh --beta` (from any branch). The flag pins `IMAGE_TAG=beta`, builds only `home`, rolls out only the `home-beta` Deployment, and marks the deployment record with `variant: "beta"` so the monitor can partition history. Production is never touched. The `*.beta.kirkl.in` subdomain aliases on the standalone apps (recipes/shopping/…) still point at their prod Services — beta only forks `home`.
 
 ## MCP Server
 
@@ -103,7 +106,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 
 **Tasks (write):**
 - `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot, notify_users)
-- `add_trip_task` — add a trip-prep task; auto-nests under `Trips/<destination>/` and tags `travel:<tripId>` (use this for trip prep instead of raw `add_task`)
+- `add_trip_task` — add a trip-prep task; auto-nests under `Trips/<destination>/` and tags `travel:<tripId>`. Pass `activity_id` to also tag `activity:<id>` so the Prep tab groups it under that activity. (Use this for trip prep instead of raw `add_task`.)
 - `update_task` — update fields (typed schema; pass only the fields to change). To reparent or move between lists use `move_task` instead.
 - `move_task` — reparent and/or move between lists; recomputes descendant `path` atomically
 - `tag_task` — add and/or remove tags atomically (avoids the get-then-set race of `update_task(tags=...)`)
@@ -111,7 +114,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `complete_task` — toggle completion (recurring sets last_completed; one_shot toggles completed)
 - `snooze_task` / `unsnooze_task` — snooze until a date or clear snooze
 
-Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner. The easy path is `add_trip_task` — it resolves the destination, finds-or-creates the containers, and tags the leaf. Using raw `add_task` is the hard path: you have to find the "Trips" root + per-trip container yourself, or the task ends up at the top level.
+Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner. The easy path is `add_trip_task` — it resolves the destination, finds-or-creates the containers, and tags the leaf. Using raw `add_task` is the hard path: you have to find the "Trips" root + per-trip container yourself, or the task ends up at the top level. Tasks may also carry an optional `activity:<activityId>` tag; when present, the Prep tab groups them under that activity (e.g. "Book Frida Kahlo tickets" under the Frida Kahlo Museum activity). `add_trip_task` accepts an `activity_id` param for this — stale `activity:<id>` tags whose activity has been deleted degrade gracefully to General prep, no cleanup needed.
 
 **Travel (read):**
 - `list_travel_trips` — all trips across logs
@@ -181,10 +184,11 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 | `cost_notes` | Price info | `$25/person`, `Free`, `$15 parking` |
 | `setting` | Indoor/outdoor/both | `outdoor`, `indoor`, `both` |
 | `trip_id` | Which trip this belongs to | (record ID) |
-| `booking_reqs` | Structured advance-booking todos. The readiness dashboard surfaces these by deadline; **use this, not the description**, for any activity requiring reservations/permits/timed entry. Array of `{ action, daysBefore, done? }`. | `[{ "action": "Book Frida Kahlo tickets at museofridakahlo.org.mx", "daysBefore": 30 }]` |
 | `confirmation_code` | Set once a booking is complete — the readiness dashboard treats it as the "confirmed" signal. | `ABC123` |
 
 **Do not** put durations or booking instructions in the description. **Do not** prefix lodging names with "Overnight in". Use the actual hotel/property name.
+
+For advance-booking todos (reserve tickets, get permits, book restaurants, etc.), create a task tagged `travel:<tripId>` via the `add_trip_task` MCP tool — the Prep tab reads from there, and tasks are the single source of truth for trip prep.
 
 ### MCP auth
 Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.
