@@ -647,7 +647,7 @@ if (shouldRun("life")) {
     const ownerPbId = userMap.get(primaryOwner)!.pbId;
 
     try {
-      // Idempotency: getOrCreateLog checks user's life_log_id first
+      // Idempotency: getOrCreateLog queries life_logs.owner = uid (0028+0029)
       const pbLog = await life.getOrCreateLog(ownerPbId);
       const pbLogId = pbLog.id;
 
@@ -1060,7 +1060,7 @@ if (shouldRun("travel")) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 7: Update user profiles with mapped IDs (slugs, boxes, life_log_id)
+// Step 7: Update user profiles with mapped IDs (slugs, recipe_boxes)
 // ---------------------------------------------------------------------------
 
 if (!config.dryRun) {
@@ -1105,14 +1105,8 @@ if (!config.dryRun) {
       }
     }
 
-    // Life log ID: Firestore users/{uid}.lifeLogId -> PB users.life_log_id
-    if (userData.lifeLogId) {
-      const pbLogId = fireLogIdToPbId.get(userData.lifeLogId);
-      if (pbLogId) {
-        await adminPb.collection("users").update(pbId, { life_log_id: pbLogId });
-        console.log(`  ${email}: life_log_id -> ${pbLogId}`);
-      }
-    }
+    // Life log ID: no forward pointer post-0029. Ownership is anchored on
+    // life_logs.owner, which getOrCreateLog already set at log-creation time.
 
     // Recipe boxes: Firestore users/{uid}.boxes (DocumentReference[]) -> PB users.recipe_boxes
     if (userData.boxes && Array.isArray(userData.boxes)) {

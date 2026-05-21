@@ -78,7 +78,6 @@ async function exportUsers(): Promise<number> {
       shopping_slugs: d.slugs ?? null,
       household_slugs: d.householdSlugs ?? null,
       travel_slugs: d.travelSlugs ?? null,
-      life_log_id: d.lifeLogId ?? null,
       recipe_boxes: resolveRefArray(d.boxes),
       cooking_mode_seen: d.cookingModeSeen ?? null,
       last_seen_update_version: d.lastSeenUpdateVersion ?? null,

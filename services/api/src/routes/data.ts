@@ -1877,11 +1877,14 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex/mov
 dataRoutes.get("/life/log", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
-  const user = await pb.collection("users").getOne(userId);
-  const logId = user.life_log_id as string;
-  if (!logId) return c.json({ error: "no life log configured" }, 404);
-
-  const log = await pb.collection("life_logs").getOne(logId);
+  // life_logs is single-owner (migration 0028); the back-pointer is the
+  // source of truth now that users.life_log_id is gone (0029).
+  const logs = await pb.collection("life_logs").getList(1, 1, {
+    filter: pb.filter("owner = {:uid}", { uid: userId }),
+    sort: "created",
+  });
+  if (logs.items.length === 0) return c.json({ error: "no life log configured" }, 404);
+  const log = logs.items[0];
   return c.json({
     id: log.id,
     name: log.name,

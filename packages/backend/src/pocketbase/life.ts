@@ -45,36 +45,15 @@ export class PocketBaseLifeBackend implements LifeBackend {
   }
 
   async getOrCreateLog(userId: string): Promise<LifeLog> {
-    const user = await this.pb().collection("users").getOne(userId);
-    const logId = user.life_log_id;
-
-    if (logId) {
-      try {
-        const r = await this.pb().collection("life_logs").getOne(logId);
-        return logFromRecord(r);
-      } catch (err: unknown) {
-        // Only treat genuine 404 as "log is gone." A transient auth/network
-        // error here used to fall through and silently mint a new empty log
-        // while clobbering user.life_log_id, orphaning the user's real data.
-        const status = (err as { status?: number })?.status;
-        if (status !== 404) throw err;
-      }
-    }
-
-    // Before creating a new log, try to recover any log this user already
-    // owns — covers the case where life_log_id was empty, stale, or
-    // accidentally pointed at a deleted/wrong log. life_logs is
-    // single-owner (migration 0028) so the filter uses direct equality.
+    // life_logs is single-owner (migration 0028) and each user has at most
+    // one row, so a filter on the back-pointer is the source of truth. No
+    // forward pointer on users to keep in sync — 0029 dropped it.
     const owned = await this.pb().collection("life_logs").getList(1, 1, {
       filter: this.pb().filter("owner = {:uid}", { uid: userId }),
       sort: "created",
     });
     if (owned.items.length > 0) {
-      const existing = owned.items[0];
-      if (user.life_log_id !== existing.id) {
-        await this.wpb.collection("users").update(userId, { life_log_id: existing.id });
-      }
-      return logFromRecord(existing);
+      return logFromRecord(owned.items[0]);
     }
 
     const id = newId();
@@ -83,7 +62,6 @@ export class PocketBaseLifeBackend implements LifeBackend {
       name: "Life Log",
       owner: userId,
     });
-    await this.wpb.collection("users").update(userId, { life_log_id: id });
     return logFromRecord(r as RecordModel);
   }
 
