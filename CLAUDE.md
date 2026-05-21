@@ -106,7 +106,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 
 **Tasks (write):**
 - `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot, notify_users)
-- `add_trip_task` — add a trip-prep task; auto-nests under `Trips/<destination>/` and tags `travel:<tripId>` (use this for trip prep instead of raw `add_task`)
+- `add_trip_task` — add a trip-prep task; auto-nests under `Trips/<destination>/` and tags `travel:<tripId>`. Pass `activity_id` to also tag `activity:<id>` so the Prep tab groups it under that activity. (Use this for trip prep instead of raw `add_task`.)
 - `update_task` — update fields (typed schema; pass only the fields to change). To reparent or move between lists use `move_task` instead.
 - `move_task` — reparent and/or move between lists; recomputes descendant `path` atomically
 - `tag_task` — add and/or remove tags atomically (avoids the get-then-set race of `update_task(tags=...)`)
@@ -114,7 +114,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `complete_task` — toggle completion (recurring sets last_completed; one_shot toggles completed)
 - `snooze_task` / `unsnooze_task` — snooze until a date or clear snooze
 
-Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner. The easy path is `add_trip_task` — it resolves the destination, finds-or-creates the containers, and tags the leaf. Using raw `add_task` is the hard path: you have to find the "Trips" root + per-trip container yourself, or the task ends up at the top level.
+Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `Trips/<name>/` container in the outliner. The easy path is `add_trip_task` — it resolves the destination, finds-or-creates the containers, and tags the leaf. Using raw `add_task` is the hard path: you have to find the "Trips" root + per-trip container yourself, or the task ends up at the top level. Tasks may also carry an optional `activity:<activityId>` tag; when present, the Prep tab groups them under that activity (e.g. "Book Frida Kahlo tickets" under the Frida Kahlo Museum activity). `add_trip_task` accepts an `activity_id` param for this — stale `activity:<id>` tags whose activity has been deleted degrade gracefully to General prep, no cleanup needed.
 
 **Travel (read):**
 - `list_travel_trips` — all trips across logs

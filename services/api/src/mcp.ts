@@ -1427,7 +1427,7 @@ const taskFrequencySchema = z.object({
 
 server.tool(
   "add_task",
-  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), tags, and notification subscribers. For trip-prep tasks, prefer add_trip_task — it handles the Trips/<destination>/ container nesting that this tool doesn't.",
+  "Create a task. Supports nesting (parent_id), task types (recurring/one_shot), tags, and notification subscribers. For trip-prep tasks, prefer add_trip_task — it handles the Trips/<destination>/ container nesting that this tool doesn't, and accepts an optional activity_id that tags the task `activity:<id>` so the travel Prep tab groups it under the matching activity.",
   {
     list: z.string().describe("The task list ID"),
     name: z.string().describe("Task name"),
@@ -1456,7 +1456,7 @@ server.tool(
 // with tag_task / update_task.
 server.tool(
   "add_trip_task",
-  "Add a trip-prep task to a trip's checklist. This is the canonical way to add tasks tied to a travel trip: it automatically nests the new task under Trips/<destination>/ (creating those container tasks on demand) and tags it with travel:<trip_id>, matching the Travel app's checklist UI. Use this instead of raw add_task whenever the task is associated with a trip — raw add_task does not create the container hierarchy and would leave the task as a top-level outliner item. Edit the resulting task later with tag_task / update_task.",
+  "Add a trip-prep task to a trip's checklist. This is the canonical way to add tasks tied to a travel trip: it automatically nests the new task under Trips/<destination>/ (creating those container tasks on demand) and tags it with travel:<trip_id>, matching the Travel app's checklist UI. Use this instead of raw add_task whenever the task is associated with a trip — raw add_task does not create the container hierarchy and would leave the task as a top-level outliner item. Pass activity_id to also tag the task `activity:<id>`, which makes the Prep tab group it under that specific activity (e.g. 'Book Frida Kahlo tickets' under the Frida Kahlo Museum activity). Edit the resulting task later with tag_task / update_task.",
   {
     trip_id: z.string().describe("The travel trip record ID this task belongs to"),
     name: z.string().describe("Task name (the user-facing prep item, e.g. 'Pack adapters')"),
@@ -1464,8 +1464,11 @@ server.tool(
     list_id: z.string().optional().describe("Task list to add into. Defaults to the caller's first household task list (matching the Travel UI's behavior)."),
     position: z.number().optional().describe("Sort position among siblings under the per-trip container. Defaults to max-sibling-position + 1."),
     notify_users: z.array(z.string()).optional().describe("User IDs to notify on completion/due"),
+    activity_id: z.string().optional().describe(
+      "Optional activity record ID. When provided, the task is also tagged `activity:<id>` so the Prep tab can group it under that activity (e.g. 'Book Frida Kahlo tickets' under the Frida Kahlo Museum activity).",
+    ),
   },
-  async ({ trip_id, name, description, list_id, position, notify_users }) => {
+  async ({ trip_id, name, description, list_id, position, notify_users, activity_id }) => {
     // 1. Resolve list. If none given, fall back to the first task list owned by the
     // caller. The Travel UI uses user.household_slugs (first entry), but no API
     // endpoint exposes that map — /data/task-lists already filters to lists the
@@ -1542,9 +1545,11 @@ server.tool(
       tripContainer = { id: created.id, name: created.name, parent_id: tripsRoot.id, position: maxPos(tripsChildren) + 1, tags: [tripContainerTag] };
     }
 
-    // 5. Create the actual leaf task, tagged travel:<trip_id>.
+    // 5. Create the actual leaf task, tagged travel:<trip_id> (and optionally
+    // activity:<activity_id> so the Prep tab can group it under that activity).
     const leafSiblings = await listChildren(tripContainer.id);
     const leafPosition = position ?? maxPos(leafSiblings) + 1;
+    const leafTags = activity_id ? [tripTag, `activity:${activity_id}`] : [tripTag];
     const data = await api("/tasks", {
       method: "POST",
       body: JSON.stringify({
@@ -1555,7 +1560,7 @@ server.tool(
         description: description ?? "",
         task_type: "one_shot",
         frequency: { value: 1, unit: "days" },
-        tags: [tripTag],
+        tags: leafTags,
         notify_users,
       }),
     });

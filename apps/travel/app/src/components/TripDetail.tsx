@@ -359,7 +359,7 @@ export function TripDetail() {
                 {showReadiness && (
                   <>
                     <ReadinessDashboard trip={trip} activities={activities} itineraries={itineraries} />
-                    <TripChecklist trip={trip} />
+                    <TripChecklist trip={trip} activities={activities} />
                   </>
                 )}
                 {trip.notes && (
