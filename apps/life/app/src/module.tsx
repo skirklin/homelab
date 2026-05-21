@@ -62,6 +62,7 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
         <Route path="/" element={<LifeDashboard embedded={embedded} />} />
         <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
         <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
+        <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
         <Route path="/insights" element={
           <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
             <Visualizations />

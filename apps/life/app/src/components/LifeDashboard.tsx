@@ -367,7 +367,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     const todayKey = getDateString(now);
 
     // Find today's most recent entry per session.
-    const lastByKind: Record<Session["id"], Date | null> = { morning: null, evening: null };
+    const lastByKind: Record<Session["id"], Date | null> = { morning: null, evening: null, weekly_review: null };
     for (const e of allEntries) {
       if (getDateString(e.timestamp) !== todayKey) continue;
       for (const s of SESSIONS) {
