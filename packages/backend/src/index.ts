@@ -27,6 +27,8 @@ export type {
   DayEntry,
 } from "./types/travel";
 export type { LifeLog, LifeEntry, SampleSchedule } from "./types/life";
+export type { LifeSampleQuestion, LifeRandomSamplesConfig } from "./types/life-config";
+export { RANDOM_SAMPLES } from "./types/life-config";
 
 // --- Travel validation (canonical impl shared by travel UI + MCP server) ---
 export {

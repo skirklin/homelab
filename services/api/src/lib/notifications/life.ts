@@ -4,6 +4,7 @@
  */
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import type { SampleSchedule } from "@homelab/backend";
+import { RANDOM_SAMPLES } from "@homelab/backend";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
@@ -15,26 +16,10 @@ import { safeTz } from "./tz";
 const LIFE_SUBDOMAIN_BASE = `https://life.${DOMAIN}`;
 const LIFE_ORIGINS = [LIFE_SUBDOMAIN_BASE, `https://${DOMAIN}`];
 
-// Used when a log's RandomSamplesConfig is missing/garbage timezone. Differs
-// from travel's "America/Denver" default — for random sampling we want
-// deterministic times for users without a tz preference, not the
-// system-owner's clock.
+// Used when RANDOM_SAMPLES.timezone is missing/garbage. Differs from travel's
+// "America/Denver" default — for random sampling we want deterministic times
+// for users without a tz preference, not the system-owner's clock.
 const FALLBACK_TZ = "UTC";
-
-interface SampleQuestion {
-  id: string;
-  type: "rating" | "text" | "number";
-  label: string;
-  max?: number;
-}
-
-interface RandomSamplesConfig {
-  enabled: boolean;
-  timesPerDay: number;
-  activeHours: [number, number];
-  timezone?: string;
-  questions: SampleQuestion[];
-}
 
 function getDateStringInTimezone(date: Date, timezone: string): string {
   const zonedDate = toZonedTime(date, timezone);
@@ -92,14 +77,20 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   let totalSent = 0;
   let totalSkipped = 0;
 
+  // System-wide config now lives in @homelab/backend. The check below is a
+  // single short-circuit, not per-log — if sampling is globally disabled or
+  // misconfigured we skip the whole tick. (If we ever want per-user opt-out,
+  // add a boolean field to life_logs and gate on that here.)
+  const config = RANDOM_SAMPLES;
+  if (!config.enabled || !config.timesPerDay || config.timesPerDay < 1) {
+    return { sent: 0, skipped: logs.length };
+  }
+  if (!Array.isArray(config.activeHours) || config.activeHours.length !== 2 ||
+      config.activeHours[0] >= config.activeHours[1]) {
+    return { sent: 0, skipped: logs.length };
+  }
+
   for (const logDoc of logs) {
-    const manifest = logDoc.manifest as { randomSamples?: RandomSamplesConfig } | null;
-    const config = manifest?.randomSamples;
-    if (!config?.enabled || !config.timesPerDay || config.timesPerDay < 1) continue;
-
-    if (!Array.isArray(config.activeHours) || config.activeHours.length !== 2 ||
-        config.activeHours[0] >= config.activeHours[1]) continue;
-
     const timezone = safeTz(config.timezone, FALLBACK_TZ);
     const today = getDateStringInTimezone(nowDate, timezone);
 

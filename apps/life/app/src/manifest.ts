@@ -8,7 +8,15 @@
  * Widget IDs are persisted in life_events.subject_id. Don't rename them in
  * place — add a MIGRATIONS entry instead so historical entries still resolve.
  */
+import { RANDOM_SAMPLES } from "@homelab/backend";
 import type { LifeManifest, EntryMigration } from "./types";
+
+// Re-export so existing consumers (`MANIFEST.randomSamples` callers, etc.)
+// keep working unchanged. The single source of truth lives in
+// `@homelab/backend` so the api scheduler can label push notifications with
+// the same questions the UI prompts for.
+export { RANDOM_SAMPLES };
+export type { LifeRandomSamplesConfig, LifeSampleQuestion } from "@homelab/backend";
 
 export interface SessionPrompt {
   /** Key in the resulting event.data object. Don't rename without a migration. */
@@ -106,16 +114,7 @@ export const MANIFEST: LifeManifest = {
       ],
     },
   ],
-  randomSamples: {
-    enabled: true,
-    timesPerDay: 3,
-    activeHours: [9, 22],
-    timezone: "America/Los_Angeles",
-    questions: [
-      { id: "mood", type: "rating", label: "How happy do you feel?", max: 5 },
-      { id: "content", type: "rating", label: "How anxious/content are you feeling?", max: 5 },
-    ],
-  },
+  randomSamples: RANDOM_SAMPLES,
 };
 
 export const MIGRATIONS: EntryMigration[] = [

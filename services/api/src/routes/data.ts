@@ -1885,10 +1885,13 @@ dataRoutes.get("/life/log", handler(async (c) => {
   });
   if (logs.items.length === 0) return c.json({ error: "no life log configured" }, 404);
   const log = logs.items[0];
+  // Note: `manifest` used to be returned here, sourced from a JSON column on
+  // life_logs. That column was abandoned when the frontend manifest moved to
+  // code (apps/life/.../manifest.ts) and is dropped in migration 0032. The
+  // api scheduler now reads RANDOM_SAMPLES from @homelab/backend directly.
   return c.json({
     id: log.id,
     name: log.name,
-    manifest: log.manifest,
     sample_schedule: log.sample_schedule,
   });
 }));

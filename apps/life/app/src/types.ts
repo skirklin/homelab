@@ -73,22 +73,11 @@ export type Widget =
   | CheckboxWidget
   | ComboWidget;
 
-export interface SampleQuestion {
-  id: string;
-  type: "rating" | "text" | "number";
-  label: string;
-  max?: number;
-  min?: number;
-  placeholder?: string;
-}
-
-export interface RandomSamplesConfig {
-  enabled: boolean;
-  timesPerDay: number;
-  activeHours: [number, number]; // [startHour, endHour] in 24h format
-  timezone?: string; // IANA timezone (e.g., "America/Los_Angeles", "Europe/London")
-  questions: SampleQuestion[];
-}
+// Random-sample types live in @homelab/backend so the api scheduler and the
+// life UI share one source of truth. Re-exported under the legacy local names
+// so existing consumers (SampleResponseModal, Visualizations, etc.) don't churn.
+export type { LifeSampleQuestion as SampleQuestion, LifeRandomSamplesConfig as RandomSamplesConfig } from "@homelab/backend";
+import type { LifeRandomSamplesConfig } from "@homelab/backend";
 
 export interface EntryMigration {
   /** Old standalone widget id */
@@ -103,7 +92,7 @@ export interface EntryMigration {
 
 export interface LifeManifest {
   widgets: Widget[];
-  randomSamples: RandomSamplesConfig;
+  randomSamples: LifeRandomSamplesConfig;
   /** Migration rules for entries moved from standalone widgets to combo widgets */
   migrations?: EntryMigration[];
 }
