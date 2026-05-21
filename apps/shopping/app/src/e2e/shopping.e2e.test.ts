@@ -14,6 +14,7 @@ import {
 import { PocketBaseShoppingBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
 import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
 import type { ShoppingItem } from "@homelab/backend";
+import { UNCATEGORIZED_CATEGORY_ID } from "../types";
 
 let ctx: TestContext;
 let shopping: PocketBaseShoppingBackend;
@@ -82,7 +83,7 @@ describe("Item operations", () => {
     const listId = await shopping.createList("Item Test", user.id);
     await userBackend.setSlug(user.id, "shopping", "items", listId);
 
-    await shopping.addItem(listId, "Milk", user.id, "uncategorized");
+    await shopping.addItem(listId, "Milk", user.id, UNCATEGORIZED_CATEGORY_ID);
 
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
@@ -126,7 +127,7 @@ describe("Item operations", () => {
     const listId = await shopping.createList("Toggle Test", user.id);
     await userBackend.setSlug(user.id, "shopping", "toggle", listId);
 
-    await shopping.addItem(listId, "Eggs", user.id, "uncategorized");
+    await shopping.addItem(listId, "Eggs", user.id, UNCATEGORIZED_CATEGORY_ID);
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
     });
@@ -148,7 +149,7 @@ describe("Item operations", () => {
     const listId = await shopping.createList("Update Test", user.id);
     await userBackend.setSlug(user.id, "shopping", "update", listId);
 
-    await shopping.addItem(listId, "Milk", user.id, "uncategorized", "whole");
+    await shopping.addItem(listId, "Milk", user.id, UNCATEGORIZED_CATEGORY_ID, "whole");
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
     });
@@ -186,8 +187,8 @@ describe("Item operations", () => {
     const listId = await shopping.createList("Clear Test", user.id);
     await userBackend.setSlug(user.id, "shopping", "clear", listId);
 
-    await shopping.addItem(listId, "Bread", user.id, "uncategorized");
-    await shopping.addItem(listId, "Butter", user.id, "uncategorized");
+    await shopping.addItem(listId, "Bread", user.id, UNCATEGORIZED_CATEGORY_ID);
+    await shopping.addItem(listId, "Butter", user.id, UNCATEGORIZED_CATEGORY_ID);
 
     // Check both items
     const items = await ctx.pb.collection("shopping_items").getFullList({
@@ -210,7 +211,7 @@ describe("Item operations", () => {
       list: item.list,
       ingredient: item.ingredient,
       note: item.note || "",
-      categoryId: item.category_id || "uncategorized",
+      categoryId: item.category_id || UNCATEGORIZED_CATEGORY_ID,
       checked: item.checked,
       addedBy: item.added_by,
     }));
