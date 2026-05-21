@@ -17,6 +17,16 @@
 # parent's code, not the worktree's. Hence: install fresh in the worktree
 # (pnpm's content-addressed store makes this ~near-instant).
 #
+# Why we fast-forward to `main`: parallel Claude sessions land commits on
+# local `main` between the moment a worktree is created and the moment the
+# agent inside it starts working. The worktree's branch (cut from the
+# snapshot at creation time — often an `origin/main` snapshot that's
+# already stale) silently misses those commits, so the agent makes
+# architectural decisions against an outdated tree and produces avoidable
+# merge conflicts. We detect "purely behind" and ff to local `main` before
+# the install step so any new dependencies brought in by those commits are
+# picked up by the same `pnpm install` that's about to run.
+#
 # Usage:
 #   ./infra/scripts/worktree-init.sh           # populate node_modules + dist
 #   ./infra/scripts/worktree-init.sh --verbose # log each step
@@ -31,7 +41,7 @@ for arg in "$@"; do
     --verbose|-v) VERBOSE=1 ;;
     --clean)      CLEAN=1 ;;
     -h|--help)
-      sed -n '2,21p' "$0"
+      sed -n '2,33p' "$0"
       exit 0
       ;;
     *)
@@ -67,6 +77,36 @@ cd "$worktree_root"
 if [[ "$worktree_root" == "$parent_repo" ]]; then
   echo "worktree-init.sh: worktree root resolves to parent repo — refusing." >&2
   exit 1
+fi
+
+# --- fast-forward to local main ----------------------------------------------
+# Skip in --clean mode: `--clean` is purely "nuke build artifacts"; it must
+# not touch git state.
+if (( ! CLEAN )); then
+  if git rev-parse --verify --quiet main >/dev/null; then
+    # `|| echo 0` keeps `set -e` happy on first-commit / no-merge-base edge
+    # cases where rev-list itself errors.
+    behind=$(git rev-list --count HEAD..main 2>/dev/null || echo 0)
+    ahead=$(git rev-list --count main..HEAD 2>/dev/null || echo 0)
+
+    if (( behind == 0 )); then
+      log "worktree up to date with main"
+    elif (( ahead == 0 )); then
+      # Pure behind — safe to fast-forward.
+      if git merge --ff-only main >/dev/null 2>&1; then
+        echo "ℹ️  Worktree was $behind commits behind main; fast-forwarded."
+      else
+        echo "⚠️  Worktree was $behind commits behind main but ff-only merge failed." >&2
+        echo "    Continuing with stale base — resolve manually if needed." >&2
+      fi
+    else
+      # Diverged — don't touch it, let the agent decide.
+      echo "⚠️  Worktree diverged from main ($behind behind / $ahead ahead)."
+      echo "    No auto-update — resolve manually if needed (\`git merge main\` to integrate)."
+    fi
+  else
+    log "no local 'main' branch visible from this worktree — skipping fast-forward"
+  fi
 fi
 
 # Packages that need a `dist/` (declaration files) for downstream typecheck.
