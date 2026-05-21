@@ -11,13 +11,17 @@
  * /sharing/list-info, no /join-list), so the cardinality on the column
  * should match: exactly one owner per log.
  *
- * Steps (order matters — backfill must happen while BOTH fields exist):
- *   1. Add `owner` (relation→users, maxSelect=1, required, non-cascading).
+ * Steps (order matters):
+ *   1. Add `owner` (relation→users, maxSelect=1, non-cascading, nullable for now).
  *   2. Backfill `owner = owners[0]` for every existing life_logs row.
- *   3. Drop the old `owners` field.
- *   4. Re-anchor list/view/update/delete rules to use the single-relation
+ *   3. Re-anchor list/view/update/delete rules to use the single-relation
  *      form `owner = @request.auth.id` (not `?=`; the any-of operator
- *      only applies to multi-relations).
+ *      only applies to multi-relations) AND promote `owner` to required.
+ *      Must happen BEFORE dropping `owners` — PB validates that all rules
+ *      resolve against existing fields on collection save, so attempting
+ *      to drop `owners` while the rules still reference `owners.id` errors
+ *      out with "failed to resolve field `owners`".
+ *   4. Drop the old `owners` field (rules no longer reference it).
  *   5. Update life_events child rules from `log.owners.id ?= …` to
  *      `log.owner = …`.
  *
@@ -96,20 +100,11 @@ migrate(
         ")",
     );
 
-    // ---- (3) Drop the old `owners` field ----
-    {
-      const fresh = app.findCollectionByNameOrId("life_logs");
-      const ownersField = fresh.fields.getByName("owners");
-      if (ownersField) {
-        fresh.fields.removeById(ownersField.id);
-        app.save(fresh);
-        console.log("  life_logs: dropped owners field");
-      } else {
-        console.log("  life_logs: owners field already absent, skipping drop");
-      }
-    }
-
-    // ---- (4) Promote `owner` to required + update life_logs rules ----
+    // ---- (3) Promote `owner` to required + update life_logs rules ----
+    // Must happen BEFORE dropping `owners`: PB validates rule fields on
+    // collection save, and the existing rules still reference owners.id.
+    // Once rules point at the new `owner` field, the owners drop in (4)
+    // passes validation.
     {
       const fresh = app.findCollectionByNameOrId("life_logs");
       const ownerField = fresh.fields.getByName("owner");
@@ -126,6 +121,19 @@ migrate(
       fresh.deleteRule = OWNER_RULE;
       app.save(fresh);
       console.log("  life_logs: rules re-anchored to single-owner shape");
+    }
+
+    // ---- (4) Drop the old `owners` field ----
+    {
+      const fresh = app.findCollectionByNameOrId("life_logs");
+      const ownersField = fresh.fields.getByName("owners");
+      if (ownersField) {
+        fresh.fields.removeById(ownersField.id);
+        app.save(fresh);
+        console.log("  life_logs: dropped owners field");
+      } else {
+        console.log("  life_logs: owners field already absent, skipping drop");
+      }
     }
 
     // ---- (5) Update life_events child rules ----
