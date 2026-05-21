@@ -17,8 +17,12 @@ RUN npx --yes playwright install --with-deps chromium
 # Copy source — services/api + the workspace pkgs it imports. @homelab/backend
 # is consumed as TS source directly (its package.json's main points at
 # src/index.ts, and tsx loads TS at runtime), so no build step is needed.
+# services/api/src/lib/authz.ts also imports authz-rules.js from the PB
+# migrations dir (shared source-of-truth for collection rules), so that
+# tree has to be in the image too.
 COPY services/api/ services/api/
 COPY packages/backend/ packages/backend/
+COPY infra/pocketbase/pb_migrations/lib/ infra/pocketbase/pb_migrations/lib/
 
 # Runtime — same base for Chromium compat
 FROM node:22-bookworm-slim
@@ -30,6 +34,7 @@ COPY --from=build /root/.cache/ms-playwright /root/.cache/ms-playwright
 COPY --from=build /workspace/node_modules ./node_modules
 COPY --from=build /workspace/services/api ./services/api
 COPY --from=build /workspace/packages/backend ./packages/backend
+COPY --from=build /workspace/infra/pocketbase/pb_migrations/lib ./infra/pocketbase/pb_migrations/lib
 COPY --from=build /workspace/package.json ./package.json
 COPY --from=build /workspace/pnpm-workspace.yaml ./pnpm-workspace.yaml
 
