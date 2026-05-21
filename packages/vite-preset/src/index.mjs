@@ -60,14 +60,25 @@ export function kirklPlugins(opts) {
           {
             // GET to /api/ or /fn/, but ABSOLUTELY NOT EventSource.
             //
-            // workbox's StaleWhileRevalidate buffers the entire response
-            // before serving — fine for normal JSON, fatal for SSE.
-            // PocketBase opens its realtime channel at /api/realtime with
-            // an `Accept: text/event-stream` header; if workbox intercepts
-            // that, the stream never establishes and the client thinks
-            // realtime is permanently down (Angela's 2026-05-19 bug —
-            // hard refresh bypasses the SW and works; plain refresh
-            // installs the SW and SSE breaks until the SW is unregistered).
+            // workbox buffers the entire response before serving — fine for
+            // normal JSON, fatal for SSE. PocketBase opens its realtime
+            // channel at /api/realtime with an `Accept: text/event-stream`
+            // header; if workbox intercepts that, the stream never
+            // establishes and the client thinks realtime is permanently
+            // down (Angela's 2026-05-19 bug — hard refresh bypasses the SW
+            // and works; plain refresh installs the SW and SSE breaks until
+            // the SW is unregistered). The path + Accept-header carve-out
+            // below is belt + suspenders to keep SSE clear of the cache.
+            //
+            // NetworkFirst (rather than StaleWhileRevalidate) because these
+            // endpoints serve mutable per-user data — checking off a
+            // shopping item then refreshing within seconds previously
+            // showed the pre-check snapshot from cache, then took a second
+            // refresh to reflect the write. NetworkFirst always returns the
+            // fresh response when online; the cache only fires on network
+            // failure / timeout, preserving offline behavior.
+            // networkTimeoutSeconds=3 caps the wait on a slow network
+            // before falling back to cache.
             urlPattern: ({ url, request }) => {
               if (request.method !== "GET") return false;
               if (!(url.pathname.startsWith("/fn/") || url.pathname.startsWith("/api/"))) return false;
@@ -76,9 +87,10 @@ export function kirklPlugins(opts) {
               if ((request.headers.get("accept") || "").includes("text/event-stream")) return false;
               return true;
             },
-            handler: "StaleWhileRevalidate",
+            handler: "NetworkFirst",
             options: {
               cacheName: "kirkl-api",
+              networkTimeoutSeconds: 3,
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 7 },
               cacheableResponse: { statuses: [0, 200] },
             },
