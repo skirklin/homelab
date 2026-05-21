@@ -63,7 +63,6 @@ export interface Activity {
   confirmationCode: string;
   details?: string;
   setting?: string;
-  bookingReqs?: unknown[];
   ratingCount?: number;
   photoRef?: string;
   flightInfo?: FlightInfo;

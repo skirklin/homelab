@@ -184,10 +184,11 @@ When creating or updating travel activities, fill in ALL relevant fields — don
 | `cost_notes` | Price info | `$25/person`, `Free`, `$15 parking` |
 | `setting` | Indoor/outdoor/both | `outdoor`, `indoor`, `both` |
 | `trip_id` | Which trip this belongs to | (record ID) |
-| `booking_reqs` | Structured advance-booking todos. The readiness dashboard surfaces these by deadline; **use this, not the description**, for any activity requiring reservations/permits/timed entry. Array of `{ action, daysBefore, done? }`. | `[{ "action": "Book Frida Kahlo tickets at museofridakahlo.org.mx", "daysBefore": 30 }]` |
 | `confirmation_code` | Set once a booking is complete — the readiness dashboard treats it as the "confirmed" signal. | `ABC123` |
 
 **Do not** put durations or booking instructions in the description. **Do not** prefix lodging names with "Overnight in". Use the actual hotel/property name.
+
+For advance-booking todos (reserve tickets, get permits, book restaurants, etc.), create a task tagged `travel:<tripId>` via the `add_trip_task` MCP tool — the Prep tab reads from there, and tasks are the single source of truth for trip prep.
 
 ### MCP auth
 Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are created in the Settings page of the home app (kirkl.in → Settings → API Tokens). The token is stored hashed in PocketBase `api_tokens` collection.

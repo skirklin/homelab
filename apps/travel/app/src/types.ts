@@ -17,13 +17,6 @@ export type {
 // Trip status values
 export type TripStatus = "Completed" | "Booked" | "Researching" | "Idea" | "Ongoing";
 
-// Booking requirement on an activity
-export interface BookingRequirement {
-  daysBefore: number; // days before trip start to take action
-  action: string; // what to do, e.g. "Book tickets at museofridakahlo.org.mx"
-  done?: boolean; // tracked per-activity, not per-trip
-}
-
 // Activity categories
 export type ActivityCategory =
   | "Flight"
@@ -115,7 +108,6 @@ export interface Activity {
   confirmationCode: string;
   details: string;
   setting: "outdoor" | "indoor" | "either" | "";
-  bookingReqs: BookingRequirement[];
   rating: number | null;
   ratingCount: number | null;
   photoRef: string;

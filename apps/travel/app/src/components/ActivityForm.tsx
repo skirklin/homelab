@@ -101,7 +101,6 @@ export function ActivityForm() {
             confirmationCode: (values.confirmationCode as string) || "",
             details: (values.details as string) || "",
             setting: ((values.setting as string) || "") as Activity["setting"],
-            bookingReqs: [],
             rating: null,
             ratingCount: null,
             photoRef: "",
