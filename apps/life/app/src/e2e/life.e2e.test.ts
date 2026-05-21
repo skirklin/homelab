@@ -161,7 +161,7 @@ describe("addEntry", () => {
 
     const log2 = await ctx.pb.collection("life_logs").create({
       name: "Second Log",
-      owners: [user.id],
+      owner: user.id,
     });
     cleanup.track("life_logs", log2.id);
 
@@ -294,7 +294,7 @@ describe("addSampleResponse", () => {
 
     const log = await ctx.pb.collection("life_logs").create({
       name: "Sample Override Log",
-      owners: [user.id],
+      owner: user.id,
     });
     cleanup.track("life_logs", log.id);
 

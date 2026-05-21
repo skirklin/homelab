@@ -36,3 +36,5 @@ export const OWNER_RULE: string;
 export const BOX_VIS_RULE: string;
 export const RECIPE_VIS_RULE: string;
 export const RECIPE_WRITE_RULE: string;
+export const LIFE_OWNER_RULE: string;
+export const LIFE_CHILD_RULE: string;

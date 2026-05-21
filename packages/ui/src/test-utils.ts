@@ -241,12 +241,12 @@ export async function createTestLifeLog(
   cleanup: TestCleanup,
   overrides?: {
     name?: string;
-    owners?: string[];
+    owner?: string;
   }
 ): Promise<{ id: string }> {
   const record = await ctx.pb.collection("life_logs").create({
     name: overrides?.name || "Test Life Log",
-    owners: overrides?.owners || [ctx.testUser!.id],
+    owner: overrides?.owner || ctx.testUser!.id,
     manifest: { widgets: [] },
   });
   cleanup.track("life_logs", record.id);

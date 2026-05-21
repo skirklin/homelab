@@ -132,13 +132,14 @@ export async function userOwnsTaskList(
 }
 
 /**
- * Verify `userId` is in `life_logs[logId].owners`. Returns `false` if the
- * log doesn't exist OR the user isn't an owner. Mirrors `userOwnsTravelLog`
+ * Verify `life_logs[logId].owner === userId`. Returns `false` if the log
+ * doesn't exist OR the user is not the owner. Mirrors `userOwnsTravelLog`
  * — admin-PB bypasses PB collection rules, so the route layer is the only
  * ownership gate for `hlk_`/`mcpat_` callers writing into another user's
  * life log or its child entries.
  *
- * Mirrors `PB_RULES.life_logs.updateRule`.
+ * life_logs is single-owner (migration 0028). Mirrors
+ * `PB_RULES.life_logs.updateRule` (`owner = @request.auth.id`).
  */
 export async function userOwnsLifeLog(
   pb: PocketBase,
@@ -148,8 +149,7 @@ export async function userOwnsLifeLog(
   if (!logId || !userId) return false;
   try {
     const log = await pb.collection("life_logs").getOne(logId);
-    const owners = log.owners;
-    return Array.isArray(owners) && owners.includes(userId);
+    return log.owner === userId;
   } catch {
     return false;
   }

@@ -108,7 +108,9 @@ app.get("/sharing/list-info/:collection/:listId", async (c) => {
   const { getAdminPb } = await import("./lib/pb");
   const collection = c.req.param("collection") ?? "";
   const listId = c.req.param("listId") ?? "";
-  const allowed = ["shopping_lists", "task_lists", "life_logs"];
+  // life_logs intentionally excluded — life is single-owner only as of
+  // migration 0028 and is no longer shareable.
+  const allowed = ["shopping_lists", "task_lists"];
   if (!allowed.includes(collection)) return c.json({ error: "Invalid collection" }, 400);
   try {
     const pb = await getAdminPb();

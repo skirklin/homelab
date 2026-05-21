@@ -141,7 +141,7 @@ beforeAll(async () => {
 
   const bobsLifeLog = await bobPb.collection("life_logs").create({
     name: "Bob's life log",
-    owners: [bob.id],
+    owner: bob.id,
     manifest: { subjects: [] },
     sample_schedule: [],
   });
@@ -170,7 +170,7 @@ beforeAll(async () => {
 
   const alicesLifeLog = await alicePb.collection("life_logs").create({
     name: "Alice's life log",
-    owners: [alice.id],
+    owner: alice.id,
     manifest: { subjects: [] },
     sample_schedule: [],
   });
