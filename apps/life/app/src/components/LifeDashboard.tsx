@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
@@ -31,6 +31,7 @@ import { useEntriesSubscription } from "../subscription";
 import { WidgetRenderer } from "./widgets";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
+import { YearHeatmap, computeStreaks } from "./YearHeatmap";
 import { MANIFEST, SESSIONS } from "../manifest";
 import {
   initializeMessaging,
@@ -139,6 +140,49 @@ const SessionCard = styled.button`
     background: var(--color-bg-muted);
     border-color: var(--color-primary);
   }
+`;
+
+const StreakCard = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-sm);
+`;
+
+const StreakItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 110px;
+`;
+
+const StreakLabel = styled.div`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .anticon {
+    color: var(--color-primary);
+  }
+`;
+
+const StreakValue = styled.div`
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text);
+`;
+
+const StreakBest = styled.span`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  margin-left: 6px;
 `;
 
 interface LifeDashboardProps {
@@ -283,6 +327,11 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
   const manifest = MANIFEST;
   const allEntries = Array.from(state.entries.values());
+
+  // Streaks — recompute when entries change (Map identity flips on each
+  // SET_ENTRIES dispatch, so the dep is stable enough).
+  const morningStreaks = useMemo(() => computeStreaks(allEntries, "morning"), [state.entries]);
+  const eveningStreaks = useMemo(() => computeStreaks(allEntries, "evening"), [state.entries]);
 
   // Check notification status on mount
   useEffect(() => {
@@ -505,6 +554,31 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
               </SessionCard>
             ))}
           </SessionRow>
+        </Section>
+
+        <Section>
+          <SectionTitle>Streaks</SectionTitle>
+          <StreakCard>
+            <StreakItem>
+              <StreakLabel><SunOutlined /> Morning</StreakLabel>
+              <StreakValue>
+                {morningStreaks.current} {morningStreaks.current === 1 ? "day" : "days"}
+                {morningStreaks.longest > morningStreaks.current && (
+                  <StreakBest>best: {morningStreaks.longest}</StreakBest>
+                )}
+              </StreakValue>
+            </StreakItem>
+            <StreakItem>
+              <StreakLabel><MoonOutlined /> Evening</StreakLabel>
+              <StreakValue>
+                {eveningStreaks.current} {eveningStreaks.current === 1 ? "day" : "days"}
+                {eveningStreaks.longest > eveningStreaks.current && (
+                  <StreakBest>best: {eveningStreaks.longest}</StreakBest>
+                )}
+              </StreakValue>
+            </StreakItem>
+          </StreakCard>
+          <YearHeatmap entries={allEntries} />
         </Section>
 
         <Section>
