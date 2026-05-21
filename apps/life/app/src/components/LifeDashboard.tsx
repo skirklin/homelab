@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
-import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled } from "@ant-design/icons";
+import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -109,11 +109,14 @@ const SwipeContainer = styled.div`
   user-select: none;
 `;
 
-const SessionRow = styled.div`
+const SessionRow = styled.div<{ $hasPrimary: boolean }>`
   display: grid;
-  /* Asymmetric grid: the prominent card stretches; the secondary stays
-     narrower. Order is set per card via grid-column-start. */
-  grid-template-columns: 2fr 1fr;
+  /* Two layouts:
+     - With a primary card: it spans the full top row, the other two cards
+       share an equal row below. Areas are wired via order on each card.
+     - All-secondary (late night, or no time-of-day match): three equal
+       columns in a single row. */
+  grid-template-columns: ${(p) => (p.$hasPrimary ? "1fr 1fr" : "1fr 1fr 1fr")};
   gap: var(--space-sm);
 `;
 
@@ -359,11 +362,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const eveningStreaks = useMemo(() => computeStreaks(allEntries, "evening"), [state.entries]);
 
   // Context-aware session prominence: drive sizing and ordering off the
-  // current hour in the user's local tz. Also surface a "logged at HH:MM"
-  // chip on whichever session was already done today.
+  // current hour + day in the user's local tz. Also surface a "logged at
+  // HH:MM" chip on whichever session was already done today.
   const sessionContext = useMemo(() => {
     const now = new Date();
     const hour = now.getHours();
+    const isSunday = now.getDay() === 0;
     const todayKey = getDateString(now);
 
     // Find today's most recent entry per session.
@@ -378,43 +382,44 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       }
     }
 
-    // Layout decisions:
-    //   morning hours (0–11): morning primary, evening secondary
-    //   afternoon/evening (12–21): evening primary, morning secondary
-    //   late evening (22–23): both secondary, no nudge
+    // Layout decisions — at most one card is "primary":
+    //   morning hours (0–11): morning primary
+    //   Sunday afternoon/evening (12–21): weekly_review primary
+    //   other afternoon/evening (12–21): evening primary
+    //   late evening (22–23): all secondary
+    // Once weekly_review is already logged today, fall back to evening on a
+    // Sunday afternoon — no point pushing a done task as primary.
     type Prom = "primary" | "secondary";
-    let morningSize: Prom;
-    let eveningSize: Prom;
-    let morningOrder: number;
-    let eveningOrder: number;
-    let lateNight = false;
+    let primary: Session["id"] | null;
     if (hour < 12) {
-      morningSize = "primary";
-      eveningSize = "secondary";
-      morningOrder = 1;
-      eveningOrder = 2;
+      primary = "morning";
     } else if (hour < 22) {
-      morningSize = "secondary";
-      eveningSize = "primary";
-      // Evening on the left when it's prominent.
-      eveningOrder = 1;
-      morningOrder = 2;
+      if (isSunday && !lastByKind.weekly_review) {
+        primary = "weekly_review";
+      } else {
+        primary = "evening";
+      }
     } else {
-      morningSize = "secondary";
-      eveningSize = "secondary";
-      morningOrder = 1;
-      eveningOrder = 2;
-      lateNight = true;
+      primary = null;
     }
+
+    const sizeOf = (id: Session["id"]): Prom => (id === primary ? "primary" : "secondary");
+    // Order: primary card first (spans the full top row), then the
+    // remaining cards in stable manifest order on the next row.
+    const orderOf = (id: Session["id"]): number => {
+      if (id === primary) return 0;
+      // Stable secondary order: morning < evening < weekly_review.
+      return id === "morning" ? 1 : id === "evening" ? 2 : 3;
+    };
 
     return {
       hour,
+      isSunday,
       lastByKind,
-      morningSize,
-      eveningSize,
-      morningOrder,
-      eveningOrder,
-      lateNight,
+      primary,
+      sizeOf,
+      orderOf,
+      lateNight: primary === null,
     };
   }, [allEntries, state.entries]);
 
@@ -637,47 +642,50 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       <PageContainer>
         <Section>
           <SectionTitle>Sessions</SectionTitle>
-          <SessionRow>
-            {SESSIONS.map((session) => {
-              const size =
-                session.id === "morning"
-                  ? sessionContext.morningSize
-                  : session.id === "evening"
-                    ? sessionContext.eveningSize
-                    : "secondary";
-              const order =
-                session.id === "morning"
-                  ? sessionContext.morningOrder
-                  : session.id === "evening"
-                    ? sessionContext.eveningOrder
-                    : 3;
-              const logged = sessionContext.lastByKind[session.id] ?? null;
-              const isAfternoon = sessionContext.hour >= 12 && sessionContext.hour < 22;
-              // Soft hint when morning was missed and we're now in afternoon —
-              // invitations not nudges.
-              const muted =
-                sessionContext.lateNight ||
-                (session.id === "morning" && isAfternoon && !logged);
-              return (
-                <SessionCard
-                  key={session.id}
-                  $size={size}
-                  $muted={muted}
-                  style={{ gridColumn: String(order) }}
-                  onClick={() => navigate(session.id)}
-                >
-                  {session.id === "morning" ? <SunOutlined /> : <MoonOutlined />}
-                  <SessionCardTitle>{session.title}</SessionCardTitle>
-                  {logged ? (
-                    <SessionCardCheck>
-                      <CheckCircleFilled /> logged at {formatHHmm(logged)}
-                    </SessionCardCheck>
-                  ) : session.id === "morning" && isAfternoon ? (
-                    <SessionCardHint>missed earlier?</SessionCardHint>
-                  ) : null}
-                </SessionCard>
-              );
-            })}
+          <SessionRow $hasPrimary={sessionContext.primary !== null}>
+            {[...SESSIONS]
+              .sort((a, b) => sessionContext.orderOf(a.id) - sessionContext.orderOf(b.id))
+              .map((session) => {
+                const size = sessionContext.sizeOf(session.id);
+                const isPrimary = size === "primary";
+                const logged = sessionContext.lastByKind[session.id] ?? null;
+                const isAfternoon = sessionContext.hour >= 12 && sessionContext.hour < 22;
+                // Soft hint for invitations not nudges. Morning gets the
+                // "missed earlier?" hint after noon; weekly_review fades
+                // when it's not Sunday (it's still tappable, just quieter).
+                const muted =
+                  sessionContext.lateNight ||
+                  (session.id === "morning" && isAfternoon && !logged) ||
+                  (session.id === "weekly_review" && !sessionContext.isSunday && !logged);
+                // Primary spans the full row at the top; secondaries flow
+                // into the second row in their natural order.
+                const cardStyle = isPrimary ? { gridColumn: "1 / -1" } : undefined;
+                const icon =
+                  session.id === "morning" ? <SunOutlined />
+                    : session.id === "evening" ? <MoonOutlined />
+                      : <CalendarOutlined />;
+                return (
+                  <SessionCard
+                    key={session.id}
+                    $size={size}
+                    $muted={muted}
+                    style={cardStyle}
+                    onClick={() => navigate(session.id)}
+                  >
+                    {icon}
+                    <SessionCardTitle>{session.title}</SessionCardTitle>
+                    {logged ? (
+                      <SessionCardCheck>
+                        <CheckCircleFilled /> logged at {formatHHmm(logged)}
+                      </SessionCardCheck>
+                    ) : session.id === "morning" && isAfternoon ? (
+                      <SessionCardHint>missed earlier?</SessionCardHint>
+                    ) : session.id === "weekly_review" && sessionContext.isSunday ? (
+                      <SessionCardHint>Sunday review</SessionCardHint>
+                    ) : null}
+                  </SessionCard>
+                );
+              })}
           </SessionRow>
         </Section>
 
