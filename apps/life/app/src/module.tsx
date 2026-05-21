@@ -14,6 +14,7 @@ import { LifeDashboard } from "./components/LifeDashboard";
 import { SessionRunner } from "./components/SessionRunner";
 
 const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
+const Journal = lazy(() => import("./components/Journal").then(m => ({ default: m.Journal })));
 
 const LoadingContainer = styled.div`
   display: flex;
@@ -61,9 +62,15 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
         <Route path="/" element={<LifeDashboard embedded={embedded} />} />
         <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
         <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
+        <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
         <Route path="/insights" element={
           <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
             <Visualizations />
+          </Suspense>
+        } />
+        <Route path="/journal" element={
+          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+            <Journal />
           </Suspense>
         } />
         <Route path="*" element={<LifeDashboard embedded={embedded} />} />

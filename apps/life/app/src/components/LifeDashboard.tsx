@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
-import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined } from "@ant-design/icons";
+import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -31,7 +31,8 @@ import { useEntriesSubscription } from "../subscription";
 import { WidgetRenderer } from "./widgets";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
-import { MANIFEST, SESSIONS } from "../manifest";
+import { YearHeatmap, computeStreaks } from "./YearHeatmap";
+import { MANIFEST, SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import {
   initializeMessaging,
   requestNotificationPermission,
@@ -108,37 +109,108 @@ const SwipeContainer = styled.div`
   user-select: none;
 `;
 
-const SessionRow = styled.div`
+const SessionRow = styled.div<{ $hasPrimary: boolean }>`
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Two layouts:
+     - With a primary card: it spans the full top row, the other two cards
+       share an equal row below. Areas are wired via order on each card.
+     - All-secondary (late night, or no time-of-day match): three equal
+       columns in a single row. */
+  grid-template-columns: ${(p) => (p.$hasPrimary ? "1fr 1fr" : "1fr 1fr 1fr")};
   gap: var(--space-sm);
 `;
 
-const SessionCard = styled.button`
+const SessionCard = styled.button<{ $size: "primary" | "secondary"; $muted: boolean }>`
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: var(--space-xs);
-  padding: var(--space-md);
+  padding: ${(p) => (p.$size === "primary" ? "var(--space-lg) var(--space-md)" : "var(--space-sm) var(--space-md)")};
   background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  border: ${(p) =>
+    p.$size === "primary"
+      ? "2px solid var(--color-primary)"
+      : "1px solid var(--color-border)"};
   border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: var(--font-size-base);
-  color: var(--color-text);
-  min-height: 64px;
+  font-size: ${(p) => (p.$size === "primary" ? "var(--font-size-lg)" : "var(--font-size-base)")};
+  color: ${(p) => (p.$muted ? "var(--color-text-secondary)" : "var(--color-text)")};
+  min-height: ${(p) => (p.$size === "primary" ? "92px" : "56px")};
+  opacity: ${(p) => (p.$muted ? 0.7 : 1)};
   transition: background 0.15s, border-color 0.15s;
 
   .anticon {
-    font-size: 20px;
+    font-size: ${(p) => (p.$size === "primary" ? "28px" : "18px")};
     color: var(--color-primary);
   }
 
   &:hover {
     background: var(--color-bg-muted);
     border-color: var(--color-primary);
+    opacity: 1;
   }
+`;
+
+const SessionCardTitle = styled.span`
+  font-weight: 500;
+`;
+
+const SessionCardHint = styled.span`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+`;
+
+const SessionCardCheck = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--color-success, #52c41a);
+  font-weight: 500;
+`;
+
+const StreakCard = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-sm);
+`;
+
+const StreakItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 110px;
+`;
+
+const StreakLabel = styled.div`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .anticon {
+    color: var(--color-primary);
+  }
+`;
+
+const StreakValue = styled.div`
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text);
+`;
+
+const StreakBest = styled.span`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  margin-left: 6px;
 `;
 
 interface LifeDashboardProps {
@@ -284,6 +356,82 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const manifest = MANIFEST;
   const allEntries = Array.from(state.entries.values());
 
+  // Streaks — recompute when entries change (Map identity flips on each
+  // SET_ENTRIES dispatch, so the dep is stable enough).
+  const morningStreaks = useMemo(() => computeStreaks(allEntries, "morning"), [state.entries]);
+  const eveningStreaks = useMemo(() => computeStreaks(allEntries, "evening"), [state.entries]);
+
+  // Context-aware session prominence: drive sizing and ordering off the
+  // current hour + day in the user's local tz. Also surface a "logged at
+  // HH:MM" chip on whichever session was already done today.
+  const sessionContext = useMemo(() => {
+    const now = new Date();
+    const hour = now.getHours();
+    const isSunday = now.getDay() === 0;
+    const todayKey = getDateString(now);
+
+    // Find today's most recent entry per session.
+    const lastByKind: Record<Session["id"], Date | null> = { morning: null, evening: null, weekly_review: null };
+    for (const e of allEntries) {
+      if (getDateString(e.timestamp) !== todayKey) continue;
+      for (const s of SESSIONS) {
+        if (e.subjectId === sessionSubjectId(s.id)) {
+          const prev = lastByKind[s.id];
+          if (!prev || e.timestamp > prev) lastByKind[s.id] = e.timestamp;
+        }
+      }
+    }
+
+    // Layout decisions — at most one card is "primary":
+    //   morning hours (0–11): morning primary
+    //   Sunday afternoon/evening (12–21): weekly_review primary
+    //   other afternoon/evening (12–21): evening primary
+    //   late evening (22–23): all secondary
+    // Once weekly_review is already logged today, fall back to evening on a
+    // Sunday afternoon — no point pushing a done task as primary.
+    type Prom = "primary" | "secondary";
+    let primary: Session["id"] | null;
+    if (hour < 12) {
+      primary = "morning";
+    } else if (hour < 22) {
+      if (isSunday && !lastByKind.weekly_review) {
+        primary = "weekly_review";
+      } else {
+        primary = "evening";
+      }
+    } else {
+      primary = null;
+    }
+
+    const sizeOf = (id: Session["id"]): Prom => (id === primary ? "primary" : "secondary");
+    // Order: primary card first (spans the full top row), then the
+    // remaining cards in stable manifest order on the next row.
+    const orderOf = (id: Session["id"]): number => {
+      if (id === primary) return 0;
+      // Stable secondary order: morning < evening < weekly_review.
+      return id === "morning" ? 1 : id === "evening" ? 2 : 3;
+    };
+
+    return {
+      hour,
+      isSunday,
+      lastByKind,
+      primary,
+      sizeOf,
+      orderOf,
+      lateNight: primary === null,
+    };
+  }, [allEntries, state.entries]);
+
+  const formatHHmm = (d: Date) => {
+    let h = d.getHours();
+    const m = String(d.getMinutes()).padStart(2, "0");
+    const ampm = h >= 12 ? "pm" : "am";
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m}${ampm}`;
+  };
+
   // Check notification status on mount
   useEffect(() => {
     const status = getNotificationPermissionStatus();
@@ -417,6 +565,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
   // Menu items - always include Insights, Display, and Export for mobile access
   const menuItems = [
+    { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("journal") },
     { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("insights") },
     { key: "display", icon: <ControlOutlined />, label: "Display Settings", onClick: () => setShowSettings(true) },
     { type: "divider" as const },
@@ -430,6 +579,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
   const desktopActions = (
     <>
+      <Button
+        icon={<BookOutlined />}
+        onClick={() => navigate("journal")}
+      >
+        Journal
+      </Button>
       <Button
         icon={<LineChartOutlined />}
         onClick={() => navigate("insights")}
@@ -487,17 +642,76 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       <PageContainer>
         <Section>
           <SectionTitle>Sessions</SectionTitle>
-          <SessionRow>
-            {SESSIONS.map((session) => (
-              <SessionCard
-                key={session.id}
-                onClick={() => navigate(session.id)}
-              >
-                {session.id === "morning" ? <SunOutlined /> : <MoonOutlined />}
-                <span>{session.title}</span>
-              </SessionCard>
-            ))}
+          <SessionRow $hasPrimary={sessionContext.primary !== null}>
+            {[...SESSIONS]
+              .sort((a, b) => sessionContext.orderOf(a.id) - sessionContext.orderOf(b.id))
+              .map((session) => {
+                const size = sessionContext.sizeOf(session.id);
+                const isPrimary = size === "primary";
+                const logged = sessionContext.lastByKind[session.id] ?? null;
+                const isAfternoon = sessionContext.hour >= 12 && sessionContext.hour < 22;
+                // Soft hint for invitations not nudges. Morning gets the
+                // "missed earlier?" hint after noon; weekly_review fades
+                // when it's not Sunday (it's still tappable, just quieter).
+                const muted =
+                  sessionContext.lateNight ||
+                  (session.id === "morning" && isAfternoon && !logged) ||
+                  (session.id === "weekly_review" && !sessionContext.isSunday && !logged);
+                // Primary spans the full row at the top; secondaries flow
+                // into the second row in their natural order.
+                const cardStyle = isPrimary ? { gridColumn: "1 / -1" } : undefined;
+                const icon =
+                  session.id === "morning" ? <SunOutlined />
+                    : session.id === "evening" ? <MoonOutlined />
+                      : <CalendarOutlined />;
+                return (
+                  <SessionCard
+                    key={session.id}
+                    $size={size}
+                    $muted={muted}
+                    style={cardStyle}
+                    onClick={() => navigate(session.id)}
+                  >
+                    {icon}
+                    <SessionCardTitle>{session.title}</SessionCardTitle>
+                    {logged ? (
+                      <SessionCardCheck>
+                        <CheckCircleFilled /> logged at {formatHHmm(logged)}
+                      </SessionCardCheck>
+                    ) : session.id === "morning" && isAfternoon ? (
+                      <SessionCardHint>missed earlier?</SessionCardHint>
+                    ) : session.id === "weekly_review" && sessionContext.isSunday ? (
+                      <SessionCardHint>Sunday review</SessionCardHint>
+                    ) : null}
+                  </SessionCard>
+                );
+              })}
           </SessionRow>
+        </Section>
+
+        <Section>
+          <SectionTitle>Streaks</SectionTitle>
+          <StreakCard>
+            <StreakItem>
+              <StreakLabel><SunOutlined /> Morning</StreakLabel>
+              <StreakValue>
+                {morningStreaks.current} {morningStreaks.current === 1 ? "day" : "days"}
+                {morningStreaks.longest > morningStreaks.current && (
+                  <StreakBest>best: {morningStreaks.longest}</StreakBest>
+                )}
+              </StreakValue>
+            </StreakItem>
+            <StreakItem>
+              <StreakLabel><MoonOutlined /> Evening</StreakLabel>
+              <StreakValue>
+                {eveningStreaks.current} {eveningStreaks.current === 1 ? "day" : "days"}
+                {eveningStreaks.longest > eveningStreaks.current && (
+                  <StreakBest>best: {eveningStreaks.longest}</StreakBest>
+                )}
+              </StreakValue>
+            </StreakItem>
+          </StreakCard>
+          <YearHeatmap entries={allEntries} />
         </Section>
 
         <Section>

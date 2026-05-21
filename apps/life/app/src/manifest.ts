@@ -28,8 +28,9 @@ export interface SessionPrompt {
 }
 
 export interface Session {
-  /** Route slug — `/morning`, `/evening`, etc. Also the event subject_id is `<id>_session`. */
-  id: "morning" | "evening";
+  /** Route slug — `/morning`, `/evening`, `/weekly`, etc. Also the event
+   *  subject_id is `<id>_session`. */
+  id: "morning" | "evening" | "weekly_review";
   title: string;
   /** One-line greeting shown at the top of the wizard. */
   greeting: string;
@@ -171,6 +172,45 @@ export const SESSIONS: Session[] = [
         id: "mood",
         type: "rating",
         label: "How are you feeling now?",
+        max: 5,
+      },
+    ],
+  },
+  {
+    id: "weekly_review",
+    title: "Weekly review",
+    greeting: "Time to look back on the week.",
+    prompts: [
+      {
+        id: "highlights",
+        type: "text",
+        label: "What were the highlights of the week?",
+        placeholder: "Pick a few that stood out.",
+      },
+      {
+        id: "lows",
+        type: "text",
+        label: "What went poorly or felt off?",
+        placeholder: "Honest, not heavy.",
+        optional: true,
+      },
+      {
+        id: "lesson",
+        type: "text",
+        label: "One thing to do differently next week?",
+        placeholder: "Concrete and small beats grand.",
+        optional: true,
+      },
+      {
+        id: "intention",
+        type: "text",
+        label: "One intention for the week ahead?",
+        placeholder: "Where do you want your attention?",
+      },
+      {
+        id: "mood_rating",
+        type: "rating",
+        label: "Overall how do you feel about this week?",
         max: 5,
       },
     ],
