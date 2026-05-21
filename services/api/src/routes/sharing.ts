@@ -111,7 +111,9 @@ sharingRoutes.post("/join-list", handler(async (c) => {
   const userId = c.get("userId");
   const { collection, listId } = await c.req.json<{ collection: string; listId: string }>();
 
-  const allowed = ["shopping_lists", "task_lists", "life_logs"];
+  // life_logs intentionally excluded — life is single-owner only as of
+  // migration 0028; the `owners` array no longer exists on that collection.
+  const allowed = ["shopping_lists", "task_lists"];
   if (!allowed.includes(collection)) {
     return c.json({ error: "Invalid collection" }, 400);
   }

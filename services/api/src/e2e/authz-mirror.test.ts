@@ -237,9 +237,11 @@ describe("PB rule decision matches TS helper decision", () => {
     let alicesLogId: string;
 
     beforeAll(async () => {
+      // life_logs is single-owner (migration 0028) — direct `owner` field,
+      // no `owners` array.
       const log = await aliceUser.pb.collection("life_logs").create({
         name: "alice life",
-        owners: [aliceUser.id],
+        owner: aliceUser.id,
       });
       alicesLogId = log.id;
     });

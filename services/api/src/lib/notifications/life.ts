@@ -147,8 +147,9 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
       sample_schedule: schedule,
     }, { $autoCancel: false });
 
-    // Send to all owners
-    const ownerIds: string[] = logDoc.owners || [];
+    // life_logs is single-owner (migration 0028) — `owner` is the
+    // user id string (empty if unset).
+    const ownerId: string = (logDoc.owner as string) || "";
     const title = "Life Tracker Check-in";
     const body = config.questions.length === 1
       ? config.questions[0].label
@@ -157,7 +158,7 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
     const quickRating = config.questions.length === 1 && config.questions[0].type === "rating"
       ? config.questions[0] : null;
 
-    for (const ownerId of ownerIds) {
+    if (ownerId) {
       const result = await sendPushToUser(pb, ownerId, {
         title,
         body,
@@ -243,7 +244,7 @@ const REMINDER_KINDS: ReminderKind[] = [
 
 /**
  * Per-minute cron tick. Fires the morning or evening session reminder to
- * each log's owners when their local wall-clock time matches the configured
+ * each log's owner when their local wall-clock time matches the configured
  * "HH:MM" (within ±1 min). Idempotent via last_{morning,evening}_reminder_sent
  * = "YYYY-MM-DD" in the user's tz.
  */
@@ -284,15 +285,14 @@ export async function runLifeReminderCheck(
       if (!target) continue;
       checked++;
 
-      const ownerIds: string[] = logDoc.owners || [];
-      if (ownerIds.length === 0) {
+      // life_logs is single-owner (migration 0028).
+      const ownerId: string = (logDoc.owner as string) || "";
+      if (!ownerId) {
         skipped++;
         continue;
       }
 
-      // Use the first owner's timezone for the reminder. Multi-owner logs are
-      // a future concern; for now there's one user per log.
-      const tz = await tzForUser(ownerIds[0]);
+      const tz = await tzForUser(ownerId);
       const currentHHmm = formatInTimeZone(now, tz, "HH:mm");
       const todayYmd = formatInTimeZone(now, tz, "yyyy-MM-dd");
 
@@ -316,18 +316,16 @@ export async function runLifeReminderCheck(
       );
 
       const payload = SESSION_REMINDERS[kind.kind];
-      for (const ownerId of ownerIds) {
-        try {
-          const result = await sendPushToUser(pb, ownerId, {
-            title: payload.title,
-            body: payload.body,
-            url: payload.url,
-            data: { type: `life_${kind.kind}_reminder`, logId: logDoc.id },
-          }, { preferredOrigins: LIFE_ORIGINS });
-          console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);
-        } catch (err) {
-          console.error(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId}:`, err);
-        }
+      try {
+        const result = await sendPushToUser(pb, ownerId, {
+          title: payload.title,
+          body: payload.body,
+          url: payload.url,
+          data: { type: `life_${kind.kind}_reminder`, logId: logDoc.id },
+        }, { preferredOrigins: LIFE_ORIGINS });
+        console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);
+      } catch (err) {
+        console.error(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId}:`, err);
       }
       sent++;
     }

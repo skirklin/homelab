@@ -63,9 +63,10 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
     // Before creating a new log, try to recover any log this user already
     // owns — covers the case where life_log_id was empty, stale, or
-    // accidentally pointed at a deleted/wrong log.
+    // accidentally pointed at a deleted/wrong log. life_logs is
+    // single-owner (migration 0028) so the filter uses direct equality.
     const owned = await this.pb().collection("life_logs").getList(1, 1, {
-      filter: this.pb().filter("owners.id ?= {:uid}", { uid: userId }),
+      filter: this.pb().filter("owner = {:uid}", { uid: userId }),
       sort: "created",
     });
     if (owned.items.length > 0) {
@@ -80,7 +81,7 @@ export class PocketBaseLifeBackend implements LifeBackend {
     const r = await this.wpb.collection("life_logs").create({
       id,
       name: "Life Log",
-      owners: [userId],
+      owner: userId,
     });
     await this.wpb.collection("users").update(userId, { life_log_id: id });
     return logFromRecord(r as RecordModel);

@@ -204,7 +204,7 @@ beforeAll(async () => {
   // --- Life data ---
   const lifeLog = await adminPb.collection("life_logs").create({
     name: "Test Life Log",
-    owners: [userId],
+    owner: userId,
     manifest: { subjects: [] },
     sample_schedule: [],
   });

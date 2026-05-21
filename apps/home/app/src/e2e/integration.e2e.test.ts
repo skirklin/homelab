@@ -88,7 +88,7 @@ describe("User profile fields across modules", () => {
 
     const log = await ctx.pb.collection("life_logs").create({
       name: "Test Log",
-      owners: [user.id],
+      owner: user.id,
       manifest: { widgets: [] },
     });
     cleanup.track("life_logs", log.id);
