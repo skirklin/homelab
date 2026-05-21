@@ -6,7 +6,7 @@ import styled from "styled-components";
 import { useDisplaySettings, type WidgetSize } from "../display-settings";
 import { useLifeContext } from "../life-context";
 import type { LifeLog } from "../types";
-import { MANIFEST } from "../manifest";
+import { RANDOM_SAMPLES } from "../manifest";
 import { useUserBackend, useLifeBackend, useFeedback } from "@kirkl/shared";
 
 const SettingRow = styled.div`
@@ -140,7 +140,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   const [savingWeekly, setSavingWeekly] = useState(false);
 
   const schedule = log?.sampleSchedule;
-  const config = MANIFEST.randomSamples;
+  const config = RANDOM_SAMPLES;
   const now = Date.now();
 
   const userTz = useMemo(

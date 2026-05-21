@@ -98,4 +98,5 @@ export function LifeModule() {
 }
 
 export { LifeProvider, useLifeContext } from "./life-context";
-export type { LogEntry, LifeLog, Widget, LifeManifest } from "./types";
+export type { LogEntry, LifeLog } from "./types";
+export type { Trackable } from "./manifest";

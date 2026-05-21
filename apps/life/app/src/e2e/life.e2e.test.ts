@@ -249,49 +249,6 @@ describe("deleteEntry", () => {
   });
 });
 
-describe("addSampleResponse", () => {
-  it("creates a sample event", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await life.getOrCreateLog(user.id);
-    const logId = log.id;
-    cleanup.track("life_logs", logId);
-
-    const eventId = await life.addSampleResponse(logId, { mood: 4, energy: 3 }, user.id);
-    cleanup.track("life_events", eventId);
-
-    const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.subject_id).toBe("__sample__");
-    expect(record.data.mood).toBe(4);
-    expect(record.data.energy).toBe(3);
-    expect(record.created_by).toBe(user.id);
-
-    await cleanup.cleanup();
-  });
-
-  it("accepts explicit logId", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await ctx.pb.collection("life_logs").create({
-      name: "Sample Override Log",
-      owner: user.id,
-    });
-    cleanup.track("life_logs", log.id);
-
-    const eventId = await life.addSampleResponse(log.id, { mood: 5 }, user.id);
-    cleanup.track("life_events", eventId);
-
-    const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.log).toBe(log.id);
-
-    await cleanup.cleanup();
-  });
-});
-
 describe("clearSampleSchedule", () => {
   it("clears the sample_schedule field on a life log", async () => {
     const user = await createTestUser(ctx);

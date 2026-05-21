@@ -29,7 +29,6 @@ export interface LifeBackend {
   addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string>;
   updateEntry(entryId: string, updates: { timestamp?: Date; data?: Record<string, unknown>; notes?: string }): Promise<void>;
   deleteEntry(entryId: string): Promise<void>;
-  addSampleResponse(logId: string, responses: Record<string, unknown>, userId: string): Promise<string>;
 
   // --- Subscriptions ---
 
