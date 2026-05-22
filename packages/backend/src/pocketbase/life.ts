@@ -16,8 +16,8 @@ function logFromRecord(r: RecordModel): LifeLog {
   return {
     id: r.id,
     sampleSchedule: r.sample_schedule || null,
-    // Coerce defensively — pre-0033 rows surface as undefined for a brief
-    // window before the migration runs on a given environment.
+    // Coerce defensively — pre-migration rows surface as undefined for a
+    // brief window before 20260522_221130 runs on a given environment.
     randomSamplingEnabled: !!r.random_sampling_enabled,
     morningReminderTime: r.morning_reminder_time || null,
     eveningReminderTime: r.evening_reminder_time || null,

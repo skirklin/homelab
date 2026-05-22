@@ -80,10 +80,11 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   // Two layers of gating:
   //   1. `RANDOM_SAMPLES.enabled` — system-wide kill switch from @homelab/backend.
   //      If sampling is globally disabled or misconfigured we skip the whole tick.
-  //   2. `life_logs.random_sampling_enabled` — per-log opt-in (migration 0033).
-  //      Defaults to false so auto-created logs don't push until the owner
-  //      explicitly flips the toggle in the life app's Settings modal. The
-  //      per-log check happens inside the loop below.
+  //   2. `life_logs.random_sampling_enabled` — per-log opt-in
+  //      (20260522_221130_life_random_sampling_enabled). Defaults to false so
+  //      auto-created logs don't push until the owner explicitly flips the
+  //      toggle in the life app's Settings modal. Per-log check happens
+  //      inside the loop below.
   const config = RANDOM_SAMPLES;
   if (!config.enabled || !config.timesPerDay || config.timesPerDay < 1) {
     return { sent: 0, skipped: logs.length };

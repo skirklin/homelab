@@ -19,6 +19,13 @@
  *
  * See packages/backend/src/types/life-config.ts for the matching comment that
  * has anticipated this gate since the manifest JSON column was retired.
+ *
+ * Filename uses the timestamp prefix (YYYYMMDD_HHMMSS) introduced in
+ * 20260521_055728_life_weekly_reminder.js. A previous attempt under the old
+ * 0033_ prefix was silently no-op'd by PocketBase's auto-migrator because
+ * 0033... sorts before the most-recently-applied 20260521... filename — PB
+ * runs the up() function but skips the schema commit and the _migrations
+ * row insert. Timestamp prefix dodges that.
  */
 
 migrate(
