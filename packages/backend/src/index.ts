@@ -26,7 +26,7 @@ export type {
   ActivitySlot, FlightSlot, FlightInfo,
   DayEntry,
 } from "./types/travel";
-export type { LifeLog, LifeEntry, SampleSchedule } from "./types/life";
+export type { LifeLog, LifeEvent, LifeEntry, SampleSchedule } from "./types/life";
 export type { LifeSampleQuestion, LifeRandomSamplesConfig } from "./types/life-config";
 export { RANDOM_SAMPLES } from "./types/life-config";
 
