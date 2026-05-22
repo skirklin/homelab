@@ -9,9 +9,45 @@ import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { RecipesBackend, RecipesUser } from "../interfaces/recipes";
 import type { RecipeBox, Recipe, RecipeData, PendingChanges, CookingLogEvent } from "../types/recipes";
-import type { Visibility, Unsubscribe, Event } from "../types/common";
+import type { Visibility, Unsubscribe } from "../types/common";
+import type { LifeEntry } from "../types/life";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
+
+/**
+ * Defensive parser for the post-migration recipe_events.entries column.
+ * Same shape as task_events / life_events.
+ */
+function entriesFromRecord(r: RecordModel): LifeEntry[] {
+  const raw = Array.isArray(r.entries) ? r.entries : [];
+  const out: LifeEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const e = item as Record<string, unknown>;
+    if (typeof e.name !== "string") continue;
+    if (e.type === "text" && typeof e.value === "string") {
+      out.push({ name: e.name, type: "text", value: e.value });
+    } else if (e.type === "number" && typeof e.value === "number" && typeof e.unit === "string") {
+      const entry: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
+      if (typeof e.scale === "number") entry.scale = e.scale;
+      out.push(entry);
+    } else if (e.type === "bool" && typeof e.value === "boolean") {
+      out.push({ name: e.name, type: "bool", value: e.value });
+    }
+  }
+  return out;
+}
+
+function labelsFromRecord(r: RecordModel): Record<string, string> | undefined {
+  return r.labels && typeof r.labels === "object" && !Array.isArray(r.labels)
+    ? (r.labels as Record<string, string>)
+    : undefined;
+}
+
+function notesEntries(notes?: string): LifeEntry[] {
+  const trimmed = notes?.trim();
+  return trimmed ? [{ name: "notes", type: "text", value: trimmed }] : [];
+}
 
 // --- Record → domain type mappers ---
 
@@ -61,9 +97,12 @@ function eventFromRecord(r: RecordModel): CookingLogEvent {
     id: r.id,
     subjectId: r.subject_id,
     timestamp: new Date(r.timestamp),
-    createdAt: new Date(r.created),
+    endTime: r.end_time ? new Date(r.end_time) : undefined,
+    entries: entriesFromRecord(r),
+    labels: labelsFromRecord(r),
     createdBy: r.created_by || "",
-    data: r.data || {},
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -266,21 +305,19 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
       subject_id: recipeId,
       timestamp: (options?.timestamp ?? new Date()).toISOString(),
       created_by: userId,
-      data: options?.notes ? { notes: options.notes } : {},
+      entries: notesEntries(options?.notes),
     });
     return id;
   }
 
   async updateCookingLogEvent(eventId: string, notes: string): Promise<void> {
     const record = await this.pb().collection("recipe_events").getOne(eventId);
-    const data = { ...(record.data || {}) };
-    const trimmed = notes.trim();
-    if (trimmed) {
-      data.notes = trimmed;
-    } else {
-      delete data.notes;
-    }
-    await this.wpb.collection("recipe_events").update(eventId, { data });
+    // Replace any existing "notes" text entry, preserve any others.
+    const existing = entriesFromRecord(record).filter(
+      (e) => !(e.name === "notes" && e.type === "text"),
+    );
+    const entries = [...existing, ...notesEntries(notes)];
+    await this.wpb.collection("recipe_events").update(eventId, { entries });
   }
 
   async deleteCookingLogEvent(eventId: string): Promise<void> {

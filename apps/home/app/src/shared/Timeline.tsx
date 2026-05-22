@@ -137,8 +137,28 @@ interface TimelineEvent {
   subjectName?: string;
   timestamp: Date;
   createdBy: string;
-  data: Record<string, unknown>;
+  /** Pulled from the row's entries[]; "notes" text entry is the only one we render today. */
+  notes?: string;
   containerId: string;
+}
+
+/**
+ * Extract the "notes" text entry from a unified event row. Both recipe_events
+ * and task_events use the same shape post-2026-05-22 migration (entries[]).
+ */
+function notesFromEntries(entries: unknown): string | undefined {
+  if (!Array.isArray(entries)) return undefined;
+  for (const e of entries) {
+    if (
+      e && typeof e === "object" &&
+      (e as Record<string, unknown>).name === "notes" &&
+      (e as Record<string, unknown>).type === "text" &&
+      typeof (e as Record<string, unknown>).value === "string"
+    ) {
+      return (e as Record<string, unknown>).value as string;
+    }
+  }
+  return undefined;
 }
 
 // Event type configurations
@@ -283,7 +303,7 @@ export function Timeline() {
             subjectId: record.subject_id,
             timestamp: new Date(record.timestamp),
             createdBy: record.created_by,
-            data: record.data || {},
+            notes: notesFromEntries(record.entries),
             containerId: record.box || record.container_id || "",
           });
         }
@@ -296,7 +316,7 @@ export function Timeline() {
             subjectId: record.subject_id,
             timestamp: new Date(record.timestamp),
             createdBy: record.created_by,
-            data: record.data || {},
+            notes: notesFromEntries(record.entries),
             containerId: record.list || record.container_id || "",
           });
         }
@@ -478,7 +498,7 @@ export function Timeline() {
               const config = eventConfig[event.type];
               const name =
                 event.subjectName || subjectNames.get(event.subjectId) || event.subjectId;
-              const notes = event.data.notes as string | undefined;
+              const notes = event.notes;
               const url = getEventUrl(event);
               const isClickable = url !== null;
 

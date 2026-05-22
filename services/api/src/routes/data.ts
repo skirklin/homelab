@@ -23,6 +23,46 @@ import {
 
 export const dataRoutes = new Hono<AppEnv>();
 
+/**
+ * Read the "notes" text entry from a unified event row's entries[] field.
+ * task_events / recipe_events / life_events all share this shape — the
+ * notes field is exposed as a flat string at the API boundary for
+ * ergonomic Claude / curl access, even though it's stored as one entry
+ * in the array.
+ */
+function notesFromEntries(entries: unknown): string | undefined {
+  if (!Array.isArray(entries)) return undefined;
+  for (const e of entries) {
+    if (
+      e && typeof e === "object" &&
+      (e as Record<string, unknown>).name === "notes" &&
+      (e as Record<string, unknown>).type === "text" &&
+      typeof (e as Record<string, unknown>).value === "string"
+    ) {
+      return (e as Record<string, unknown>).value as string;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Build the entries[] patch for a notes-only edit: drop any existing
+ * "notes" text entry from the row, append a new one if the caller passed
+ * a non-empty value. Preserves any other entries the row may carry.
+ */
+function patchNotesEntries(existing: unknown, nextNotes: string | undefined): unknown[] {
+  const list = Array.isArray(existing) ? existing : [];
+  const filtered = list.filter(
+    (e) =>
+      !(e && typeof e === "object" &&
+        (e as Record<string, unknown>).name === "notes" &&
+        (e as Record<string, unknown>).type === "text"),
+  );
+  const trimmed = (nextNotes ?? "").trim();
+  if (!trimmed) return filtered;
+  return [...filtered, { name: "notes", type: "text", value: trimmed }];
+}
+
 // Re-export the authz helpers for backward compatibility. New code should
 // import directly from `../lib/authz` instead.
 export {
@@ -773,7 +813,7 @@ dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
   return c.json(events.map((e) => ({
     id: e.id,
     timestamp: e.timestamp,
-    notes: (e.data as Record<string, unknown> | undefined)?.notes,
+    notes: notesFromEntries(e.entries),
     created_by: e.created_by,
     created: e.created,
   })));
@@ -800,7 +840,7 @@ dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
     subject_id: id,
     timestamp: body.timestamp ?? new Date().toISOString(),
     created_by: userId,
-    data: body.notes ? { notes: body.notes } : {},
+    entries: patchNotesEntries([], body.notes),
   });
   return c.json({ id: record.id, timestamp: record.timestamp }, 201);
 }));
@@ -820,11 +860,7 @@ dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
   const body = await c.req.json<{ notes?: string; timestamp?: string }>();
   const update: Record<string, unknown> = {};
   if (body.notes !== undefined) {
-    const data = { ...((record.data as Record<string, unknown>) || {}) };
-    const trimmed = (body.notes ?? "").trim();
-    if (trimmed) data.notes = trimmed;
-    else delete data.notes;
-    update.data = data;
+    update.entries = patchNotesEntries(record.entries, body.notes);
   }
   if (body.timestamp !== undefined) update.timestamp = body.timestamp;
   if (Object.keys(update).length === 0) return c.json({ error: "no fields provided" }, 400);
@@ -832,7 +868,7 @@ dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
   return c.json({
     id: updated.id,
     timestamp: updated.timestamp,
-    notes: (updated.data as Record<string, unknown> | undefined)?.notes,
+    notes: notesFromEntries(updated.entries),
   });
 }));
 
@@ -2227,7 +2263,7 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
     subject_id: id,
     timestamp: now,
     created_by: userId,
-    data: {},
+    entries: [],
   });
   // Recompute last_completed from the max event timestamp — keeps it honest
   // when events pre-date this one (backfills) or are later edited/deleted.

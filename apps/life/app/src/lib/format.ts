@@ -77,6 +77,7 @@ export function formatDose(value: number, unit: string): string {
  */
 export function formatEntry(entry: LifeEntry): string {
   if (entry.type === "text") return entry.value;
+  if (entry.type === "bool") return entry.value ? "Yes" : "No";
   switch (entry.unit) {
     case "min":
       return formatDuration(entry.value);

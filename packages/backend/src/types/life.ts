@@ -72,6 +72,17 @@ export type LifeEntry =
       name: string;
       type: "text";
       value: string;
+    }
+  | {
+      /**
+       * Boolean state entry. No current callers, but the variant is here so
+       * future state-toggle events (e.g. "did the thing today") can land
+       * without another type-level migration. The PB column is plain JSON, so
+       * we don't need a schema change to start writing these.
+       */
+      name: string;
+      type: "bool";
+      value: boolean;
     };
 
 /**

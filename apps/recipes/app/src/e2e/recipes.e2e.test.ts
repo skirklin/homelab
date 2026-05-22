@@ -302,7 +302,8 @@ describe("addCookingLogEvent / getCookingLogEvents", () => {
 
     const events = await recipes.getCookingLogEvents(box.id, recipe.id);
     expect(events.length).toBe(1);
-    expect(events[0].data?.notes).toBe("Great batch!");
+    const notesEntry = events[0].entries.find((e) => e.name === "notes" && e.type === "text");
+    expect(notesEntry?.type === "text" && notesEntry.value).toBe("Great batch!");
 
     await cleanup.cleanup();
   });
@@ -356,7 +357,10 @@ describe("updateCookingLogEvent", () => {
     await recipes.updateCookingLogEvent(eventId, "Updated notes");
 
     const record = await ctx.pb.collection("recipe_events").getOne(eventId);
-    expect(record.data.notes).toBe("Updated notes");
+    const updatedNote = (record.entries as Array<Record<string, unknown>>).find(
+      (e) => e.name === "notes" && e.type === "text",
+    );
+    expect(updatedNote?.value).toBe("Updated notes");
 
     await cleanup.cleanup();
   });
@@ -375,7 +379,10 @@ describe("updateCookingLogEvent", () => {
     await recipes.updateCookingLogEvent(eventId, "   ");
 
     const record = await ctx.pb.collection("recipe_events").getOne(eventId);
-    expect(record.data.notes).toBeUndefined();
+    const cleared = (record.entries as Array<Record<string, unknown>>).find(
+      (e) => e.name === "notes" && e.type === "text",
+    );
+    expect(cleared).toBeUndefined();
 
     await cleanup.cleanup();
   });
@@ -424,9 +431,17 @@ describe("subscribeToCookingLog", () => {
       callbackCount++;
     });
 
+    // Notes live as a "notes" text entry in the unified shape.
+    const noteOf = (e: CookingLogEvent): string | undefined => {
+      for (const entry of e.entries) {
+        if (entry.name === "notes" && entry.type === "text") return entry.value;
+      }
+      return undefined;
+    };
+
     // Wait for initial delivery
     await waitFor(() => callbackCount >= 1 && lastBatch.length === 1, 5000);
-    expect(lastBatch[0].data?.notes).toBe("Seed");
+    expect(noteOf(lastBatch[0])).toBe("Seed");
 
     // Simulate "another device" / out-of-band write: add via the admin client
     // directly, bypassing the local wpb cache. The subscription must catch it
@@ -436,18 +451,18 @@ describe("subscribeToCookingLog", () => {
       subject_id: recipe.id,
       timestamp: new Date().toISOString(),
       created_by: user.id,
-      data: { notes: "From another tab" },
+      entries: [{ name: "notes", type: "text", value: "From another tab" }],
     });
     cleanup.track("recipe_events", newRec.id);
 
     await waitFor(() => lastBatch.length === 2, 5000);
-    expect(lastBatch.map((e) => e.data?.notes)).toContain("From another tab");
-    expect(lastBatch.map((e) => e.data?.notes)).toContain("Seed");
+    expect(lastBatch.map(noteOf)).toContain("From another tab");
+    expect(lastBatch.map(noteOf)).toContain("Seed");
 
     // Delete via the same backend instance — subscription should drop it
     await recipes.deleteCookingLogEvent(newRec.id);
     await waitFor(() => lastBatch.length === 1, 5000);
-    expect(lastBatch[0].data?.notes).toBe("Seed");
+    expect(noteOf(lastBatch[0])).toBe("Seed");
 
     unsub();
     await cleanup.cleanup();
