@@ -24,6 +24,13 @@ export interface LifeBackend {
     times: { morning?: string | null; evening?: string | null; weekly?: string | null },
   ): Promise<void>;
 
+  /**
+   * Opt the log in or out of random-sample push notifications. Gates the
+   * per-5-minute cron in `services/api/src/lib/notifications/life.ts` — when
+   * disabled, no schedule is generated and no pushes fire.
+   */
+  setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void>;
+
   // --- Entries ---
 
   addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string>;

@@ -17,6 +17,17 @@ export interface SampleSchedule {
 export interface LifeLog {
   id: string;
   sampleSchedule: SampleSchedule | null;
+  /**
+   * Per-log opt-in for the api service's per-5-minute random-sample cron in
+   * `services/api/src/lib/notifications/life.ts`. When false (the default for
+   * newly-created logs), no random check-in pushes are sent and no
+   * `sample_schedule` is generated. Morning/evening/weekly session reminders
+   * are gated independently by their `*ReminderTime` fields being non-null.
+   *
+   * Always defined after the PB mapper runs — the field defaults to `false`
+   * in PocketBase, the mapper coerces any falsy value to `false`.
+   */
+  randomSamplingEnabled: boolean;
   /** "HH:MM" 24h string, or null/undefined when no morning reminder is set. */
   morningReminderTime?: string | null;
   /** "HH:MM" 24h string, or null/undefined when no evening reminder is set. */

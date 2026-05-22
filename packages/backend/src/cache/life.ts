@@ -12,6 +12,7 @@ export function withLifeCache(inner: LifeBackend): LifeBackend {
 
     clearSampleSchedule: (id) => inner.clearSampleSchedule(id),
     updateReminderTimes: (id, t) => inner.updateReminderTimes(id, t),
+    setRandomSamplingEnabled: (id, enabled) => inner.setRandomSamplingEnabled(id, enabled),
     addEntry: (id, w, d, u, o) => inner.addEntry(id, w, d, u, o),
     updateEntry: (id, u) => inner.updateEntry(id, u),
     deleteEntry: (id) => inner.deleteEntry(id),

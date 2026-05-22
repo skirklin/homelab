@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Modal, Segmented, Button, TimePicker } from "antd";
+import { Modal, Segmented, Button, TimePicker, Switch } from "antd";
 import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import styled from "styled-components";
@@ -138,6 +138,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   const [savingMorning, setSavingMorning] = useState(false);
   const [savingEvening, setSavingEvening] = useState(false);
   const [savingWeekly, setSavingWeekly] = useState(false);
+  const [savingSampling, setSavingSampling] = useState(false);
 
   const schedule = log?.sampleSchedule;
   const config = RANDOM_SAMPLES;
@@ -160,6 +161,23 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   const morningValue: Dayjs | null = parseHHmm(log?.morningReminderTime);
   const eveningValue: Dayjs | null = parseHHmm(log?.eveningReminderTime);
   const weeklyValue: Dayjs | null = parseHHmm(log?.weeklyReminderTime);
+
+  const toggleRandomSampling = async (next: boolean) => {
+    if (!log?.id) return;
+    setSavingSampling(true);
+    try {
+      await life.setRandomSamplingEnabled(log.id, next);
+      dispatch({
+        type: "SET_LOG",
+        log: { ...log, randomSamplingEnabled: next },
+      });
+    } catch (err) {
+      console.error("Failed to update random sampling opt-in:", err);
+      message.error("Failed to update random check-in setting");
+    } finally {
+      setSavingSampling(false);
+    }
+  };
 
   const saveReminder = async (
     which: "morning" | "evening" | "weekly",
@@ -248,6 +266,27 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
           ]}
         />
       </SettingRow>
+
+      <Section>
+        <SectionTitle>
+          <span>Random check-ins</span>
+        </SectionTitle>
+        <SettingRow>
+          <div>
+            <SettingLabel>Push random check-ins</SettingLabel>
+            <SettingDescription>
+              Push a random check-in {config.timesPerDay}× per day between{" "}
+              {config.activeHours?.[0]}:00 and {config.activeHours?.[1]}:00.
+            </SettingDescription>
+          </div>
+          <Switch
+            checked={!!log?.randomSamplingEnabled}
+            onChange={toggleRandomSampling}
+            loading={savingSampling}
+            disabled={!log?.id}
+          />
+        </SettingRow>
+      </Section>
 
       <Section>
         <SectionTitle>

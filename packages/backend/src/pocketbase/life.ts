@@ -16,6 +16,9 @@ function logFromRecord(r: RecordModel): LifeLog {
   return {
     id: r.id,
     sampleSchedule: r.sample_schedule || null,
+    // Coerce defensively — pre-0033 rows surface as undefined for a brief
+    // window before the migration runs on a given environment.
+    randomSamplingEnabled: !!r.random_sampling_enabled,
     morningReminderTime: r.morning_reminder_time || null,
     eveningReminderTime: r.evening_reminder_time || null,
     weeklyReminderTime: r.weekly_reminder_time || null,
@@ -87,6 +90,12 @@ export class PocketBaseLifeBackend implements LifeBackend {
     }
     if (Object.keys(patch).length === 0) return;
     await this.wpb.collection("life_logs").update(logId, patch);
+  }
+
+  async setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void> {
+    await this.wpb.collection("life_logs").update(logId, {
+      random_sampling_enabled: enabled,
+    });
   }
 
   async addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string> {

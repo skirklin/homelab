@@ -77,10 +77,13 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   let totalSent = 0;
   let totalSkipped = 0;
 
-  // System-wide config now lives in @homelab/backend. The check below is a
-  // single short-circuit, not per-log — if sampling is globally disabled or
-  // misconfigured we skip the whole tick. (If we ever want per-user opt-out,
-  // add a boolean field to life_logs and gate on that here.)
+  // Two layers of gating:
+  //   1. `RANDOM_SAMPLES.enabled` — system-wide kill switch from @homelab/backend.
+  //      If sampling is globally disabled or misconfigured we skip the whole tick.
+  //   2. `life_logs.random_sampling_enabled` — per-log opt-in (migration 0033).
+  //      Defaults to false so auto-created logs don't push until the owner
+  //      explicitly flips the toggle in the life app's Settings modal. The
+  //      per-log check happens inside the loop below.
   const config = RANDOM_SAMPLES;
   if (!config.enabled || !config.timesPerDay || config.timesPerDay < 1) {
     return { sent: 0, skipped: logs.length };
@@ -91,6 +94,13 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   }
 
   for (const logDoc of logs) {
+    // Per-log opt-in gate. Must come before schedule generation so disabled
+    // logs don't accumulate `sample_schedule` writes either.
+    if (!logDoc.random_sampling_enabled) {
+      totalSkipped++;
+      continue;
+    }
+
     const timezone = safeTz(config.timezone, FALLBACK_TZ);
     const today = getDateStringInTimezone(nowDate, timezone);
 
