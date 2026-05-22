@@ -134,7 +134,7 @@ beforeAll(async () => {
     subject_id: bobsPrivateRecipeId,
     timestamp: new Date().toISOString(),
     created_by: bob.id,
-    data: { notes: "bob cooked it" },
+    entries: [{ name: "notes", type: "text", value: "bob cooked it" }],
   });
   bobsCookingLogId = event.id;
 
