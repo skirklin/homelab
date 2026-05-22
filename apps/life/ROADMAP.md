@@ -69,6 +69,14 @@ Mapped to the user's stated focus areas:
 3. **Yearly themes** — set a focus once per year; morning prompts rotate around it; end-of-year recap reviews against it.
 4. **Symptom tracking dashboard** — dedicated view with trend lines, notes per entry, export-to-PDF (e.g., to share with a doctor or PT someday).
 
+## UI improvements (punch list)
+
+Small, concrete fixes outside the phased plan. Pull from this list when there's appetite for a polish pass.
+
+1. **URL-sync the selected date.** Dashboard's `selectedDate` lives only in `useState` ([LifeDashboard.tsx:249](app/src/components/LifeDashboard.tsx#L249)), so refresh always snaps to today and there's no back-button to yesterday. Encode as `?date=YYYY-MM-DD` (or `/day/YYYY-MM-DD`), keep "today" as the no-param default so existing bookmarks still work.
+2. **Edit recorded entries.** Delete already exists — when a tracker has logged data today the value badge opens [EntriesPopover](app/src/components/EntriesPopover.tsx) with a per-entry delete button, surfaced from [EventLogger.tsx:381-389](app/src/components/EventLogger.tsx#L381-L389). The gaps are (a) discoverability — the badge doesn't look tappable — and (b) edit: change the timestamp on a misfired log, or correct a value. Worth adding inline edit in the same popover.
+3. **Tighten the grid.** Dashboard feels very airy on desktop. Audit gaps + card padding (currently `var(--space-sm)` between cards, `var(--space-lg) var(--space-md)` on primary cards). Consider denser breakpoint targets and a "compact mode" toggle that goes one step beyond the existing `widgetSize: compact`.
+
 ## Anti-patterns to actively avoid
 
 - Badges/achievements for arbitrary milestones ("100 sessions logged!")
