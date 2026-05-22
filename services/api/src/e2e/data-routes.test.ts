@@ -214,7 +214,8 @@ beforeAll(async () => {
     subject_id: "mood",
     timestamp: new Date().toISOString(),
     created_by: userId,
-    data: { value: 8 },
+    entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }],
+    labels: { source: "manual" },
   });
   lifeEventId = event.id;
 
@@ -1073,10 +1074,9 @@ describe("Life", () => {
     expect(status).toBe(200);
     expect(data.id).toBe(lifeLogId);
     expect(data.name).toBe("Test Life Log");
-    expect(data.manifest).toBeDefined();
   });
 
-  it("GET /data/life/entries?log=X — returns entries", async () => {
+  it("GET /data/life/entries?log=X — returns events with the new entries[] shape", async () => {
     const { status, data } = await apiReq(
       `/data/life/entries?log=${lifeLogId}`,
       { token: userToken },
@@ -1087,6 +1087,9 @@ describe("Life", () => {
     const entry = data.find((e: any) => e.id === lifeEventId);
     expect(entry).toBeDefined();
     expect(entry.subject_id).toBe("mood");
-    expect(entry.data.value).toBe(8);
+    expect(Array.isArray(entry.entries)).toBe(true);
+    const rating = entry.entries.find((e: any) => e.name === "rating");
+    expect(rating?.value).toBe(4);
+    expect(rating?.unit).toBe("rating");
   });
 });

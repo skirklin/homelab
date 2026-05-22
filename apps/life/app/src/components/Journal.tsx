@@ -8,6 +8,7 @@ import {
   CalendarOutlined,
   SearchOutlined,
   LineChartOutlined,
+  BookOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
@@ -20,6 +21,7 @@ import { useLifeContext } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEntry } from "../types";
+import { findTextEntry, findNumberEntry } from "../lib/format";
 
 // ---------------------------------------------------------------------------
 // Styled
@@ -173,16 +175,29 @@ const RatingPill = styled.span`
 // Helpers
 // ---------------------------------------------------------------------------
 
-type FilterKey = "all" | Session["id"];
+type FilterKey = "all" | Session["id"] | "journal";
 
 function sessionForEntry(entry: LogEntry): Session | undefined {
   return SESSIONS.find((s) => sessionSubjectId(s.id) === entry.subjectId);
 }
 
+// "journal" subject_id is reserved for freeform / Journey-backfilled entries
+// (post-migration). The legacy `freeform_journal` id is matched too so old
+// rows surface in the filter without needing a data migration.
+const JOURNAL_SUBJECTS = new Set(["journal", "freeform_journal"]);
+
 function iconForSessionId(id: Session["id"]) {
   if (id === "morning") return <SunOutlined />;
   if (id === "evening") return <MoonOutlined />;
   return <CalendarOutlined />;
+}
+
+/** First non-empty text entry on the event, for the on-this-day preview. */
+function firstTextOf(entry: LogEntry): string | undefined {
+  for (const e of entry.entries) {
+    if (e.type === "text" && e.value.trim().length > 0) return e.value;
+  }
+  return undefined;
 }
 
 function dateKey(d: Date): string {
@@ -209,19 +224,19 @@ function formatTime(d: Date): string {
   return dayjs(d).format("h:mm A");
 }
 
-function renderValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  return JSON.stringify(value);
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 const SESSION_SUBJECT_IDS = new Set(SESSIONS.map((s) => sessionSubjectId(s.id)));
+
+/**
+ * Filterable subjects = sessions + journal. Other trackables stay off the
+ * Journal view (they're already on the dashboard).
+ */
+function isJournalable(entry: LogEntry): boolean {
+  return SESSION_SUBJECT_IDS.has(entry.subjectId) || JOURNAL_SUBJECTS.has(entry.subjectId);
+}
 
 export function Journal() {
   const navigate = useNavigate();
@@ -232,27 +247,33 @@ export function Journal() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
 
-  // All session entries, newest first.
-  const sessionEntries = useMemo(() => {
+  // All journal-shaped entries (sessions + freeform journal), newest first.
+  const journalEntries = useMemo(() => {
     return Array.from(state.entries.values())
-      .filter((e) => SESSION_SUBJECT_IDS.has(e.subjectId))
+      .filter(isJournalable)
       .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   }, [state.entries]);
 
   // Filter + search applied for the main list.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return sessionEntries.filter((e) => {
-      const session = sessionForEntry(e);
-      if (filter !== "all" && session?.id !== filter) return false;
+    return journalEntries.filter((e) => {
+      if (filter !== "all") {
+        if (filter === "journal") {
+          if (!JOURNAL_SUBJECTS.has(e.subjectId)) return false;
+        } else {
+          const session = sessionForEntry(e);
+          if (session?.id !== filter) return false;
+        }
+      }
       if (!q) return true;
-      // Substring across string values in data.
-      for (const v of Object.values(e.data)) {
-        if (typeof v === "string" && v.toLowerCase().includes(q)) return true;
+      // Substring across all text entries.
+      for (const entry of e.entries) {
+        if (entry.type === "text" && entry.value.toLowerCase().includes(q)) return true;
       }
       return false;
     });
-  }, [sessionEntries, filter, search]);
+  }, [journalEntries, filter, search]);
 
   // Group filtered entries by local date.
   const grouped = useMemo(() => {
@@ -285,7 +306,7 @@ export function Journal() {
     for (const o of offsets) {
       const k = dateKey(o.date);
       // First (chronologically earliest) entry for that day, so morning comes first.
-      const match = sessionEntries
+      const match = journalEntries
         .filter((e) => dateKey(e.timestamp) === k)
         .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())[0];
       if (match) {
@@ -293,7 +314,7 @@ export function Journal() {
       }
     }
     return result;
-  }, [sessionEntries]);
+  }, [journalEntries]);
 
   const menuItems = [
     {
@@ -318,19 +339,19 @@ export function Journal() {
             <OnThisDayRow>
               {onThisDay.map(({ label, entry }) => {
                 const session = sessionForEntry(entry);
-                const firstText = Object.entries(entry.data).find(
-                  ([, v]) => typeof v === "string" && (v as string).trim().length > 0,
-                );
+                const firstText = firstTextOf(entry);
+                const isJournal = JOURNAL_SUBJECTS.has(entry.subjectId);
                 return (
                   <OnThisDayCard key={`${label}-${entry.id}`}>
-                    {session ? iconForSessionId(session.id) : <CalendarOutlined />}
+                    {session ? iconForSessionId(session.id) : <BookOutlined />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <OnThisDayLabel>
                         {label} · {dayjs(entry.timestamp).format("MMM D, YYYY")}
                         {session && ` · ${session.title}`}
+                        {isJournal && ` · Journal`}
                       </OnThisDayLabel>
                       {firstText && (
-                        <OnThisDayPreview>{firstText[1] as string}</OnThisDayPreview>
+                        <OnThisDayPreview>{firstText}</OnThisDayPreview>
                       )}
                     </div>
                   </OnThisDayCard>
@@ -354,6 +375,9 @@ export function Journal() {
                 {iconForSessionId(s.id)} {s.title}
               </Chip>
             ))}
+            <Chip $active={filter === "journal"} onClick={() => setFilter("journal")}>
+              <BookOutlined /> Journal
+            </Chip>
           </FilterRow>
 
           <SearchWrap>
@@ -371,7 +395,7 @@ export function Journal() {
               description={
                 search.trim()
                   ? "No entries match that search."
-                  : "No session entries yet. Start a morning or evening session from the dashboard."
+                  : "No entries yet. Start a morning or evening session from the dashboard."
               }
             />
           ) : (
@@ -380,37 +404,88 @@ export function Journal() {
                 <DateHeader>{formatDateHeader(g.date)}</DateHeader>
                 {g.entries.map((entry) => {
                   const session = sessionForEntry(entry);
-                  if (!session) return null;
-                  return (
-                    <EntryCard key={entry.id}>
-                      <EntryHeader>
-                        {iconForSessionId(session.id)}
-                        <EntryKind>{session.title}</EntryKind>
-                        <span>·</span>
-                        <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
-                      </EntryHeader>
-                      {session.prompts.map((p) => {
-                        const val = entry.data[p.id];
-                        if (val === undefined || val === null || val === "") {
-                          return null;
-                        }
-                        return (
-                          <PromptBlock key={p.id}>
-                            <PromptLabel>{p.label}</PromptLabel>
-                            {p.type === "rating" && typeof val === "number" ? (
-                              <PromptValue>
-                                <RatingPill>
-                                  {val} / {p.max ?? 5}
-                                </RatingPill>
-                              </PromptValue>
-                            ) : (
-                              <PromptValue>{renderValue(val)}</PromptValue>
-                            )}
-                          </PromptBlock>
-                        );
-                      })}
-                    </EntryCard>
-                  );
+                  if (session) {
+                    // Session entries render each prompt as a labeled block.
+                    return (
+                      <EntryCard key={entry.id}>
+                        <EntryHeader>
+                          {iconForSessionId(session.id)}
+                          <EntryKind>{session.title}</EntryKind>
+                          <span>·</span>
+                          <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
+                        </EntryHeader>
+                        {session.prompts.map((p) => {
+                          if (p.type === "text") {
+                            const val = findTextEntry(entry, p.id);
+                            if (!val) return null;
+                            return (
+                              <PromptBlock key={p.id}>
+                                <PromptLabel>{p.label}</PromptLabel>
+                                <PromptValue>{val}</PromptValue>
+                              </PromptBlock>
+                            );
+                          }
+                          if (p.type === "rating") {
+                            const num = findNumberEntry(entry, p.id);
+                            if (!num) return null;
+                            return (
+                              <PromptBlock key={p.id}>
+                                <PromptLabel>{p.label}</PromptLabel>
+                                <PromptValue>
+                                  <RatingPill>
+                                    {num.value} / {num.scale ?? p.max ?? 5}
+                                  </RatingPill>
+                                </PromptValue>
+                              </PromptBlock>
+                            );
+                          }
+                          // number / checkbox fall through to numeric display.
+                          const num = findNumberEntry(entry, p.id);
+                          if (!num) return null;
+                          return (
+                            <PromptBlock key={p.id}>
+                              <PromptLabel>{p.label}</PromptLabel>
+                              <PromptValue>{num.value}</PromptValue>
+                            </PromptBlock>
+                          );
+                        })}
+                      </EntryCard>
+                    );
+                  }
+                  if (JOURNAL_SUBJECTS.has(entry.subjectId)) {
+                    // Freeform journal: render the `body` text + optional
+                    // mood pill + a footer line showing location/weather if
+                    // present.
+                    const body = findTextEntry(entry, "body");
+                    const mood = findNumberEntry(entry, "mood");
+                    const labels = entry.labels ?? {};
+                    const footerBits: string[] = [];
+                    if (labels.location_address) footerBits.push(labels.location_address);
+                    if (labels.weather) footerBits.push(labels.weather);
+                    return (
+                      <EntryCard key={entry.id}>
+                        <EntryHeader>
+                          <BookOutlined />
+                          <EntryKind>Journal</EntryKind>
+                          <span>·</span>
+                          <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
+                          {mood && (
+                            <>
+                              <span>·</span>
+                              <RatingPill>{mood.value} / {mood.scale ?? 5}</RatingPill>
+                            </>
+                          )}
+                        </EntryHeader>
+                        {body && <PromptValue>{body}</PromptValue>}
+                        {footerBits.length > 0 && (
+                          <PromptLabel style={{ marginTop: "var(--space-sm)" }}>
+                            {footerBits.join(" · ")}
+                          </PromptLabel>
+                        )}
+                      </EntryCard>
+                    );
+                  }
+                  return null;
                 })}
               </DateGroup>
             ))

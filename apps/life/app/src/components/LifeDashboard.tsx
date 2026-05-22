@@ -465,14 +465,20 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   }, []);
 
   // Handle quick response submission (from notification action buttons).
-  // questionId is the trackable id (matches the new value-shaped event model).
+  // questionId is the trackable id (all sample questions point at ratings).
   const handleQuickResponse = useCallback(async (questionId: string, value: number) => {
     if (!user?.uid || !state.log?.id) {
       console.error("Cannot submit quick response: missing user or log");
       return;
     }
     try {
-      await life.addEntry(state.log.id, questionId, { value, source: "sample" }, user.uid);
+      await life.addEvent(
+        state.log.id,
+        questionId,
+        [{ name: "rating", type: "number", value, unit: "rating", scale: 5 }],
+        user.uid,
+        { labels: { source: "sample" } },
+      );
       message.success("Response saved");
     } catch (error) {
       console.error("Failed to save quick response:", error);
@@ -557,15 +563,18 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       downloadFile(content, `life-tracker-export-${date}.json`, "application/json");
       message.success("Exported to JSON");
     } else {
-      const headers = ["timestamp", "widget", "data", "source", "notes"];
+      // CSV is one row per event; the entries+labels payload renders as
+      // compact JSON. Good enough for spreadsheets; the JSON export is the
+      // structured surface.
+      const headers = ["timestamp", "subject_id", "source", "entries", "labels"];
       const rows = sortedEntries.map(e => [
         e.timestamp.toISOString(),
         e.subjectId,
-        JSON.stringify(e.data),
-        (e.data.source as string) || "manual",
-        (e.data.notes as string) || "",
+        e.labels?.source ?? "manual",
+        JSON.stringify(e.entries),
+        JSON.stringify(e.labels ?? {}),
       ]);
-      const csv = [headers.join(","), ...rows.map(r => r.map(c => `"${c}"`).join(","))].join("\n");
+      const csv = [headers.join(","), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
       const date = new Date().toISOString().split("T")[0];
       downloadFile(csv, `life-tracker-export-${date}.csv`, "text/csv");
       message.success("Exported to CSV");

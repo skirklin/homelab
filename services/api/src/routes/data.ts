@@ -1893,7 +1893,7 @@ dataRoutes.get("/life/log", handler(async (c) => {
   });
 }));
 
-// List entries (events) in a life log
+// List events in a life log (the wire term remains `entries` for URL stability).
 dataRoutes.get("/life/entries", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -1903,59 +1903,74 @@ dataRoutes.get("/life/entries", handler(async (c) => {
     return c.json({ error: "access denied" }, 403);
   }
 
-  const entries = await pb.collection("life_events").getFullList({
+  const events = await pb.collection("life_events").getFullList({
     filter: pb.filter("log = {:logId}", { logId }),
     sort: "-timestamp",
   });
-  return c.json(entries.map((e) => ({
+  return c.json(events.map((e) => ({
     id: e.id,
     log: e.log,
     subject_id: e.subject_id,
     timestamp: e.timestamp,
-    data: e.data,
+    end_time: e.end_time || null,
+    entries: e.entries || [],
+    labels: e.labels || null,
     created_by: e.created_by,
   })));
 }));
 
-// Add a life log entry. Mirrors LifeBackend.addEntry: notes (if given) merge
-// into the data JSON under `notes`.
+// Create a life event. The wire shape mirrors the new LifeBackend.addEvent:
+// the caller provides the entries[] array directly, plus optional labels and
+// end_time. Legacy `data`/`notes` fields are no longer accepted — callers must
+// construct typed entries.
 dataRoutes.post("/life/entries", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const body = await c.req.json<{
     log: string;
-    widget_id: string;
-    data?: Record<string, unknown>;
+    subject_id?: string;
+    /** Legacy alias for subject_id from the old wire format. */
+    widget_id?: string;
+    entries?: unknown[];
+    labels?: Record<string, string>;
     timestamp?: string;
-    notes?: string;
+    end_time?: string;
   }>();
-  if (!body.log || !body.widget_id) return c.json({ error: "log and widget_id required" }, 400);
+  const subjectId = body.subject_id || body.widget_id;
+  if (!body.log || !subjectId) {
+    return c.json({ error: "log and subject_id required" }, 400);
+  }
   if (!(await userOwnsLifeLog(pb, body.log, userId))) {
     return c.json({ error: "access denied" }, 403);
   }
 
-  const eventData: Record<string, unknown> = { ...(body.data || {}) };
-  if (body.notes) eventData.notes = body.notes;
+  const entries = Array.isArray(body.entries) ? body.entries : [];
 
-  const record = await pb.collection("life_events").create({
+  const payload: Record<string, unknown> = {
     log: body.log,
-    subject_id: body.widget_id,
+    subject_id: subjectId,
     timestamp: body.timestamp || new Date().toISOString(),
     created_by: userId,
-    data: eventData,
-  });
+    entries,
+  };
+  if (body.end_time) payload.end_time = body.end_time;
+  if (body.labels && Object.keys(body.labels).length > 0) payload.labels = body.labels;
+
+  const record = await pb.collection("life_events").create(payload);
   return c.json({ id: record.id, timestamp: record.timestamp }, 201);
 }));
 
-// Update a life log entry — timestamp, data (merged), or notes
+// Update a life event — timestamp, end_time, entries (whole-replace), or
+// labels (whole-replace). No merge semantics — callers send the new value.
 dataRoutes.patch("/life/entries/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const id = c.req.param("id")!;
   const body = await c.req.json<{
     timestamp?: string;
-    data?: Record<string, unknown>;
-    notes?: string;
+    end_time?: string | null;
+    entries?: unknown[];
+    labels?: Record<string, string> | null;
   }>();
   const record = await pb.collection("life_events").getOne(id).catch(() => null);
   if (!record) return c.json({ error: "not found" }, 404);
@@ -1964,16 +1979,18 @@ dataRoutes.patch("/life/entries/:id", handler(async (c) => {
   }
   const patch: Record<string, unknown> = {};
   if (body.timestamp) patch.timestamp = body.timestamp;
-  const existingData = (record.data || {}) as Record<string, unknown>;
-  if (body.data || body.notes !== undefined) {
-    const merged = body.data ? { ...existingData, ...body.data } : { ...existingData };
-    if (body.notes !== undefined) merged.notes = body.notes;
-    patch.data = merged;
-  }
+  if (body.end_time !== undefined) patch.end_time = body.end_time;
+  if (body.entries !== undefined) patch.entries = body.entries;
+  if (body.labels !== undefined) patch.labels = body.labels;
   if (Object.keys(patch).length === 0) return c.json({ error: "no fields provided" }, 400);
 
   const updated = await pb.collection("life_events").update(id, patch);
-  return c.json({ id: updated.id, timestamp: updated.timestamp, data: updated.data });
+  return c.json({
+    id: updated.id,
+    timestamp: updated.timestamp,
+    entries: updated.entries || [],
+    labels: updated.labels || null,
+  });
 }));
 
 // Delete a life log entry

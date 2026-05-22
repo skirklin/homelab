@@ -151,7 +151,11 @@ beforeAll(async () => {
     subject_id: "mood",
     timestamp: new Date().toISOString(),
     created_by: bob.id,
-    data: { value: 8, notes: "Bob's notes" },
+    entries: [
+      { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+      { name: "notes", type: "text", value: "Bob's notes" },
+    ],
+    labels: { source: "manual" },
   });
   bobsLifeEntryId = bobsEntry.id;
 
@@ -338,7 +342,11 @@ describe("cross-tenant writes via /data/life/entries/* (admin-PB bypass)", () =>
     const { status } = await apiReq("/data/life/entries", {
       method: "POST",
       token: alice.apiToken,
-      body: { log: bobsLifeLogId, widget_id: "mood", data: { value: 1 } },
+      body: {
+        log: bobsLifeLogId,
+        subject_id: "mood",
+        entries: [{ name: "rating", type: "number", value: 1, unit: "rating", scale: 5 }],
+      },
     });
     expect(status, "Alice was able to plant a life entry in Bob's log").toBe(403);
   });
@@ -347,7 +355,9 @@ describe("cross-tenant writes via /data/life/entries/* (admin-PB bypass)", () =>
     const { status } = await apiReq(`/data/life/entries/${bobsLifeEntryId}`, {
       method: "PATCH",
       token: alice.apiToken,
-      body: { notes: "tampered" },
+      body: {
+        entries: [{ name: "rating", type: "number", value: 1, unit: "rating", scale: 5 }],
+      },
     });
     expect(status, "Alice was able to mutate Bob's life entry").toBe(403);
   });
@@ -361,7 +371,8 @@ describe("cross-tenant writes via /data/life/entries/* (admin-PB bypass)", () =>
       subject_id: "mood",
       timestamp: new Date().toISOString(),
       created_by: bob.id,
-      data: { value: 5 },
+      entries: [{ name: "rating", type: "number", value: 5, unit: "rating", scale: 5 }],
+      labels: { source: "manual" },
     });
 
     const { status } = await apiReq(`/data/life/entries/${fresh.id}`, {
@@ -378,7 +389,11 @@ describe("cross-tenant writes via /data/life/entries/* (admin-PB bypass)", () =>
     const { status, data } = await apiReq("/data/life/entries", {
       method: "POST",
       token: bob.apiToken,
-      body: { log: bobsLifeLogId, widget_id: "mood", data: { value: 9 } },
+      body: {
+        log: bobsLifeLogId,
+        subject_id: "mood",
+        entries: [{ name: "rating", type: "number", value: 5, unit: "rating", scale: 5 }],
+      },
     });
     expect(status).toBeLessThan(400);
     expect((data as { id: string }).id).toBeTruthy();
@@ -388,7 +403,12 @@ describe("cross-tenant writes via /data/life/entries/* (admin-PB bypass)", () =>
     const { status } = await apiReq(`/data/life/entries/${bobsLifeEntryId}`, {
       method: "PATCH",
       token: bob.apiToken,
-      body: { notes: "Bob's updated notes" },
+      body: {
+        entries: [
+          { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+          { name: "notes", type: "text", value: "Bob's updated notes" },
+        ],
+      },
     });
     expect(status).toBeLessThan(400);
   });
