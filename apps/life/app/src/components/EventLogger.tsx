@@ -374,15 +374,19 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   );
 
   // Value badge — clickable for entries popover when there's logged data.
+  // The outer span swallows clicks so the popover trigger doesn't bubble up
+  // to the Card's onClick in one-tap mode (which would log another entry).
   const valueDisplay = (
     <>
       {dayEvents.length > 0 ? (
-        <EntriesPopover events={dayEvents} logId={logId}>
-          <ValueBadge $logged={true} $size={size} title={`${dayEvents.length} ${dayEvents.length === 1 ? "entry" : "entries"}`}>
-            {formatValueDisplay(agg, trackable)}
-            {dayEvents.length > 1 && <span>· {dayEvents.length}</span>}
-          </ValueBadge>
-        </EntriesPopover>
+        <span onClick={(e) => e.stopPropagation()}>
+          <EntriesPopover events={dayEvents} logId={logId}>
+            <ValueBadge $logged={true} $size={size} title={`${dayEvents.length} ${dayEvents.length === 1 ? "entry" : "entries"}`}>
+              {formatValueDisplay(agg, trackable)}
+              {dayEvents.length > 1 && <span>· {dayEvents.length}</span>}
+            </ValueBadge>
+          </EntriesPopover>
+        </span>
       ) : (
         <ValueBadge $logged={false} $size={size} as="span">—</ValueBadge>
       )}
