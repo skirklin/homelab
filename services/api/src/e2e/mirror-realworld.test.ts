@@ -236,6 +236,109 @@ describe("PBMirror integration: page-reload boundary (dogfood)", () => {
     }
   }, 30000);
 
+  it("A11 (DOGFOOD oscillation): stale persisted SET + server has checked=true → consumer must never see checked=false", async () => {
+    // Live-PB version of realworld.test.ts:A11. The user's exact repro:
+    //   1. add item → server has checked=false
+    //   2. check item → server now has checked=true; both pending acks
+    //      drain, but the SET's IDB unpersist is fire-and-forget. If the
+    //      user refreshes within a few ms, the SET entry is still in IDB.
+    //   3. refresh → session 2 boots:
+    //        - BackendProvider fires replayPending. SET is pushed into
+    //          the queue; POST dispatched (will 409).
+    //        - Mirror.watch bootstraps via getFullList → fetches server
+    //          {checked: true}.
+    //   4. Without the fix, composeView(server={checked:true}, [set{checked:false}])
+    //      = {checked:false} because `set` REPLACED the server snapshot.
+    //      Consumer observes unchecked, then the 409 drains and the record
+    //      disappears entirely.
+    //   5. With the fix, `set` is a no-op when a server snapshot exists,
+    //      so the consumer never sees checked=false.
+    await clearAllMutations();
+    const itemId = newId();
+
+    // Server reflects the post-check state (the user's real intent).
+    await alicePb.collection("shopping_items").create({
+      id: itemId,
+      list: aliceListId,
+      ingredient: "test-a11",
+      note: "",
+      category_id: "uncategorized",
+      checked: true,
+      checked_by: aliceId,
+      checked_at: new Date().toISOString(),
+      added_by: aliceId,
+    });
+
+    // IDB still has the stale SET from session 1 (create-time body: checked=false).
+    await persistMutation({
+      id: newId(),
+      collection: "shopping_items",
+      recordId: itemId,
+      mutation: {
+        kind: "set",
+        record: {
+          id: itemId,
+          list: aliceListId,
+          ingredient: "test-a11",
+          note: "",
+          category_id: "uncategorized",
+          checked: false,
+          added_by: aliceId,
+        },
+      },
+      createdAt: Date.now() - 1000,
+      origin: "tab-1",
+    });
+
+    const wpb = wrapPocketBase(() => alicePb);
+
+    // Production ordering: replayPending fires before mirror.watch attaches.
+    void wpb.replayPending();
+
+    const mirror: PBMirror = createMirror(() => alicePb, wpb);
+    const states: RawRecord[][] = [];
+    const handle = mirror.watch(
+      {
+        collection: "shopping_items",
+        topic: "*",
+        filter: alicePb.filter("list = {:listId}", { listId: aliceListId }),
+        predicate: (r) => r.list === aliceListId,
+      },
+      (s) => { states.push(s); },
+    );
+
+    try {
+      // Wait for the replay's POST (which will 400/409 against PB because
+      // the record already exists) to settle.
+      await new Promise((r) => setTimeout(r, 750));
+
+      // INVARIANT 1: no emit ever showed the item as unchecked.
+      const checkedHistory = states
+        .map((s) => s.find((r) => r.id === itemId)?.checked)
+        .filter((v) => v !== undefined);
+      expect(
+        checkedHistory,
+        `no emit may surface checked=false; observed: ${JSON.stringify(checkedHistory)}`,
+      ).not.toContain(false);
+
+      // INVARIANT 2: final state has the record present and checked=true.
+      const finalState = states[states.length - 1] ?? [];
+      const finalItem = finalState.find((r) => r.id === itemId);
+      expect(finalItem, "record must remain in mirror view").toBeDefined();
+      expect(finalItem?.checked).toBe(true);
+
+      // INVARIANT 3: server state still consistent (replay's POST didn't
+      // mutate server truth).
+      const onServer = await alicePb.collection("shopping_items").getOne(itemId);
+      expect(onServer.checked).toBe(true);
+
+      await alicePb.collection("shopping_items").delete(itemId);
+    } finally {
+      handle.unsubscribe();
+      mirror.dispose();
+    }
+  }, 30000);
+
   it("A2: persisted create with no prior PB record → replay creates the record, mirror reflects it", async () => {
     await clearAllMutations();
     const itemId = newId();

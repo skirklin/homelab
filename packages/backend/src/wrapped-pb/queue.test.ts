@@ -12,12 +12,47 @@ describe("composeView", () => {
     expect(composeView(r("a", { name: "x" }), [])).toEqual({ id: "a", name: "x" });
   });
 
-  it("Set replaces server", () => {
+  it("Set is a no-op when a server snapshot already exists (server truth wins)", () => {
+    // A `set` mutation models an optimistic create. Once the server has a
+    // snapshot for this id, the create has either already landed (set is
+    // moot; pending drains on ack) or pre-existed (set will 409 and drain
+    // via permanent-error path). In neither case may the set's stale
+    // create-time body override fresher server truth — this is the
+    // dogfood oscillation root cause (realworld.test.ts:A11).
     expect(
       composeView(r("a", { name: "x" }), [
         { id: "m1", collection: "c", recordId: "a", createdAt: 0, mutation: { kind: "set", record: r("a", { name: "y" }) } },
       ]),
+    ).toEqual({ id: "a", name: "x" });
+  });
+
+  it("Set on null server produces the set body (optimistic-create overlay)", () => {
+    expect(
+      composeView(null, [
+        { id: "m1", collection: "c", recordId: "a", createdAt: 0, mutation: { kind: "set", record: r("a", { name: "y" }) } },
+      ]),
     ).toEqual({ id: "a", name: "y" });
+  });
+
+  it("Set followed by Update on null server folds correctly", () => {
+    expect(
+      composeView(null, [
+        { id: "m1", collection: "c", recordId: "a", createdAt: 0, mutation: { kind: "set", record: r("a", { name: "y", count: 1 }) } },
+        { id: "m2", collection: "c", recordId: "a", createdAt: 1, mutation: { kind: "update", patch: { count: 2 } } },
+      ]),
+    ).toEqual({ id: "a", name: "y", count: 2 });
+  });
+
+  it("Set is no-op on server, but subsequent Update still merges on server", () => {
+    // Sanity: even when set is no-op'd, downstream updates still apply.
+    // This is what makes the optimistic-write chain converge after server
+    // truth arrives mid-flight.
+    expect(
+      composeView(r("a", { name: "server", count: 99 }), [
+        { id: "m1", collection: "c", recordId: "a", createdAt: 0, mutation: { kind: "set", record: r("a", { name: "stale-create", count: 1 }) } },
+        { id: "m2", collection: "c", recordId: "a", createdAt: 1, mutation: { kind: "update", patch: { count: 2 } } },
+      ]),
+    ).toEqual({ id: "a", name: "server", count: 2 });
   });
 
   it("Update merges patch onto server", () => {

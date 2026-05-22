@@ -682,7 +682,13 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         // Deliver from queue.view so we forward whatever's freshest, not
         // necessarily the snapshot we just fetched.
         for (const r of initialRecords) {
-          if (queue.view(name, r.id) === null) {
+          // Seed the server snapshot unless the queue already has one for
+          // this record (an SSE event raced ahead during our await; that
+          // snapshot is more authoritative). A pending-only entry must NOT
+          // skip the seed — composeView still needs server truth underneath,
+          // and without it a stale replayed SET would override the freshest
+          // server state (the dogfood oscillation bug A11/A12).
+          if (!queue.hasServerSnapshot(name, r.id)) {
             queue.applyServer(name, r.id, r);
           }
           const view = queue.view(name, r.id);

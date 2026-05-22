@@ -31,7 +31,28 @@ interface RecordState {
   pending: PendingMutation[];
 }
 
-/** Compose pending mutations on top of the server snapshot. Pure. */
+/**
+ * Compose pending mutations on top of the server snapshot. Pure.
+ *
+ * Semantics of `set`:
+ *   - When there's no server snapshot, the set body IS the optimistic view.
+ *     This is what powers optimistic creates with client-supplied IDs:
+ *     wpb.create pushes a set, composeView surfaces it to consumers
+ *     before the POST acks.
+ *   - When a server snapshot already exists, the set is treated as a
+ *     no-op. Rationale: every `set` originates from `wpb.create()`, which
+ *     means "create a record with this id and body". If the server already
+ *     has a snapshot for this id, the create has either succeeded
+ *     server-side (the set is moot; pending will drain on ack) or the
+ *     record pre-existed (the set will 409 and drain via permanent-error
+ *     path). In neither case should the set's stale create-time body
+ *     replace fresher server truth. Concretely: a stale persisted set
+ *     replayed from IDB used to override a freshly-fetched server
+ *     snapshot, making a checked item appear unchecked (the dogfood
+ *     oscillation bug; realworld.test.ts:A11).
+ *   - Updates after a no-op'd set still apply to the server snapshot as
+ *     normal, so the optimistic write chain converges.
+ */
 export function composeView(
   server: RawRecord | null,
   pending: PendingMutation[],
@@ -40,7 +61,9 @@ export function composeView(
   for (const p of pending) {
     switch (p.mutation.kind) {
       case "set":
-        result = p.mutation.record;
+        // No-op when server truth exists (see fn comment). Otherwise the
+        // set body becomes the optimistic view.
+        if (result === null) result = p.mutation.record;
         break;
       case "update":
         result = result ? { ...result, ...p.mutation.patch } : null;
@@ -79,6 +102,19 @@ export class MutationQueue {
     if (!col) return false;
     const rec = col.get(recordId);
     return !!rec && rec.pending.length > 0;
+  }
+
+  /** True when an applyServer snapshot exists (regardless of pending state).
+   *  Used by the mirror's bootstrap to distinguish "queue has nothing for
+   *  this record" (safe to seed from a fresh fetch) from "queue already
+   *  has a server snapshot, possibly fresher than ours (e.g. an SSE event
+   *  that raced ahead during our await)". A pending-only entry is NOT a
+   *  server snapshot — composeView still needs server truth underneath. */
+  hasServerSnapshot(collection: string, recordId: string): boolean {
+    const col = this.state.get(collection);
+    if (!col) return false;
+    const rec = col.get(recordId);
+    return !!rec && rec.server !== null;
   }
 
   /** Returns the current view of a record (server snapshot + pending). */

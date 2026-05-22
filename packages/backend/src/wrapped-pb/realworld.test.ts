@@ -743,6 +743,188 @@ describe("realworld A: page-reload boundary", () => {
     handle.unsubscribe();
     mirror.dispose();
   });
+
+  it("A11 (DOGFOOD oscillation): stale persisted SET + server already has fresher state → consumer must never see stale create-time body", async () => {
+    // The reported user repro (beta.kirkl.in dogfood, 2026-05-22):
+    //   1. Add "test" to a shopping list. wpb.create persists `set {checked:false}`.
+    //   2. Check it. wpb.update persists `update {checked:true}`. Both POSTs ack;
+    //      both queue entries drain. BUT the IDB unpersistMutation for the SET
+    //      is fire-and-forget. If the user refreshes a couple ms later, the
+    //      IDB entry may still be there (browser hasn't flushed the delete).
+    //   3. Refresh. Session 2: replayPending loads the stale SET, pushes it
+    //      into the queue, and dispatches a POST. PB returns 409 (already
+    //      exists with checked=true).
+    //   4. Meanwhile, mirror.watch bootstraps: getFullList returns `{checked:true}`.
+    //      Bootstrap's seed-into-queue is gated by `!queue.hasPending(...)`.
+    //      Because replay just pushed a SET, hasPending is true, so the server
+    //      snapshot is NOT seeded. Materialize falls back to queue.viewCollection,
+    //      which composes `null server + [set{checked:false}]` = `{checked:false}`.
+    //      → Consumer renders the item UNCHECKED.
+    //   5. The replay's POST eventually 409s; permanent path drains the SET
+    //      from the queue. composeView is now `null server + []` = `null`. The
+    //      record DISAPPEARS from the slice's wildcard view entirely.
+    //   6. Next refresh: IDB is clean. Bootstrap seeds normally. Consumer
+    //      sees checked=true. (Matches the user's "second refresh is correct".)
+    //
+    // Root cause: bootstrap's hasPending guard at mirror.ts:500 confuses
+    // "there's a pending optimistic write" with "don't trust the server
+    // snapshot". applyServer is composition-safe — it doesn't clobber
+    // pending — so the guard is both unnecessary and wrong here.
+    //
+    // Correct behavior: at every emit during this sequence, the consumer
+    // sees the item with `checked: true` (server-authoritative; the stale
+    // replayed SET is just a request that will 409). No `checked: false`
+    // emit, no "record disappeared" emit between the two states.
+    const stub = makeStubPb();
+    const id = "item-a11";
+
+    // Server already has the record in the post-check state.
+    stub.col("items").records.set(id, rec("items", {
+      id,
+      list: "L1",
+      ingredient: "test",
+      checked: true, // user already checked it; server is authoritative.
+    }));
+
+    // IDB still has the stale SET from the prior session's create (the
+    // browser didn't flush the unpersistMutation before the tab closed).
+    // The SET body reflects the create-time state (checked: false).
+    await persistMutation({
+      id: "m-stale-create",
+      collection: "items",
+      recordId: id,
+      mutation: { kind: "set", record: rec("items", {
+        id, list: "L1", ingredient: "test", checked: false,
+      }) },
+      createdAt: 1,
+      origin: "tab-1",
+    });
+
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    // Gate the create POST so the replay's dispatch is still in flight
+    // when mirror.watch bootstraps. Without this gate, the in-memory stub
+    // would 409 immediately, drain the pending entry before bootstrap
+    // runs, and the race never fires. In production, the replay's POST
+    // is network-bound (10s-100s of ms) and mirror.watch attaches within
+    // a few React render ticks — the window is wide open.
+    let releaseCreate: () => void = () => {};
+    stub.col("items").gateCreates = new Promise<void>((res) => { releaseCreate = res; });
+
+    // Production ordering: BackendProvider's useEffect fires replayPending
+    // before any consumer module mounts and calls mirror.watch.
+    void wpb.replayPending();
+    await flush();
+
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    const states: RawRecord[][] = [];
+    const handle = mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => { states.push(s); },
+    );
+
+    // Let bootstrap's getFullList complete while the replay's POST is
+    // still gated. This is the exact production-shape window where the
+    // bug manifests.
+    await flush(8);
+
+    // Now release the gated create — it will 409 (record already exists).
+    releaseCreate();
+    stub.col("items").gateCreates = null;
+    await flush(32);
+
+    // INVARIANT 1: The consumer never observes the item as unchecked. Every
+    // emit since the slice became ready should show `checked: true` (server
+    // truth), because the stale SET cannot override what the server already
+    // has. The user must not see their checked item flicker back to unchecked.
+    const checkedHistory = states
+      .filter((s) => s.length > 0)
+      .map((s) => s.find((r) => r.id === id)?.checked);
+    expect(
+      checkedHistory,
+      `no emit may show the item unchecked; observed: ${JSON.stringify(checkedHistory)}`,
+    ).not.toContain(false);
+
+    // INVARIANT 2: The item is still present and checked after settle.
+    const finalState = states[states.length - 1];
+    expect(finalState.find((r) => r.id === id)?.checked).toBe(true);
+
+    // INVARIANT 3: The server itself is unchanged (still checked=true; the
+    // stale replay's 409 didn't corrupt it).
+    expect(stub.col("items").records.get(id)?.checked).toBe(true);
+
+    handle.unsubscribe();
+    mirror.dispose();
+  });
+
+  it("A12 (DOGFOOD oscillation, item-disappears variant): stale SET → 409 drains → ensure record doesn't vanish from mirror view", async () => {
+    // Tighter variant: same setup as A11, but explicitly assert that no
+    // intermediate emit produces an empty slice (i.e. the record never
+    // vanishes from the consumer's view, only momentarily). This is the
+    // shape the user actually sees as "unchecked then checked" — between
+    // the two refreshes, the consumer is briefly looking at an empty list
+    // for this item, which renders as "item missing" UI before the
+    // refresh, but here we verify mid-session that no emit drops the
+    // record entirely.
+    const stub = makeStubPb();
+    const id = "item-a12";
+
+    stub.col("items").records.set(id, rec("items", {
+      id,
+      list: "L1",
+      ingredient: "milk",
+      checked: true,
+    }));
+
+    await persistMutation({
+      id: "m-stale-create-a12",
+      collection: "items",
+      recordId: id,
+      mutation: { kind: "set", record: rec("items", {
+        id, list: "L1", ingredient: "milk", checked: false,
+      }) },
+      createdAt: 1,
+      origin: "tab-1",
+    });
+
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    // Gate the create POST so the dispatch is still in flight when
+    // mirror.watch attaches — same race as A11.
+    let releaseCreate: () => void = () => {};
+    stub.col("items").gateCreates = new Promise<void>((res) => { releaseCreate = res; });
+
+    void wpb.replayPending();
+    await flush();
+
+    const mirror = createMirror(() => stub.pb, wpb);
+    const states: RawRecord[][] = [];
+    const handle = mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => { states.push(s); },
+    );
+    await flush(8);
+
+    releaseCreate();
+    stub.col("items").gateCreates = null;
+    await flush(32);
+
+    // INVARIANT: every emit after the first non-empty one must continue
+    // to contain the record. Pre-fix, the 409 drain leaves the queue
+    // empty and the record disappears from the consumer's wildcard view.
+    let firstNonEmptyIdx = states.findIndex((s) => s.length > 0);
+    expect(firstNonEmptyIdx).toBeGreaterThanOrEqual(0);
+    for (let i = firstNonEmptyIdx; i < states.length; i++) {
+      expect(
+        states[i].some((r) => r.id === id),
+        `emit #${i} dropped the record (states: ${JSON.stringify(states.map((s) => s.map((r) => `${r.id}:${r.checked}`)))})`,
+      ).toBe(true);
+    }
+
+    handle.unsubscribe();
+    mirror.dispose();
+  });
 });
 
 // ===================================================================

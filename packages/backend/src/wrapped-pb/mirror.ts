@@ -489,15 +489,21 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // Seed slice.records AND the mutation queue. Seeding the queue is the
     // key to making queue.viewCollection() the single source of truth in
     // materialize() — otherwise the initial filtered set would only live
-    // in slice.records and the queue overlay would be partial. Only seed
-    // when the queue doesn't already have a fresher snapshot (an SSE event
-    // that raced ahead during our await is more authoritative).
+    // in slice.records and the queue overlay would be partial.
+    //
+    // The seed-skip guard is intentionally narrow: only skip when the
+    // queue ALREADY has a server snapshot for this id (an SSE event
+    // raced ahead during our await — that snapshot is more authoritative
+    // than our potentially-stale getList). A pending-only entry must NOT
+    // skip the seed: a stale persisted SET replayed from IDB does not
+    // constitute server truth, and without the server seed, composeView
+    // would (a) show the stale create-time body to consumers, and (b)
+    // leave the record with no server snapshot when the replay's 409
+    // drains the pending — making the record vanish entirely. This is
+    // the dogfood oscillation bug (A11/A12 in realworld.test.ts).
     for (const r of initial) {
       slice.records.set(r.id, r);
-      // Only seed when the queue doesn't already have a fresher snapshot
-      // (an SSE event that raced ahead during our await is more
-      // authoritative; a pending optimistic mutation must NOT be clobbered).
-      if (queue.view(collection, r.id) === null && !queue.hasPending(collection, r.id)) {
+      if (!queue.hasServerSnapshot(collection, r.id)) {
         queue.applyServer(collection, r.id, r);
       }
     }
@@ -669,10 +675,13 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
           queue.applyServer(collection, oldId, null);
         }
         // Seed the queue with the fresh data so queue.viewCollection has it.
+        // applyServer composes under any pending overlay (the user's
+        // optimistic writes survive), so unconditionally writing through
+        // is safe and necessary: the consumer's view must reflect the
+        // freshest server truth underneath whatever optimistic state the
+        // queue currently holds.
         for (const r of fresh) {
-          if (!queue.hasPending(collection, r.id)) {
-            queue.applyServer(collection, r.id, r);
-          }
+          queue.applyServer(collection, r.id, r);
         }
         slice.records = next;
         emitSlice(slice);
