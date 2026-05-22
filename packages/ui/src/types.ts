@@ -1,3 +1,11 @@
+// ===== Re-exports from @homelab/backend =====
+//
+// These are the canonical event types — re-exported here so the rest of the
+// monorepo can keep importing them from @kirkl/shared without crossing the
+// internal package boundary.
+
+export type { LifeEvent, LifeEntry } from "@homelab/backend";
+
 // ===== User Profile Types =====
 
 export type NotificationMode = "all" | "subscribed" | "off";

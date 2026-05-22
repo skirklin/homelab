@@ -47,6 +47,8 @@ function eventFromRecord(r: RecordModel): LifeEvent {
       const out: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
       if (typeof e.scale === "number") out.scale = e.scale;
       entries.push(out);
+    } else if (e.type === "bool" && typeof e.value === "boolean") {
+      entries.push({ name: e.name, type: "bool", value: e.value });
     }
   }
 

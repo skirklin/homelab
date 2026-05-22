@@ -42,6 +42,8 @@ export type {
 export type {
   Event,
   EventStore,
+  LifeEvent,
+  LifeEntry,
   UserProfile,
   UserProfileStore,
   NotificationMode,
