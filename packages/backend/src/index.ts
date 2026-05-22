@@ -12,7 +12,7 @@
  */
 
 // --- Types ---
-export type { User, Unsubscribe, Event, Visibility, NotificationMode } from "./types/common";
+export type { User, Unsubscribe, Visibility, NotificationMode } from "./types/common";
 export type {
   ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTrip,
 } from "./types/shopping";

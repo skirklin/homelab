@@ -40,15 +40,12 @@ export type {
 
 // Shared types
 export type {
-  Event,
-  EventStore,
   LifeEvent,
   LifeEntry,
   UserProfile,
   UserProfileStore,
   NotificationMode,
 } from "./types";
-export { eventFromStore, eventToStore } from "./types";
 
 // UI Components
 export { AppHeader } from "./AppHeader";
