@@ -4,8 +4,36 @@ import styled from "styled-components";
 import { Button, Input, InputNumber, Checkbox } from "antd";
 import { LeftOutlined, CheckOutlined } from "@ant-design/icons";
 import { useAuth, useFeedback, PageContainer, useLifeBackend, AppHeader } from "@kirkl/shared";
+import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { getSession, sessionSubjectId, type Session, type SessionPrompt } from "../manifest";
+
+/**
+ * Convert a session's accumulated answers (prompt id → value) into the
+ * unified entries[] array. Prompt type drives the entry shape:
+ *   text     -> { type: "text", value }
+ *   rating   -> { type: "number", unit: "rating", scale: max ?? 5 }
+ *   number   -> { type: "number", unit: prompt.unit ?? "ct" }
+ *   checkbox -> { type: "number", value: 1|0, unit: "ct" }
+ * Empty / undefined answers are skipped — the storage shape is sparse.
+ */
+function answersToEntries(session: Session, answers: Record<string, unknown>): LifeEntry[] {
+  const out: LifeEntry[] = [];
+  for (const prompt of session.prompts) {
+    const v = answers[prompt.id];
+    if (v === undefined || v === null || v === "") continue;
+    if (prompt.type === "text" && typeof v === "string") {
+      out.push({ name: prompt.id, type: "text", value: v });
+    } else if (prompt.type === "rating" && typeof v === "number") {
+      out.push({ name: prompt.id, type: "number", value: v, unit: "rating", scale: prompt.max ?? 5 });
+    } else if (prompt.type === "number" && typeof v === "number") {
+      out.push({ name: prompt.id, type: "number", value: v, unit: prompt.unit ?? "ct" });
+    } else if (prompt.type === "checkbox") {
+      out.push({ name: prompt.id, type: "number", value: v ? 1 : 0, unit: "ct" });
+    }
+  }
+  return out;
+}
 
 const Greeting = styled.p`
   font-size: var(--font-size-lg);
@@ -127,7 +155,14 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     if (!user?.uid || !state.log?.id) return;
     setSubmitting(true);
     try {
-      await life.addEntry(state.log.id, sessionSubjectId(session.id), answers, user.uid);
+      const entries = answersToEntries(session, answers);
+      await life.addEvent(
+        state.log.id,
+        sessionSubjectId(session.id),
+        entries,
+        user.uid,
+        { labels: { source: "manual" } },
+      );
       message.success(`${session.title} session saved`);
       navigate("/");
     } catch (err) {

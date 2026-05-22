@@ -2,7 +2,7 @@ import { useState } from "react";
 import styled from "styled-components";
 import { Popover, Button } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
-import type { LogEntry } from "../types";
+import type { LifeEvent } from "@homelab/backend";
 import { useLifeBackend } from "@kirkl/shared";
 
 const EntryList = styled.div`
@@ -45,24 +45,24 @@ const EmptyMessage = styled.div`
 `;
 
 interface EntriesPopoverProps {
-  entries: LogEntry[];
+  events: LifeEvent[];
   logId: string | undefined;
   children: React.ReactNode;
 }
 
-export function EntriesPopover({ entries, logId, children }: EntriesPopoverProps) {
+export function EntriesPopover({ events, logId, children }: EntriesPopoverProps) {
   const life = useLifeBackend();
   const [open, setOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const handleDelete = async (entryId: string) => {
+  const handleDelete = async (eventId: string) => {
     if (!logId) return;
 
-    setDeletingId(entryId);
+    setDeletingId(eventId);
     try {
-      await life.deleteEntry(entryId);
-      // If that was the last entry, close the popover
-      if (entries.length === 1) {
+      await life.deleteEvent(eventId);
+      // If that was the last event, close the popover
+      if (events.length === 1) {
         setOpen(false);
       }
     } catch (error) {
@@ -79,20 +79,20 @@ export function EntriesPopover({ entries, logId, children }: EntriesPopoverProps
     });
   };
 
-  const content = entries.length === 0 ? (
+  const content = events.length === 0 ? (
     <EmptyMessage>No entries</EmptyMessage>
   ) : (
     <EntryList>
-      {entries.map((entry) => (
-        <EntryRow key={entry.id}>
-          <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
+      {events.map((event) => (
+        <EntryRow key={event.id}>
+          <EntryTime>{formatTime(event.timestamp)}</EntryTime>
           <DeleteButton
             type="text"
             danger
             size="small"
             icon={<DeleteOutlined />}
-            loading={deletingId === entry.id}
-            onClick={() => handleDelete(entry.id)}
+            loading={deletingId === event.id}
+            onClick={() => handleDelete(event.id)}
           />
         </EntryRow>
       ))}

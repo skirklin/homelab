@@ -2,13 +2,16 @@
  * Code-driven manifest for the life app.
  *
  * Every entry is a `life_events` row keyed by `subject_id`. A Trackable is the
- * config for one of those subjects: what to call it, what unit it carries,
- * how to aggregate today's values, and what optional shape its `data` may
- * take (`category`, `intensity`, `notes`).
+ * config for one of those subjects: what to call it, what unit its primary
+ * value carries, and what shape its inline log form takes.
+ *
+ * Aggregation behaviour is derived from `unit` (see `lib/format.ts`'s
+ * `aggregationFor`): ratings average, everything else sums. The old explicit
+ * `aggregation` field was dropped — it was redundant with `unit` in every
+ * existing case.
  *
  * Trackable IDs are persisted in life_events.subject_id. Don't rename them in
- * place — historical events will fall through to the legacy adapter and
- * surface as unknown.
+ * place — historical events keyed on the old id will fall off the dashboard.
  */
 import type { SampleSchedule, LifeLog } from "@homelab/backend";
 
@@ -22,54 +25,63 @@ export interface Trackable {
   /** Becomes subject_id on events. Don't rename without considering history. */
   id: string;
   label: string;
-  /** Display unit. "rating" is special — the value field becomes a 1-5 picker. */
+  /**
+   * Canonical storage unit for the trackable's primary numeric entry.
+   *   "min"     durations (sleep, exercise, focus)
+   *   "mg"      doses
+   *   "oz"      volumes
+   *   "drinks"  count of alcoholic drinks
+   *   "ct"      count of discrete things
+   *   "rating"  1..5 rating
+   *
+   * Hours-as-input duration trackables (defaultValue >= 60) accept hours in
+   * the inline form and convert to minutes on write.
+   */
   unit: "min" | "mg" | "ct" | "drinks" | "oz" | "rating" | string;
-  aggregation: "sum" | "avg" | "last";
   /** Visual grouping on the dashboard. Trackables without a group are rendered as standalones. */
   group?: string;
-  /** If set, the log form shows a category picker. */
+  /** If set, the log form shows a category picker; written into `labels.category`. */
   categories?: string[];
-  /** If true, the log form shows a 1-5 intensity picker. */
+  /** If true, the log form shows a 1-5 intensity picker stored as a rating entry. */
   hasIntensity?: boolean;
-  /** Pre-filled in the log form. */
+  /** Pre-filled in the log form. Stored in the trackable's canonical unit. */
   defaultValue?: number;
-  /** If true, the log form shows a notes textarea. */
+  /** If true, the log form shows a notes textarea (stored as a text entry). */
   hasNotes?: boolean;
-  /** Reserved for future timer mode. */
-  supportsEndTime?: boolean;
 }
 
 export const TRACKABLES: Trackable[] = [
   // medical
-  { id: "vyvanse",       label: "Vyvanse",       unit: "mg",     aggregation: "sum", group: "medical",     defaultValue: 30 },
-  { id: "vitamins",      label: "Vitamins",      unit: "ct",     aggregation: "sum", group: "medical",     defaultValue: 1 },
-  { id: "ibuprofin",     label: "Ibuprofin",     unit: "mg",     aggregation: "sum", group: "medical",     defaultValue: 400 },
+  { id: "vyvanse",       label: "Vyvanse",       unit: "mg",     group: "medical",     defaultValue: 30 },
+  { id: "vitamins",      label: "Vitamins",      unit: "ct",     group: "medical",     defaultValue: 1 },
+  { id: "ibuprofin",     label: "Ibuprofin",     unit: "mg",     group: "medical",     defaultValue: 400 },
 
   // consumables
-  { id: "edibles",       label: "Edibles",       unit: "mg",     aggregation: "sum", group: "consumables", defaultValue: 5 },
-  { id: "alcohol",       label: "Alcohol",       unit: "drinks", aggregation: "sum", group: "consumables", defaultValue: 1 },
-  { id: "coffee",        label: "Coffee",        unit: "oz",     aggregation: "sum", group: "consumables", defaultValue: 8 },
+  { id: "edibles",       label: "Edibles",       unit: "mg",     group: "consumables", defaultValue: 5 },
+  { id: "alcohol",       label: "Alcohol",       unit: "drinks", group: "consumables", defaultValue: 1 },
+  { id: "coffee",        label: "Coffee",        unit: "oz",     group: "consumables", defaultValue: 8 },
 
   // bio
-  { id: "poop",          label: "Poop",          unit: "ct",     aggregation: "sum", group: "bio",         defaultValue: 1 },
-  { id: "wank",          label: "Wank",          unit: "ct",     aggregation: "sum", group: "bio",         defaultValue: 1 },
-  { id: "sex",           label: "Boink",         unit: "ct",     aggregation: "sum", group: "bio",         defaultValue: 1 },
+  { id: "poop",          label: "Poop",          unit: "ct",     group: "bio",         defaultValue: 1 },
+  { id: "wank",          label: "Wank",          unit: "ct",     group: "bio",         defaultValue: 1 },
+  { id: "sex",           label: "Boink",         unit: "ct",     group: "bio",         defaultValue: 1 },
 
   // standalone
-  { id: "floss",         label: "Floss",         unit: "ct",     aggregation: "sum", defaultValue: 1 },
+  { id: "floss",         label: "Floss",         unit: "ct",     defaultValue: 1 },
 
-  // time-based
-  { id: "sleep",         label: "Sleep",         unit: "min",    aggregation: "sum", group: "time-based", defaultValue: 480, hasNotes: true },
-  { id: "exercise",      label: "Exercise",      unit: "min",    aggregation: "sum", group: "time-based",
+  // time-based — defaultValue is in minutes; the inline form auto-switches to
+  // hours input when defaultValue >= 60 and converts back on submit.
+  { id: "sleep",         label: "Sleep",         unit: "min",    group: "time-based", defaultValue: 480, hasNotes: true },
+  { id: "exercise",      label: "Exercise",      unit: "min",    group: "time-based",
     categories: ["walk", "run", "bike", "PT", "lift", "yoga", "other"],
     hasIntensity: true, defaultValue: 30 },
-  { id: "focus",         label: "Focus",         unit: "min",    aggregation: "sum", group: "time-based",
+  { id: "focus",         label: "Focus",         unit: "min",    group: "time-based",
     categories: ["chinese", "coding", "learning", "trip planning"], defaultValue: 25 },
 
   // rating-shaped
-  { id: "mood",          label: "Mood",          unit: "rating", aggregation: "avg", group: "ratings" },
-  { id: "content",       label: "Content",       unit: "rating", aggregation: "avg", group: "ratings" },
-  { id: "sleep_quality", label: "Sleep quality", unit: "rating", aggregation: "avg", group: "ratings" },
+  { id: "mood",          label: "Mood",          unit: "rating", group: "ratings" },
+  { id: "content",       label: "Content",       unit: "rating", group: "ratings" },
+  { id: "sleep_quality", label: "Sleep quality", unit: "rating", group: "ratings" },
 ];
 
 export function getTrackable(id: string): Trackable | undefined {
@@ -85,7 +97,7 @@ export const GROUP_ORDER = ["medical", "consumables", "bio", "time-based", "rati
 // ---------- Sessions ----------
 
 export interface SessionPrompt {
-  /** Key in the resulting event.data object. Don't rename without a migration. */
+  /** Key in the resulting event's entries. Don't rename without a migration. */
   id: string;
   type: "text" | "rating" | "number" | "checkbox";
   label: string;

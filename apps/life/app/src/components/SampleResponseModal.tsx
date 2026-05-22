@@ -79,12 +79,18 @@ export function SampleResponseModal({
     }
     setSaving(true);
     try {
-      // Write one value-shaped event per answered question. Each lands as a
-      // normal event under the question's trackable id, so it flows into the
-      // same charts and aggregations as manually-logged ratings.
+      // Write one event per answered question (one entry each, labels.source="sample").
+      // Each lands as a normal event under the question's trackable id, so it
+      // flows into the same charts and aggregations as manually-logged ratings.
       await Promise.all(
         answered.map(([trackableId, value]) =>
-          life.addEntry(logId, trackableId, { value, source: "sample" }, userId),
+          life.addEvent(
+            logId,
+            trackableId,
+            [{ name: "rating", type: "number", value, unit: "rating", scale: 5 }],
+            userId,
+            { labels: { source: "sample" } },
+          ),
         ),
       );
       message.success("Response saved");

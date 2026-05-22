@@ -72,7 +72,7 @@ describe("getOrCreateLog", () => {
   });
 });
 
-describe("addEntry", () => {
+describe("addEvent", () => {
   it("creates a life event linked to the log", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
@@ -82,19 +82,26 @@ describe("addEntry", () => {
     const logId = log.id;
     cleanup.track("life_logs", logId);
 
-    const eventId = await life.addEntry(logId, "meds", { count: 1 }, user.id);
+    const eventId = await life.addEvent(
+      logId,
+      "vitamins",
+      [{ name: "count", type: "number", value: 1, unit: "ct" }],
+      user.id,
+    );
     cleanup.track("life_events", eventId);
 
     const record = await ctx.pb.collection("life_events").getOne(eventId);
     expect(record.log).toBe(logId);
-    expect(record.subject_id).toBe("meds");
+    expect(record.subject_id).toBe("vitamins");
     expect(record.created_by).toBe(user.id);
-    expect(record.data.count).toBe(1);
+    expect(Array.isArray(record.entries)).toBe(true);
+    expect(record.entries[0].name).toBe("count");
+    expect(record.entries[0].value).toBe(1);
 
     await cleanup.cleanup();
   });
 
-  it("stores notes in the data field", async () => {
+  it("stores text entries alongside numeric ones", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
@@ -103,14 +110,22 @@ describe("addEntry", () => {
     const logId = log.id;
     cleanup.track("life_logs", logId);
 
-    const eventId = await life.addEntry(logId, "sleep", { hours: 7 }, user.id, {
-      notes: "Felt rested",
-    });
+    const eventId = await life.addEvent(
+      logId,
+      "sleep",
+      [
+        { name: "duration", type: "number", value: 420, unit: "min" },
+        { name: "notes", type: "text", value: "Felt rested" },
+      ],
+      user.id,
+    );
     cleanup.track("life_events", eventId);
 
     const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.data.notes).toBe("Felt rested");
-    expect(record.data.hours).toBe(7);
+    const entries = record.entries as Array<{ name: string; value: unknown }>;
+    expect(entries).toHaveLength(2);
+    expect(entries.find((e) => e.name === "duration")?.value).toBe(420);
+    expect(entries.find((e) => e.name === "notes")?.value).toBe("Felt rested");
 
     await cleanup.cleanup();
   });
@@ -125,7 +140,13 @@ describe("addEntry", () => {
     cleanup.track("life_logs", logId);
 
     const ts = new Date("2025-01-15T10:00:00Z");
-    const eventId = await life.addEntry(logId, "vitamins", {}, user.id, { timestamp: ts });
+    const eventId = await life.addEvent(
+      logId,
+      "vitamins",
+      [{ name: "count", type: "number", value: 1, unit: "ct" }],
+      user.id,
+      { timestamp: ts },
+    );
     cleanup.track("life_events", eventId);
 
     const record = await ctx.pb.collection("life_events").getOne(eventId);
@@ -134,32 +155,32 @@ describe("addEntry", () => {
     await cleanup.cleanup();
   });
 
-  it("accepts explicit logId", async () => {
+  it("persists labels.source on sample-shaped events", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
 
-    // Create two logs; use the second via explicit logId
-    const log1 = await life.getOrCreateLog(user.id);
-    cleanup.track("life_logs", log1.id);
+    const log = await life.getOrCreateLog(user.id);
+    const logId = log.id;
+    cleanup.track("life_logs", logId);
 
-    const log2 = await ctx.pb.collection("life_logs").create({
-      name: "Second Log",
-      owner: user.id,
-    });
-    cleanup.track("life_logs", log2.id);
-
-    const eventId = await life.addEntry(log2.id, "meds", {}, user.id);
+    const eventId = await life.addEvent(
+      logId,
+      "mood",
+      [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }],
+      user.id,
+      { labels: { source: "sample" } },
+    );
     cleanup.track("life_events", eventId);
 
     const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.log).toBe(log2.id);
+    expect((record.labels as Record<string, string>).source).toBe("sample");
 
     await cleanup.cleanup();
   });
 });
 
-describe("updateEntry", () => {
+describe("updateEvent", () => {
   it("updates the timestamp on an existing event", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
@@ -169,11 +190,16 @@ describe("updateEntry", () => {
     const logId = log.id;
     cleanup.track("life_logs", logId);
 
-    const eventId = await life.addEntry(logId, "sleep", { hours: 6 }, user.id);
+    const eventId = await life.addEvent(
+      logId,
+      "sleep",
+      [{ name: "duration", type: "number", value: 360, unit: "min" }],
+      user.id,
+    );
     cleanup.track("life_events", eventId);
 
     const newTs = new Date("2025-03-01T08:00:00Z");
-    await life.updateEntry(eventId, { timestamp: newTs });
+    await life.updateEvent(eventId, { timestamp: newTs });
 
     const record = await ctx.pb.collection("life_events").getOne(eventId);
     expect(new Date(record.timestamp).toISOString()).toBe(newTs.toISOString());
@@ -181,7 +207,7 @@ describe("updateEntry", () => {
     await cleanup.cleanup();
   });
 
-  it("updates the data on an existing event", async () => {
+  it("replaces the entries on an existing event", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
@@ -190,41 +216,27 @@ describe("updateEntry", () => {
     const logId = log.id;
     cleanup.track("life_logs", logId);
 
-    const eventId = await life.addEntry(logId, "sleep", { hours: 6 }, user.id);
+    const eventId = await life.addEvent(
+      logId,
+      "sleep",
+      [{ name: "duration", type: "number", value: 360, unit: "min" }],
+      user.id,
+    );
     cleanup.track("life_events", eventId);
 
-    await life.updateEntry(eventId, { data: { hours: 8 } });
+    await life.updateEvent(eventId, {
+      entries: [{ name: "duration", type: "number", value: 480, unit: "min" }],
+    });
 
     const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.data.hours).toBe(8);
-
-    await cleanup.cleanup();
-  });
-
-  it("merges notes into existing data when only notes are updated", async () => {
-    const user = await createTestUser(ctx);
-    const cleanup = new TestCleanup();
-    cleanup.bind(ctx.pb);
-
-    const log = await life.getOrCreateLog(user.id);
-    const logId = log.id;
-    cleanup.track("life_logs", logId);
-
-    const eventId = await life.addEntry(logId, "meds", { count: 1 }, user.id);
-    cleanup.track("life_events", eventId);
-
-    await life.updateEntry(eventId, { notes: "Took with food" });
-
-    const record = await ctx.pb.collection("life_events").getOne(eventId);
-    expect(record.data.notes || record.notes).toBe("Took with food");
-    // Original data should be preserved
-    expect(record.data.count).toBe(1);
+    const entries = record.entries as Array<{ name: string; value: number }>;
+    expect(entries[0].value).toBe(480);
 
     await cleanup.cleanup();
   });
 });
 
-describe("deleteEntry", () => {
+describe("deleteEvent", () => {
   it("deletes a life event", async () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
@@ -234,9 +246,14 @@ describe("deleteEntry", () => {
     const logId = log.id;
     cleanup.track("life_logs", logId);
 
-    const eventId = await life.addEntry(logId, "vitamins", {}, user.id);
+    const eventId = await life.addEvent(
+      logId,
+      "vitamins",
+      [{ name: "count", type: "number", value: 1, unit: "ct" }],
+      user.id,
+    );
 
-    await life.deleteEntry(eventId);
+    await life.deleteEvent(eventId);
 
     try {
       await ctx.pb.collection("life_events").getOne(eventId);
