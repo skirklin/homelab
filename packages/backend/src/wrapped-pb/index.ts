@@ -388,13 +388,48 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     };
   }
 
-  async function dispatchMutation(
+  /**
+   * Per-record dispatch chain. Mutations on the same record id are
+   * serialized so PB sees them in the order the user issued them. This
+   * matters most after `replayPending`: a persisted-create's POST may
+   * still be in flight when the user clicks an update on the visible
+   * (optimistic) row. Without serialization, the update POST races ahead
+   * and hits PB before the create lands → 404 on update → WrappedPbError.
+   *
+   * Serialization is per (collection, recordId). Cross-record concurrency
+   * is unchanged. The chain's promise always resolves (never rejects) so
+   * the next link can run regardless of how the prior one settled.
+   */
+  const dispatchChains = new Map<string, Promise<unknown>>();
+
+  function dispatchMutation(
     collection: string,
     recordId: string,
     mutationId: string,
     fire: () => Promise<RawRecord | null>,
     kind: "create" | "update" | "delete",
   ): Promise<RawRecord | null> {
+    const chainKey = `${collection}::${recordId}`;
+    const prev = dispatchChains.get(chainKey) ?? Promise.resolve();
+    const outcome = (async () => {
+      // Wait for any prior dispatch on this record. Use .catch so a
+      // prior permanent-rejection doesn't poison us — we still want to
+      // fire our own attempt; PB will validate independently.
+      try {
+        await prev;
+      } catch { /* prior chain settled with rejection; that's their problem */ }
+      return runOne();
+    })();
+    // Track the latest chain head. Convert outcome to never-reject before
+    // storing in the map so a subsequent `await prev` doesn't blow up.
+    const chainLink: Promise<unknown> = outcome.catch(() => {});
+    dispatchChains.set(chainKey, chainLink);
+    void chainLink.then(() => {
+      if (dispatchChains.get(chainKey) === chainLink) dispatchChains.delete(chainKey);
+    });
+    return outcome;
+
+    async function runOne(): Promise<RawRecord | null> {
     try {
       const result = await fire();
       // Apply server snapshot from the ack response, then drain pending.
@@ -468,6 +503,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       }
       notifyMutationListeners(collection, recordId);
       throw new WrappedPbError({ kind, collection, recordId }, err);
+    }
     }
   }
 
@@ -854,6 +890,20 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         // Push back into in-memory queue (preserves ordering by createdAt).
         queue.pushPending(m.collection, m.recordId, m.mutation, m.id);
         recordEvent({ kind: "replay", collection: m.collection, recordId: m.recordId, detail: { mutationId: m.id, op: m.mutation.kind } });
+        // Notify subscribers (legacy wpb.subscribe path) and the mirror's
+        // mutation listener so the optimistic state from a prior session
+        // shows up immediately. Without this, the mirror's view stays
+        // empty (or stale) until the replay's dispatch ack arrives or
+        // some other event triggers an emit. The shopping dogfood bug
+        // hit exactly this seam: the user saw a ghost row whose only
+        // basis was a replayed pending mutation that hadn't yet acked.
+        const view = queue.view(m.collection, m.recordId);
+        if (view) {
+          notifySubscribers(m.collection, m.mutation.kind === "delete" ? "delete" : "update", view);
+        } else if (m.mutation.kind === "delete") {
+          notifySubscribers(m.collection, "delete", { id: m.recordId });
+        }
+        notifyMutationListeners(m.collection, m.recordId);
         // Re-fire via the shared mutation-builder. Replay swallows
         // idempotent errors (404 on already-deleted, 409 on already-
         // created); transient errors stay queued via dispatchMutation's

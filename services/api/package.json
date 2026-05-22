@@ -27,6 +27,7 @@
   "devDependencies": {
     "@types/web-push": "^3.6.4",
     "eventsource": "^4.1.0",
+    "fake-indexeddb": "^6.2.5",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "vitest": "^3.2.4"
