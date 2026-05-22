@@ -1,5 +1,12 @@
-import type { Event, EventStore, NotificationMode } from "@kirkl/shared";
-export type { Event, EventStore, NotificationMode };
+import type { LifeEvent, NotificationMode } from "@kirkl/shared";
+export type { NotificationMode };
+
+/**
+ * Task completion record. Same unified shape as life events — entries[] is the
+ * canonical place for per-completion data. Today we only write a single text
+ * entry named "notes" (see getCompletionNotes below).
+ */
+export type Completion = Omit<LifeEvent, "log">;
 
 export type FrequencyUnit = "days" | "weeks" | "months";
 
@@ -38,15 +45,15 @@ export interface TaskNode {
   depth: number;
 }
 
-// Completion record (uses unified Event type)
-export type Completion = Event;
-
-export function getTaskId(completion: Event): string {
+export function getTaskId(completion: Completion): string {
   return completion.subjectId;
 }
 
-export function getCompletionNotes(completion: Event): string {
-  return (completion.data.notes as string) ?? "";
+export function getCompletionNotes(completion: Completion): string {
+  for (const e of completion.entries) {
+    if (e.name === "notes" && e.type === "text") return e.value;
+  }
+  return "";
 }
 
 // Task list (container)

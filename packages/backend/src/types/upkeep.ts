@@ -1,6 +1,6 @@
 /** Upkeep / unified task system domain types */
 
-import type { Event } from "./common";
+import type { LifeEntry } from "./life";
 
 export interface TaskList {
   id: string;
@@ -38,4 +38,21 @@ export interface Task {
   updated: string;
 }
 
-export type TaskCompletion = Event;
+/**
+ * A persisted task_events row. Same unified shape as LifeEvent, minus the
+ * `log` container field (task events live under a `list` instead). Notes are
+ * carried as a text entry, e.g.:
+ *   { name: "notes", type: "text", value: "looks great" }
+ */
+export interface TaskCompletion {
+  id: string;
+  subjectId: string;
+  timestamp: Date;
+  /** Reserved for interval completions; unused today. */
+  endTime?: Date;
+  entries: LifeEntry[];
+  labels?: Record<string, string>;
+  createdBy: string;
+  created: string;
+  updated: string;
+}

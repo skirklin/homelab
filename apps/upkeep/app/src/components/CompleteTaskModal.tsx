@@ -180,14 +180,23 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
         notes: editNotes.trim(),
         timestamp: editDate.toDate(),
       });
-      // Update local state
+      // Update local state — replace any existing "notes" entry with the new
+      // value (or strip it when the user cleared the field). Mirrors the
+      // canonical entries[] shape so the rerender doesn't desync from the
+      // backend's view of the row.
+      const trimmedNotes = editNotes.trim();
       dispatch({
         type: "SET_COMPLETIONS",
-        completions: state.completions.map(c =>
-          c.id === editingId
-            ? { ...c, timestamp: editDate.toDate(), data: { ...c.data, notes: editNotes.trim() || undefined } }
-            : c
-        ),
+        completions: state.completions.map(c => {
+          if (c.id !== editingId) return c;
+          const filtered = c.entries.filter(
+            (e) => !(e.name === "notes" && e.type === "text"),
+          );
+          const entries = trimmedNotes
+            ? [...filtered, { name: "notes" as const, type: "text" as const, value: trimmedNotes }]
+            : filtered;
+          return { ...c, timestamp: editDate.toDate(), entries };
+        }),
       });
       message.success("Updated");
       handleCancelEdit();

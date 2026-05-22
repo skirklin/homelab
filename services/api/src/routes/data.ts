@@ -2227,7 +2227,7 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
     subject_id: id,
     timestamp: now,
     created_by: userId,
-    data: {},
+    entries: [],
   });
   // Recompute last_completed from the max event timestamp — keeps it honest
   // when events pre-date this one (backfills) or are later edited/deleted.
