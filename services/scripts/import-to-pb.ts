@@ -408,9 +408,22 @@ async function importLife() {
         try {
           const createdBy = mapUid(event.createdBy) || primaryOwner;
           const ts = deTs(event.timestamp);
-          await life.addEntry(pbLogId, event.subjectId || "", event.data || {}, createdBy, {
+          // Firebase migration is historical — preserve every legacy data
+          // field as a best-effort entry. Numbers go as ct/rating, strings
+          // as text. Production data ran through the 20260522 migration's
+          // mapRow which is far more accurate; this is here so the script
+          // typechecks against the new interface.
+          const data = event.data || {};
+          const entries: import("@homelab/backend").LifeEntry[] = [];
+          const labels: Record<string, string> = { source: "import" };
+          for (const [k, v] of Object.entries(data)) {
+            if (k === "source" && typeof v === "string") labels.source = v;
+            else if (typeof v === "number") entries.push({ name: k, type: "number", value: v, unit: "ct" });
+            else if (typeof v === "string") entries.push({ name: k, type: "text", value: v });
+          }
+          await life.addEvent(pbLogId, event.subjectId || "", entries, createdBy, {
             timestamp: ts ? new Date(ts) : undefined,
-            notes: event.data?.notes,
+            labels,
           });
           eventStats.created++;
         } catch { eventStats.errors++; }

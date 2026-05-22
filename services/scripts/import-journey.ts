@@ -4,14 +4,22 @@
  * Journey's native export is a zip of `<timestamp>-<id>.json` files, one
  * entry per file. Photos are explicitly dropped — not migrated.
  *
+ * Writes the unified life_events shape (post-20260522 migration):
+ *   subject_id: "journal"
+ *   entries: [
+ *     { name: "body", type: "text", value: <plain-text> },
+ *     { name: "mood", type: "number", value: <1-5>, unit: "rating", scale: 5 } | absent,
+ *   ]
+ *   labels: { source: "journey", journey_id, tz?, weather?, location_*?, ... }
+ *
  * Usage:
  *   export $(grep -v '^#' .env | xargs)
  *   pnpm tsx import-journey.ts <zip-or-dir> [...] [--dry-run|--apply] [--user-email <email>]
  *
  * Default is --dry-run. --apply commits.
  *
- * Idempotency: deduped by data.journey_id against the user's existing
- * `freeform_journal` events. Safe to re-run.
+ * Idempotency: deduped by labels.journey_id against the user's existing
+ * `journal` (and legacy `freeform_journal`) events. Safe to re-run.
  */
 import { execSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -92,11 +100,29 @@ interface JourneyEntry {
   type?: string;
 }
 
+type LifeEntryWire =
+  | { name: string; type: "number"; value: number; unit: string; scale?: number }
+  | { name: string; type: "text"; value: string };
+
 interface MappedEntry {
   source_path: string;
   journey_id: string;
   timestamp: string;
-  data: Record<string, unknown>;
+  entries: LifeEntryWire[];
+  labels: Record<string, string>;
+  /** Plain-text body — surfaced for dry-run sample previews. */
+  bodyText: string;
+  /** Mood 1..5, or undefined when absent. Surfaced for stats. */
+  mood?: number;
+  /** Lat/lon pulled for stats only; canonical storage is labels.location_*. */
+  loc?: { lat: number; lon: number; address?: string };
+  /** Tags pulled for stats only; canonical storage is labels.tags (comma-joined). */
+  tags?: string[];
+  /** Weather pulled for stats only. */
+  weatherDescription?: string;
+  /** Music pulled for stats only. */
+  music?: { title?: string; artist?: string };
+  favourite?: boolean;
 }
 
 /**
@@ -133,57 +159,85 @@ function stripHtml(html: string | undefined): string {
 }
 
 function mapEntry(entry: JourneyEntry, sourcePath: string): MappedEntry {
-  const data: Record<string, unknown> = {
-    journey_id: entry.id,
+  const entries: LifeEntryWire[] = [];
+  const labels: Record<string, string> = {
     source: "journey",
+    journey_id: entry.id,
   };
 
   const text = stripHtml(entry.text);
-  if (text) data.text = text;
-  if (entry.text) data.text_html = entry.text;
-  if (typeof entry.mood === "number" && entry.mood > 0) data.mood = entry.mood;
+  if (text) entries.push({ name: "body", type: "text", value: text });
+  // Preserve the original HTML body as a separate text entry — useful for
+  // future re-renderers / forensic debugging without bloating the labels.
+  if (entry.text) entries.push({ name: "body_html", type: "text", value: entry.text });
 
+  let mood: number | undefined;
+  if (typeof entry.mood === "number" && entry.mood > 0) {
+    mood = entry.mood;
+    entries.push({ name: "mood", type: "number", value: mood, unit: "rating", scale: 5 });
+  }
+
+  let loc: { lat: number; lon: number; address?: string } | undefined;
   if (
     typeof entry.lat === "number" && typeof entry.lon === "number" &&
     entry.lat < SENTINEL_THRESHOLD && entry.lon < SENTINEL_THRESHOLD
   ) {
-    const loc: Record<string, unknown> = { lat: entry.lat, lon: entry.lon };
+    loc = { lat: entry.lat, lon: entry.lon };
     if (entry.address) loc.address = entry.address;
-    data.location = loc;
+    labels.location_lat = String(entry.lat);
+    labels.location_lon = String(entry.lon);
+    if (entry.address) labels.location_address = entry.address;
   }
 
-  if (entry.tags && entry.tags.length > 0) data.tags = entry.tags;
+  let tagsCopy: string[] | undefined;
+  if (entry.tags && entry.tags.length > 0) {
+    tagsCopy = entry.tags.filter((t): t is string => typeof t === "string");
+    if (tagsCopy.length > 0) labels.tags = tagsCopy.join(",");
+  }
 
+  let weatherDescription: string | undefined;
   if (
     entry.weather &&
     typeof entry.weather.degree_c === "number" &&
     entry.weather.degree_c < SENTINEL_THRESHOLD &&
     entry.weather.description
   ) {
-    const w: Record<string, unknown> = {
-      degree_c: entry.weather.degree_c,
-      description: entry.weather.description,
-    };
-    if (entry.weather.place) w.place = entry.weather.place;
-    data.weather = w;
+    weatherDescription = entry.weather.description;
+    labels.weather = entry.weather.description;
+    labels.weather_degree_c = String(entry.weather.degree_c);
+    if (entry.weather.place) labels.weather_place = entry.weather.place;
   }
 
-  if (entry.favourite) data.favourite = true;
+  if (entry.favourite) labels.favourite = "true";
 
+  let musicCopy: { title?: string; artist?: string } | undefined;
   if (entry.music_title || entry.music_artist) {
-    const m: Record<string, unknown> = {};
-    if (entry.music_title) m.title = entry.music_title;
-    if (entry.music_artist) m.artist = entry.music_artist;
-    data.music = m;
+    musicCopy = {};
+    if (entry.music_title) {
+      musicCopy.title = entry.music_title;
+      labels.music_title = entry.music_title;
+    }
+    if (entry.music_artist) {
+      musicCopy.artist = entry.music_artist;
+      labels.music_artist = entry.music_artist;
+    }
   }
 
-  if (entry.timezone) data.timezone = entry.timezone;
+  if (entry.timezone) labels.tz = entry.timezone;
 
   return {
     source_path: sourcePath,
     journey_id: entry.id,
     timestamp: new Date(entry.date_journal).toISOString(),
-    data,
+    entries,
+    labels,
+    bodyText: text,
+    mood,
+    loc,
+    tags: tagsCopy,
+    weatherDescription,
+    music: musicCopy,
+    favourite: entry.favourite,
   };
 }
 
@@ -317,17 +371,31 @@ const logId = logRec.id;
 console.log(`  User:       ${userId}`);
 console.log(`  Life log:   ${logId}`);
 
-// Pull existing freeform_journal events for idempotency.
+// Pull existing journal events for idempotency. Match both the new
+// "journal" subject_id and the pre-migration "freeform_journal" id.
+// labels.journey_id is the source of truth post-20260522 migration; old rows
+// keep journey_id in data — handled below.
 const existing = await pb.collection("life_events").getFullList({
-  filter: pb.filter("log = {:logId} && subject_id = {:sid}", { logId, sid: "freeform_journal" }),
+  filter: pb.filter(
+    "log = {:logId} && (subject_id = {:sidNew} || subject_id = {:sidOld})",
+    { logId, sidNew: "journal", sidOld: "freeform_journal" },
+  ),
   $autoCancel: false,
 });
 const existingJourneyIds = new Set<string>();
 for (const r of existing) {
-  const jid = (r.data as Record<string, unknown> | undefined)?.journey_id;
-  if (typeof jid === "string") existingJourneyIds.add(jid);
+  const labels = r.labels as Record<string, string> | undefined;
+  const jidFromLabels = labels?.journey_id;
+  if (typeof jidFromLabels === "string" && jidFromLabels.length > 0) {
+    existingJourneyIds.add(jidFromLabels);
+    continue;
+  }
+  // Pre-migration fallback in case anything escapes the schema migration.
+  const data = r.data as Record<string, unknown> | undefined;
+  const jidFromData = data?.journey_id;
+  if (typeof jidFromData === "string") existingJourneyIds.add(jidFromData);
 }
-console.log(`  Existing freeform_journal events: ${existing.length} (${existingJourneyIds.size} with journey_id)`);
+console.log(`  Existing journal events: ${existing.length} (${existingJourneyIds.size} with journey_id)`);
 
 // Partition into new vs already-imported.
 const toImport: MappedEntry[] = [];
@@ -350,12 +418,12 @@ const stats = {
   emptyText: 0,
 };
 for (const e of toImport) {
-  if (e.data.location) stats.withLocation++;
-  if (typeof e.data.mood === "number") stats.withMood++;
-  if (Array.isArray(e.data.tags)) stats.withTags++;
-  if (e.data.weather) stats.withWeather++;
-  if (e.data.music) stats.withMusic++;
-  if (!e.data.text) stats.emptyText++;
+  if (e.loc) stats.withLocation++;
+  if (typeof e.mood === "number") stats.withMood++;
+  if (e.tags && e.tags.length > 0) stats.withTags++;
+  if (e.weatherDescription) stats.withWeather++;
+  if (e.music) stats.withMusic++;
+  if (!e.bodyText) stats.emptyText++;
 }
 
 console.log("");
@@ -385,26 +453,24 @@ if (toImport.length > 0) {
   if (n >= 3) sampleIdxs.add(Math.floor(n / 2));
   // Try to add one with location + mood for variety, if we don't already have it.
   if (sampleIdxs.size < 5) {
-    const richIdx = toImport.findIndex((e) => e.data.location && typeof e.data.mood === "number");
+    const richIdx = toImport.findIndex((e) => e.loc && typeof e.mood === "number");
     if (richIdx >= 0) sampleIdxs.add(richIdx);
   }
   const sorted = Array.from(sampleIdxs).sort((a, b) => a - b);
   for (const idx of sorted) {
     const e = toImport[idx];
-    const textRaw = typeof e.data.text === "string" ? e.data.text : "";
-    const preview = textRaw.slice(0, 280).replace(/\n+/g, " ⏎ ");
-    const more = textRaw.length > 280 ? ` … [+${textRaw.length - 280} chars]` : "";
+    const preview = e.bodyText.slice(0, 280).replace(/\n+/g, " ⏎ ");
+    const more = e.bodyText.length > 280 ? ` … [+${e.bodyText.length - 280} chars]` : "";
     console.log("");
     console.log(`  [#${idx + 1}/${toImport.length}] ${e.timestamp}  (journey_id=${e.journey_id})`);
     const meta: string[] = [];
-    if (typeof e.data.mood === "number") meta.push(`mood=${e.data.mood}`);
-    if (Array.isArray(e.data.tags)) meta.push(`tags=[${(e.data.tags as string[]).join(", ")}]`);
-    if (e.data.location) {
-      const loc = e.data.location as { lat: number; lon: number; address?: string };
-      meta.push(`loc=${loc.lat.toFixed(3)},${loc.lon.toFixed(3)}${loc.address ? ` (${loc.address})` : ""}`);
+    if (typeof e.mood === "number") meta.push(`mood=${e.mood}`);
+    if (e.tags && e.tags.length > 0) meta.push(`tags=[${e.tags.join(", ")}]`);
+    if (e.loc) {
+      meta.push(`loc=${e.loc.lat.toFixed(3)},${e.loc.lon.toFixed(3)}${e.loc.address ? ` (${e.loc.address})` : ""}`);
     }
-    if (e.data.weather) meta.push("weather=yes");
-    if (e.data.favourite) meta.push("★");
+    if (e.weatherDescription) meta.push(`weather=${e.weatherDescription}`);
+    if (e.favourite) meta.push("★");
     if (meta.length > 0) console.log(`    ${meta.join("  ")}`);
     console.log(`    text: ${preview}${more}`);
   }
@@ -429,10 +495,11 @@ for (const e of toImport) {
   try {
     await pb.collection("life_events").create({
       log: logId,
-      subject_id: "freeform_journal",
+      subject_id: "journal",
       timestamp: e.timestamp,
       created_by: userId,
-      data: e.data,
+      entries: e.entries,
+      labels: e.labels,
     }, { $autoCancel: false });
     created++;
     if (created % 25 === 0) console.log(`    ...${created}/${toImport.length}`);

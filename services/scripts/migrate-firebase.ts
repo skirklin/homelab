@@ -679,9 +679,20 @@ if (shouldRun("life")) {
             }
           }
 
-          await life.addEntry(pbLogId, subjectId, eData.data || {}, createdBy, {
+          // Firebase migration is historical — see import-to-pb.ts for the
+          // matching best-effort legacy data fan-out. Numbers → ct/rating,
+          // strings → text entries.
+          const data = (eData.data || {}) as Record<string, unknown>;
+          const entries: import("@homelab/backend").LifeEntry[] = [];
+          const labels: Record<string, string> = { source: "import" };
+          for (const [k, v] of Object.entries(data)) {
+            if (k === "source" && typeof v === "string") labels.source = v;
+            else if (typeof v === "number") entries.push({ name: k, type: "number", value: v, unit: "ct" });
+            else if (typeof v === "string") entries.push({ name: k, type: "text", value: v });
+          }
+          await life.addEvent(pbLogId, subjectId, entries, createdBy, {
             timestamp: timestamp || undefined,
-            notes: eData.data?.notes,
+            labels,
           });
           eventStats.created++;
         } catch (err: any) {
