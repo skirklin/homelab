@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
 import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
@@ -55,6 +55,33 @@ function getDateString(date: Date): string {
 function startOfDay(date: Date): Date {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Parse a YYYY-MM-DD string in browser-local time. Returns null on malformed
+// input or on dates outside the plausible range (year < 2000, or > tomorrow).
+// "Tomorrow" is allowed so timezone edge cases at midnight don't trip users.
+const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+function parseYmdParam(raw: string | null): Date | null {
+  if (!raw) return null;
+  const m = YMD_RE.exec(raw);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (year < 2000 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const d = new Date(year, month - 1, day, 0, 0, 0, 0);
+  // Round-trip check rejects things like 2026-02-31.
+  if (
+    d.getFullYear() !== year ||
+    d.getMonth() !== month - 1 ||
+    d.getDate() !== day
+  ) {
+    return null;
+  }
+  const tomorrow = startOfDay(new Date());
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d > tomorrow) return null;
   return d;
 }
 
@@ -245,26 +272,72 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
 
-  // Track selected date and what "today" was when we loaded
-  const [selectedDate, setSelectedDate] = useState<Date>(() => startOfDay(new Date()));
+  // The URL is the source of truth for the viewed day. `?date=YYYY-MM-DD`
+  // (browser-local time) picks a specific day; no param means today.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const dateParam = searchParams.get("date");
+  // todayDate ticks on midnight/visibility/focus so the derived value below
+  // re-evaluates "today" without needing to write to the URL.
   const [todayDate, setTodayDate] = useState<string>(() => getDateString(new Date()));
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+
+  // Derive selectedDate from the URL. Invalid params fall back to today and
+  // are scrubbed by the effect below. todayDate is a dep so the rollover
+  // effect re-derives "today" when the day flips at midnight.
+  const selectedDate = useMemo<Date>(() => {
+    const parsed = parseYmdParam(dateParam);
+    return parsed ?? startOfDay(new Date());
+    // todayDate intentionally listed so midnight rollover re-derives today.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateParam, todayDate]);
+
+  // Quietly scrub a malformed `?date=...` so URLs don't carry garbage.
+  useEffect(() => {
+    if (!dateParam) return;
+    if (parseYmdParam(dateParam) !== null) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("date");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [dateParam, setSearchParams]);
+
+  // Helper: write the URL. null clears the param (back to "today" with a
+  // clean URL); a Date writes ?date=YYYY-MM-DD. Used by prev/next, the
+  // DatePicker, swipes, and the "tap to return to today" affordance.
+  const updateSelectedDate = useCallback(
+    (date: Date | null, options?: { replace?: boolean }) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (date === null) {
+            next.delete("date");
+          } else {
+            next.set("date", getDateString(date));
+          }
+          return next;
+        },
+        options,
+      );
+    },
+    [setSearchParams],
+  );
 
   // Swipe handling
   const touchStartX = useRef<number | null>(null);
   const swipeContainerRef = useRef<HTMLDivElement>(null);
 
-  // Check for day change - on interval, visibility change, and focus
+  // Midnight rollover: when the day flips, re-derive "today" so the dashboard
+  // (with no `?date` param) silently advances. When the user has `?date=...`
+  // explicitly set, leave them on that day — they're looking at it on purpose.
   useEffect(() => {
     const checkDayChange = () => {
       const currentToday = getDateString(new Date());
       if (currentToday !== todayDate) {
-        // If user was viewing "today", keep them on the new today
-        const wasViewingToday = getDateString(selectedDate) === todayDate;
         setTodayDate(currentToday);
-        if (wasViewingToday) {
-          setSelectedDate(startOfDay(new Date()));
-        }
       }
     };
 
@@ -291,34 +364,26 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleFocus);
     };
-  }, [todayDate, selectedDate]);
-
-  // Navigation helpers
-  const goToPrevDay = useCallback(() => {
-    setSelectedDate(prev => {
-      const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() - 1);
-      return newDate;
-    });
-  }, []);
-
-  const goToNextDay = useCallback(() => {
-    const tomorrow = startOfDay(new Date());
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    setSelectedDate(prev => {
-      const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() + 1);
-      // Don't go past today
-      if (newDate > startOfDay(new Date())) {
-        return startOfDay(new Date());
-      }
-      return newDate;
-    });
-  }, []);
+  }, [todayDate]);
 
   const isToday = getDateString(selectedDate) === getDateString(new Date());
   const canGoNext = !isToday;
+
+  // Navigation helpers — all writes go through the URL so refresh/back/forward
+  // and link-sharing all do the right thing.
+  const goToPrevDay = useCallback(() => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() - 1);
+    updateSelectedDate(newDate);
+  }, [selectedDate, updateSelectedDate]);
+
+  const goToNextDay = useCallback(() => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() + 1);
+    // Don't go past today
+    if (newDate > startOfDay(new Date())) return;
+    updateSelectedDate(newDate);
+  }, [selectedDate, updateSelectedDate]);
 
   // Swipe handlers
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -505,10 +570,22 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
     // Check URL for sample or quick response parameters
     const params = new URLSearchParams(window.location.search);
+    const cleanupConsumedParams = () => {
+      // Strip only the params we just consumed so we don't clobber `date` or
+      // other query state.
+      const next = new URLSearchParams(window.location.search);
+      next.delete("sample");
+      next.delete("quickResponse");
+      const qs = next.toString();
+      window.history.replaceState(
+        {},
+        "",
+        qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
+      );
+    };
     if (params.get("sample") === "true") {
       setShowSampleModal(true);
-      // Clean up URL
-      window.history.replaceState({}, "", window.location.pathname);
+      cleanupConsumedParams();
     } else if (params.get("quickResponse")) {
       // Handle quick response from URL (format: questionId:value)
       const quickResponse = params.get("quickResponse");
@@ -516,8 +593,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       if (questionId && valueStr) {
         handleQuickResponse(questionId, parseInt(valueStr, 10));
       }
-      // Clean up URL
-      window.history.replaceState({}, "", window.location.pathname);
+      cleanupConsumedParams();
     }
 
     return () => {
@@ -759,7 +835,18 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
               onClick={goToPrevDay}
             />
             <div style={{ position: "relative" }}>
-              <DateDisplay onClick={() => setDatePickerOpen(true)}>
+              <DateDisplay
+                onClick={() => {
+                  // When viewing a past day, the display becomes a "back to
+                  // today" affordance (clears the URL param). When already on
+                  // today it opens the picker for explicit date selection.
+                  if (isToday) {
+                    setDatePickerOpen(true);
+                  } else {
+                    updateSelectedDate(null);
+                  }
+                }}
+              >
                 {formatDateLabel()}
               </DateDisplay>
               <HiddenDatePicker
@@ -768,7 +855,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
                 value={dayjs(selectedDate)}
                 onChange={(date) => {
                   if (date && typeof (date as dayjs.Dayjs).toDate === 'function') {
-                    setSelectedDate(startOfDay((date as dayjs.Dayjs).toDate()));
+                    updateSelectedDate(startOfDay((date as dayjs.Dayjs).toDate()));
                   }
                   setDatePickerOpen(false);
                 }}
