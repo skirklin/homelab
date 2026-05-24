@@ -53,6 +53,8 @@ function makeStubBackend(): {
     toggleItem: async () => {},
     deleteItem: async () => {},
     clearCheckedItems: async () => {},
+    renameHistoryEntry: async () => {},
+    deleteHistoryEntry: async () => {},
     subscribeToList(_listId, h): Unsubscribe {
       handlers = h;
       return () => {

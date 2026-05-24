@@ -275,7 +275,8 @@ describe("PocketBaseShoppingBackend", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb, mirror);
 
     await shopping.renameHistoryEntry("H1", "Parsley");
     // Drain optimistic write
@@ -317,7 +318,8 @@ describe("PocketBaseShoppingBackend", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb, mirror);
 
     // Seed the optimistic view by performing a no-op update so the wpb queue
     // observes both rows. The simpler path is to just create them through wpb,
@@ -356,7 +358,8 @@ describe("PocketBaseShoppingBackend", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb, mirror);
 
     // "Parsley" normalizes to "parsley" — already the row's ingredient.
     await shopping.renameHistoryEntry("H1", "Parsley");
@@ -383,7 +386,8 @@ describe("PocketBaseShoppingBackend", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb, mirror);
 
     await shopping.deleteHistoryEntry("H1");
     for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
