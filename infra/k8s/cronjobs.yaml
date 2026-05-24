@@ -300,7 +300,11 @@ spec:
                   # PB stores `created` as "YYYY-MM-DD HH:MM:SS.sssZ" (space
                   # separator, ms precision, trailing Z). Build the cutoff in
                   # that exact shape so the string compare in the filter works.
-                  CUTOFF=$(date -u -d '10 days ago' +'%Y-%m-%d %H:%M:%S.000Z')
+                  # NOTE: alpine/curl uses BusyBox date which doesn't grok
+                  # GNU's `-d '10 days ago'` syntax. Compute the epoch offset
+                  # in shell and pass `@<unix_ts>` — supported by both.
+                  CUTOFF_TS=$(( $(date -u +%s) - 10*86400 ))
+                  CUTOFF=$(date -u -d "@$CUTOFF_TS" +'%Y-%m-%d %H:%M:%S.000Z')
                   FILTER="created < \"$CUTOFF\" && type = \"Normal\""
                   # PB filter must be URI-encoded; jq -sRr @uri is the safe path
                   # (handles quotes, spaces, &, <, =, etc. consistently).
