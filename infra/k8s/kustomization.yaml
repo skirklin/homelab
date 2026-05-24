@@ -7,7 +7,6 @@ resources:
   - registry.yaml
   - caddy.yaml
   - pocketbase.yaml
-  - supabase.yaml
   - apps.yaml
   - ingest.yaml
   - api.yaml
