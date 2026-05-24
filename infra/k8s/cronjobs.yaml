@@ -134,7 +134,10 @@ spec:
                     -H "Content-Type: application/json" \
                     -d "{\"identity\":\"$PB_ADMIN_EMAIL\",\"password\":\"$PB_ADMIN_PASSWORD\"}" \
                     | jq -er .token)
-                  KEY="daily-$(date -u +%Y-%m-%dT%H-%M-%SZ).zip"
+                  # PB enforces lowercase-only on backup names (regex
+                  # `^[a-z0-9_-]+\.zip$`), so use lowercase `t`/`z`
+                  # separators instead of the ISO 8601 uppercase form.
+                  KEY="daily-$(date -u +%Y-%m-%dt%H-%M-%Sz).zip"
                   curl -sf -X POST "$PB/api/backups" \
                     -H "Authorization: $TOKEN" \
                     -H "Content-Type: application/json" \

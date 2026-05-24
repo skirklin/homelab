@@ -95,7 +95,9 @@ pre_deploy_backup() {
 
     local sha ts key auth_resp token
     sha=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    ts=$(date -u +%Y%m%dT%H%M%SZ)
+    # PB rejects uppercase chars in backup names (regex `^[a-z0-9_-]+\.zip$`).
+    # Use lowercase `t`/`z` separators; git short SHA is hex (lowercase).
+    ts=$(date -u +%Y%m%dt%H%M%Sz)
     key="pre-deploy-${sha}-${ts}.zip"
 
     auth_resp=$(curl -fsS --max-time 15 -X POST "${pb_url}/api/collections/_superusers/auth-with-password" \
