@@ -10,7 +10,7 @@
 // via char-code decode); composite trackables (sleep/exercise/work/
 // symptoms/mood/content) produced empty entries (recovery via the
 // pre-migration PB backup). Recovery via
-// services/scripts/recover-life-events.ts. The future migration template
+// services/scripts/historical/recover-life-events.ts. The future migration template
 // should always use unwrapPbJson() — see
 // infra/pocketbase/pb_migrations/lib/pb-json.js.
 

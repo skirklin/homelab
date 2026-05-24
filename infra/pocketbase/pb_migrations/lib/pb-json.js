@@ -14,7 +14,7 @@
  * `JSON.parse(JSON.stringify(r.get("data") || {}))` which round-trips the
  * byte-array form into a JS array of numbers, then per-subject mapRow
  * branches treated that as an object. See the recovery script in
- * services/scripts/recover-life-events.ts.
+ * services/scripts/historical/recover-life-events.ts.
  *
  * Layout note: lives under pb_migrations/lib/ so the PB migration loader
  * (which globs `NNNN_*.js` at the top level) does not try to run it as a

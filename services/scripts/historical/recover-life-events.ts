@@ -33,7 +33,7 @@
  * Usage
  * -----
  *   export $(grep -v '^#' .env | xargs)
- *   pnpm tsx recover-life-events.ts <backup-data.db> [--user-email <email>] [--dry-run | --apply]
+ *   pnpm tsx historical/recover-life-events.ts <backup-data.db> [--user-email <email>] [--dry-run | --apply]
  *
  *   <backup-data.db> = absolute path to the extracted backup sqlite (e.g.
  *                      /tmp/pb-backup-extracted/data.db).
@@ -84,7 +84,7 @@ const pbUrl = takeOpt("--pb-url") || process.env.PB_URL || `https://api.${proces
 const positional = argv.filter((a) => !a.startsWith("--"));
 const backupPath = positional[0];
 if (!backupPath) {
-  console.error("Usage: pnpm tsx recover-life-events.ts <backup-data.db> [--user-email <email>] [--dry-run | --apply]");
+  console.error("Usage: pnpm tsx historical/recover-life-events.ts <backup-data.db> [--user-email <email>] [--dry-run | --apply]");
   process.exit(1);
 }
 try {

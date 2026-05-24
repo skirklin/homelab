@@ -26,7 +26,7 @@
  *
  * Sister script
  * -------------
- * `services/scripts/recover-life-events.ts` is the canonical pattern from the
+ * `services/scripts/historical/recover-life-events.ts` is the canonical pattern from the
  * May-22 incident. See its header for a longer write-up of the underlying
  * goja byte-array bug and the recovery approach. This script reuses the same
  * sqlite3-CLI-via-execFileSync trick (better-sqlite3 hit an ABI mismatch on
@@ -86,7 +86,7 @@ const dryRun = takeFlag("--dry-run");
 
 if (argv.length > 0) {
   console.error(`Unknown args: ${argv.join(" ")}`);
-  console.error("Usage: pnpm tsx recover-recipe-events.ts [--backup <path>] [--pb <url>] [--dry-run]");
+  console.error("Usage: pnpm tsx historical/recover-recipe-events.ts [--backup <path>] [--pb <url>] [--dry-run]");
   process.exit(1);
 }
 

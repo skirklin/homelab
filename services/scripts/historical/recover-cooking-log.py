@@ -12,8 +12,8 @@ This script reads the static Firebase export at
 PocketBase IDs by name/email, and rewrites the events.
 
 Usage (from repo root):
-  python3 services/scripts/recover-cooking-log.py              # dry run
-  python3 services/scripts/recover-cooking-log.py --apply       # do it
+  python3 services/scripts/historical/recover-cooking-log.py              # dry run
+  python3 services/scripts/historical/recover-cooking-log.py --apply       # do it
 
 Both .env vars PB_ADMIN_PASSWORD and PB_URL (default https://api.kirkl.in)
 are honoured.
