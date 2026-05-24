@@ -6,6 +6,10 @@
  * promises resolve must NOT leak the underlying realtime subscriptions once
  * those promises land. Same shape as the bug fixed in subscribeSlugs (see
  * user.test.ts) and the recipes / life / upkeep cleanup races.
+ *
+ * Also covers the surgical trip-item ops (updateTripItem / removeTripItem)
+ * that replaced the editable-history surface when `shopping_history` was
+ * retired.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import type PocketBase from "pocketbase";
@@ -130,7 +134,7 @@ function makeStubPb(): {
 }
 
 /**
- * Counts wpb's underlying realtime subscribers across the four shopping
+ * Counts wpb's underlying realtime subscribers across the three shopping
  * collections. Each subscribeToList call should add one realtime callback
  * per collection. After teardown the count must return to 0 — anything left
  * is a leaked subscription.
@@ -139,9 +143,26 @@ function totalSubscribers(stub: ReturnType<typeof makeStubPb>): number {
   return (
     stub.col("shopping_lists").realtimeCbs.size +
     stub.col("shopping_items").realtimeCbs.size +
-    stub.col("shopping_history").realtimeCbs.size +
     stub.col("shopping_trips").realtimeCbs.size
   );
+}
+
+function seedTrip(
+  stub: ReturnType<typeof makeStubPb>,
+  id: string,
+  list: string,
+  items: Array<{ ingredient: string; note?: string; categoryId?: string }>,
+): void {
+  stub.col("shopping_trips").records.set(id, {
+    id,
+    collectionId: "shopping_trips",
+    collectionName: "shopping_trips",
+    created: "",
+    updated: "",
+    list,
+    completed_at: new Date().toISOString(),
+    items,
+  } as unknown as RecordModel);
 }
 
 beforeEach(async () => {
@@ -150,7 +171,7 @@ beforeEach(async () => {
 
 describe("PocketBaseShoppingBackend", () => {
   it("does not leak realtime subscriptions when unsub runs before the inner promises resolve", async () => {
-    // Race repro: subscribeToList kicks off four inner subscribe(...).then(u
+    // Race repro: subscribeToList kicks off three inner subscribe(...).then(u
     // => unsubs.push(u)) chains. If the caller's cleanup runs before any of
     // those .then callbacks fire, the unsubs array is empty when the
     // closure iterates it, and the late-arriving `u` functions never get
@@ -180,14 +201,13 @@ describe("PocketBaseShoppingBackend", () => {
     const unsubscribe = shopping.subscribeToList("L1", {
       onList: () => {},
       onItems: () => {},
-      onHistory: () => {},
       onTrips: () => {},
     });
 
     // Tear down BEFORE any inner promise resolves.
     unsubscribe();
 
-    // Let the gated reads complete. The four inner .then callbacks now run.
+    // Let the gated reads complete. The three inner .then callbacks now run.
     stub.release();
     // Drain microtasks so every awaited chain inside subscribeToList lands.
     for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
@@ -231,7 +251,6 @@ describe("PocketBaseShoppingBackend", () => {
     const unsubscribe = shopping.subscribeToList("L1", {
       onList: () => {},
       onItems: () => {},
-      onHistory: () => {},
       onTrips: () => {},
     });
 
@@ -243,11 +262,7 @@ describe("PocketBaseShoppingBackend", () => {
     stub.release();
     for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
 
-    // The reload-based collections must not have hit pb.subscribe at all.
-    expect(
-      stub.col("shopping_history").subscribeCalls,
-      "subscribeToCollectionReload called pb.subscribe on shopping_history after cancellation",
-    ).toBe(0);
+    // The reload-based collection must not have hit pb.subscribe at all.
     expect(
       stub.col("shopping_trips").subscribeCalls,
       "subscribeToCollectionReload called pb.subscribe on shopping_trips after cancellation",
@@ -257,135 +272,81 @@ describe("PocketBaseShoppingBackend", () => {
     expect(totalSubscribers(stub)).toBe(0);
   });
 
-  it("renameHistoryEntry — no collision: updates in place", async () => {
+  it("updateTripItem — rename happy path: replaces ingredient at the given index", async () => {
     const stub = makeStubPb();
-    stub.col("shopping_history").records.set("H1", {
-      id: "H1",
-      collectionId: "shopping_history",
-      collectionName: "shopping_history",
-      created: "",
-      updated: "",
-      list: "L1",
-      ingredient: "parsely",
-      category_id: "produce",
-      last_added: new Date("2026-05-01").toISOString(),
-    } as unknown as RecordModel);
+    seedTrip(stub, "T1", "L1", [
+      { ingredient: "parsely", categoryId: "produce" },
+      { ingredient: "cheese", categoryId: "dairy" },
+    ]);
 
     const wpb = wrapPocketBase(() => stub.pb);
     const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
 
-    await shopping.renameHistoryEntry("H1", "Parsley");
+    await shopping.updateTripItem("T1", 0, { ingredient: "Parsley" });
     // Drain optimistic write
     for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
 
-    const after = stub.col("shopping_history").records.get("H1");
-    expect(after?.ingredient).toBe("parsley");
-    // Source row should still exist (no merge)
-    expect(stub.col("shopping_history").records.has("H1")).toBe(true);
+    const trip = stub.col("shopping_trips").records.get("T1");
+    const items = trip?.items as Array<{ ingredient: string; categoryId: string }>;
+    expect(items[0].ingredient).toBe("Parsley");
+    expect(items[0].categoryId).toBe("produce");
+    // Sibling row untouched
+    expect(items[1].ingredient).toBe("cheese");
   });
 
-  it("renameHistoryEntry — collision in same list: merges into canonical and deletes source", async () => {
+  it("updateTripItem — empty ingredient is rejected", async () => {
     const stub = makeStubPb();
-    const older = new Date("2026-04-01").toISOString();
-    const newer = new Date("2026-05-15").toISOString();
-    // Source row (the misspelled one) is the newer entry.
-    stub.col("shopping_history").records.set("H_src", {
-      id: "H_src",
-      collectionId: "shopping_history",
-      collectionName: "shopping_history",
-      created: "",
-      updated: "",
-      list: "L1",
-      ingredient: "parsely",
-      category_id: "produce-newer",
-      last_added: newer,
-    } as unknown as RecordModel);
-    // Canonical row (correctly spelled) is older.
-    stub.col("shopping_history").records.set("H_canon", {
-      id: "H_canon",
-      collectionId: "shopping_history",
-      collectionName: "shopping_history",
-      created: "",
-      updated: "",
-      list: "L1",
-      ingredient: "parsley",
-      category_id: "produce-older",
-      last_added: older,
-    } as unknown as RecordModel);
+    seedTrip(stub, "T1", "L1", [{ ingredient: "parsely", categoryId: "produce" }]);
 
     const wpb = wrapPocketBase(() => stub.pb);
     const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
 
-    // Seed the optimistic view by performing a no-op update so the wpb queue
-    // observes both rows. The simpler path is to just create them through wpb,
-    // but the stub already has them on disk. The renameHistoryEntry impl
-    // uses pb().getFirstListItem as the fallback when the view is empty —
-    // but our stub's getFirstListItem always 404s. So we seed the wpb view
-    // explicitly via update (which sources the record into the queue).
-    await wpb.collection("shopping_history").update("H_canon", { /* no-op refresh */ });
-    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+    await expect(shopping.updateTripItem("T1", 0, { ingredient: "   " }))
+      .rejects.toThrow(/cannot be empty/);
 
-    await shopping.renameHistoryEntry("H_src", "Parsley");
-    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
-
-    // Source row deleted
-    expect(stub.col("shopping_history").records.has("H_src")).toBe(false);
-    // Canonical row took the newer last_added and the newer side's category
-    const merged = stub.col("shopping_history").records.get("H_canon");
-    expect(merged?.last_added).toBe(newer);
-    expect(merged?.category_id).toBe("produce-newer");
-    expect(merged?.ingredient).toBe("parsley");
+    // Trip unchanged
+    const items = stub.col("shopping_trips").records.get("T1")?.items as Array<{ ingredient: string }>;
+    expect(items[0].ingredient).toBe("parsely");
   });
 
-  it("renameHistoryEntry — same normalized value: no-op", async () => {
+  it("updateTripItem — out-of-range index throws", async () => {
     const stub = makeStubPb();
-    const orig = new Date("2026-05-01").toISOString();
-    stub.col("shopping_history").records.set("H1", {
-      id: "H1",
-      collectionId: "shopping_history",
-      collectionName: "shopping_history",
-      created: "",
-      updated: "",
-      list: "L1",
-      ingredient: "parsley",
-      category_id: "produce",
-      last_added: orig,
-    } as unknown as RecordModel);
+    seedTrip(stub, "T1", "L1", [{ ingredient: "milk", categoryId: "dairy" }]);
 
     const wpb = wrapPocketBase(() => stub.pb);
     const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
 
-    // "Parsley" normalizes to "parsley" — already the row's ingredient.
-    await shopping.renameHistoryEntry("H1", "Parsley");
-    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
-
-    const after = stub.col("shopping_history").records.get("H1");
-    expect(after?.ingredient).toBe("parsley");
-    expect(after?.last_added).toBe(orig);
-    expect(after?.category_id).toBe("produce");
+    await expect(shopping.updateTripItem("T1", 5, { ingredient: "Whatever" }))
+      .rejects.toThrow(/out of range/);
   });
 
-  it("deleteHistoryEntry removes the row", async () => {
+  it("removeTripItem — removes the item at the given index", async () => {
     const stub = makeStubPb();
-    stub.col("shopping_history").records.set("H1", {
-      id: "H1",
-      collectionId: "shopping_history",
-      collectionName: "shopping_history",
-      created: "",
-      updated: "",
-      list: "L1",
-      ingredient: "parsley",
-      category_id: "produce",
-      last_added: new Date().toISOString(),
-    } as unknown as RecordModel);
+    seedTrip(stub, "T1", "L1", [
+      { ingredient: "apples", categoryId: "produce" },
+      { ingredient: "bread", categoryId: "bakery" },
+      { ingredient: "milk", categoryId: "dairy" },
+    ]);
 
     const wpb = wrapPocketBase(() => stub.pb);
     const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
 
-    await shopping.deleteHistoryEntry("H1");
+    await shopping.removeTripItem("T1", 1);
     for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
 
-    expect(stub.col("shopping_history").records.has("H1")).toBe(false);
+    const items = stub.col("shopping_trips").records.get("T1")?.items as Array<{ ingredient: string }>;
+    expect(items.map((i) => i.ingredient)).toEqual(["apples", "milk"]);
+  });
+
+  it("removeTripItem — out-of-range index throws", async () => {
+    const stub = makeStubPb();
+    seedTrip(stub, "T1", "L1", [{ ingredient: "milk", categoryId: "dairy" }]);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+
+    await expect(shopping.removeTripItem("T1", -1)).rejects.toThrow(/out of range/);
+    await expect(shopping.removeTripItem("T1", 99)).rejects.toThrow(/out of range/);
   });
 
   it("normal teardown after the promises resolve still releases everything", async () => {
@@ -410,15 +371,14 @@ describe("PocketBaseShoppingBackend", () => {
     const unsubscribe = shopping.subscribeToList("L1", {
       onList: () => {},
       onItems: () => {},
-      onHistory: () => {},
       onTrips: () => {},
     });
 
-    // Let all four inner subscribe promises resolve.
+    // Let all three inner subscribe promises resolve.
     for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
 
-    // Four collections, one subscriber each.
-    expect(totalSubscribers(stub)).toBe(4);
+    // Three collections, one subscriber each.
+    expect(totalSubscribers(stub)).toBe(3);
 
     unsubscribe();
     // Microtask drain for any deferred teardown work inside wpb.

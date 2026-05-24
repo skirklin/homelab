@@ -34,13 +34,6 @@ export interface ShoppingList {
   updated: Date;
 }
 
-export interface ItemHistory {
-  id: string;
-  ingredient: string;
-  categoryId: CategoryId;
-  lastAdded: Date;
-}
-
 export interface ShoppingTripItem {
   ingredient: string;
   note?: string;

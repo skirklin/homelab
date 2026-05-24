@@ -5,14 +5,13 @@
 import { createContext, useContext, useReducer, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { useAuth } from "@kirkl/shared";
 import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
-import type { ShoppingItem, ShoppingList, ItemHistory, ShoppingTrip } from "./types";
+import type { ShoppingItem, ShoppingList, ShoppingTrip } from "./types";
 import type { ShoppingBackend } from "@homelab/backend";
 
 export interface ShoppingState {
   userSlugs: Record<string, string>;
   list: ShoppingList | null;
   items: Map<string, ShoppingItem>;
-  history: ItemHistory[];
   trips: ShoppingTrip[];
   loading: boolean;
 }
@@ -23,7 +22,6 @@ export type ShoppingAction =
   | { type: "SET_ITEM"; item: ShoppingItem }
   | { type: "REMOVE_ITEM"; itemId: string }
   | { type: "CLEAR_ITEMS" }
-  | { type: "SET_HISTORY"; history: ItemHistory[] }
   | { type: "SET_TRIPS"; trips: ShoppingTrip[] }
   | { type: "SET_LOADING"; loading: boolean };
 
@@ -45,8 +43,6 @@ function reducer(state: ShoppingState, action: ShoppingAction): ShoppingState {
     }
     case "CLEAR_ITEMS":
       return { ...state, items: new Map() };
-    case "SET_HISTORY":
-      return { ...state, history: action.history };
     case "SET_TRIPS":
       return { ...state, trips: action.trips };
     case "SET_LOADING":
@@ -60,7 +56,6 @@ const initialState: ShoppingState = {
   userSlugs: {},
   list: null,
   items: new Map(),
-  history: [],
   trips: [],
   loading: true,
 };
@@ -125,17 +120,6 @@ function subscribeToListViaBackend(
         firstItems = false;
         dispatch({ type: "SET_LOADING", loading: false });
       }
-    },
-    onHistory: (entries) => {
-      dispatch({
-        type: "SET_HISTORY",
-        history: entries.map((e) => ({
-          id: e.id,
-          ingredient: e.ingredient,
-          categoryId: e.categoryId,
-          lastAdded: e.lastAdded,
-        })),
-      });
     },
     onTrips: (trips) => {
       dispatch({

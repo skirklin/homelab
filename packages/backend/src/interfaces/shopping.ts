@@ -1,7 +1,10 @@
 /**
  * Shopping backend interface.
  *
- * Covers: lists, items, categories, history, and shopping trips.
+ * Covers: lists, items, categories, and shopping trips. Autocomplete
+ * suggestions are derived client-side from trips — there is no separate
+ * `shopping_history` collection anymore (retired May 2026).
+ *
  * Subscriptions deliver full current state (not deltas).
  */
 import type { Unsubscribe } from "../types/common";
@@ -9,7 +12,6 @@ import type {
   ShoppingList,
   ShoppingItem,
   CategoryDef,
-  HistoryEntry,
   ShoppingTrip,
 } from "../types/shopping";
 
@@ -27,7 +29,8 @@ export interface ShoppingBackend {
 
   // --- Item CRUD ---
 
-  /** Caller must look up `categoryId` from local history (e.g. via shopping context) — adapter does not fetch from history. */
+  /** Caller must look up `categoryId` from local suggestions (derived from trips
+   *  via `deriveSuggestions`) — adapter does not infer it. */
   addItem(
     listId: string,
     ingredient: string,
@@ -37,7 +40,9 @@ export interface ShoppingBackend {
   ): Promise<string>;
 
   updateItem(itemId: string, updates: { ingredient?: string; note?: string }): Promise<void>;
-  /** `listId` is required so the adapter can upsert history without a server lookup. */
+  /** `listId` is kept in the signature for parity with `addItem`; the adapter
+   *  no longer uses it (the old history-upsert side-effect was removed when
+   *  `shopping_history` was retired). */
   updateItemCategory(
     itemId: string,
     listId: string,
@@ -55,24 +60,21 @@ export interface ShoppingBackend {
     items: Pick<ShoppingItem, "id" | "ingredient" | "note" | "categoryId" | "checked">[],
   ): Promise<void>;
 
-  // --- History entry management ---
+  // --- Trip-item surgical edits ---
+  //
+  // Trips are JSON-array records, addressed by (tripId, itemIndex). These ops
+  // load → patch index → write the trip back, using the optimistic-view-first
+  // pattern so a still-pending edit on the same trip is visible without a
+  // round-trip. Editing a trip item changes future autocomplete suggestions
+  // (see `deriveSuggestions`) — that's the whole point of editing in place.
 
-  /**
-   * Rename a history entry.
-   *
-   * Normalizes the new ingredient name. If another history row in the same list
-   * already exists with the same normalized name, the rows are merged: the
-   * canonical row's `lastAdded` is set to the max of both, its `categoryId` is
-   * set to whichever row has the newer `lastAdded`, and the source row is
-   * deleted. Otherwise this is a plain in-place rename.
-   *
-   * Does NOT cascade to `shopping_items` or `shopping_trips` — only future
-   * autocomplete reflects the change.
-   */
-  renameHistoryEntry(id: string, newIngredient: string): Promise<void>;
+  updateTripItem(
+    tripId: string,
+    itemIndex: number,
+    patch: { ingredient?: string; note?: string; categoryId?: string },
+  ): Promise<void>;
 
-  /** Delete a history entry. Does not affect active items or trip records. */
-  deleteHistoryEntry(id: string): Promise<void>;
+  removeTripItem(tripId: string, itemIndex: number): Promise<void>;
 
   // --- Subscriptions ---
 
@@ -85,7 +87,6 @@ export interface ShoppingBackend {
     handlers: {
       onList: (list: ShoppingList) => void;
       onItems: (items: ShoppingItem[]) => void;
-      onHistory: (entries: HistoryEntry[]) => void;
       onTrips: (trips: ShoppingTrip[]) => void;
       onDeleted?: () => void;
     },

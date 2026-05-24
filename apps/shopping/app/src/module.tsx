@@ -49,3 +49,6 @@ export function ShoppingModule() {
 // Re-export provider for standalone use
 export { ShoppingProvider, useShoppingContext } from "./shopping-context";
 export { useShoppingBackend } from "@kirkl/shared";
+// Suggestion derivation — exposed for the home shell's recipe → shopping bridge
+// so it uses the same trip-derived source of truth as the AddItem UI.
+export { deriveSuggestions, type Suggestion } from "./suggestions";

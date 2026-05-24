@@ -2,7 +2,7 @@
  * Shopping backend cache decorator.
  */
 import type { ShoppingBackend } from "../interfaces/shopping";
-import type { ShoppingList, ShoppingItem, HistoryEntry, ShoppingTrip } from "../types/shopping";
+import type { ShoppingList, ShoppingItem, ShoppingTrip } from "../types/shopping";
 import type { Unsubscribe } from "../types/common";
 import { cachedRead, cached, hydrateOne } from "./helpers";
 
@@ -22,18 +22,16 @@ export function withShoppingCache(inner: ShoppingBackend): ShoppingBackend {
     toggleItem: (id, checked, userId) => inner.toggleItem(id, checked, userId),
     deleteItem: (id) => inner.deleteItem(id),
     clearCheckedItems: (id, items) => inner.clearCheckedItems(id, items),
-    renameHistoryEntry: (id, newIngredient) => inner.renameHistoryEntry(id, newIngredient),
-    deleteHistoryEntry: (id) => inner.deleteHistoryEntry(id),
+    updateTripItem: (tripId, idx, patch) => inner.updateTripItem(tripId, idx, patch),
+    removeTripItem: (tripId, idx) => inner.removeTripItem(tripId, idx),
 
     subscribeToList(listId, handlers): Unsubscribe {
       const listKey = `shopping:list:${listId}`;
       const itemsKey = `shopping:items:${listId}`;
-      const historyKey = `shopping:history:${listId}`;
       const tripsKey = `shopping:trips:${listId}`;
 
       const listH = hydrateOne<ShoppingList>(listKey, handlers.onList);
       const itemsH = hydrateOne<ShoppingItem[]>(itemsKey, handlers.onItems);
-      const historyH = hydrateOne<HistoryEntry[]>(historyKey, handlers.onHistory);
       const tripsH = hydrateOne<ShoppingTrip[]>(tripsKey, handlers.onTrips);
 
       return inner.subscribeToList(listId, {
@@ -44,10 +42,6 @@ export function withShoppingCache(inner: ShoppingBackend): ShoppingBackend {
         onItems: cached(itemsKey, (i) => {
           itemsH.live();
           handlers.onItems(i);
-        }),
-        onHistory: cached(historyKey, (h) => {
-          historyH.live();
-          handlers.onHistory(h);
         }),
         onTrips: cached(tripsKey, (t) => {
           tripsH.live();

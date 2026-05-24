@@ -14,7 +14,7 @@
 // --- Types ---
 export type { User, Unsubscribe, Visibility, NotificationMode } from "./types/common";
 export type {
-  ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTrip,
+  ShoppingList, ShoppingItem, CategoryDef, ShoppingTrip,
 } from "./types/shopping";
 export type {
   RecipeBox, Recipe, RecipeData, RecipeInstruction, EnrichmentStatus,

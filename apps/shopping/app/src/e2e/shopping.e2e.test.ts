@@ -13,8 +13,9 @@ import {
 } from "@kirkl/shared/test-utils";
 import { PocketBaseShoppingBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
 import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
-import type { ShoppingItem } from "@homelab/backend";
+import type { ShoppingItem, ShoppingTrip } from "@homelab/backend";
 import { UNCATEGORIZED_CATEGORY_ID } from "../types";
+import { deriveSuggestions } from "../suggestions";
 
 let ctx: TestContext;
 let shopping: PocketBaseShoppingBackend;
@@ -94,34 +95,6 @@ describe("Item operations", () => {
     expect(items[0].checked).toBe(false);
   });
 
-  it("addItem upserts history with the supplied category", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await shopping.createList("History Test", user.id);
-    await userBackend.setSlug(user.id, "shopping", "history", listId);
-
-    await shopping.addItem(listId, "Cheese", user.id, "dairy");
-
-    const history = await ctx.pb.collection("shopping_history").getFullList({
-      filter: `list = "${listId}"`,
-    });
-    expect(history).toHaveLength(1);
-    expect(history[0].ingredient).toBe("cheese"); // normalized to lowercase
-    expect(history[0].category_id).toBe("dairy");
-
-    // Re-adding with a different category updates the existing history row.
-    const items = await ctx.pb.collection("shopping_items").getFullList({
-      filter: `list = "${listId}"`,
-    });
-    await shopping.deleteItem(items[0].id);
-    await shopping.addItem(listId, "Cheese", user.id, "snacks");
-
-    const updatedHistory = await ctx.pb.collection("shopping_history").getFullList({
-      filter: `list = "${listId}"`,
-    });
-    expect(updatedHistory).toHaveLength(1);
-    expect(updatedHistory[0].category_id).toBe("snacks");
-  });
-
   it("toggleItem checks and unchecks an item", async () => {
     const user = await createTestUser(ctx);
     const listId = await shopping.createList("Toggle Test", user.id);
@@ -161,7 +134,7 @@ describe("Item operations", () => {
     expect(updated.note).toBe("unsweetened");
   });
 
-  it("updateItemCategory updates the item and history", async () => {
+  it("updateItemCategory updates the item's category", async () => {
     const user = await createTestUser(ctx);
     const listId = await shopping.createList("Category Test", user.id);
     await userBackend.setSlug(user.id, "shopping", "cat", listId);
@@ -175,11 +148,6 @@ describe("Item operations", () => {
 
     const updated = await ctx.pb.collection("shopping_items").getOne(items[0].id);
     expect(updated.category_id).toBe("fruit");
-
-    const history = await ctx.pb.collection("shopping_history").getFirstListItem(
-      `list = "${listId}" && ingredient = "apples"`
-    );
-    expect(history.category_id).toBe("fruit");
   });
 
   it("clearCheckedItems records a trip and deletes checked items", async () => {
@@ -231,104 +199,104 @@ describe("Item operations", () => {
   });
 });
 
-describe("History entry editing", () => {
-  it("renameHistoryEntry — no collision: updates in place and normalizes", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await shopping.createList("Rename History", user.id);
-    await userBackend.setSlug(user.id, "shopping", "rename-hist", listId);
+describe("Trip-derived suggestions", () => {
+  /**
+   * Helper: load all trips for a list and map them to the domain shape that
+   * `deriveSuggestions` expects. Mirrors what `subscribeToList` delivers to
+   * the UI, but synchronous-ish so tests don't have to spin up a subscription.
+   */
+  async function loadTrips(listId: string): Promise<ShoppingTrip[]> {
+    const records = await ctx.pb.collection("shopping_trips").getFullList({
+      filter: `list = "${listId}"`,
+      sort: "-completed_at",
+    });
+    return records.map((r) => ({
+      id: r.id,
+      list: r.list,
+      completedAt: new Date(r.completed_at),
+      items: (r.items || []).map((item: { ingredient?: string; name?: string; note?: string; categoryId?: string }) => ({
+        ingredient: item.ingredient || item.name || "",
+        note: item.note || "",
+        categoryId: item.categoryId || UNCATEGORIZED_CATEGORY_ID,
+      })),
+    }));
+  }
 
+  it("ingredient appears in suggestions after a trip is completed; rename surfaces the new name", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await shopping.createList("Suggestions From Trips", user.id);
+    await userBackend.setSlug(user.id, "shopping", "sugg", listId);
+
+    // Add an item, check it, complete the trip — exactly what the UI does.
     await shopping.addItem(listId, "Parsely", user.id, "produce");
-    const before = await ctx.pb.collection("shopping_history").getFirstListItem(
-      `list = "${listId}" && ingredient = "parsely"`
-    );
-
-    await shopping.renameHistoryEntry(before.id, "Parsley");
-
-    const after = await ctx.pb.collection("shopping_history").getOne(before.id);
-    expect(after.ingredient).toBe("parsley"); // normalized
-  });
-
-  it("renameHistoryEntry — collision: merges into canonical and deletes source", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await shopping.createList("Merge History", user.id);
-    await userBackend.setSlug(user.id, "shopping", "merge-hist", listId);
-
-    // Canonical row first (older)
-    await shopping.addItem(listId, "Parsley", user.id, "produce-canon");
-    // Source row second (will be the newer last_added)
-    await shopping.addItem(listId, "Parsely", user.id, "produce-source");
-
-    const allBefore = await ctx.pb.collection("shopping_history").getFullList({
-      filter: `list = "${listId}"`,
-    });
-    expect(allBefore).toHaveLength(2);
-    const source = allBefore.find((h) => h.ingredient === "parsely")!;
-    const canonical = allBefore.find((h) => h.ingredient === "parsley")!;
-
-    await shopping.renameHistoryEntry(source.id, "Parsley");
-
-    const allAfter = await ctx.pb.collection("shopping_history").getFullList({
-      filter: `list = "${listId}"`,
-    });
-    expect(allAfter).toHaveLength(1);
-    expect(allAfter[0].id).toBe(canonical.id);
-    expect(allAfter[0].ingredient).toBe("parsley");
-    // Source row was the newer one, so its category should win the merge.
-    expect(allAfter[0].category_id).toBe("produce-source");
-  });
-
-  it("renameHistoryEntry — same normalized value: no-op", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await shopping.createList("Same Name", user.id);
-    await userBackend.setSlug(user.id, "shopping", "same-name", listId);
-
-    await shopping.addItem(listId, "Parsley", user.id, "produce");
-    const before = await ctx.pb.collection("shopping_history").getFirstListItem(
-      `list = "${listId}" && ingredient = "parsley"`
-    );
-
-    await shopping.renameHistoryEntry(before.id, "Parsley");
-
-    const after = await ctx.pb.collection("shopping_history").getOne(before.id);
-    expect(after.ingredient).toBe("parsley");
-    expect(after.category_id).toBe("produce");
-  });
-
-  it("deleteHistoryEntry removes the row", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await shopping.createList("Delete History", user.id);
-    await userBackend.setSlug(user.id, "shopping", "del-hist", listId);
-
-    await shopping.addItem(listId, "Cilantro", user.id, "produce");
-    const before = await ctx.pb.collection("shopping_history").getFirstListItem(
-      `list = "${listId}" && ingredient = "cilantro"`
-    );
-
-    await shopping.deleteHistoryEntry(before.id);
-
-    const remaining = await ctx.pb.collection("shopping_history").getFullList({
-      filter: `list = "${listId}"`,
-    });
-    expect(remaining).toHaveLength(0);
-  });
-
-  it("deleteHistoryEntry does not cascade to active items", async () => {
-    const user = await createTestUser(ctx);
-    const listId = await shopping.createList("No Cascade", user.id);
-    await userBackend.setSlug(user.id, "shopping", "no-cascade", listId);
-
-    await shopping.addItem(listId, "Basil", user.id, "produce");
-    const histBefore = await ctx.pb.collection("shopping_history").getFirstListItem(
-      `list = "${listId}" && ingredient = "basil"`
-    );
-
-    await shopping.deleteHistoryEntry(histBefore.id);
-
     const items = await ctx.pb.collection("shopping_items").getFullList({
       filter: `list = "${listId}"`,
     });
-    expect(items).toHaveLength(1);
-    expect(items[0].ingredient).toBe("Basil");
+    const checkedItems: ShoppingItem[] = items.map((item) => ({
+      id: item.id,
+      list: item.list,
+      ingredient: item.ingredient,
+      note: item.note || "",
+      categoryId: item.category_id || UNCATEGORIZED_CATEGORY_ID,
+      checked: true, // simulate the user checking the row before "Done"
+      addedBy: item.added_by,
+      addedAt: item.created,
+      created: item.created,
+      updated: item.updated,
+    }));
+    await shopping.clearCheckedItems(listId, checkedItems);
+
+    // Suggestion is derived from the trip — the misspelled name shows up.
+    let suggestions = deriveSuggestions(await loadTrips(listId));
+    expect(suggestions.has("parsely")).toBe(true);
+    expect(suggestions.get("parsely")?.categoryId).toBe("produce");
+    expect(suggestions.has("parsley")).toBe(false);
+
+    // Find the trip and rename the item in place. After the rename, the new
+    // name appears in suggestions and the old one is gone.
+    const trips = await ctx.pb.collection("shopping_trips").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    expect(trips).toHaveLength(1);
+    await shopping.updateTripItem(trips[0].id, 0, { ingredient: "Parsley" });
+
+    suggestions = deriveSuggestions(await loadTrips(listId));
+    expect(suggestions.has("parsley")).toBe(true);
+    expect(suggestions.get("parsley")?.ingredient).toBe("Parsley");
+    expect(suggestions.has("parsely")).toBe(false);
+    // Category carries over.
+    expect(suggestions.get("parsley")?.categoryId).toBe("produce");
+  });
+
+  it("removeTripItem drops the suggestion derived from that trip item", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await shopping.createList("Remove Trip Item", user.id);
+    await userBackend.setSlug(user.id, "shopping", "remove-trip-item", listId);
+
+    await shopping.addItem(listId, "Basil", user.id, "produce");
+    const items = await ctx.pb.collection("shopping_items").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    await shopping.clearCheckedItems(listId, items.map((item) => ({
+      id: item.id,
+      list: item.list,
+      ingredient: item.ingredient,
+      note: item.note || "",
+      categoryId: item.category_id || UNCATEGORIZED_CATEGORY_ID,
+      checked: true,
+      addedBy: item.added_by,
+      addedAt: item.created,
+      created: item.created,
+      updated: item.updated,
+    })));
+
+    const trips = await ctx.pb.collection("shopping_trips").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    await shopping.removeTripItem(trips[0].id, 0);
+
+    const suggestions = deriveSuggestions(await loadTrips(listId));
+    expect(suggestions.has("basil")).toBe(false);
   });
 });
 

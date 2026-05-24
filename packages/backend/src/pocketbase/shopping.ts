@@ -2,20 +2,23 @@
  * PocketBase implementation of ShoppingBackend.
  *
  * Writes route through the optimistic wrapper (wrapPocketBase) so the UI
- * sees changes within a frame. Reads on history/trips stay direct because
- * those collections are write-once-read-many and don't need optimistic UI.
+ * sees changes within a frame. Reads on trips stay direct because that
+ * collection is write-once-read-many and doesn't need optimistic UI.
+ *
+ * Autocomplete suggestions are derived client-side from trips (see
+ * `apps/shopping/app/src/suggestions.ts`) — there is no `shopping_history`
+ * collection backing them anymore (retired May 2026).
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { ShoppingBackend } from "../interfaces/shopping";
-import type { ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTrip } from "../types/shopping";
+import type { ShoppingList, ShoppingItem, CategoryDef, ShoppingTrip } from "../types/shopping";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
 
 // --- Pagination limits ---
 
-const HISTORY_PAGE_SIZE = 500;
 const TRIPS_PAGE_SIZE = 50;
 
 // --- Record → domain type mappers ---
@@ -48,13 +51,17 @@ function itemFromRecord(r: RecordModel): ShoppingItem {
   };
 }
 
-function historyFromRecord(r: RecordModel): HistoryEntry {
-  return {
-    id: r.id,
-    ingredient: r.ingredient || "",
-    categoryId: r.category_id || "uncategorized",
-    lastAdded: new Date(r.last_added),
-  };
+/** Raw shape of the `items` JSON column on a `shopping_trips` row. */
+interface TripItemRaw {
+  ingredient?: string;
+  /** Legacy field name from very old records — first ever wave used `name`. */
+  name?: string;
+  note?: string;
+  categoryId?: string;
+}
+
+function tripItemsFromRecord(r: RecordModel): TripItemRaw[] {
+  return Array.isArray(r.items) ? r.items : [];
 }
 
 function tripFromRecord(r: RecordModel): ShoppingTrip {
@@ -62,16 +69,12 @@ function tripFromRecord(r: RecordModel): ShoppingTrip {
     id: r.id,
     list: r.list,
     completedAt: new Date(r.completed_at),
-    items: (r.items || []).map((item: Record<string, string>) => ({
+    items: tripItemsFromRecord(r).map((item) => ({
       ingredient: item.ingredient || item.name || "",
       note: item.note || "",
       categoryId: item.categoryId || "uncategorized",
     })),
   };
-}
-
-function normalizeIngredient(ingredient: string): string {
-  return ingredient.toLowerCase().trim();
 }
 
 export class PocketBaseShoppingBackend implements ShoppingBackend {
@@ -123,21 +126,15 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     note?: string,
   ): Promise<string> {
     const itemId = newId();
-    // Both writes go optimistic via wpb; awaiting both ensures sequencing for
-    // callers (e.g. updateItemCategory immediately after addItem) sees the
-    // history row already in place.
-    await Promise.all([
-      this.wpb.collection("shopping_items").create({
-        id: itemId,
-        list: listId,
-        ingredient,
-        note: note || "",
-        category_id: categoryId,
-        checked: false,
-        added_by: userId,
-      }, { $autoCancel: false }),
-      this.upsertHistory(listId, ingredient, categoryId),
-    ]);
+    await this.wpb.collection("shopping_items").create({
+      id: itemId,
+      list: listId,
+      ingredient,
+      note: note || "",
+      category_id: categoryId,
+      checked: false,
+      added_by: userId,
+    }, { $autoCancel: false });
     return itemId;
   }
 
@@ -150,12 +147,13 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
   async updateItemCategory(
     itemId: string,
-    listId: string,
+    _listId: string,
     categoryId: string,
-    ingredient: string,
+    _ingredient: string,
   ): Promise<void> {
+    // listId + ingredient are kept in the signature for parity with addItem;
+    // they were only needed for the now-retired history upsert.
     await this.wpb.collection("shopping_items").update(itemId, { category_id: categoryId });
-    await this.upsertHistory(listId, ingredient, categoryId);
   }
 
   async toggleItem(itemId: string, checked: boolean, userId: string): Promise<void> {
@@ -201,119 +199,57 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     );
   }
 
-  async renameHistoryEntry(id: string, newIngredient: string): Promise<void> {
-    const normalized = normalizeIngredient(newIngredient);
-    if (!normalized) return;
-
-    // Find the source row to learn its list (so we can scope the dedup lookup).
-    // Try the optimistic view first so a still-pending rename of the same row
-    // (or a still-pending create) is visible without a round-trip.
-    const fromView = this.wpb.collection("shopping_history").viewCollection<RecordModel>(
-      (r) => r.id === id,
-    );
-    const source = fromView.length > 0
-      ? fromView[0]
-      : await this.pb().collection("shopping_history").getOne(id, { $autoCancel: false });
-    const listId = source.list;
-
-    // No-op if the user typed the same normalized value back in.
-    if (source.ingredient === normalized) return;
-
-    // Optimistic-view-first dedup lookup (same pattern as upsertHistory — see
-    // the race fix in commit 21878cc).
-    const canonicalFromQueue = this.wpb.collection("shopping_history").viewCollection<RecordModel>(
-      (r) => r.list === listId && r.ingredient === normalized && r.id !== id,
-    );
-    let canonical: RecordModel | null = canonicalFromQueue[0] ?? null;
-    if (!canonical) {
-      const filter = this.pb().filter(
-        "list = {:listId} && ingredient = {:ingredient} && id != {:id}",
-        { listId, ingredient: normalized, id },
-      );
-      try {
-        canonical = await this.pb().collection("shopping_history").getFirstListItem(
-          filter,
-          { $autoCancel: false },
-        );
-      } catch {
-        canonical = null;
-      }
-    }
-
-    if (!canonical) {
-      // No collision — just rename in place.
-      await this.wpb.collection("shopping_history").update(id, { ingredient: normalized });
-      return;
-    }
-
-    // Merge: pick the most-recent-last_added side's category, take the max
-    // last_added, write that onto the canonical row, then delete the source.
-    const sourceLastAdded = new Date(source.last_added).getTime();
-    const canonicalLastAdded = new Date(canonical.last_added).getTime();
-    const sourceIsNewer = sourceLastAdded > canonicalLastAdded;
-    const mergedLastAdded = sourceIsNewer ? source.last_added : canonical.last_added;
-    const mergedCategoryId = sourceIsNewer ? source.category_id : canonical.category_id;
-
-    await this.wpb.collection("shopping_history").update(canonical.id, {
-      last_added: mergedLastAdded,
-      category_id: mergedCategoryId,
-    });
-    await this.wpb.collection("shopping_history").delete(id);
-  }
-
-  async deleteHistoryEntry(id: string): Promise<void> {
-    await this.wpb.collection("shopping_history").delete(id);
-  }
-
-  /** Upsert a history entry — find existing by (list, ingredient) and update, else create.
-   *
-   * The optimistic-view check must come first. Reading through the live PB
-   * here (this.pb().getFirstListItem) used to race when a user added an
-   * item and re-categorized it within ~5s: the second upsert's read fired
-   * before the first upsert's create had committed to the server, so it
-   * saw "no row" and created a duplicate. Checking the wpb view first
-   * means a still-pending create is visible and we update it in place.
-   */
-  private async upsertHistory(
-    listId: string,
-    ingredient: string,
-    categoryId: string,
+  async updateTripItem(
+    tripId: string,
+    itemIndex: number,
+    patch: { ingredient?: string; note?: string; categoryId?: string },
   ): Promise<void> {
-    const normalized = normalizeIngredient(ingredient);
-
-    const fromQueue = this.wpb.collection("shopping_history").viewCollection<RecordModel>(
-      (r) => r.list === listId && r.ingredient === normalized,
-    );
-    if (fromQueue.length > 0) {
-      await this.wpb.collection("shopping_history").update(fromQueue[0].id, {
-        category_id: categoryId,
-        last_added: new Date().toISOString(),
-      });
-      return;
+    const trip = await this.loadTrip(tripId);
+    const items = tripItemsFromRecord(trip);
+    if (itemIndex < 0 || itemIndex >= items.length) {
+      throw new Error(`updateTripItem: index ${itemIndex} out of range (0..${items.length - 1})`);
     }
-
-    const filter = this.pb().filter(
-      "list = {:listId} && ingredient = {:ingredient}",
-      { listId, ingredient: normalized },
-    );
-    try {
-      const existing = await this.pb().collection("shopping_history").getFirstListItem(
-        filter,
-        { $autoCancel: false },
-      );
-      await this.wpb.collection("shopping_history").update(existing.id, {
-        category_id: categoryId,
-        last_added: new Date().toISOString(),
-      });
-    } catch {
-      await this.wpb.collection("shopping_history").create({
-        id: newId(),
-        list: listId,
-        ingredient: normalized,
-        category_id: categoryId,
-        last_added: new Date().toISOString(),
-      });
+    // Reject obvious garbage early — a blank rename would silently retire the
+    // suggestion derived from this trip item, which is rarely what the user
+    // wants. Delete is the right tool for that.
+    if (patch.ingredient !== undefined && !patch.ingredient.trim()) {
+      throw new Error("updateTripItem: ingredient cannot be empty");
     }
+    const nextItems = items.map((item, i) => {
+      if (i !== itemIndex) return item;
+      const next: TripItemRaw = { ...item };
+      if (patch.ingredient !== undefined) next.ingredient = patch.ingredient.trim();
+      if (patch.note !== undefined) next.note = patch.note;
+      if (patch.categoryId !== undefined) next.categoryId = patch.categoryId;
+      return next;
+    });
+    await this.wpb.collection("shopping_trips").update(tripId, { items: nextItems });
+  }
+
+  async removeTripItem(tripId: string, itemIndex: number): Promise<void> {
+    const trip = await this.loadTrip(tripId);
+    const items = tripItemsFromRecord(trip);
+    if (itemIndex < 0 || itemIndex >= items.length) {
+      throw new Error(`removeTripItem: index ${itemIndex} out of range (0..${items.length - 1})`);
+    }
+    const nextItems = items.filter((_, i) => i !== itemIndex);
+    await this.wpb.collection("shopping_trips").update(tripId, { items: nextItems });
+  }
+
+  /**
+   * Load a trip record, preferring the optimistic view so a still-pending
+   * edit on the same trip is visible without a server round-trip. Same
+   * pattern as the old `upsertHistory` race fix (commit 21878cc); race
+   * pressure is lower on trips (low-traffic, single-user-edits) but the
+   * cost of using the pattern is negligible and it keeps surgical-op
+   * read-modify-write correct under back-to-back edits.
+   */
+  private async loadTrip(tripId: string): Promise<RecordModel> {
+    const fromView = this.wpb.collection("shopping_trips").viewCollection<RecordModel>(
+      (r) => r.id === tripId,
+    );
+    if (fromView.length > 0) return fromView[0];
+    return this.pb().collection("shopping_trips").getOne(tripId, { $autoCancel: false });
   }
 
   subscribeToList(
@@ -321,7 +257,6 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     handlers: {
       onList: (list: ShoppingList) => void;
       onItems: (items: ShoppingItem[]) => void;
-      onHistory: (entries: HistoryEntry[]) => void;
       onTrips: (trips: ShoppingTrip[]) => void;
       onDeleted?: () => void;
     },
@@ -391,16 +326,6 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
       }
     }).catch(() => { /* surfaced via wpb's error channel */ });
 
-    // History — full reload on any change. Stays on raw pb subscribe; writes
-    // still go through wpb so persistence + replay-on-reload work.
-    trackUnsub(this.subscribeToCollectionReload("shopping_history", isCancelled, {
-      filter: this.pb().filter("list = {:listId}", { listId }),
-      sort: "-last_added",
-      perPage: HISTORY_PAGE_SIZE,
-      belongsTo: (r) => r.list === listId,
-      onData: (records) => handlers.onHistory(records.map(historyFromRecord)),
-    }));
-
     // Trips — full reload on any change.
     trackUnsub(this.subscribeToCollectionReload("shopping_trips", isCancelled, {
       filter: this.pb().filter("list = {:listId}", { listId }),
@@ -422,9 +347,9 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
   /**
    * Subscribe to a collection that fully reloads on any change. Used for
-   * history/trips where ordering and pagination matter more than per-record
-   * deltas. Stays on raw pb.subscribe — writes go through wpb so the server
-   * event we receive already reflects ack'd state.
+   * trips where ordering and pagination matter more than per-record deltas.
+   * Stays on raw pb.subscribe — writes go through wpb so the server event
+   * we receive already reflects ack'd state.
    */
   private async subscribeToCollectionReload(
     collection: string,
