@@ -90,3 +90,128 @@ spec:
               envFrom:
                 - secretRef:
                     name: api-secrets
+---
+# Daily PocketBase backup — 2 AM Pacific. Snapshots the whole pb_data
+# dir (collections + records + uploaded files) into a zip in
+# /pb/pb_data/backups/ on the PocketBase PVC. The 2026-05-22 life_events
+# migration data loss (recovered only because a pre-migration-20260419
+# zip happened to be there) prompted this — daily zips give us a known
+# floor on data-recovery RPO. Pruner CronJob (pb-backup-prune below)
+# handles rotation.
+#
+# Uses alpine/curl (curl + jq) so we can extract the auth token cleanly
+# from the JSON response without sed gymnastics. Hits PB cluster-internal
+# via the homelab.svc.cluster.local Service.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pb-backup-daily
+  namespace: homelab
+spec:
+  schedule: "0 9 * * *"  # 2 AM Pacific (PDT = UTC-7); slips by an hour during PST
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: alpine/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  PB=http://pocketbase.homelab.svc.cluster.local:8090
+                  # Superuser auth — PB returns 200 + {token: "..."} on success.
+                  # NOTE: PB session tokens go in `Authorization: <token>` (no
+                  # Bearer prefix), unlike hlk_/mcpat_ tokens which DO use Bearer.
+                  TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"identity\":\"$PB_ADMIN_EMAIL\",\"password\":\"$PB_ADMIN_PASSWORD\"}" \
+                    | jq -er .token)
+                  KEY="daily-$(date -u +%Y-%m-%dT%H-%M-%SZ).zip"
+                  curl -sf -X POST "$PB/api/backups" \
+                    -H "Authorization: $TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"name\":\"$KEY\"}"
+                  echo "[pb-backup-daily] created $KEY"
+              envFrom:
+                - secretRef:
+                    name: api-secrets
+---
+# Backup pruner — runs just after the daily backup. Retention policy:
+#   - daily-*           : keep 30 days
+#   - pre-deploy-*      : keep 7 days
+#   - pre-migration-*   : keep forever (manual / migration-related, rare,
+#                         load-bearing — the only thing that saved the
+#                         2026-05-22 life_events incident)
+#   - anything else     : keep forever (be conservative — manual backups
+#                         the user took get the same protection)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pb-backup-prune
+  namespace: homelab
+spec:
+  schedule: "5 9 * * *"  # 5 min after pb-backup-daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: prune
+              image: alpine/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  PB=http://pocketbase.homelab.svc.cluster.local:8090
+                  TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"identity\":\"$PB_ADMIN_EMAIL\",\"password\":\"$PB_ADMIN_PASSWORD\"}" \
+                    | jq -er .token)
+                  NOW=$(date -u +%s)
+                  DAILY_CUTOFF=$((NOW - 30*86400))
+                  PREDEPLOY_CUTOFF=$((NOW - 7*86400))
+                  # GET /api/backups returns [{key, size, modified}, ...].
+                  # `modified` is RFC3339-ish UTC ("2026-05-22 09:00:00.123Z"
+                  # in current PB versions). Normalize space→T and strip
+                  # sub-seconds so busybox date can parse it.
+                  curl -sf "$PB/api/backups" -H "Authorization: $TOKEN" \
+                    | jq -r '.[] | "\(.key)\t\(.modified)"' \
+                    | while IFS="$(printf '\t')" read -r KEY MODIFIED; do
+                        ISO=$(printf '%s' "$MODIFIED" | sed 's/ /T/; s/\.[0-9]*Z/Z/; s/\.[0-9]*$//')
+                        TS=$(date -u -d "$ISO" +%s 2>/dev/null || echo "")
+                        if [ -z "$TS" ]; then
+                          echo "[pb-backup-prune] skip (unparseable date) $KEY $MODIFIED" >&2
+                          continue
+                        fi
+                        case "$KEY" in
+                          daily-*)
+                            if [ "$TS" -lt "$DAILY_CUTOFF" ]; then
+                              echo "[pb-backup-prune] delete (>30d) $KEY"
+                              curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
+                            fi
+                            ;;
+                          pre-deploy-*)
+                            if [ "$TS" -lt "$PREDEPLOY_CUTOFF" ]; then
+                              echo "[pb-backup-prune] delete (>7d) $KEY"
+                              curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
+                            fi
+                            ;;
+                          *)
+                            # pre-migration-* and any manually-named backups — keep.
+                            ;;
+                        esac
+                      done
+                  echo "[pb-backup-prune] done"
+              envFrom:
+                - secretRef:
+                    name: api-secrets
