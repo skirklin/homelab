@@ -30,6 +30,14 @@ export type { LifeLog, LifeEvent, LifeEntry, SampleSchedule } from "./types/life
 export type { LifeSampleQuestion, LifeRandomSamplesConfig } from "./types/life-config";
 export { RANDOM_SAMPLES } from "./types/life-config";
 
+// --- Upkeep urgency (canonical impl shared by upkeep UI + life morning header) ---
+export {
+  calculateDueDate,
+  getUrgencyLevel,
+  isTaskSnoozed,
+} from "./lib/upkeep-urgency";
+export type { UrgencyLevel, UrgencyTask } from "./lib/upkeep-urgency";
+
 // --- Travel validation (canonical impl shared by travel UI + MCP server) ---
 export {
   validateDay,
