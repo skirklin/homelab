@@ -124,6 +124,8 @@ spec:
               args:
                 - |
                   set -e
+                  # alpine/curl ships only curl — install jq for token parsing.
+                  apk add --no-cache jq >/dev/null
                   PB=http://pocketbase.homelab.svc.cluster.local:8090
                   # Superuser auth — PB returns 200 + {token: "..."} on success.
                   # NOTE: PB session tokens go in `Authorization: <token>` (no
@@ -179,6 +181,8 @@ spec:
               args:
                 - |
                   set -e
+                  # alpine/curl ships only curl — install jq for token + filtering.
+                  apk add --no-cache jq >/dev/null
                   PB=http://pocketbase.homelab.svc.cluster.local:8090
                   TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
                     -H "Content-Type: application/json" \
