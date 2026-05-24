@@ -96,8 +96,8 @@ const DateNav = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
 `;
 
 const DateDisplay = styled.button`
@@ -144,11 +144,11 @@ const SessionRow = styled.div<{ $hasPrimary: boolean }>`
      - All-secondary (late night, or no time-of-day match): three equal
        columns in a single row. */
   grid-template-columns: ${(p) => (p.$hasPrimary ? "1fr 1fr" : "1fr 1fr 1fr")};
-  gap: var(--space-sm);
+  gap: var(--space-xs);
 `;
 
 const GroupSection = styled.div`
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-sm);
 
   &:last-child { margin-bottom: 0; }
 `;
@@ -168,7 +168,7 @@ const SessionCard = styled.button<{ $size: "primary" | "secondary"; $muted: bool
   align-items: center;
   justify-content: center;
   gap: var(--space-xs);
-  padding: ${(p) => (p.$size === "primary" ? "var(--space-lg) var(--space-md)" : "var(--space-sm) var(--space-md)")};
+  padding: ${(p) => (p.$size === "primary" ? "var(--space-md) var(--space-sm)" : "var(--space-xs) var(--space-sm)")};
   background: var(--color-bg);
   border: ${(p) =>
     p.$size === "primary"
@@ -215,12 +215,12 @@ const SessionCardCheck = styled.span`
 const StreakCard = styled.div`
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-md);
-  padding: var(--space-md);
+  gap: var(--space-sm);
+  padding: var(--space-sm);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-xs);
 `;
 
 const StreakItem = styled.div`
