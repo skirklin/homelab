@@ -44,7 +44,14 @@
  * The script PATCHes existing rows in place (preserving id + timestamp +
  * subject_id). It never inserts or deletes.
  */
-import Database from "better-sqlite3";
+import { execFileSync } from "node:child_process";
+// HACK: better-sqlite3 native binary is built against a different Node ABI on
+// the dev box. Shell out to the sqlite3 CLI instead — same data, no rebuild.
+function sqliteAll<T>(dbPath: string, sql: string): T[] {
+  const out = execFileSync("sqlite3", ["-json", dbPath, sql], { maxBuffer: 100 * 1024 * 1024 }).toString();
+  if (!out.trim()) return [];
+  return JSON.parse(out) as T[];
+}
 import { statSync } from "node:fs";
 import PocketBase from "pocketbase";
 
@@ -341,10 +348,10 @@ console.log(`  Life log:   ${logId}`);
 // Resolve which backup log_id(s) belong to this user. The current life_logs
 // schema is single-`owner`; the backup may use `owners` (JSON array) per
 // migration 0028. Match by either.
-const db = new Database(backupPath, { readonly: true, fileMustExist: true });
-const allBackupLogs = db.prepare(
+const allBackupLogs = sqliteAll<{ id: string; owners: string | null }>(
+  backupPath,
   "SELECT id, owners FROM life_logs",
-).all() as Array<{ id: string; owners: string | null }>;
+);
 const backupLogIds: string[] = [];
 for (const r of allBackupLogs) {
   if (!r.owners) continue;
@@ -366,12 +373,14 @@ if (backupLogIds.length === 0) {
 // (subject_id, timestamp) within this user's events. Record ids therefore
 // drift; we rely on subject_id + timestamp uniqueness, which is consistent
 // for one human's events (no script writes two events at the same ms).
-const backupQuery = backupLogIds.length === 0
-  ? db.prepare("SELECT id, subject_id, timestamp, data FROM life_events WHERE 1=0")
-  : db.prepare(
-      `SELECT id, subject_id, timestamp, data FROM life_events WHERE log IN (${backupLogIds.map(() => "?").join(",")})`,
+const backupRows = backupLogIds.length === 0
+  ? []
+  : sqliteAll<{ id: string; subject_id: string; timestamp: string; data: string | null }>(
+      backupPath,
+      `SELECT id, subject_id, timestamp, data FROM life_events WHERE log IN (${
+        backupLogIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(",")
+      })`,
     );
-const backupRows = backupQuery.all(...backupLogIds) as Array<{ id: string; subject_id: string; timestamp: string; data: string | null }>;
 
 const backupByKey = new Map<string, BackupRow>();
 let backupDupes = 0;
@@ -391,7 +400,7 @@ for (const r of backupRows) {
     data: parsed,
   });
 }
-db.close();
+// (no db handle — using sqlite3 CLI shell-out)
 console.log(`  Backup rows (this user): ${backupRows.length} (${backupDupes} (subject,ts) dupes — last wins)`);
 
 // ---------------------------------------------------------------------------
