@@ -247,3 +247,86 @@ spec:
               envFrom:
                 - secretRef:
                     name: api-secrets
+---
+# pod_events pruner — daily TTL on routine k8s Event noise.
+#
+# event-watcher streams every k8s Event (kind=Pod) into the pod_events PB
+# collection so we have a long-term history (k8s itself only retains Events
+# for ~1h). With no built-in retention, the table grew unbounded: ~1,500
+# Normal rows/day of routine pod-startup chatter (Pulled, Scheduled, Started,
+# Created, Pulling) hit ~23k rows in 14 days before we noticed.
+#
+# Policy: delete Normal-type rows older than 10 days; keep all Warnings
+# forever (low volume, high forensic value). At ~1.5k Normals/day this
+# bounds steady-state size at ~15k rows + however many Warnings accrue —
+# small and predictable.
+#
+# History note: on 2026-05-24 a one-shot manual prune removed 22.9k rows of
+# pre-policy noise. This CronJob is what keeps it from coming back.
+#
+# Auth + tooling mirrors pb-backup-prune above: alpine/curl image, jq for
+# JSON parsing, superuser auth via PB_ADMIN_EMAIL/PB_ADMIN_PASSWORD from
+# api-secrets, `Authorization: $TOKEN` (no Bearer prefix — PB session
+# tokens, not hlk_/mcpat_).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pod-events-prune
+  namespace: homelab
+spec:
+  schedule: "30 9 * * *"  # 2:30 AM Pacific (PDT); after pb-backup-prune
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: prune
+              image: alpine/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  # alpine/curl ships only curl — install jq for token + URI encoding.
+                  apk add --no-cache jq >/dev/null
+                  PB=http://pocketbase.homelab.svc.cluster.local:8090
+                  TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"identity\":\"$PB_ADMIN_EMAIL\",\"password\":\"$PB_ADMIN_PASSWORD\"}" \
+                    | jq -er .token)
+                  # PB stores `created` as "YYYY-MM-DD HH:MM:SS.sssZ" (space
+                  # separator, ms precision, trailing Z). Build the cutoff in
+                  # that exact shape so the string compare in the filter works.
+                  CUTOFF=$(date -u -d '10 days ago' +'%Y-%m-%d %H:%M:%S.000Z')
+                  FILTER="created < \"$CUTOFF\" && type = \"Normal\""
+                  # PB filter must be URI-encoded; jq -sRr @uri is the safe path
+                  # (handles quotes, spaces, &, <, =, etc. consistently).
+                  ENCODED=$(printf '%s' "$FILTER" | jq -sRr @uri)
+                  echo "[pod-events-prune] cutoff=$CUTOFF"
+                  TOTAL=0
+                  while :; do
+                    # Pull a page of ids matching the filter. We always read
+                    # page=1 because every iteration deletes its batch — the
+                    # next call sees a fresh first page of survivors.
+                    PAGE=$(curl -sf "$PB/api/collections/pod_events/records?perPage=500&fields=id&filter=$ENCODED" \
+                      -H "Authorization: $TOKEN")
+                    IDS=$(printf '%s' "$PAGE" | jq -r '.items[].id')
+                    if [ -z "$IDS" ]; then
+                      break
+                    fi
+                    COUNT=0
+                    for ID in $IDS; do
+                      curl -sf -X DELETE "$PB/api/collections/pod_events/records/$ID" \
+                        -H "Authorization: $TOKEN"
+                      COUNT=$((COUNT + 1))
+                    done
+                    TOTAL=$((TOTAL + COUNT))
+                    echo "[pod-events-prune] deleted batch=$COUNT total=$TOTAL"
+                  done
+                  echo "[pod-events-prune] done total=$TOTAL"
+              envFrom:
+                - secretRef:
+                    name: api-secrets

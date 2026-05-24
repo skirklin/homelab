@@ -75,6 +75,9 @@ spec:
             # limit so kubelet warns on every pod schedule. DNS still works
             # (uses the first 3); silenced here as cosmetic noise. Real fix
             # would require k3s --resolv-conf kubelet arg + cluster restart.
+            #
+            # Volume control for the rest is via the pod-events-prune CronJob
+            # in cronjobs.yaml (10-day TTL on Normals, Warnings kept forever).
             - name: IGNORE_REASONS
               value: "DNSConfigForming"
             # Self-reporting alert path. When the api service starts rejecting
