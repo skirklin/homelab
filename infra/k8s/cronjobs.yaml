@@ -142,14 +142,21 @@ spec:
                 - secretRef:
                     name: api-secrets
 ---
-# Backup pruner — runs just after the daily backup. Retention policy:
-#   - daily-*           : keep 30 days
-#   - pre-deploy-*      : keep 7 days
+# Backup pruner — runs just after the daily backup. Tiered retention:
+#
+#   - daily-*           : keep 90 days, EXCEPT the chronologically-first
+#                         daily-* of each calendar month, which is exempted
+#                         from pruning and kept forever (virtual "monthly"
+#                         tier — no separate file naming, no separate cron).
+#   - pre-deploy-*      : keep 14 days
 #   - pre-migration-*   : keep forever (manual / migration-related, rare,
 #                         load-bearing — the only thing that saved the
 #                         2026-05-22 life_events incident)
 #   - anything else     : keep forever (be conservative — manual backups
 #                         the user took get the same protection)
+#
+# Sizing note: at ~30 MB/snapshot, 90 daily + ~12 monthlies/year ≈ 3 GB/yr.
+# Disk on the VPS has ~13 GB free as of 2026-05-22 — plenty of headroom.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -178,13 +185,27 @@ spec:
                     -d "{\"identity\":\"$PB_ADMIN_EMAIL\",\"password\":\"$PB_ADMIN_PASSWORD\"}" \
                     | jq -er .token)
                   NOW=$(date -u +%s)
-                  DAILY_CUTOFF=$((NOW - 30*86400))
-                  PREDEPLOY_CUTOFF=$((NOW - 7*86400))
+                  DAILY_CUTOFF=$((NOW - 90*86400))
+                  PREDEPLOY_CUTOFF=$((NOW - 14*86400))
                   # GET /api/backups returns [{key, size, modified}, ...].
                   # `modified` is RFC3339-ish UTC ("2026-05-22 09:00:00.123Z"
                   # in current PB versions). Normalize space→T and strip
                   # sub-seconds so busybox date can parse it.
-                  curl -sf "$PB/api/backups" -H "Authorization: $TOKEN" \
+                  BACKUPS=$(curl -sf "$PB/api/backups" -H "Authorization: $TOKEN")
+                  # Monthly exempt set: chronologically-first daily-* of each
+                  # calendar month (grouped by YYYY-MM extracted from key).
+                  # Lexicographic min_by(.modified) === chronological min for
+                  # the RFC3339-ish string PB returns. Written to a file so
+                  # the while-loop subshell below can grep it cheaply.
+                  MONTHLY=$(printf '%s' "$BACKUPS" | jq -r '
+                    [.[] | select(.key | test("^daily-"))]
+                    | group_by(.key | capture("^daily-(?<ym>[0-9]{4}-[0-9]{2})") | .ym)
+                    | map(min_by(.modified) | .key)
+                    | .[]
+                  ')
+                  echo "[pb-backup-prune] monthly exempts:"
+                  printf '  %s\n' $MONTHLY
+                  printf '%s' "$BACKUPS" \
                     | jq -r '.[] | "\(.key)\t\(.modified)"' \
                     | while IFS="$(printf '\t')" read -r KEY MODIFIED; do
                         ISO=$(printf '%s' "$MODIFIED" | sed 's/ /T/; s/\.[0-9]*Z/Z/; s/\.[0-9]*$//')
@@ -195,14 +216,18 @@ spec:
                         fi
                         case "$KEY" in
                           daily-*)
+                            if printf '%s\n' "$MONTHLY" | grep -qxF "$KEY"; then
+                              # Monthly exempt — keep forever.
+                              continue
+                            fi
                             if [ "$TS" -lt "$DAILY_CUTOFF" ]; then
-                              echo "[pb-backup-prune] delete (>30d) $KEY"
+                              echo "[pb-backup-prune] delete (>90d) $KEY"
                               curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
                             fi
                             ;;
                           pre-deploy-*)
                             if [ "$TS" -lt "$PREDEPLOY_CUTOFF" ]; then
-                              echo "[pb-backup-prune] delete (>7d) $KEY"
+                              echo "[pb-backup-prune] delete (>14d) $KEY"
                               curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
                             fi
                             ;;
