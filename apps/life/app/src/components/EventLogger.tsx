@@ -67,7 +67,7 @@ const HeaderRow = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
 `;
 
 const Label = styled.span<{ $size: WidgetSize }>`

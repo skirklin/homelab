@@ -295,7 +295,6 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
         <InputNumber
           size="small"
           value={local as number}
-          step={entry.scale ? 1 : 1}
           min={entry.unit === "rating" ? 1 : 0}
           max={entry.unit === "rating" ? entry.scale ?? 5 : undefined}
           onChange={(v) => {
