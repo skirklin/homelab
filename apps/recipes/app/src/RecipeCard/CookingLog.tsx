@@ -6,8 +6,32 @@ import { Context } from '../context';
 import { getAppUserFromState, getUserFromState } from '../state';
 import type { RecipeCardProps } from './RecipeCard';
 import { useRecipesBackend } from '@kirkl/shared';
-import { useAuth, useFeedback, type Event } from '@kirkl/shared';
-import type { Event as BackendEvent } from '@homelab/backend';
+import { useAuth, useFeedback } from '@kirkl/shared';
+import type { CookingLogEvent, LifeEntry } from '@homelab/backend';
+
+/** Pull the "notes" text entry out of a unified event row. */
+function getNotes(event: CookingLogEvent): string {
+  for (const e of event.entries) {
+    if (e.name === 'notes' && e.type === 'text') return e.value;
+  }
+  return '';
+}
+
+/**
+ * Apply a notes edit to the local copy of an event: replace any existing
+ * "notes" text entry, drop it when the value is empty. Preserves any other
+ * entries the row may carry.
+ */
+function withNotes(event: CookingLogEvent, notes: string): CookingLogEvent {
+  const filtered = event.entries.filter(
+    (e) => !(e.name === 'notes' && e.type === 'text'),
+  );
+  const trimmed = notes.trim();
+  const entries: LifeEntry[] = trimmed
+    ? [...filtered, { name: 'notes', type: 'text', value: trimmed }]
+    : filtered;
+  return { ...event, entries };
+}
 
 const LogContainer = styled.div`
   margin-top: var(--space-md);
@@ -102,25 +126,13 @@ function formatDate(date: Date): string {
   });
 }
 
-/** Convert a backend Event to the @kirkl/shared Event shape used in the UI */
-function backendEventToShared(e: BackendEvent): Event {
-  return {
-    id: e.id,
-    subjectId: e.subjectId,
-    timestamp: e.timestamp,
-    createdAt: e.createdAt,
-    createdBy: e.createdBy,
-    data: e.data,
-  };
-}
-
 function CookingLog(props: RecipeCardProps) {
   const { message } = useFeedback();
   const { recipeId, boxId } = props;
   const { state } = useContext(Context);
   const { user: authUser } = useAuth();
   const recipesBackend = useRecipesBackend();
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<CookingLogEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -135,7 +147,7 @@ function CookingLog(props: RecipeCardProps) {
     setLoading(true);
     const unsub = recipesBackend.subscribeToCookingLog(boxId, recipeId, (fetchedEvents) => {
       if (cancelled) return;
-      setEvents(fetchedEvents.map(backendEventToShared));
+      setEvents(fetchedEvents);
       setLoading(false);
     });
     return () => {
@@ -149,7 +161,7 @@ function CookingLog(props: RecipeCardProps) {
     return logUser?.name || 'Someone';
   };
 
-  const canEdit = (event: Event): boolean => {
+  const canEdit = (event: CookingLogEvent): boolean => {
     return currentUser?.id === event.createdBy;
   };
 
@@ -160,12 +172,9 @@ function CookingLog(props: RecipeCardProps) {
   const handleSaveEdit = async (eventId: string, newNote: string) => {
     try {
       await recipesBackend.updateCookingLogEvent(eventId, newNote);
-      // Update local state
-      setEvents(prev => prev.map(e =>
-        e.id === eventId
-          ? { ...e, data: { ...e.data, notes: newNote.trim() || undefined } }
-          : e
-      ));
+      // Update local state — keep entries[] in sync with the backend so the
+      // rerender matches the post-write row exactly.
+      setEvents(prev => prev.map(e => (e.id === eventId ? withNotes(e, newNote) : e)));
       setEditingId(null);
     } catch (error) {
       console.error('Failed to update note:', error);
@@ -207,9 +216,10 @@ function CookingLog(props: RecipeCardProps) {
     <LogContainer>
       <LogTitle>Cooking Log</LogTitle>
       <LogList>
-        {events.map((event: Event) => {
+        {events.map((event) => {
           const editable = canEdit(event);
           const isEditing = editingId === event.id;
+          const notes = getNotes(event);
 
           return (
             <LogEntryContainer key={event.id}>
@@ -222,7 +232,7 @@ function CookingLog(props: RecipeCardProps) {
                   <NoteInput
                     autoFocus
                     autoSize
-                    defaultValue={(event.data.notes as string) || ''}
+                    defaultValue={notes}
                     placeholder="Add a note about how it turned out..."
                     onBlur={(e) => handleSaveEdit(event.id, e.target.value)}
                     onKeyUp={(e) => {
@@ -231,12 +241,12 @@ function CookingLog(props: RecipeCardProps) {
                       }
                     }}
                   />
-                ) : event.data.notes ? (
+                ) : notes ? (
                   <LogNote
                     $editable={editable}
                     onClick={editable ? () => handleStartEdit(event.id) : undefined}
                   >
-                    "{String(event.data.notes)}"
+                    "{notes}"
                   </LogNote>
                 ) : editable ? (
                   <AddNoteHint onClick={() => handleStartEdit(event.id)}>

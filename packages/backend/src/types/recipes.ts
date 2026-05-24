@@ -1,6 +1,7 @@
 /** Recipes domain types */
 
-import type { Visibility, Event } from "./common";
+import type { Visibility } from "./common";
+import type { LifeEntry } from "./life";
 
 export interface RecipeBox {
   id: string;
@@ -63,4 +64,20 @@ export interface PendingChanges {
   model: string;
 }
 
-export type CookingLogEvent = Event;
+/**
+ * A persisted recipe_events row. Same unified shape as LifeEvent and
+ * TaskCompletion — entries[] is the canonical place for per-cook data.
+ * Today we only write a single text entry named "notes".
+ */
+export interface CookingLogEvent {
+  id: string;
+  subjectId: string;
+  timestamp: Date;
+  /** Reserved for interval cooks (e.g. multi-session bakes); unused today. */
+  endTime?: Date;
+  entries: LifeEntry[];
+  labels?: Record<string, string>;
+  createdBy: string;
+  created: string;
+  updated: string;
+}

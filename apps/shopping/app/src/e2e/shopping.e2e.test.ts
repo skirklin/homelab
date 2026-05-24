@@ -231,6 +231,107 @@ describe("Item operations", () => {
   });
 });
 
+describe("History entry editing", () => {
+  it("renameHistoryEntry — no collision: updates in place and normalizes", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await shopping.createList("Rename History", user.id);
+    await userBackend.setSlug(user.id, "shopping", "rename-hist", listId);
+
+    await shopping.addItem(listId, "Parsely", user.id, "produce");
+    const before = await ctx.pb.collection("shopping_history").getFirstListItem(
+      `list = "${listId}" && ingredient = "parsely"`
+    );
+
+    await shopping.renameHistoryEntry(before.id, "Parsley");
+
+    const after = await ctx.pb.collection("shopping_history").getOne(before.id);
+    expect(after.ingredient).toBe("parsley"); // normalized
+  });
+
+  it("renameHistoryEntry — collision: merges into canonical and deletes source", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await shopping.createList("Merge History", user.id);
+    await userBackend.setSlug(user.id, "shopping", "merge-hist", listId);
+
+    // Canonical row first (older)
+    await shopping.addItem(listId, "Parsley", user.id, "produce-canon");
+    // Source row second (will be the newer last_added)
+    await shopping.addItem(listId, "Parsely", user.id, "produce-source");
+
+    const allBefore = await ctx.pb.collection("shopping_history").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    expect(allBefore).toHaveLength(2);
+    const source = allBefore.find((h) => h.ingredient === "parsely")!;
+    const canonical = allBefore.find((h) => h.ingredient === "parsley")!;
+
+    await shopping.renameHistoryEntry(source.id, "Parsley");
+
+    const allAfter = await ctx.pb.collection("shopping_history").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    expect(allAfter).toHaveLength(1);
+    expect(allAfter[0].id).toBe(canonical.id);
+    expect(allAfter[0].ingredient).toBe("parsley");
+    // Source row was the newer one, so its category should win the merge.
+    expect(allAfter[0].category_id).toBe("produce-source");
+  });
+
+  it("renameHistoryEntry — same normalized value: no-op", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await shopping.createList("Same Name", user.id);
+    await userBackend.setSlug(user.id, "shopping", "same-name", listId);
+
+    await shopping.addItem(listId, "Parsley", user.id, "produce");
+    const before = await ctx.pb.collection("shopping_history").getFirstListItem(
+      `list = "${listId}" && ingredient = "parsley"`
+    );
+
+    await shopping.renameHistoryEntry(before.id, "Parsley");
+
+    const after = await ctx.pb.collection("shopping_history").getOne(before.id);
+    expect(after.ingredient).toBe("parsley");
+    expect(after.category_id).toBe("produce");
+  });
+
+  it("deleteHistoryEntry removes the row", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await shopping.createList("Delete History", user.id);
+    await userBackend.setSlug(user.id, "shopping", "del-hist", listId);
+
+    await shopping.addItem(listId, "Cilantro", user.id, "produce");
+    const before = await ctx.pb.collection("shopping_history").getFirstListItem(
+      `list = "${listId}" && ingredient = "cilantro"`
+    );
+
+    await shopping.deleteHistoryEntry(before.id);
+
+    const remaining = await ctx.pb.collection("shopping_history").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("deleteHistoryEntry does not cascade to active items", async () => {
+    const user = await createTestUser(ctx);
+    const listId = await shopping.createList("No Cascade", user.id);
+    await userBackend.setSlug(user.id, "shopping", "no-cascade", listId);
+
+    await shopping.addItem(listId, "Basil", user.id, "produce");
+    const histBefore = await ctx.pb.collection("shopping_history").getFirstListItem(
+      `list = "${listId}" && ingredient = "basil"`
+    );
+
+    await shopping.deleteHistoryEntry(histBefore.id);
+
+    const items = await ctx.pb.collection("shopping_items").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].ingredient).toBe("Basil");
+  });
+});
+
 describe("Category operations", () => {
   it("updateCategories sets category definitions on the list", async () => {
     const user = await createTestUser(ctx);

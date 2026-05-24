@@ -22,6 +22,8 @@ export function withShoppingCache(inner: ShoppingBackend): ShoppingBackend {
     toggleItem: (id, checked, userId) => inner.toggleItem(id, checked, userId),
     deleteItem: (id) => inner.deleteItem(id),
     clearCheckedItems: (id, items) => inner.clearCheckedItems(id, items),
+    renameHistoryEntry: (id, newIngredient) => inner.renameHistoryEntry(id, newIngredient),
+    deleteHistoryEntry: (id) => inner.deleteHistoryEntry(id),
 
     subscribeToList(listId, handlers): Unsubscribe {
       const listKey = `shopping:list:${listId}`;

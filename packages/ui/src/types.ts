@@ -1,3 +1,16 @@
+// ===== Re-exports from @homelab/backend =====
+//
+// LifeEvent / LifeEntry are the canonical event types — re-exported here so
+// the rest of the monorepo can keep importing them from @kirkl/shared
+// without crossing the internal package boundary.
+//
+// The old free-form Event / EventStore / eventFromStore / eventToStore
+// helpers were retired once task_events + recipe_events migrated to the
+// unified entries[] shape (commits 3f8ea6c / a1cf8f8). Use LifeEvent
+// (or the per-domain TaskCompletion / CookingLogEvent) instead.
+
+export type { LifeEvent, LifeEntry } from "@homelab/backend";
+
 // ===== User Profile Types =====
 
 export type NotificationMode = "all" | "subscribed" | "off";
@@ -16,45 +29,3 @@ export interface UserProfile {
 }
 
 export type UserProfileStore = UserProfile;
-
-/**
- * Unified event type for tracking activities across all apps.
- */
-export interface Event {
-  id: string;
-  subjectId: string;
-  timestamp: Date;
-  createdAt: Date;
-  createdBy: string;
-  data: Record<string, unknown>;
-}
-
-/**
- * PocketBase storage format for Event — dates are ISO strings
- */
-export interface EventStore {
-  subject_id: string;
-  timestamp: string;
-  created_by: string;
-  data: Record<string, unknown>;
-}
-
-export function eventFromStore(id: string, store: EventStore & { created: string }): Event {
-  return {
-    id,
-    subjectId: store.subject_id,
-    timestamp: new Date(store.timestamp),
-    createdAt: new Date(store.created),
-    createdBy: store.created_by,
-    data: store.data || {},
-  };
-}
-
-export function eventToStore(event: Omit<Event, "id">): EventStore {
-  return {
-    subject_id: event.subjectId,
-    timestamp: event.timestamp.toISOString(),
-    created_by: event.createdBy,
-    data: event.data,
-  };
-}

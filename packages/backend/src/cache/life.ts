@@ -2,7 +2,7 @@
  * Life backend cache decorator.
  */
 import type { LifeBackend } from "../interfaces/life";
-import type { LifeLog, LifeEntry } from "../types/life";
+import type { LifeLog, LifeEvent } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { cachedRead, cached, hydrateOne } from "./helpers";
 
@@ -12,18 +12,19 @@ export function withLifeCache(inner: LifeBackend): LifeBackend {
 
     clearSampleSchedule: (id) => inner.clearSampleSchedule(id),
     updateReminderTimes: (id, t) => inner.updateReminderTimes(id, t),
-    addEntry: (id, w, d, u, o) => inner.addEntry(id, w, d, u, o),
-    updateEntry: (id, u) => inner.updateEntry(id, u),
-    deleteEntry: (id) => inner.deleteEntry(id),
+    setRandomSamplingEnabled: (id, enabled) => inner.setRandomSamplingEnabled(id, enabled),
+    addEvent: (id, s, e, u, o) => inner.addEvent(id, s, e, u, o),
+    updateEvent: (id, u) => inner.updateEvent(id, u),
+    deleteEvent: (id) => inner.deleteEvent(id),
 
-    subscribeToEntries(logId, onEntries): Unsubscribe {
-      const key = `life:entries:${logId}`;
-      const h = hydrateOne<LifeEntry[]>(key, onEntries);
-      return inner.subscribeToEntries(
+    subscribeToEvents(logId, onEvents): Unsubscribe {
+      const key = `life:events:${logId}`;
+      const h = hydrateOne<LifeEvent[]>(key, onEvents);
+      return inner.subscribeToEvents(
         logId,
-        cached(key, (entries) => {
+        cached(key, (events) => {
           h.live();
-          onEntries(entries);
+          onEvents(events);
         }),
       );
     },

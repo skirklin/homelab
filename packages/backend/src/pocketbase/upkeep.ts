@@ -12,9 +12,46 @@ import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { UpkeepBackend } from "../interfaces/upkeep";
 import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
+import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
+
+/**
+ * Defensive parser for the post-migration task_events.entries column.
+ * Mirrors apps/life/.../life.ts so a half-deployed env or hand-edited row
+ * can't crash the UI.
+ */
+function entriesFromRecord(r: RecordModel): LifeEntry[] {
+  const raw = Array.isArray(r.entries) ? r.entries : [];
+  const out: LifeEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const e = item as Record<string, unknown>;
+    if (typeof e.name !== "string") continue;
+    if (e.type === "text" && typeof e.value === "string") {
+      out.push({ name: e.name, type: "text", value: e.value });
+    } else if (e.type === "number" && typeof e.value === "number" && typeof e.unit === "string") {
+      const entry: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
+      if (typeof e.scale === "number") entry.scale = e.scale;
+      out.push(entry);
+    } else if (e.type === "bool" && typeof e.value === "boolean") {
+      out.push({ name: e.name, type: "bool", value: e.value });
+    }
+  }
+  return out;
+}
+
+function labelsFromRecord(r: RecordModel): Record<string, string> | undefined {
+  return r.labels && typeof r.labels === "object" && !Array.isArray(r.labels)
+    ? (r.labels as Record<string, string>)
+    : undefined;
+}
+
+function notesEntries(notes?: string): LifeEntry[] {
+  const trimmed = notes?.trim();
+  return trimmed ? [{ name: "notes", type: "text", value: trimmed }] : [];
+}
 
 function listFromRecord(r: RecordModel): TaskList {
   return {
@@ -54,9 +91,12 @@ function completionFromRecord(r: RecordModel): TaskCompletion {
     id: r.id,
     subjectId: r.subject_id || "",
     timestamp: new Date(r.timestamp),
-    createdAt: new Date(r.created),
+    endTime: r.end_time ? new Date(r.end_time) : undefined,
+    entries: entriesFromRecord(r),
+    labels: labelsFromRecord(r),
     createdBy: r.created_by || "",
-    data: r.data || {},
+    created: r.created,
+    updated: r.updated,
   };
 }
 
@@ -257,7 +297,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       subject_id: taskId,
       timestamp,
       created_by: userId,
-      data: options?.notes ? { notes: options.notes } : {},
+      entries: notesEntries(options?.notes),
     });
     // Now syncLastCompleted scans the queue (including the just-pushed event)
     // and only fires a tasks.update if the value actually changed.
@@ -332,13 +372,16 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
   async updateCompletion(eventId: string, updates: { notes?: string; timestamp?: Date }): Promise<void> {
     const cached = this.wpb.collection("task_events").view<RecordModel>(eventId);
     const record: RecordModel = cached ?? await this.pb().collection("task_events").getOne(eventId);
-    const data: Record<string, unknown> = {};
-    if (updates.timestamp) data.timestamp = updates.timestamp.toISOString();
+    const patch: Record<string, unknown> = {};
+    if (updates.timestamp) patch.timestamp = updates.timestamp.toISOString();
     if (updates.notes !== undefined) {
-      const existing = (record.data as Record<string, unknown>) || {};
-      data.data = { ...existing, notes: updates.notes.trim() || undefined };
+      // Replace any existing "notes" entry, preserving every other entry the
+      // row might carry (no current writers add others, but a hand-edited row
+      // shouldn't lose them on a notes edit).
+      const existing = entriesFromRecord(record).filter((e) => !(e.name === "notes" && e.type === "text"));
+      patch.entries = [...existing, ...notesEntries(updates.notes)];
     }
-    const eventUpdate = this.wpb.collection("task_events").update(eventId, data);
+    const eventUpdate = this.wpb.collection("task_events").update(eventId, patch);
     if (updates.timestamp !== undefined) {
       await Promise.all([eventUpdate, this.syncLastCompleted(record.subject_id as string)]);
     } else {

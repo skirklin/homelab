@@ -300,7 +300,11 @@ describe("Task Completion", () => {
       filter: `subject_id = "${taskId}"`,
     });
     expect(events.length).toBe(1);
-    expect(events[0].data.notes).toBe("Looks great!");
+    // Notes live in entries[] under the unified event shape.
+    const notesEntry = (events[0].entries as Array<Record<string, unknown>>).find(
+      (e) => e.name === "notes" && e.type === "text",
+    );
+    expect(notesEntry?.value).toBe("Looks great!");
     expect(events[0].created_by).toBe(user.id);
     cleanup.track("task_events", events[0].id);
 
@@ -441,7 +445,10 @@ describe("Task Completion", () => {
     await upkeep.updateCompletion(eventId, { notes: "Updated notes" });
 
     const updated = await ctx.pb.collection("task_events").getOne(eventId);
-    expect(updated.data.notes).toBe("Updated notes");
+    const updatedNotes = (updated.entries as Array<Record<string, unknown>>).find(
+      (e) => e.name === "notes" && e.type === "text",
+    );
+    expect(updatedNotes?.value).toBe("Updated notes");
 
     await cleanup.cleanup();
   });
@@ -730,7 +737,12 @@ describe("Multi-user Scenarios", () => {
     });
     expect(events.length).toBe(2);
 
-    const notes = events.map((e) => e.data.notes);
+    const notes = events.map((e) => {
+      const entry = (e.entries as Array<Record<string, unknown>>).find(
+        (x) => x.name === "notes" && x.type === "text",
+      );
+      return entry?.value;
+    });
     expect(notes).toContain("User A completed");
     expect(notes).toContain("User B completed");
 

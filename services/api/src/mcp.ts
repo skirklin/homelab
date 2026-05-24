@@ -449,28 +449,46 @@ server.tool(
 
 // --- Life tools ---
 
+// Each life_events row carries an `entries[]` bag of named typed values. The
+// shape matches the LifeEntry union exported from @homelab/backend.
+const lifeEntrySchema = z.discriminatedUnion("type", [
+  z.object({
+    name: z.string().describe("Field name within this event (e.g. 'duration', 'rating', 'notes')"),
+    type: z.literal("number"),
+    value: z.number(),
+    unit: z.string().describe("Storage-canonical unit: min, mg, oz, drinks, ct, rating"),
+    scale: z.number().optional().describe("For unit='rating': max of the scale (default 5)"),
+  }),
+  z.object({
+    name: z.string(),
+    type: z.literal("text"),
+    value: z.string(),
+  }),
+]);
+
 server.tool(
   "list_life_entries",
-  "List recent life log entries. Defaults to the last 7 days.",
+  "List recent life events. Defaults to the last 7 days. Each event has entries[] (named typed values) + optional labels{} (source, category, tz, etc).",
   { days: z.number().optional().describe("Number of days to look back (default 7)") },
   async ({ days }) => {
     const log = (await api("/life/log")) as { id: string; name: string };
-    const entries = (await api(`/life/entries?log=${log.id}`)) as Array<{
+    const events = (await api(`/life/entries?log=${log.id}`)) as Array<{
       id: string;
       subject_id: string;
       timestamp: string;
-      data: unknown;
+      entries: unknown;
+      labels: unknown;
       [k: string]: unknown;
     }>;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - (days ?? 7));
-    const recent = entries.filter((e) => new Date(e.timestamp) >= cutoff);
+    const recent = events.filter((e) => new Date(e.timestamp) >= cutoff);
     return {
       content: [{
         type: "text",
         text: recent.length
           ? JSON.stringify(recent, null, 2)
-          : `No life entries in the last ${days ?? 7} days`,
+          : `No life events in the last ${days ?? 7} days`,
       }],
     };
   },
@@ -478,18 +496,19 @@ server.tool(
 
 server.tool(
   "add_life_entry",
-  "Record a life log entry. Each entry tracks one widget (subject_id) at a point in time. Data shape depends on widget type (e.g. {checked: true}, {value: 5}, {rating: 3}).",
+  "Record a life event. One event per moment per subject_id. `entries[]` carries every named typed value (e.g. duration in min, rating 1-5, text note). `labels{}` carries categorical dimensions like source (manual|sample|journey), category, tz.",
   {
     log: z.string().describe("The life log ID"),
-    widget_id: z.string().describe("The widget ID this entry is for (subject_id in PB)"),
-    data: z.record(z.unknown()).optional().describe("Widget-specific payload (defaults to {})"),
+    subject_id: z.string().describe("The trackable / session id (sleep, mood, morning_session, journal, etc.)"),
+    entries: z.array(lifeEntrySchema).describe("Named typed values captured at this moment"),
+    labels: z.record(z.string()).optional().describe("Categorical labels (string→string). Conventions: source, category, tz."),
     timestamp: z.string().optional().describe("ISO timestamp (defaults to now)"),
-    notes: z.string().optional().describe("Free-form notes — merged into data.notes"),
+    end_time: z.string().optional().describe("ISO end timestamp for interval events (sleep, workouts). Optional."),
   },
-  async ({ log, widget_id, data, timestamp, notes }) => {
+  async ({ log, subject_id, entries, labels, timestamp, end_time }) => {
     const result = await api("/life/entries", {
       method: "POST",
-      body: JSON.stringify({ log, widget_id, data, timestamp, notes }),
+      body: JSON.stringify({ log, subject_id, entries, labels, timestamp, end_time }),
     });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
@@ -497,12 +516,13 @@ server.tool(
 
 server.tool(
   "update_life_entry",
-  "Update a life log entry — change timestamp, merge new data, or set notes",
+  "Update a life event. Each provided field replaces wholesale (no merge): pass the complete new entries[] / labels{}.",
   {
-    id: z.string().describe("The life entry ID"),
+    id: z.string().describe("The life event ID"),
     timestamp: z.string().optional().describe("New ISO timestamp"),
-    data: z.record(z.unknown()).optional().describe("Fields to merge into existing data"),
-    notes: z.string().optional().describe("Set/replace notes (empty string clears)"),
+    end_time: z.string().nullable().optional().describe("New ISO end timestamp (null clears)"),
+    entries: z.array(lifeEntrySchema).optional().describe("Replacement entries[] (whole-replace)"),
+    labels: z.record(z.string()).nullable().optional().describe("Replacement labels{} (whole-replace; null clears)"),
   },
   async ({ id, ...body }) => {
     const result = await api(`/life/entries/${id}`, {
@@ -515,8 +535,8 @@ server.tool(
 
 server.tool(
   "delete_life_entry",
-  "Delete a life log entry",
-  { id: z.string().describe("The life entry ID") },
+  "Delete a life event",
+  { id: z.string().describe("The life event ID") },
   async ({ id }) => {
     const result = await api(`/life/entries/${id}`, { method: "DELETE" });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };

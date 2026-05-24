@@ -12,7 +12,7 @@
  */
 
 // --- Types ---
-export type { User, Unsubscribe, Event, Visibility, NotificationMode } from "./types/common";
+export type { User, Unsubscribe, Visibility, NotificationMode } from "./types/common";
 export type {
   ShoppingList, ShoppingItem, CategoryDef, HistoryEntry, ShoppingTrip,
 } from "./types/shopping";
@@ -26,9 +26,17 @@ export type {
   ActivitySlot, FlightSlot, FlightInfo,
   DayEntry,
 } from "./types/travel";
-export type { LifeLog, LifeEntry, SampleSchedule } from "./types/life";
+export type { LifeLog, LifeEvent, LifeEntry, SampleSchedule } from "./types/life";
 export type { LifeSampleQuestion, LifeRandomSamplesConfig } from "./types/life-config";
 export { RANDOM_SAMPLES } from "./types/life-config";
+
+// --- Upkeep urgency (canonical impl shared by upkeep UI + life morning header) ---
+export {
+  calculateDueDate,
+  getUrgencyLevel,
+  isTaskSnoozed,
+} from "./lib/upkeep-urgency";
+export type { UrgencyLevel, UrgencyTask } from "./lib/upkeep-urgency";
 
 // --- Travel validation (canonical impl shared by travel UI + MCP server) ---
 export {

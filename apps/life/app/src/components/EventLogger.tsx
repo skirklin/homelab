@@ -3,31 +3,44 @@
  * renderers. Behaviour is driven by the Trackable manifest entry:
  *
  *  - "ct" trackables with defaultValue=1 and no categories/intensity/notes
- *    are "one-tap" — clicking the card logs `{value: 1}` instantly. This is
+ *    are "one-tap" — clicking the card logs a single count entry. This is
  *    the old counter ergonomics for floss / poop / etc.
  *  - rating-shaped (unit: "rating") trackables show a 1-5 picker inline.
+ *  - "min" duration trackables accept input as hours (sleep) or minutes
+ *    (exercise/focus) based on defaultValue and convert to canonical
+ *    minutes on write.
  *  - everything else expands an inline form with value (pre-filled from
- *    defaultValue), an optional category picker, intensity buttons, and a
- *    notes field.
+ *    defaultValue), an optional category picker (written to labels),
+ *    intensity rating, and a notes text entry.
  *
- * The card always shows the day's aggregated value (sum/avg/last) so the
+ * The card always shows the day's aggregated value (sum for non-rating
+ * units, avg for rating units — see lib/format.ts `aggregationFor`) so the
  * dashboard reads at a glance. Tap the value badge to open an entries
  * popover (delete individual entries).
  */
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import styled, { css } from "styled-components";
-import { Input, InputNumber, Button } from "antd";
+import { Input, InputNumber, Button, Segmented } from "antd";
 import { PlusOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
+import type { LifeEntry, LifeEvent } from "@homelab/backend";
 import type { Trackable } from "../manifest";
 import type { LogEntry } from "../types";
 import { type WidgetSize } from "../display-settings";
-import { getEntriesForTrackable, type NormalizedEvent } from "../lib/legacy-adapter";
+import {
+  aggregate,
+  formatDuration,
+  formatRating,
+  formatDose,
+  collectNumberValues,
+  primaryEntryName,
+} from "../lib/format";
 import { EntriesPopover } from "./EntriesPopover";
+import { Hint } from "./Hint";
 
 interface EventLoggerProps {
   trackable: Trackable;
-  /** All entries for the log (raw — adapter is applied internally). */
+  /** All events for the log. */
   entries: LogEntry[];
   userId: string;
   logId: string | undefined;
@@ -55,7 +68,7 @@ const HeaderRow = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
 `;
 
 const Label = styled.span<{ $size: WidgetSize }>`
@@ -76,11 +89,14 @@ const ValueBadge = styled.button<{ $logged: boolean; $size: WidgetSize }>`
   font-weight: 600;
   font-size: ${(p) => (p.$size === "compact" ? "var(--font-size-xs)" : "var(--font-size-sm)")};
   cursor: ${(p) => (p.$logged ? "pointer" : "default")};
-`;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
 
-const Hint = styled.span`
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
+  ${(p) => p.$logged && `
+    &:hover {
+      background: var(--color-primary);
+      color: white;
+    }
+  `}
 `;
 
 const FormRow = styled.div`
@@ -157,7 +173,7 @@ const TapPlus = styled.button<{ $size: WidgetSize }>`
   &:hover { background: var(--color-primary-light); color: var(--color-primary); }
 `;
 
-// ---------- One-tap detection ----------
+// ---------- Trackable mode detection ----------
 
 function isOneTap(t: Trackable): boolean {
   return (
@@ -173,42 +189,62 @@ function isRatingShaped(t: Trackable): boolean {
   return t.unit === "rating";
 }
 
-// ---------- Aggregation ----------
-
-function aggregateValue(events: NormalizedEvent[], aggregation: Trackable["aggregation"]): number | null {
-  if (events.length === 0) return null;
-  const values = events
-    .map((e) => e.data.value)
-    .filter((v): v is number => typeof v === "number");
-  if (values.length === 0) return null;
-  switch (aggregation) {
-    case "sum":
-      return values.reduce((a, b) => a + b, 0);
-    case "avg":
-      return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
-    case "last":
-      return values[0]; // events arrive sorted most-recent-first
-  }
+/** Duration trackables default to hours input when the default >= 60min. */
+function defaultDurationInputUnit(t: Trackable): "hours" | "minutes" {
+  if (t.unit !== "min") return "minutes";
+  return (t.defaultValue ?? 0) >= 60 ? "hours" : "minutes";
 }
 
-function formatValue(value: number | null, trackable: Trackable): string {
+// ---------- Per-day filtering / aggregation ----------
+
+function startOfDay(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function endOfDay(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(23, 59, 59, 999);
+  return out;
+}
+
+function eventsForTrackable(events: LogEntry[], trackableId: string, day?: Date): LifeEvent[] {
+  const date = day ?? new Date();
+  const dayStart = startOfDay(date);
+  const dayEnd = endOfDay(date);
+  return events
+    .filter((e) => e.subjectId === trackableId && e.timestamp >= dayStart && e.timestamp <= dayEnd)
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+}
+
+function formatValueDisplay(value: number | null, trackable: Trackable): string {
   if (value === null) return "—";
-  if (trackable.unit === "rating") return `${value}/5`;
-  if (trackable.unit === "ct") return `${value}`;
-  return `${value} ${trackable.unit}`;
+  if (trackable.unit === "rating") return formatRating(value, 5);
+  if (trackable.unit === "min") return formatDuration(value);
+  return formatDose(value, trackable.unit);
 }
 
-function categoryBreakdown(events: NormalizedEvent[], unit: string): string | null {
+function categoryBreakdown(events: LifeEvent[]): string | null {
+  // Sum primary numeric entries per labels.category. Today this is only used
+  // for exercise / focus, which both have a `categories` array on their
+  // Trackable.
   const byCat: Record<string, number> = {};
-  for (const e of events) {
-    const v = e.data.value;
-    if (typeof v !== "number") continue;
-    const cat = (e.data.category as string | undefined) ?? "—";
-    byCat[cat] = (byCat[cat] ?? 0) + v;
+  for (const ev of events) {
+    const cat = ev.labels?.category;
+    if (!cat) continue;
+    // Primary entry: just walk numeric entries until one matches.
+    // For combo trackables, the "duration" entry is the right one to bucket.
+    for (const e of ev.entries) {
+      if (e.type === "number" && e.name === "duration") {
+        byCat[cat] = (byCat[cat] ?? 0) + e.value;
+        break;
+      }
+    }
   }
   const parts = Object.entries(byCat);
   if (parts.length <= 1) return null;
-  return parts.map(([cat, v]) => `${cat} ${v}${unit === "min" ? "" : ""}`).join(" + ");
+  return parts.map(([cat, v]) => `${cat} ${v}`).join(" + ");
 }
 
 // ---------- Component ----------
@@ -217,15 +253,30 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   const { message } = useFeedback();
   const life = useLifeBackend();
 
-  const dayEntries = getEntriesForTrackable(entries, trackable.id, timestamp);
-  const agg = aggregateValue(dayEntries, trackable.aggregation);
-  const breakdown = trackable.categories ? categoryBreakdown(dayEntries, trackable.unit) : null;
+  const dayEvents = useMemo(
+    () => eventsForTrackable(entries, trackable.id, timestamp),
+    [entries, trackable.id, timestamp],
+  );
+
+  const primaryName = useMemo(() => primaryEntryName(trackable.id), [trackable.id]);
+  const aggValues = useMemo(() => collectNumberValues(dayEvents, primaryName), [dayEvents, primaryName]);
+  const agg = aggregate(aggValues, trackable.unit);
+
+  const breakdown = trackable.categories ? categoryBreakdown(dayEvents) : null;
   const oneTap = isOneTap(trackable);
   const rating = isRatingShaped(trackable);
+  const durationInputUnit = defaultDurationInputUnit(trackable);
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [value, setValue] = useState<number | null>(trackable.defaultValue ?? null);
+  // For duration trackables, `value` is held in the *input* unit (hours or
+  // minutes); converted to canonical minutes at submit time.
+  const initialInputValue =
+    trackable.unit === "min" && durationInputUnit === "hours" && trackable.defaultValue !== undefined
+      ? trackable.defaultValue / 60
+      : (trackable.defaultValue ?? null);
+  const [value, setValue] = useState<number | null>(initialInputValue);
+  const [inputUnit, setInputUnit] = useState<"hours" | "minutes">(durationInputUnit);
   const [category, setCategory] = useState<string | undefined>(trackable.categories?.[0]);
   const [intensity, setIntensity] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
@@ -233,22 +284,29 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   // Reset form state on open so each log starts fresh.
   useEffect(() => {
     if (open) {
-      setValue(trackable.defaultValue ?? null);
+      setValue(initialInputValue);
+      setInputUnit(durationInputUnit);
       setCategory(trackable.categories?.[0]);
       setIntensity(null);
       setNotes("");
     }
-  }, [open, trackable]);
+  }, [open, trackable, initialInputValue, durationInputUnit]);
 
   const cancelEdit = useCallback(() => {
     setOpen(false);
   }, []);
 
-  const log = useCallback(async (data: Record<string, unknown>) => {
+  const writeEvent = useCallback(async (
+    eventEntries: LifeEntry[],
+    labels?: Record<string, string>,
+  ) => {
     if (!logId || !userId) return;
     setSaving(true);
     try {
-      await life.addEntry(logId, trackable.id, data, userId, { timestamp });
+      await life.addEvent(logId, trackable.id, eventEntries, userId, {
+        timestamp,
+        labels,
+      });
       setOpen(false);
     } catch (err) {
       console.error("Failed to log:", err);
@@ -258,27 +316,44 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     }
   }, [logId, userId, trackable.id, timestamp, life, message]);
 
-  // One-tap mode: clicking the card logs {value: 1} immediately.
+  // One-tap mode: clicking the card logs a single count entry immediately.
   const handleOneTap = useCallback(() => {
-    if (oneTap) log({ value: 1 });
-  }, [oneTap, log]);
+    if (!oneTap) return;
+    writeEvent([
+      { name: primaryName, type: "number", value: 1, unit: trackable.unit },
+    ]);
+  }, [oneTap, writeEvent, primaryName, trackable.unit]);
 
-  // Rating-shaped: clicking a number logs immediately.
+  // Rating-shaped: clicking a number logs immediately as one rating entry.
   const handleRatingClick = useCallback((n: number) => {
-    log({ value: n });
-  }, [log]);
+    writeEvent([
+      { name: primaryName, type: "number", value: n, unit: "rating", scale: 5 },
+    ]);
+  }, [writeEvent, primaryName]);
 
   const handleSubmit = useCallback(() => {
     if (value === null) {
       message.warning("Enter a value");
       return;
     }
-    const data: Record<string, unknown> = { value };
-    if (category) data.category = category;
-    if (intensity !== null) data.intensity = intensity;
-    if (notes.trim()) data.notes = notes.trim();
-    log(data);
-  }, [value, category, intensity, notes, log, message]);
+    // Convert hours→minutes for duration trackables when the input unit is hours.
+    const storedValue =
+      trackable.unit === "min" && inputUnit === "hours"
+        ? Math.round(value * 60)
+        : value;
+    const eventEntries: LifeEntry[] = [
+      { name: primaryName, type: "number", value: storedValue, unit: trackable.unit },
+    ];
+    if (intensity !== null) {
+      eventEntries.push({ name: "intensity", type: "number", value: intensity, unit: "rating", scale: 5 });
+    }
+    if (notes.trim()) {
+      eventEntries.push({ name: "notes", type: "text", value: notes.trim() });
+    }
+    const labels: Record<string, string> = {};
+    if (category) labels.category = category;
+    writeEvent(eventEntries, Object.keys(labels).length > 0 ? labels : undefined);
+  }, [value, inputUnit, category, intensity, notes, trackable.unit, primaryName, writeEvent, message]);
 
   // Submit on Enter when in the form.
   const formRef = useRef<HTMLDivElement>(null);
@@ -303,15 +378,19 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   );
 
   // Value badge — clickable for entries popover when there's logged data.
+  // The outer span swallows clicks so the popover trigger doesn't bubble up
+  // to the Card's onClick in one-tap mode (which would log another entry).
   const valueDisplay = (
     <>
-      {dayEntries.length > 0 ? (
-        <EntriesPopover entries={dayEntries} logId={logId}>
-          <ValueBadge $logged={true} $size={size} title={`${dayEntries.length} ${dayEntries.length === 1 ? "entry" : "entries"}`}>
-            {formatValue(agg, trackable)}
-            {dayEntries.length > 1 && <span>· {dayEntries.length}</span>}
-          </ValueBadge>
-        </EntriesPopover>
+      {dayEvents.length > 0 ? (
+        <span onClick={(e) => e.stopPropagation()}>
+          <EntriesPopover events={dayEvents} logId={logId}>
+            <ValueBadge $logged={true} $size={size} title={`${dayEvents.length} ${dayEvents.length === 1 ? "entry" : "entries"}`}>
+              {formatValueDisplay(agg, trackable)}
+              {dayEvents.length > 1 && <span>· {dayEvents.length}</span>}
+            </ValueBadge>
+          </EntriesPopover>
+        </span>
       ) : (
         <ValueBadge $logged={false} $size={size} as="span">—</ValueBadge>
       )}
@@ -323,10 +402,10 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   // One-tap mode: the whole card is a button.
   if (oneTap) {
     return (
-      <Card $size={size} $highlighted={dayEntries.length > 0} onClick={handleOneTap} style={{ cursor: "pointer" }}>
+      <Card $size={size} $highlighted={dayEvents.length > 0} onClick={handleOneTap} style={{ cursor: "pointer" }}>
         <HeaderRow>
           {headerLabel}
-          {dayEntries.length > 0 ? (
+          {dayEvents.length > 0 ? (
             valueDisplay
           ) : (
             <TapPlus $size={size} disabled={saving || !logId} aria-label="Log">
@@ -342,7 +421,7 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   if (rating) {
     const nums = [1, 2, 3, 4, 5];
     return (
-      <Card $size={size} $highlighted={dayEntries.length > 0}>
+      <Card $size={size} $highlighted={dayEvents.length > 0}>
         <HeaderRow>
           {headerLabel}
           {valueDisplay}
@@ -365,8 +444,9 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   }
 
   // Default mode: card collapsed → tap to open inline form.
+  const showHoursToggle = trackable.unit === "min";
   return (
-    <Card $size={size} $highlighted={dayEntries.length > 0}>
+    <Card $size={size} $highlighted={dayEvents.length > 0}>
       <HeaderRow>
         {headerLabel}
         {!open && (
@@ -382,15 +462,38 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
       {open && (
         <FormRow ref={formRef}>
           <InlineRow>
-            <FieldLabel style={{ minWidth: 60 }}>{trackable.unit}</FieldLabel>
+            <FieldLabel style={{ minWidth: 60 }}>
+              {showHoursToggle ? "Duration" : trackable.unit}
+            </FieldLabel>
             <InputNumber
               value={value}
               onChange={(v) => setValue(typeof v === "number" ? v : null)}
               min={0}
+              step={showHoursToggle && inputUnit === "hours" ? 0.5 : 1}
               autoFocus
               style={{ flex: 1 }}
               size={size === "compact" ? "small" : "middle"}
             />
+            {showHoursToggle && (
+              <Segmented
+                size="small"
+                options={[
+                  { label: "h", value: "hours" },
+                  { label: "m", value: "minutes" },
+                ]}
+                value={inputUnit}
+                onChange={(v) => {
+                  const next = v as "hours" | "minutes";
+                  if (next === inputUnit) return;
+                  // Convert the current value when the unit flips so the user
+                  // doesn't have to retype.
+                  if (value !== null) {
+                    setValue(next === "hours" ? Math.round((value / 60) * 100) / 100 : Math.round(value * 60));
+                  }
+                  setInputUnit(next);
+                }}
+              />
+            )}
           </InlineRow>
 
           {trackable.categories && (
@@ -439,13 +542,13 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
               Log
             </Button>
           </Actions>
-          {dayEntries.length > 0 && (
-            <Hint>{dayEntries.length} logged today{breakdown ? ` · ${breakdown}` : ""}</Hint>
+          {dayEvents.length > 0 && (
+            <Hint $muted>{dayEvents.length} logged today{breakdown ? ` · ${breakdown}` : ""}</Hint>
           )}
         </FormRow>
       )}
 
-      {!open && breakdown && <Hint style={{ marginTop: 4 }}>{breakdown}</Hint>}
+      {!open && breakdown && <Hint $muted style={{ marginTop: 4 }}>{breakdown}</Hint>}
     </Card>
   );
 }

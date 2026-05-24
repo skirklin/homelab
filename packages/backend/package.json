@@ -25,7 +25,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build": "tsc -b"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",

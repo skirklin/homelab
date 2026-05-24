@@ -1,0 +1,113 @@
+/// <reference path="../pb_data/types.d.ts" />
+
+/*
+ * PocketBase migration TEMPLATE.
+ *
+ * USAGE
+ *   cp _TEMPLATE.js.example $(date -u +%Y%m%d_%H%M%S)_<short_description>.js
+ *
+ * The `.example` extension keeps PB's migration loader from globbing this
+ * file — only top-level `*.js` under pb_migrations/ is run, and `*.example`
+ * isn't. (If you ever rename this to end in `.js`, give it an underscore
+ * prefix AND verify PB's regex empirically; v0.25 has surprised us before.)
+ *
+ * --------------------------------------------------------------------------
+ * THREE RULES YOU MUST KNOW BEFORE EDITING A PB MIGRATION
+ * --------------------------------------------------------------------------
+ *
+ * 1. FILENAME ORDERING IS LEXICOGRAPHIC AND SILENTLY SKIPS BACKWARDS.
+ *    PB v0.25 records the last-applied filename and quietly ignores any new
+ *    migration whose filename sorts before it. Numeric prefixes like
+ *    `0033_…` would overflow once we hit 0034; `YYYYMMDD_HHMMSS_…` is
+ *    chronologically monotonic forever. Use UTC.
+ *
+ *    See: memory `feedback_pb_migration_filename_ordering`.
+ *
+ * 2. ADD FIELDS WITH `col.fields.add(new Field({...}))`, NOT BY PUSHING TO
+ *    THE ARRAY.
+ *    Raw `col.fields.push({ name, type })` looks like it worked but the
+ *    field never makes it through PB's schema validation — you get a silent
+ *    no-op or a save that throws on the next collection load. Always:
+ *
+ *      col.fields.add(new Field({ type: "json", name: "entries", maxSize: 50000 }));
+ *
+ *    To drop a field:
+ *
+ *      const f = col.fields.getByName("old_field");
+ *      if (f) col.fields.removeById(f.id);
+ *
+ *    See: memory `feedback_pb_migration_field_syntax`.
+ *
+ * 3. READ JSON COLUMNS THROUGH `unwrapPbJson()`, NEVER VIA
+ *    `JSON.parse(JSON.stringify(record.get(jsonField)))`.
+ *    PB stores JSON columns as Go `[]byte`. In goja, `record.get()` can
+ *    surface them as a JS ARRAY of byte values (one number per UTF-8 byte),
+ *    not a parsed object. `JSON.parse(JSON.stringify(...))` round-trips
+ *    that into a JS array of numbers — and your per-row transform silently
+ *    treats numbers as object fields, destroying data on save.
+ *
+ *    This bug shipped on 2026-05-22 and corrupted ~all `life_events`,
+ *    `task_events`, and `recipe_events` rows. Recovery via PB backup +
+ *    char-code decode of the byte-array form took two days. The recovery
+ *    scripts live at services/scripts/historical/recover-life-events.ts
+ *    and services/scripts/historical/recover-recipe-event-notes.ts.
+ *
+ *    The right way:
+ *
+ *      const { unwrapPbJson } = require("./lib/pb-json.js");
+ *      const data = unwrapPbJson(r.get("data"));  // real object, always
+ *      // ... transform data ...
+ *      r.set("data", data);
+ *      app.save(r);
+ *
+ *    See: memories `feedback_pb_goja_sharp_edges`, `feedback_pb_migration_field_syntax`.
+ *
+ * --------------------------------------------------------------------------
+ * DELETE THE SAMPLE BELOW AND REPLACE WITH YOUR ACTUAL MIGRATION.
+ * --------------------------------------------------------------------------
+ */
+
+const { unwrapPbJson } = require("./lib/pb-json.js");
+
+migrate(
+  (app) => {
+    // ---- SAMPLE up() — DELETE ME ----------------------------------------
+    // Adds a `flavor` text field to a fictitious `widgets` collection,
+    // then rewrites every row's JSON `data` blob to default `flavor` to
+    // the `kind` field if missing.
+
+    const col = app.findCollectionByNameOrId("widgets");
+
+    // Field add — note `new Field({...})`, never raw push.
+    if (!col.fields.getByName("flavor")) {
+      col.fields.add(new Field({ type: "text", name: "flavor", max: 32 }));
+      app.save(col);
+    }
+
+    // Per-row transform — note `unwrapPbJson`, never round-trip stringify.
+    const rows = app.findRecordsByFilter("widgets", "1=1");
+    let rewritten = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const data = unwrapPbJson(r.get("data"));
+      if (!r.get("flavor") && typeof data.kind === "string") {
+        r.set("flavor", data.kind);
+        app.save(r);
+        rewritten++;
+      }
+    }
+    console.log(`  widgets: backfilled flavor on ${rewritten} row(s)`);
+  },
+  (app) => {
+    // ---- SAMPLE down() — DELETE ME --------------------------------------
+    // Drop the field; we don't bother un-setting `flavor` on existing rows
+    // because removing the column from the schema makes the value
+    // unreachable anyway.
+    const col = app.findCollectionByNameOrId("widgets");
+    const f = col.fields.getByName("flavor");
+    if (f) {
+      col.fields.removeById(f.id);
+      app.save(col);
+    }
+  },
+);

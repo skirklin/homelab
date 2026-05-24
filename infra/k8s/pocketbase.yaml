@@ -36,10 +36,14 @@ spec:
               mountPath: /pb/pb_data
           resources:
             requests:
-              memory: 64Mi
+              memory: 128Mi
               cpu: 50m
             limits:
-              memory: 256Mi
+              # Bumped from 256Mi → 1Gi after 2026-05-21 OOMKill during a
+              # post-deploy reconnect storm. Single-tenant VPS has plenty of
+              # headroom; the previous limit was conservative and started
+              # biting now that more clients + the api service connect at once.
+              memory: 1Gi
               cpu: 500m
       volumes:
         - name: data

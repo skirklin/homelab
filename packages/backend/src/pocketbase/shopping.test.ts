@@ -149,7 +149,7 @@ beforeEach(async () => {
   await clearAllMutations();
 });
 
-describe("PocketBaseShoppingBackend.subscribeToList cancellation", () => {
+describe("PocketBaseShoppingBackend", () => {
   it("does not leak realtime subscriptions when unsub runs before the inner promises resolve", async () => {
     // Race repro: subscribeToList kicks off four inner subscribe(...).then(u
     // => unsubs.push(u)) chains. If the caller's cleanup runs before any of
@@ -258,6 +258,137 @@ describe("PocketBaseShoppingBackend.subscribeToList cancellation", () => {
 
     // And the outer invariant from the first test still holds.
     expect(totalSubscribers(stub)).toBe(0);
+  });
+
+  it("renameHistoryEntry — no collision: updates in place", async () => {
+    const stub = makeStubPb();
+    stub.col("shopping_history").records.set("H1", {
+      id: "H1",
+      collectionId: "shopping_history",
+      collectionName: "shopping_history",
+      created: "",
+      updated: "",
+      list: "L1",
+      ingredient: "parsely",
+      category_id: "produce",
+      last_added: new Date("2026-05-01").toISOString(),
+    } as unknown as RecordModel);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+
+    await shopping.renameHistoryEntry("H1", "Parsley");
+    // Drain optimistic write
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+
+    const after = stub.col("shopping_history").records.get("H1");
+    expect(after?.ingredient).toBe("parsley");
+    // Source row should still exist (no merge)
+    expect(stub.col("shopping_history").records.has("H1")).toBe(true);
+  });
+
+  it("renameHistoryEntry — collision in same list: merges into canonical and deletes source", async () => {
+    const stub = makeStubPb();
+    const older = new Date("2026-04-01").toISOString();
+    const newer = new Date("2026-05-15").toISOString();
+    // Source row (the misspelled one) is the newer entry.
+    stub.col("shopping_history").records.set("H_src", {
+      id: "H_src",
+      collectionId: "shopping_history",
+      collectionName: "shopping_history",
+      created: "",
+      updated: "",
+      list: "L1",
+      ingredient: "parsely",
+      category_id: "produce-newer",
+      last_added: newer,
+    } as unknown as RecordModel);
+    // Canonical row (correctly spelled) is older.
+    stub.col("shopping_history").records.set("H_canon", {
+      id: "H_canon",
+      collectionId: "shopping_history",
+      collectionName: "shopping_history",
+      created: "",
+      updated: "",
+      list: "L1",
+      ingredient: "parsley",
+      category_id: "produce-older",
+      last_added: older,
+    } as unknown as RecordModel);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+
+    // Seed the optimistic view by performing a no-op update so the wpb queue
+    // observes both rows. The simpler path is to just create them through wpb,
+    // but the stub already has them on disk. The renameHistoryEntry impl
+    // uses pb().getFirstListItem as the fallback when the view is empty —
+    // but our stub's getFirstListItem always 404s. So we seed the wpb view
+    // explicitly via update (which sources the record into the queue).
+    await wpb.collection("shopping_history").update("H_canon", { /* no-op refresh */ });
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+
+    await shopping.renameHistoryEntry("H_src", "Parsley");
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+
+    // Source row deleted
+    expect(stub.col("shopping_history").records.has("H_src")).toBe(false);
+    // Canonical row took the newer last_added and the newer side's category
+    const merged = stub.col("shopping_history").records.get("H_canon");
+    expect(merged?.last_added).toBe(newer);
+    expect(merged?.category_id).toBe("produce-newer");
+    expect(merged?.ingredient).toBe("parsley");
+  });
+
+  it("renameHistoryEntry — same normalized value: no-op", async () => {
+    const stub = makeStubPb();
+    const orig = new Date("2026-05-01").toISOString();
+    stub.col("shopping_history").records.set("H1", {
+      id: "H1",
+      collectionId: "shopping_history",
+      collectionName: "shopping_history",
+      created: "",
+      updated: "",
+      list: "L1",
+      ingredient: "parsley",
+      category_id: "produce",
+      last_added: orig,
+    } as unknown as RecordModel);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+
+    // "Parsley" normalizes to "parsley" — already the row's ingredient.
+    await shopping.renameHistoryEntry("H1", "Parsley");
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+
+    const after = stub.col("shopping_history").records.get("H1");
+    expect(after?.ingredient).toBe("parsley");
+    expect(after?.last_added).toBe(orig);
+    expect(after?.category_id).toBe("produce");
+  });
+
+  it("deleteHistoryEntry removes the row", async () => {
+    const stub = makeStubPb();
+    stub.col("shopping_history").records.set("H1", {
+      id: "H1",
+      collectionId: "shopping_history",
+      collectionName: "shopping_history",
+      created: "",
+      updated: "",
+      list: "L1",
+      ingredient: "parsley",
+      category_id: "produce",
+      last_added: new Date().toISOString(),
+    } as unknown as RecordModel);
+
+    const wpb = wrapPocketBase(() => stub.pb);
+    const shopping = new PocketBaseShoppingBackend(() => stub.pb, wpb);
+
+    await shopping.deleteHistoryEntry("H1");
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+
+    expect(stub.col("shopping_history").records.has("H1")).toBe(false);
   });
 
   it("normal teardown after the promises resolve still releases everything", async () => {

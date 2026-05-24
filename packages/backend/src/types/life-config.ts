@@ -13,8 +13,9 @@
  * value-shaped events under `subject_id = trackableId`, so they flow into
  * the same series as manually-logged ratings — no parallel "sample" table.
  *
- * If we ever want per-user opt-out, add a `random_samples_enabled` boolean
- * on `life_logs` and gate on that — do NOT resurrect the manifest JSON column.
+ * Per-user opt-in lives on `life_logs.random_sampling_enabled`
+ * (20260522_221130_life_random_sampling_enabled) — do NOT resurrect the
+ * manifest JSON column.
  */
 
 export interface LifeSampleQuestion {

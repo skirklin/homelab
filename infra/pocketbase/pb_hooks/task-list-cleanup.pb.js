@@ -30,11 +30,14 @@
  *       are 15-char alnum so substring false positives are negligible, but
  *       JS re-checks anyway so we're correct either way.
  *
- *   (b) record.get on a JSON-object field returns a goja-wrapped object
- *       whose mutations don't always stick. Copy into a fresh plain JS
- *       object before mutating. We use JSON.parse(JSON.stringify(raw)) —
- *       slower than a shallow clone but bulletproof for these tiny maps,
- *       and matches the recipe-box hook's "copy defensively" stance.
+ *   (b) record.get on a JSON-object field can surface as a goja []byte
+ *       (one number per UTF-8 byte of the stored JSON) instead of a parsed
+ *       object — the 2026-05-22 incident class. We previously used
+ *       `JSON.parse(JSON.stringify(raw))` and called it "bulletproof"; it
+ *       was not (the round-trip preserves the byte-array shape, then
+ *       Object.keys silently returns the numeric indices). We now inline
+ *       an unwrap that handles all three shapes (object / string / byte
+ *       array). See infra/pocketbase/pb_migrations/lib/pb-json.js.
  *
  *   (c) Module-scope helpers aren't reachable from inside the callback;
  *       inline the helper.
@@ -44,14 +47,22 @@
  */
 onRecordAfterDeleteSuccess((e) => {
   function toPlainObject(raw) {
-    if (!raw) return {};
-    try {
-      const copy = JSON.parse(JSON.stringify(raw));
-      if (copy && typeof copy === "object" && !Array.isArray(copy)) return copy;
-      return {};
-    } catch (_) {
+    if (raw == null) return {};
+    if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try { return JSON.parse(raw); } catch (_) { return {}; }
+    }
+    if (Array.isArray(raw)) {
+      // goja []byte form: array of UTF-8 byte values. Decode.
+      var s = "";
+      for (var i = 0; i < raw.length; i++) s += String.fromCharCode(raw[i]);
+      try {
+        const parsed = JSON.parse(s);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+      } catch (_) { /* fall through */ }
       return {};
     }
+    return {};
   }
 
   const listId = e.record.id;

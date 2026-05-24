@@ -1,11 +1,12 @@
 /**
  * Life tracker backend interface.
  *
- * Covers: log management and entries/events. Widget config lives in the
- * frontend as a code-defined manifest — no DB-driven config.
+ * Covers: log management and events. The trackable / session manifest is
+ * code-defined in the frontend (apps/life/.../manifest.ts); no DB-driven
+ * config.
  */
 import type { Unsubscribe } from "../types/common";
-import type { LifeLog, LifeEntry } from "../types/life";
+import type { LifeLog, LifeEvent, LifeEntry } from "../types/life";
 
 export interface LifeBackend {
   // --- Log ---
@@ -24,20 +25,56 @@ export interface LifeBackend {
     times: { morning?: string | null; evening?: string | null; weekly?: string | null },
   ): Promise<void>;
 
-  // --- Entries ---
+  /**
+   * Opt the log in or out of random-sample push notifications. Gates the
+   * per-5-minute cron in `services/api/src/lib/notifications/life.ts` — when
+   * disabled, no schedule is generated and no pushes fire.
+   */
+  setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void>;
 
-  addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string>;
-  updateEntry(entryId: string, updates: { timestamp?: Date; data?: Record<string, unknown>; notes?: string }): Promise<void>;
-  deleteEntry(entryId: string): Promise<void>;
+  // --- Events ---
+
+  /**
+   * Create a life event under the given log.
+   *
+   * `entries` carries every named typed value captured at this moment.
+   * `labels` are categorical dimensions (`source`, `category`, etc. — see
+   * the LifeEvent docstring for the convention list).
+   *
+   * Returns the new event's id.
+   */
+  addEvent(
+    logId: string,
+    subjectId: string,
+    entries: LifeEntry[],
+    userId: string,
+    options?: { timestamp?: Date; endTime?: Date; labels?: Record<string, string> },
+  ): Promise<string>;
+
+  /**
+   * Patch an existing event. Each provided field is set wholesale (no
+   * merging of `entries`/`labels` arrays — pass the complete new value).
+   */
+  updateEvent(
+    eventId: string,
+    updates: {
+      timestamp?: Date;
+      endTime?: Date | null;
+      entries?: LifeEntry[];
+      labels?: Record<string, string> | null;
+    },
+  ): Promise<void>;
+
+  deleteEvent(eventId: string): Promise<void>;
 
   // --- Subscriptions ---
 
   /**
-   * Subscribe to all entries for a life log.
+   * Subscribe to all events for a life log.
    * Callback receives full current state on initial load and after every change.
    */
-  subscribeToEntries(
+  subscribeToEvents(
     logId: string,
-    onEntries: (entries: LifeEntry[]) => void,
+    onEvents: (events: LifeEvent[]) => void,
   ): Unsubscribe;
 }

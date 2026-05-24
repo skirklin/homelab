@@ -121,6 +121,18 @@ data:
         conditions:
           - "[STATUS] == 200"
 
+      # Backup freshness — fails if the latest daily-* PB backup is older
+      # than 25h. 25 (not 24) gives the pb-backup-daily CronJob some slack
+      # if it lags by minutes. Endpoint is public (no auth) and only
+      # returns age + key, no record contents. See services/api/src/index.ts.
+      - name: pb-backups-fresh
+        group: data
+        url: https://api.kirkl.in/fn/health/backups
+        interval: 5m
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY].age_hours < 25"
+
       # --- internal (cluster-only) ---
       - name: beszel-hub
         group: monitor
@@ -149,45 +161,6 @@ data:
         interval: 60s
         conditions:
           - "[STATUS] == 200"
-
-      # --- supabase (tailnet-internal during Phase 1 migration) ---
-      - name: supabase-auth
-        group: supabase
-        url: http://supabase-kong.homelab.svc.cluster.local:8000/auth/v1/health
-        interval: 60s
-        conditions:
-          - "[STATUS] == 200"
-
-      - name: supabase-rest
-        group: supabase
-        url: http://supabase-rest.homelab.svc.cluster.local:3000/
-        interval: 60s
-        conditions:
-          - "[STATUS] == 200"
-
-      - name: supabase-realtime
-        group: supabase
-        # Realtime's per-tenant health endpoint requires a seeded tenant
-        # (Phase 2 work). For Phase 1, settle for "server is responding HTTP"
-        # — any 2xx/4xx (i.e., not a connection refusal or 5xx) means alive.
-        url: http://supabase-realtime.homelab.svc.cluster.local:4000/
-        interval: 60s
-        conditions:
-          - "[STATUS] < 500"
-
-      - name: supabase-studio
-        group: supabase
-        url: http://supabase-studio.homelab.svc.cluster.local:3000/
-        interval: 60s
-        conditions:
-          - "[STATUS] == 200"
-
-      - name: supabase-kong
-        group: supabase
-        url: http://supabase-kong.homelab.svc.cluster.local:8000/
-        interval: 60s
-        conditions:
-          - "[STATUS] != 500"
 
 ---
 apiVersion: apps/v1

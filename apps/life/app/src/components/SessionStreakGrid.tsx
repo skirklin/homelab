@@ -1,12 +1,22 @@
 /**
- * GitHub-contributions-style year heatmap for life session entries.
+ * Last-8-weeks session grid for the life dashboard StreakCard.
  *
- * 53 weeks × 7 days, columns = weeks (oldest → newest left → right), rows =
- * day-of-week (Sun on top). Intensity per day = (morning_session ? 1 : 0) +
- * (evening_session ? 1 : 0) ∈ {0, 1, 2}.
+ * 8 columns × 7 rows, columns = weeks (oldest → newest left → right), rows =
+ * day-of-week (Sun on top). The rightmost column ends at the current week, so
+ * "today" is always visible at its weekday row.
  *
- * Pure CSS grid; no chart library. Tooltip via the antd Tooltip wrapping each
- * cell — light on the DOM since 53*7 = 371 elements is fine.
+ * Each cell is split along the anti-diagonal (top-right → bottom-left): the
+ * top-left triangle = morning session, the bottom-right triangle = evening
+ * session. Each half is either teal (logged) or muted (not logged). A fully
+ * muted cell = nothing logged that day; a fully teal cell = both sessions
+ * logged.
+ *
+ * Pure CSS grid; the diagonal split is a single hard-stop linear-gradient. No
+ * chart library, no horizontal scrolling — the grid is sized to fit any
+ * StreakCard width.
+ *
+ * Also exports `computeStreaks` + the `SessionStreaks` shape, which the
+ * dashboard uses to render the streak counters above the grid.
  */
 import { useMemo } from "react";
 import styled from "styled-components";
@@ -15,7 +25,21 @@ import dayjs from "dayjs";
 import { sessionSubjectId, type Session } from "../manifest";
 import type { LogEntry } from "../types";
 
-const WEEKS = 53;
+const WEEKS = 8;
+const CELL_PX = 14;
+const GAP_PX = 3;
+const LOGGED_COLOR = "#13c2c2";
+const MUTED_COLOR = "var(--color-bg-muted, #f0f0f0)";
+
+/**
+ * `linear-gradient(135deg, A 50%, B 50%)` puts a hard split along the
+ * anti-diagonal: A fills the top-left triangle, B fills the bottom-right.
+ */
+function splitBg(morning: boolean, evening: boolean): string {
+  const top = morning ? LOGGED_COLOR : MUTED_COLOR;
+  const bot = evening ? LOGGED_COLOR : MUTED_COLOR;
+  return `linear-gradient(135deg, ${top} 50%, ${bot} 50%)`;
+}
 
 const Wrap = styled.div`
   display: flex;
@@ -25,49 +49,39 @@ const Wrap = styled.div`
 
 const Grid = styled.div`
   display: grid;
-  grid-template-rows: repeat(7, 12px);
+  grid-template-rows: repeat(7, ${CELL_PX}px);
   grid-auto-flow: column;
-  grid-auto-columns: 12px;
-  gap: 3px;
-  /* Soft overflow on narrow screens — the grid is wider than mobile. */
-  overflow-x: auto;
-  padding-bottom: 2px;
+  grid-auto-columns: ${CELL_PX}px;
+  gap: ${GAP_PX}px;
+  /* 8 * 14 + 7 * 3 = 133px — fits any StreakCard width. */
+  width: max-content;
+  align-self: flex-end;
 `;
 
-const Cell = styled.div<{ $level: 0 | 1 | 2; $today: boolean }>`
-  width: 12px;
-  height: 12px;
+const Cell = styled.div<{ $bg: string; $today: boolean; $hidden: boolean }>`
+  width: ${CELL_PX}px;
+  height: ${CELL_PX}px;
   border-radius: 2px;
-  background: ${(p) =>
-    p.$level === 2
-      ? "#13c2c2"
-      : p.$level === 1
-        ? "rgba(19, 194, 194, 0.45)"
-        : "var(--color-bg-muted, #f0f0f0)"};
+  background: ${(p) => p.$bg};
   border: 1px solid ${(p) => (p.$today ? "var(--color-text, #333)" : "transparent")};
-  cursor: ${(p) => (p.$level > 0 ? "default" : "default")};
+  visibility: ${(p) => (p.$hidden ? "hidden" : "visible")};
 `;
 
 const Legend = styled.div`
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   justify-content: flex-end;
 `;
 
-const LegendCell = styled.span<{ $level: 0 | 1 | 2 }>`
+const LegendCell = styled.span<{ $bg: string }>`
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 2px;
-  background: ${(p) =>
-    p.$level === 2
-      ? "#13c2c2"
-      : p.$level === 1
-        ? "rgba(19, 194, 194, 0.45)"
-        : "var(--color-bg-muted, #f0f0f0)"};
+  background: ${(p) => p.$bg};
 `;
 
 function dateKey(d: Date): string {
@@ -85,22 +99,21 @@ interface DayData {
   evening: boolean;
 }
 
-interface YearHeatmapProps {
+interface SessionStreakGridProps {
   entries: LogEntry[];
 }
 
-export function YearHeatmap({ entries }: YearHeatmapProps) {
+export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
   const morningSubject = sessionSubjectId("morning");
   const eveningSubject = sessionSubjectId("evening");
 
-  // Walk back from today to the same weekday WEEKS weeks ago so the rightmost
-  // column ends on today. Then pad the start back to Sunday so columns are
-  // proper weeks (Sun→Sat).
+  // Build a rectangular 8-week × 7-day window ending on the Saturday of the
+  // current week. Days past today are rendered as hidden cells so the grid
+  // stays rectangular and "today" lands at its actual weekday row.
   const cells = useMemo<DayData[]>(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Index entries by date for O(1) lookup.
     const morningByDay = new Set<string>();
     const eveningByDay = new Set<string>();
     for (const e of entries) {
@@ -108,7 +121,6 @@ export function YearHeatmap({ entries }: YearHeatmapProps) {
       else if (e.subjectId === eveningSubject) eveningByDay.add(dateKey(e.timestamp));
     }
 
-    // End at end-of-current-week (Saturday) so the grid is rectangular.
     const endDate = new Date(today);
     const daysToSat = 6 - endDate.getDay(); // Sun=0..Sat=6
     endDate.setDate(endDate.getDate() + daysToSat);
@@ -136,31 +148,38 @@ export function YearHeatmap({ entries }: YearHeatmapProps) {
       <Grid>
         {cells.map((c) => {
           const inFuture = c.date.getTime() > Date.now();
-          const level: 0 | 1 | 2 = (c.morning ? 1 : 0) + (c.evening ? 1 : 0) as 0 | 1 | 2;
           if (inFuture) {
-            return <Cell key={c.key} $level={0} $today={false} style={{ visibility: "hidden" }} />;
+            return (
+              <Cell
+                key={c.key}
+                $bg={splitBg(false, false)}
+                $today={false}
+                $hidden
+              />
+            );
           }
           const labelDate = dayjs(c.date).format("ddd, MMM D, YYYY");
-          const sessions: string[] = [];
-          if (c.morning) sessions.push("morning");
-          if (c.evening) sessions.push("evening");
-          const tip =
-            sessions.length === 0
-              ? `${labelDate} — nothing logged`
-              : `${labelDate} — ${sessions.join(" + ")}`;
+          let tip: string;
+          if (c.morning && c.evening) tip = `${labelDate} — morning + evening`;
+          else if (c.morning) tip = `${labelDate} — morning only`;
+          else if (c.evening) tip = `${labelDate} — evening only`;
+          else tip = `${labelDate} — nothing logged`;
           return (
             <Tooltip key={c.key} title={tip} mouseEnterDelay={0.1}>
-              <Cell $level={level} $today={c.key === todayKey} />
+              <Cell
+                $bg={splitBg(c.morning, c.evening)}
+                $today={c.key === todayKey}
+                $hidden={false}
+              />
             </Tooltip>
           );
         })}
       </Grid>
       <Legend>
-        <span>Less</span>
-        <LegendCell $level={0} />
-        <LegendCell $level={1} />
-        <LegendCell $level={2} />
-        <span>More</span>
+        <LegendCell $bg={splitBg(true, false)} />
+        <span>morning</span>
+        <LegendCell $bg={splitBg(false, true)} />
+        <span>evening</span>
       </Legend>
     </Wrap>
   );

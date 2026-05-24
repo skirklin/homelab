@@ -1,13 +1,17 @@
 /**
  * PocketBase implementation of LifeBackend.
  *
- * Writes route through the optimistic wrapper. Entries subscription uses
- * wpb so optimistic mutations fan to the right log.
+ * Writes route through the optimistic wrapper. Event subscription uses wpb so
+ * optimistic mutations fan to the right log.
+ *
+ * Schema reference: migration 20260522_221157_life_event_unified_shape.js.
+ * Rows have `entries` (json[]), `labels` (json|null), `end_time` (date|null);
+ * the old free-form `data` column was dropped in the same migration.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { LifeBackend } from "../interfaces/life";
-import type { LifeLog, LifeEntry } from "../types/life";
+import type { LifeLog, LifeEvent, LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
@@ -16,6 +20,9 @@ function logFromRecord(r: RecordModel): LifeLog {
   return {
     id: r.id,
     sampleSchedule: r.sample_schedule || null,
+    // Coerce defensively — pre-migration rows surface as undefined for a
+    // brief window before 20260522_221130 runs on a given environment.
+    randomSamplingEnabled: !!r.random_sampling_enabled,
     morningReminderTime: r.morning_reminder_time || null,
     eveningReminderTime: r.evening_reminder_time || null,
     weeklyReminderTime: r.weekly_reminder_time || null,
@@ -25,15 +32,39 @@ function logFromRecord(r: RecordModel): LifeLog {
   };
 }
 
-function entryFromRecord(r: RecordModel): LifeEntry {
+function eventFromRecord(r: RecordModel): LifeEvent {
+  // `entries` should be an array post-migration; coerce defensively so a
+  // half-deployed env or a malformed seed row can't crash the UI.
+  const rawEntries = Array.isArray(r.entries) ? r.entries : [];
+  const entries: LifeEntry[] = [];
+  for (const raw of rawEntries) {
+    if (!raw || typeof raw !== "object") continue;
+    const e = raw as Record<string, unknown>;
+    if (typeof e.name !== "string") continue;
+    if (e.type === "text" && typeof e.value === "string") {
+      entries.push({ name: e.name, type: "text", value: e.value });
+    } else if (e.type === "number" && typeof e.value === "number" && typeof e.unit === "string") {
+      const out: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
+      if (typeof e.scale === "number") out.scale = e.scale;
+      entries.push(out);
+    } else if (e.type === "bool" && typeof e.value === "boolean") {
+      entries.push({ name: e.name, type: "bool", value: e.value });
+    }
+  }
+
+  const labels = (r.labels && typeof r.labels === "object" && !Array.isArray(r.labels))
+    ? (r.labels as Record<string, string>)
+    : undefined;
+
   return {
     id: r.id,
     log: r.log,
-    widgetId: r.subject_id || "",
+    subjectId: r.subject_id || "",
     timestamp: new Date(r.timestamp),
+    endTime: r.end_time ? new Date(r.end_time) : undefined,
+    entries,
+    labels,
     createdBy: r.created_by || "",
-    data: r.data || {},
-    notes: r.notes || undefined,
     created: r.created,
     updated: r.updated,
   };
@@ -89,62 +120,78 @@ export class PocketBaseLifeBackend implements LifeBackend {
     await this.wpb.collection("life_logs").update(logId, patch);
   }
 
-  async addEntry(logId: string, widgetId: string, data: Record<string, unknown>, userId: string, options?: { timestamp?: Date; notes?: string }): Promise<string> {
-    const eventData: Record<string, unknown> = { ...data };
-    if (options?.notes) {
-      eventData.notes = options.notes;
-    }
+  async setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void> {
+    await this.wpb.collection("life_logs").update(logId, {
+      random_sampling_enabled: enabled,
+    });
+  }
+
+  async addEvent(
+    logId: string,
+    subjectId: string,
+    entries: LifeEntry[],
+    userId: string,
+    options?: { timestamp?: Date; endTime?: Date; labels?: Record<string, string> },
+  ): Promise<string> {
     const id = newId();
-    await this.wpb.collection("life_events").create({
+    const payload: Record<string, unknown> = {
       id,
       log: logId,
-      subject_id: widgetId,
+      subject_id: subjectId,
       timestamp: (options?.timestamp ?? new Date()).toISOString(),
       created_by: userId,
-      data: eventData,
-    });
+      entries,
+    };
+    if (options?.endTime) payload.end_time = options.endTime.toISOString();
+    if (options?.labels && Object.keys(options.labels).length > 0) payload.labels = options.labels;
+    await this.wpb.collection("life_events").create(payload);
     return id;
   }
 
-  async updateEntry(entryId: string, updates: { timestamp?: Date; data?: Record<string, unknown>; notes?: string }): Promise<void> {
-    const record = await this.pb().collection("life_events").getOne(entryId);
+  async updateEvent(
+    eventId: string,
+    updates: {
+      timestamp?: Date;
+      endTime?: Date | null;
+      entries?: LifeEntry[];
+      labels?: Record<string, string> | null;
+    },
+  ): Promise<void> {
     const patch: Record<string, unknown> = {};
     if (updates.timestamp) patch.timestamp = updates.timestamp.toISOString();
-    if (updates.data) {
-      const merged = { ...(record.data || {}), ...updates.data };
-      if (updates.notes !== undefined) merged.notes = updates.notes;
-      patch.data = merged;
-    } else if (updates.notes !== undefined) {
-      // Merge notes into existing data
-      patch.data = { ...(record.data || {}), notes: updates.notes };
+    if (updates.endTime !== undefined) {
+      patch.end_time = updates.endTime ? updates.endTime.toISOString() : null;
     }
-    await this.wpb.collection("life_events").update(entryId, patch);
+    if (updates.entries !== undefined) patch.entries = updates.entries;
+    if (updates.labels !== undefined) patch.labels = updates.labels;
+    if (Object.keys(patch).length === 0) return;
+    await this.wpb.collection("life_events").update(eventId, patch);
   }
 
-  async deleteEntry(entryId: string): Promise<void> {
-    await this.wpb.collection("life_events").delete(entryId);
+  async deleteEvent(eventId: string): Promise<void> {
+    await this.wpb.collection("life_events").delete(eventId);
   }
 
-  subscribeToEntries(logId: string, onEntries: (entries: LifeEntry[]) => void): Unsubscribe {
+  subscribeToEvents(logId: string, onEvents: (events: LifeEvent[]) => void): Unsubscribe {
     let cancelled = false;
-    const entriesMap = new Map<string, LifeEntry>();
+    const eventsMap = new Map<string, LifeEvent>();
 
     const emit = () => {
-      if (!cancelled) onEntries(Array.from(entriesMap.values()));
+      if (!cancelled) onEvents(Array.from(eventsMap.values()));
     };
 
     // wpb.subscribe with a filter auto-loads matching records, seeds the
     // optimistic queue, and delivers each as a "create" event before
     // forwarding live updates. We defer the first emit until subscribe()
-    // resolves so consumers see one batched onEntries instead of N.
+    // resolves so consumers see one batched onEvents instead of N.
     let initialDone = false;
     let unsub: (() => void) | undefined;
     this.wpb.collection("life_events").subscribe("*", (e) => {
       if (cancelled || e.record.log !== logId) return;
       if (e.action === "delete") {
-        entriesMap.delete(e.record.id);
+        eventsMap.delete(e.record.id);
       } else {
-        entriesMap.set(e.record.id, entryFromRecord(e.record));
+        eventsMap.set(e.record.id, eventFromRecord(e.record));
       }
       if (initialDone) emit();
     }, {

@@ -45,8 +45,11 @@ export function completionFromBackend(c: BackendTaskCompletion): Completion {
     id: c.id,
     subjectId: c.subjectId,
     timestamp: c.timestamp,
-    createdAt: c.createdAt,
+    endTime: c.endTime,
+    entries: c.entries,
+    labels: c.labels,
     createdBy: c.createdBy,
-    data: c.data,
+    created: c.created,
+    updated: c.updated,
   };
 }

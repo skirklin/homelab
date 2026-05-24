@@ -13,13 +13,11 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
-  LineChart,
-  Line,
 } from "recharts";
 import { useLifeContext } from "../life-context";
 import { TRACKABLES, type Trackable } from "../manifest";
 import type { LogEntry } from "../types";
-import { normalizeEntries, type NormalizedEvent } from "../lib/legacy-adapter";
+import { aggregationFor, primaryEntryName } from "../lib/format";
 
 const Container = styled.div`
   max-width: 800px;
@@ -174,25 +172,33 @@ interface DayData {
   value: number;
 }
 
-/** Compute one day's aggregated value from matching normalized events. */
-function aggregateDay(events: NormalizedEvent[], agg: Trackable["aggregation"]): number {
-  if (events.length === 0) return 0;
-  const values = events
-    .map((e) => e.data.value)
-    .filter((v): v is number => typeof v === "number");
-  if (values.length === 0) return 0;
-  switch (agg) {
-    case "sum":
-      return values.reduce((a, b) => a + b, 0);
-    case "avg":
-      return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
-    case "last":
-      // events arrive newest-first
-      return values[0];
+/**
+ * Collect the primary numeric values for a trackable from a set of events.
+ * `primaryEntryName(trackableId)` tells us which entry name carries the
+ * trackable's main number; we pull every matching value across events.
+ */
+function collectValues(events: LogEntry[], trackableId: string): number[] {
+  const name = primaryEntryName(trackableId);
+  const out: number[] = [];
+  for (const ev of events) {
+    if (ev.subjectId !== trackableId) continue;
+    for (const entry of ev.entries) {
+      if (entry.type === "number" && entry.name === name) out.push(entry.value);
+    }
   }
+  return out;
 }
 
-function getMonthData(entries: NormalizedEvent[], trackableId: string, year: number, month: number, agg: Trackable["aggregation"]): DayData[] {
+/** Aggregate a list of values per the unit's policy. */
+function aggregateValues(values: number[], unit: string): number {
+  if (values.length === 0) return 0;
+  if (aggregationFor(unit) === "avg") {
+    return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
+  }
+  return values.reduce((a, b) => a + b, 0);
+}
+
+function getMonthData(entries: LogEntry[], trackable: Trackable, year: number, month: number): DayData[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
@@ -206,15 +212,19 @@ function getMonthData(entries: NormalizedEvent[], trackableId: string, year: num
     const dayStart = new Date(year, month, day, 0, 0, 0, 0);
     const dayEnd = new Date(year, month, day, 23, 59, 59, 999);
 
-    const dayEntries = entries.filter(
-      (e) => e.subjectId === trackableId && e.timestamp >= dayStart && e.timestamp <= dayEnd,
+    const dayEvents = entries.filter(
+      (e) => e.subjectId === trackable.id && e.timestamp >= dayStart && e.timestamp <= dayEnd,
     );
-    data.push({ date, count: dayEntries.length, value: aggregateDay(dayEntries, agg) });
+    data.push({
+      date,
+      count: dayEvents.length,
+      value: aggregateValues(collectValues(dayEvents, trackable.id), trackable.unit),
+    });
   }
   return data;
 }
 
-function getLast30DaysData(entries: NormalizedEvent[], trackableId: string, agg: Trackable["aggregation"]): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: LogEntry[], trackable: Trackable): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
   const today = new Date();
 
@@ -225,19 +235,19 @@ function getLast30DaysData(entries: NormalizedEvent[], trackableId: string, agg:
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
 
-    const dayEntries = entries.filter(
-      (e) => e.subjectId === trackableId && e.timestamp >= date && e.timestamp <= dayEnd,
+    const dayEvents = entries.filter(
+      (e) => e.subjectId === trackable.id && e.timestamp >= date && e.timestamp <= dayEnd,
     );
     data.push({
       date: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      value: aggregateDay(dayEntries, agg),
-      count: dayEntries.length,
+      value: aggregateValues(collectValues(dayEvents, trackable.id), trackable.unit),
+      count: dayEvents.length,
     });
   }
   return data;
 }
 
-function getWeeklyData(entries: NormalizedEvent[], trackableId: string, agg: Trackable["aggregation"]): { week: string; value: number; count: number }[] {
+function getWeeklyData(entries: LogEntry[], trackable: Trackable): { week: string; value: number; count: number }[] {
   const data: { week: string; value: number; count: number }[] = [];
   const today = new Date();
 
@@ -250,41 +260,26 @@ function getWeeklyData(entries: NormalizedEvent[], trackableId: string, agg: Tra
     weekEnd.setDate(weekEnd.getDate() + 6);
     weekEnd.setHours(23, 59, 59, 999);
 
-    const weekEntries = entries.filter(
-      (e) => e.subjectId === trackableId && e.timestamp >= weekStart && e.timestamp <= weekEnd,
+    const weekEvents = entries.filter(
+      (e) => e.subjectId === trackable.id && e.timestamp >= weekStart && e.timestamp <= weekEnd,
     );
-
-    // Weekly view: sum→sum-of-days, avg→avg-of-days, last→last value in week.
-    let weekValue = 0;
-    if (agg === "sum") {
-      weekValue = weekEntries
-        .map((e) => e.data.value)
-        .filter((v): v is number => typeof v === "number")
-        .reduce((a, b) => a + b, 0);
-    } else if (agg === "avg") {
-      const vals = weekEntries.map((e) => e.data.value).filter((v): v is number => typeof v === "number");
-      weekValue = vals.length > 0 ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : 0;
-    } else {
-      const vals = weekEntries.map((e) => e.data.value).filter((v): v is number => typeof v === "number");
-      weekValue = vals[0] ?? 0;
-    }
 
     data.push({
       week: weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      value: weekValue,
-      count: weekEntries.length,
+      value: aggregateValues(collectValues(weekEvents, trackable.id), trackable.unit),
+      count: weekEvents.length,
     });
   }
   return data;
 }
 
-function CalendarHeatMap({ entries, trackable }: { entries: NormalizedEvent[]; trackable: Trackable }) {
+function CalendarHeatMap({ entries, trackable }: { entries: LogEntry[]; trackable: Trackable }) {
   const [viewDate, setViewDate] = useState(new Date());
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
   const monthData = useMemo(
-    () => getMonthData(entries, trackable.id, year, month, trackable.aggregation),
+    () => getMonthData(entries, trackable, year, month),
     [entries, trackable, year, month],
   );
   const today = new Date();
@@ -299,6 +294,7 @@ function CalendarHeatMap({ entries, trackable }: { entries: NormalizedEvent[]; t
   const validDays = monthData.filter((d) => d.count >= 0);
   const totalValue = validDays.reduce((sum, d) => sum + d.value, 0);
   const daysWithActivity = validDays.filter((d) => d.count > 0).length;
+  const isAvg = aggregationFor(trackable.unit) === "avg";
 
   let currentStreak = 0;
   const todayIndex = validDays.findIndex((d) => d.date.toDateString() === today.toDateString());
@@ -313,8 +309,8 @@ function CalendarHeatMap({ entries, trackable }: { entries: NormalizedEvent[]; t
     <CalendarContainer>
       <StatsGrid>
         <StatCard>
-          <StatValue>{trackable.aggregation === "avg" ? (totalValue / Math.max(daysWithActivity, 1)).toFixed(1) : totalValue}</StatValue>
-          <StatLabel>{trackable.aggregation === "avg" ? "Monthly avg" : `Monthly total (${trackable.unit})`}</StatLabel>
+          <StatValue>{isAvg ? (totalValue / Math.max(daysWithActivity, 1)).toFixed(1) : totalValue}</StatValue>
+          <StatLabel>{isAvg ? "Monthly avg" : `Monthly total (${trackable.unit})`}</StatLabel>
         </StatCard>
         <StatCard>
           <StatValue>{daysWithActivity}</StatValue>
@@ -358,9 +354,9 @@ function CalendarHeatMap({ entries, trackable }: { entries: NormalizedEvent[]; t
   );
 }
 
-function TrendChart({ entries, trackable }: { entries: NormalizedEvent[]; trackable: Trackable }) {
+function TrendChart({ entries, trackable }: { entries: LogEntry[]; trackable: Trackable }) {
   const data = useMemo(
-    () => getLast30DaysData(entries, trackable.id, trackable.aggregation),
+    () => getLast30DaysData(entries, trackable),
     [entries, trackable],
   );
 
@@ -369,11 +365,8 @@ function TrendChart({ entries, trackable }: { entries: NormalizedEvent[]; tracka
   const daysWithData = nonZero.length;
   const maxVal = Math.max(...nonZero, 0);
 
-  // Chart shape per aggregation: sum→bar, avg→area, last→stepped line.
-  const ChartTag =
-    trackable.aggregation === "sum" ? "bar"
-      : trackable.aggregation === "avg" ? "area"
-        : "step";
+  // Chart shape per aggregation: sum→bar, avg→area.
+  const ChartTag = aggregationFor(trackable.unit) === "sum" ? "bar" : "area";
 
   return (
     <>
@@ -402,7 +395,7 @@ function TrendChart({ entries, trackable }: { entries: NormalizedEvent[]; tracka
               <Tooltip contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }} />
               <Bar dataKey="value" fill="#7c3aed" radius={[2, 2, 0, 0]} />
             </BarChart>
-          ) : ChartTag === "area" ? (
+          ) : (
             <AreaChart data={data}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" tickFormatter={(v, i) => (i % 5 === 0 ? v : "")} />
@@ -410,14 +403,6 @@ function TrendChart({ entries, trackable }: { entries: NormalizedEvent[]; tracka
               <Tooltip contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }} />
               <Area type="monotone" dataKey="value" stroke="#7c3aed" fill="rgba(124, 58, 237, 0.2)" strokeWidth={2} />
             </AreaChart>
-          ) : (
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" tickFormatter={(v, i) => (i % 5 === 0 ? v : "")} />
-              <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }} />
-              <Line type="stepAfter" dataKey="value" stroke="#7c3aed" strokeWidth={2} dot={{ fill: "#7c3aed", r: 3 }} />
-            </LineChart>
           )}
         </ResponsiveContainer>
       </ChartContainer>
@@ -425,9 +410,9 @@ function TrendChart({ entries, trackable }: { entries: NormalizedEvent[]; tracka
   );
 }
 
-function WeeklyChart({ entries, trackable }: { entries: NormalizedEvent[]; trackable: Trackable }) {
+function WeeklyChart({ entries, trackable }: { entries: LogEntry[]; trackable: Trackable }) {
   const data = useMemo(
-    () => getWeeklyData(entries, trackable.id, trackable.aggregation),
+    () => getWeeklyData(entries, trackable),
     [entries, trackable],
   );
 
@@ -451,10 +436,9 @@ export function Visualizations() {
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Normalize once for the whole view. Legacy combo / counter-group / sample
-  // rows get translated into per-trackable value events.
+  // Unified shape — read entries directly. No more normalization adapter; the
+  // 20260522 migration rewrote every legacy row in place.
   const allEntries: LogEntry[] = useMemo(() => Array.from(state.entries.values()), [state.entries]);
-  const normalized: NormalizedEvent[] = useMemo(() => normalizeEntries(allEntries), [allEntries]);
 
   const currentId = selectedId || TRACKABLES[0]?.id;
   const trackable = TRACKABLES.find((t) => t.id === currentId);
@@ -480,17 +464,17 @@ export function Visualizations() {
     {
       key: "trend",
       label: "Daily Trend",
-      children: <TrendChart entries={normalized} trackable={trackable} />,
+      children: <TrendChart entries={allEntries} trackable={trackable} />,
     },
     {
       key: "weekly",
       label: "Weekly",
-      children: <WeeklyChart entries={normalized} trackable={trackable} />,
+      children: <WeeklyChart entries={allEntries} trackable={trackable} />,
     },
     {
       key: "calendar",
       label: "Calendar",
-      children: <CalendarHeatMap entries={normalized} trackable={trackable} />,
+      children: <CalendarHeatMap entries={allEntries} trackable={trackable} />,
     },
   ];
 

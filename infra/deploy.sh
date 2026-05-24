@@ -71,6 +71,71 @@ if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$VPS" 'true' >/dev/null 2>&1; th
     exit 1
 fi
 
+# Pre-deploy lint — block the deploy if PB migrations / hooks carry the
+# 2026-05-22 goja JSON byte-array bug pattern. Cheap (sub-second) so we
+# always run it; hard exit so a known-bad pattern can never ship. Allowlist
+# for frozen historical migrations lives inside the script.
+if [ -x "infra/scripts/lint-pb-migrations.sh" ]; then
+    if ! infra/scripts/lint-pb-migrations.sh; then
+        echo "[deploy.sh] PB migration/hook lint failed — fix findings above or annotate with \`// lint-skip: <reason>\`. Aborting deploy." >&2
+        exit 1
+    fi
+fi
+
+# Pre-deploy PB backup — belt-and-suspenders on top of the nightly
+# pb-backup-daily CronJob. A migration shipped on a Wednesday and the
+# nightly only ran Tuesday is exactly the gap that bit us on 2026-05-22.
+# Tags the backup key with the git SHA so it's recoverable by deploy.
+# Failure does NOT abort the deploy — backups are insurance, not the
+# critical path, and a 5xx on the PB backup endpoint shouldn't block
+# pushing a hotfix. Warning goes to stderr so it's visible in the deploy
+# log if it ever silently degrades.
+pre_deploy_backup() {
+    local api_url="${HOMELAB_API_URL:-https://api.${DOMAIN:-kirkl.in}}"
+    local pb_url="${PB_URL:-${api_url}}"
+    # Solo-user: email is well-known, hardcoded as the default everywhere else
+    # too (services/scripts/*.ts). Only PB_ADMIN_PASSWORD must come from .env.
+    local email="${PB_ADMIN_EMAIL:-scott.kirklin@gmail.com}"
+    local password="${PB_ADMIN_PASSWORD:-}"
+    if [ -z "$password" ]; then
+        echo "[deploy.sh] (pre-deploy-backup) skipped: PB_ADMIN_PASSWORD not in .env" >&2
+        return 0
+    fi
+    command -v jq >/dev/null 2>&1 || {
+        echo "[deploy.sh] (pre-deploy-backup) skipped: jq not installed locally" >&2
+        return 0
+    }
+
+    local sha ts key auth_resp token
+    sha=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    # PB rejects uppercase chars in backup names (regex `^[a-z0-9_-]+\.zip$`).
+    # Use lowercase `t`/`z` separators; git short SHA is hex (lowercase).
+    ts=$(date -u +%Y%m%dt%H%M%Sz)
+    key="pre-deploy-${sha}-${ts}.zip"
+
+    auth_resp=$(curl -fsS --max-time 15 -X POST "${pb_url}/api/collections/_superusers/auth-with-password" \
+        -H "Content-Type: application/json" \
+        -d "$(jq -nc --arg id "$email" --arg pw "$password" '{identity:$id, password:$pw}')" 2>/dev/null) || {
+        echo "[deploy.sh] WARNING: pre-deploy backup auth failed (continuing deploy)" >&2
+        return 0
+    }
+    token=$(printf '%s' "$auth_resp" | jq -er .token 2>/dev/null) || {
+        echo "[deploy.sh] WARNING: pre-deploy backup auth response had no token (continuing)" >&2
+        return 0
+    }
+
+    # PB session token: no `Bearer ` prefix.
+    if curl -fsS --max-time 60 -X POST "${pb_url}/api/backups" \
+            -H "Authorization: ${token}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg name "$key" '{name:$name}')" > /dev/null 2>&1; then
+        echo "[deploy.sh] pre-deploy backup created: ${key}"
+    else
+        echo "[deploy.sh] WARNING: pre-deploy backup POST failed (continuing deploy)" >&2
+    fi
+}
+pre_deploy_backup
+
 # Deployment recording — POSTs a row to the monitor's deployments collection
 # via api.kirkl.in. Tracks success/failure via DEPLOY_STATUS, set just before
 # the final "Deploy complete" echo. Trap on EXIT so failures get recorded too.
@@ -299,7 +364,15 @@ echo "Push: ${PUSH_TOTAL} images ($(elapsed $((SECONDS - PUSH_START))))"
 
 echo ""
 echo "=== Applying manifests ==="
-ssh "${VPS}" "mkdir -p ~/homelab-manifests"
+# Clear the remote manifest dir before re-syncing. The previous additive
+# tar-only flow left orphans whenever a manifest was deleted from the repo
+# (caused supabase to keep coming back for months after `0860dd6` removed it).
+# Scoped to top-level .yaml/.yml only — preserves any other files dropped in
+# the dir, doesn't recurse, and won't go anywhere weird if the path expands
+# unexpectedly (no `rm -rf` of a variable).
+ssh "${VPS}" 'set -e
+  mkdir -p ~/homelab-manifests
+  find ~/homelab-manifests -maxdepth 1 -type f \( -name "*.yaml" -o -name "*.yml" \) -delete'
 tar -cf - -C infra/k8s . | ssh "${VPS}" "tar -xf - -C ~/homelab-manifests/"
 ssh "${VPS}" "kubectl apply -k ~/homelab-manifests/"
 

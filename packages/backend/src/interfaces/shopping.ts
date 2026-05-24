@@ -55,6 +55,25 @@ export interface ShoppingBackend {
     items: Pick<ShoppingItem, "id" | "ingredient" | "note" | "categoryId" | "checked">[],
   ): Promise<void>;
 
+  // --- History entry management ---
+
+  /**
+   * Rename a history entry.
+   *
+   * Normalizes the new ingredient name. If another history row in the same list
+   * already exists with the same normalized name, the rows are merged: the
+   * canonical row's `lastAdded` is set to the max of both, its `categoryId` is
+   * set to whichever row has the newer `lastAdded`, and the source row is
+   * deleted. Otherwise this is a plain in-place rename.
+   *
+   * Does NOT cascade to `shopping_items` or `shopping_trips` — only future
+   * autocomplete reflects the change.
+   */
+  renameHistoryEntry(id: string, newIngredient: string): Promise<void>;
+
+  /** Delete a history entry. Does not affect active items or trip records. */
+  deleteHistoryEntry(id: string): Promise<void>;
+
   // --- Subscriptions ---
 
   /**

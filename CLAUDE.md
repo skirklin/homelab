@@ -29,9 +29,11 @@ A great codebase is the result of constantly questioning previous choices, not j
 
 Personal web apps monorepo, self-hosted on PocketBase + Caddy on a VPS (Hetzner, 5.78.200.161, user `scott`).
 
-## Current state (2026-04-19)
+## Current state (2026-05-24)
 
 Production is **`kirkl.in`**. Firebase → PocketBase migration is complete; PB on the VPS is authoritative for all app data. Caddy still serves `beta.kirkl.in` as an alias during the transition window.
+
+The **life app is now unhosted** from the home shell — `life.kirkl.in` serves a standalone deploy (its own nginx pod) and is no longer bundled as a module under `kirkl.in`. The morning/evening session wizards (`/morning`, `/evening`) live in that standalone app. The widget manifest is hardcoded in [`apps/life/app/src/manifest.ts`](apps/life/app/src/manifest.ts) — the in-DB manifest editor was deleted.
 
 ### Architecture
 
@@ -212,11 +214,11 @@ Two ways to authenticate:
 - `packages/ui` is `@kirkl/shared` — shared React components, auth, backend provider
 - `services/api` — Hono API service (recipe scraping, AI, sharing, push, data endpoints, MCP server)
 - `services/ingest` — Python backend for money/financial data, managed with uv
-- `services/scripts` — migration and utility scripts (export-firebase, import-to-pb, wipe-pb)
+- `services/scripts` — migration and utility scripts (export-firebase, import-to-pb, wipe-pb). One-shot recovery scripts live under `services/scripts/historical/` (e.g. `recover-life-events.ts`, `recover-recipe-events.ts`, `recover-cooking-log.py`) — kept around for forensic value but not part of the steady-state deploy path.
 - `extension/` — Chrome extension for financial data capture
 - `infra/` — Dockerfiles, k8s manifests, build/deploy scripts
-- `infra/pocketbase/pb_migrations/` — PocketBase schema migrations
-- `infra/pocketbase/pb_hooks/` — PocketBase JS hooks (invite redemption)
+- `infra/pocketbase/pb_migrations/` — PocketBase schema migrations. Use [`_TEMPLATE.js.example`](infra/pocketbase/pb_migrations/_TEMPLATE.js.example) as the starting point for new migrations; it imports `unwrapPbJson` from [`lib/pb-json.js`](infra/pocketbase/pb_migrations/lib/pb-json.js), which handles all three goja shapes (string, parsed object, byte-array) for PB JSON columns.
+- `infra/pocketbase/pb_hooks/` — PocketBase JS hooks: `sharing.pb.js` (invite redemption), `shopping-list-cleanup.pb.js`, `task-list-cleanup.pb.js`, `recipe-box-cleanup.pb.js`, `api_tokens.pb.js`. Module-scope helpers are unreachable inside `routerAdd` callbacks under goja, so JSON-column unwrap is inlined in each hook that needs it (mirrors `lib/pb-json.js`).
 
 ## Backend abstraction (`@homelab/backend`)
 
@@ -236,6 +238,9 @@ Implementations live in `packages/backend/src/pocketbase/`. Apps get backends vi
 - Private Docker registry at `registry.kirkl.in` — deploys take ~30-60s
 - API tokens: `hlk_` prefix, SHA-256 hashed in PocketBase, created via Settings UI
 - `.env` at project root has secrets (gitignored): `PB_ADMIN_PASSWORD`, `HOMELAB_API_TOKEN`, `VITE_GOOGLE_MAPS_API_KEY`
+- `pnpm lint:pb` — runs `infra/scripts/lint-pb-migrations.sh`, which fails on the goja byte-array footguns (`JSON.parse(JSON.stringify(r.get(...)))` and unwrapped JSON-column field access). Wired into `deploy.sh` so a broken migration can't reach prod.
+- `pnpm test:pb-hooks` — vitest against `unwrapPbJson` + PB hook execution stubs (currently 16 tests, in `packages/backend/src/pocketbase-hooks/`).
+- New PB migrations: copy [`_TEMPLATE.js.example`](infra/pocketbase/pb_migrations/_TEMPLATE.js.example) and rename to `YYYYMMDD_HHMMSS_<slug>.js`. Always read JSON columns through `unwrapPbJson` from [`lib/pb-json.js`](infra/pocketbase/pb_migrations/lib/pb-json.js) — never `r.get("jsonField")` directly (see 2026-05-22 incident).
 
 ## Adding a new app
 
@@ -259,6 +264,26 @@ Health endpoints to expose so Gatus has something to hit:
 - **Deployment history** — `deployments` PB collection. Written automatically by `infra/deploy.sh`'s exit trap. Read via `GET /fn/data/deployments`.
 - **Tailscale operator** — All tailnet apps use the Tailscale Kubernetes operator (Ingress with `ingressClassName: tailscale`), which auto-provisions per-app tailnet devices and HTTPS certs. Operator config in `infra/k8s/tailscale-operator.yaml` (vendored upstream + env overrides for `OPERATOR_INITIAL_TAGS`/`PROXY_TAGS=tag:k8s`). OAuth client + ACL `tagOwners` use a single `tag:k8s` — Tailscale enforces *exact-match* between OAuth `authTags` and the tags requested at mint time, so single-tag is simpler. To expose a new app: add an `Ingress` with `ingressClassName: tailscale` and `tls.hosts: [<name>]`.
 
+### Backups & data retention
+
+All CronJobs live in [`infra/k8s/cronjobs.yaml`](infra/k8s/cronjobs.yaml).
+
+| CronJob | Schedule (UTC) | Local (PT) | Purpose |
+|---|---|---|---|
+| `pb-backup-daily` | `0 9 * * *` | 2:00 AM | Creates `daily-YYYY-MM-DDtHH-MM-SSz.zip` under `/pb/pb_data/backups/` via PB's `/api/backups` |
+| `pb-backup-prune` | `5 9 * * *` | 2:05 AM | Applies tiered retention (see below) |
+| `pod-events-prune` | `30 9 * * *` | 2:30 AM | Deletes `pod_events` rows with `type="Normal"` older than 10 days; `type="Warning"` kept forever (low volume, high forensic value) |
+
+Backup retention tiers (enforced by `pb-backup-prune`):
+- **`daily-*`** — keep 90 days, EXCEPT the chronologically-first daily of each calendar month (monthly tier, kept forever). At ~30 MB/snapshot that's ~3 GB/yr.
+- **`pre-deploy-*`** — keep 14 days. Written by the pre-deploy hook in `infra/deploy.sh` (tagged with the git SHA, e.g. `pre-deploy-abc1234-20260524t090000z.zip`); belt-and-suspenders on top of the nightly so a same-day rollback always has a fresh baseline. Backup failure does NOT abort the deploy — it's insurance, not critical-path.
+- **`pre-migration-*`** — keep forever.
+- **Anything else** (`emergency-*`, `pre-restore-*`, manual) — keep forever.
+
+Backup freshness monitor:
+- `GET /fn/health/backups` (public, no auth) returns `{ age_hours, latest_key, size }` for the newest `daily-*`. See [`services/api/src/index.ts`](services/api/src/index.ts).
+- Gatus check `pb-backups-fresh` polls every 5m and fails if `age_hours > 25` (the +1h gives the daily CronJob some slack if it lags).
+
 ### Possible future work
 
 Deferred but worth picking up if a need surfaces:
@@ -268,6 +293,9 @@ Deferred but worth picking up if a need surfaces:
 - **Native Beszel charts in the monitor frontend** — query Beszel's PocketBase API directly and render CPU/memory/disk/network charts natively, instead of linking out to the Beszel UI. Needs a read-only auth path into Beszel's PB (separate user with read-only API token, stored in a k8s Secret, injected at the monitor's nginx layer like `HOMELAB_API_TOKEN` is). Couple hours of work.
 - **Gatus tailnet-end checks** — current Gatus checks hit cluster-internal Service IPs, which prove the pod is healthy but don't catch a broken Tailscale operator proxy. To check the tailnet-edge URL end-to-end, Gatus would need to be tailnet-attached itself (e.g., a tailscale sidecar in its pod). Low priority since the operator's stable.
 - **Money → PocketBase migration** — retire ingest's sqlite as system of record; money joins the `@homelab/backend` pattern. Plan in [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md). ~2–3 weeks focused work. MCP access already covered by the TS proxy in `services/api/src/routes/money.ts`.
+- **VPS state outside the repo** — sysctl tweaks (e.g. `fs.inotify.max_user_watches`), 1Password SSH agent config, k3s install script invocation, etc. are currently undocumented manual steps. If the box ever gets rebuilt, recovering takes archaeology. Worth either a bootstrap script under `infra/scripts/` or a small Ansible playbook.
+- **Off-volume backup target** — daily backups currently live on the same PVC as the PB data they're protecting; a disk-level failure or accidental PVC delete loses both. Wire `pb-backup-daily` (or a sidecar) to push each new `daily-*.zip` to B2/S3 for true disaster recovery. ~1 day of work, plus a credentials secret.
+- **Broader migration-test harness** — `pnpm lint:pb` catches the specific goja byte-array footgun, but schema/data-correctness more broadly (e.g. a migration that drops a field still referenced by app code) is still uncovered. A CI job that spins up a fresh PB, applies all migrations, and runs a smoke pass would close that gap.
 
 ## Money debugging
 

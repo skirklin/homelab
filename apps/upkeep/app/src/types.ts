@@ -1,5 +1,18 @@
-import type { Event, EventStore, NotificationMode } from "@kirkl/shared";
-export type { Event, EventStore, NotificationMode };
+import type { LifeEvent, NotificationMode } from "@kirkl/shared";
+import {
+  calculateDueDate as sharedCalculateDueDate,
+  getUrgencyLevel as sharedGetUrgencyLevel,
+  isTaskSnoozed as sharedIsTaskSnoozed,
+  type UrgencyLevel as SharedUrgencyLevel,
+} from "@homelab/backend";
+export type { NotificationMode };
+
+/**
+ * Task completion record. Same unified shape as life events — entries[] is the
+ * canonical place for per-completion data. Today we only write a single text
+ * entry named "notes" (see getCompletionNotes below).
+ */
+export type Completion = Omit<LifeEvent, "log">;
 
 export type FrequencyUnit = "days" | "weeks" | "months";
 
@@ -38,15 +51,15 @@ export interface TaskNode {
   depth: number;
 }
 
-// Completion record (uses unified Event type)
-export type Completion = Event;
-
-export function getTaskId(completion: Event): string {
+export function getTaskId(completion: Completion): string {
   return completion.subjectId;
 }
 
-export function getCompletionNotes(completion: Event): string {
-  return (completion.data.notes as string) ?? "";
+export function getCompletionNotes(completion: Completion): string {
+  for (const e of completion.entries) {
+    if (e.name === "notes" && e.type === "text") return e.value;
+  }
+  return "";
 }
 
 // Task list (container)
@@ -60,42 +73,11 @@ export interface TaskList {
 
 export type { UserProfile, UserProfileStore } from "@kirkl/shared";
 
-// Urgency levels for Kanban columns
-export type UrgencyLevel = "today" | "thisWeek" | "later";
-
-// Utility: calculate next due date (only meaningful for recurring tasks)
-export function calculateDueDate(task: Task): Date | null {
-  if (task.taskType !== "recurring") return null;
-  if (!task.lastCompleted) return null; // Never done = immediately due
-
-  const due = new Date(task.lastCompleted);
-  switch (task.frequency.unit) {
-    case "days":
-      due.setDate(due.getDate() + task.frequency.value);
-      break;
-    case "weeks":
-      due.setDate(due.getDate() + task.frequency.value * 7);
-      break;
-    case "months":
-      due.setMonth(due.getMonth() + task.frequency.value);
-      break;
-  }
-  return due;
-}
-
-export function getUrgencyLevel(task: Task): UrgencyLevel {
-  const now = new Date();
-  const dueDate = calculateDueDate(task);
-
-  if (!dueDate) return "today"; // Never completed = due today
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-  const diffDays = Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-
-  if (diffDays <= 0) return "today";
-  if (diffDays <= 7) return "thisWeek";
-  return "later";
-}
+// Urgency levels for Kanban columns — canonical impl in @homelab/backend so
+// life's morning header can reuse the same bucketing without cross-app imports.
+export type UrgencyLevel = SharedUrgencyLevel;
+export const calculateDueDate = (task: Task): Date | null => sharedCalculateDueDate(task);
+export const getUrgencyLevel = (task: Task): UrgencyLevel => sharedGetUrgencyLevel(task);
 
 export function formatFrequency(frequency: Frequency): string {
   const { value, unit } = frequency;
@@ -103,10 +85,7 @@ export function formatFrequency(frequency: Frequency): string {
   return `Every ${value} ${unit}`;
 }
 
-export function isTaskSnoozed(task: Task): boolean {
-  if (!task.snoozedUntil) return false;
-  return task.snoozedUntil.getTime() > Date.now();
-}
+export const isTaskSnoozed = (task: Task): boolean => sharedIsTaskSnoozed(task);
 
 export function formatSnoozeRemaining(task: Task): string {
   if (!task.snoozedUntil) return "";

@@ -1,127 +1,95 @@
 # homelab
 
-Personal web apps monorepo, self-hosted on a VPS with k3s, Caddy, and PocketBase.
+Personal web apps monorepo for a single user, self-hosted as a k3s single-node cluster on a Hetzner VPS. PocketBase is the system of record; Caddy fronts everything with Let's Encrypt TLS; each frontend is a Vite build served by nginx; a Hono API service handles scraping, AI, sharing, push, and an MCP server. Production lives at **`kirkl.in`**.
 
-## Infrastructure
+## Apps
 
-k3s (single-node Kubernetes) on a VPS. Caddy handles TLS (automatic Let's Encrypt) and reverse proxies to app services. PocketBase provides data storage and auth.
+| Subdomain | App | Notes |
+|---|---|---|
+| `kirkl.in` | home | Shell app; also serves `/tasks/*` (unified task outliner) |
+| `beta.kirkl.in` | home-beta | Parallel `home` build sharing prod PB / API / data |
+| `recipes.kirkl.in` | recipes | Standalone deploy + module under home |
+| `shopping.kirkl.in` | shopping | Standalone deploy + module under home |
+| `upkeep.kirkl.in` | upkeep | Kanban task view |
+| `travel.kirkl.in` | travel | Trip planner |
+| `life.kirkl.in` | life | Standalone (no longer bundled into home) |
+| `me.kirkl.in` | homepage | Static personal page |
+| `api.kirkl.in` | pocketbase + Hono `/fn/*` | Same hostname, split by path |
+| `registry.kirkl.in` | private Docker registry | Auth required |
 
-| Subdomain | App |
-|---|---|
-| `beta.kirkl.in` | home (shell) |
-| `recipes.beta.kirkl.in` | recipes |
-| `shopping.beta.kirkl.in` | shopping |
-| `life.beta.kirkl.in` | life |
-| `upkeep.beta.kirkl.in` | upkeep |
-| `travel.beta.kirkl.in` | travel |
-| `me.beta.kirkl.in` | homepage (static) |
-| `money.beta.kirkl.in` | money (moving to tailnet-only) |
-| `api.beta.kirkl.in` | PocketBase API |
+Tailnet-only: `money` (financial dashboard), `ingest` (Python money backend), `monitor` (deploys + uptime UI), `beszel` (metrics), `gatus` (uptime). Exposed via the Tailscale Kubernetes operator.
 
-## Structure
+## Repo layout
 
-```
-apps/
-  recipes/        # Recipe management app (React + Vite)
-  shopping/      # Grocery list app (React + Vite)
-  homepage/       # Personal homepage (static)
-  home/           # Shell app that hosts shopping, recipes, life, upkeep, travel
-  life/           # Life tracker app (React + Vite)
-  upkeep/         # Household task tracker (React + Vite)
-  travel/         # Travel trip planner (React + Vite)
-  money/          # Personal finance dashboard (React + Vite)
-services/
-  functions/      # Firebase Cloud Functions (to be migrated)
-  scripts/        # Data migration scripts
-  ingest/         # Financial data ingest server (Python, managed with uv)
-extension/        # Chrome extension for financial data capture
-packages/
-  pb-client/      # Typed PocketBase client (placeholder)
-  ui/             # Shared React components (@kirkl/shared)
-infra/
-  docker/         # Dockerfiles for all services
-  k8s/            # Kubernetes manifests (Kustomize)
-  build.sh        # Build all Docker images
-  deploy.sh       # Deploy to k3s
-  setup-k3s.sh    # One-time k3s installation
-```
+- `apps/` — frontend apps: `home`, `recipes`, `shopping`, `upkeep`, `travel`, `life`, `money`, `homepage`, `monitor`. Most apps live under an `app/` subdirectory; `money`, `homepage`, and `monitor` are flatter.
+- `packages/` — shared workspace packages:
+  - `backend` (`@homelab/backend`) — backend interfaces + PocketBase implementations
+  - `ui` (`@kirkl/shared`) — shared React components, auth, backend provider
+  - `vite-preset` — shared Vite config
+- `services/` — backend services:
+  - `api` — Hono API (recipe scraping, AI, sharing, push, data endpoints, MCP server)
+  - `ingest` — Python money/financial backend (managed with `uv`)
+  - `event-watcher` — k8s event sink → PocketBase
+  - `scripts` — migration + utility scripts; one-shot recovery scripts live under `services/scripts/historical/`
+- `infra/` — Dockerfiles, k8s manifests (Kustomize), `deploy.sh`, PB migrations + hooks
+- `extension/` — Chrome extension for financial data capture
+- `tools/`, `docs/`, `billing-cap/` — supporting bits
 
-## Deployment
+For the full structure, conventions, MCP tool reference, and the new-app wiring checklist, see [`CLAUDE.md`](CLAUDE.md).
 
-### First-time setup (on the VPS)
+## Stack
 
-```bash
-# Install k3s
-./infra/setup-k3s.sh
+- **Frontend**: Vite + React + TypeScript (pnpm workspaces + Turborepo)
+- **Backend**: PocketBase (StatefulSet on k3s with a PVC), Hono API in `services/api`, Python ingest service in `services/ingest`
+- **Auth**: PocketBase users; `hlk_` API tokens for tooling (Settings → API Tokens); OAuth 2.1 + PKCE for Claude mobile MCP (`mcpat_` tokens)
+- **Hosting**: k3s on a Hetzner VPS, Caddy for TLS + reverse proxy, private Docker registry at `registry.kirkl.in`
+- **Monitoring**: Beszel (system metrics) + Gatus (uptime) + a custom `monitor` frontend, all tailnet-only
 
-# Build all images and deploy
-./infra/build.sh
-./infra/deploy.sh
-```
-
-### Updating
-
-```bash
-./infra/build.sh       # rebuild images
-./infra/deploy.sh      # import + rollout restart
-```
-
-### Monitoring
-
-```bash
-kubectl get pods -n homelab
-kubectl logs -n homelab deploy/caddy
-kubectl logs -n homelab deploy/recipes
-```
-
-## Development
+## Local dev
 
 ```bash
 pnpm install
-pnpm dev       # starts all apps via Turborepo
-pnpm build     # builds all apps
+pnpm -F home dev          # or recipes, shopping, life, travel, …
 ```
 
-## Testing
+Most apps need PB credentials and other secrets in the project-root `.env` (gitignored — see `CLAUDE.md` for the expected keys: `PB_ADMIN_PASSWORD`, `HOMELAB_API_TOKEN`, `VITE_GOOGLE_MAPS_API_KEY`, …). Without them you can sign in but most data calls will 401.
 
-The vitest e2e suites and Playwright tests hit a real PocketBase instance
-and the Hono API service. Bring them up in Docker before running tests:
+Useful root scripts:
 
 ```bash
-pnpm test:env:up       # starts PocketBase (:8091) + API (:3001), waits for health
-pnpm test              # turbo run test across the monorepo
-pnpm test:env:down     # stop the containers when done
+pnpm typecheck            # turbo typecheck across the workspace
+pnpm lint:pb              # lint PB migrations for goja byte-array footguns
+pnpm test:pb-hooks        # vitest against PB hook stubs
+pnpm test:ingest          # Python ingest test suite (handles VIRTUAL_ENV poisoning)
+pnpm test:env:up          # bring up test PB (:8091) + API (:3001) in Docker
+pnpm test                 # turbo test
 ```
 
-`pnpm test:env:status` shows container and health status.
+Beta and prod share the same PB instance, so dev should point at the test environment (`test:env:up`) — not prod — for anything that mutates state.
 
-Test types:
+## Deploy
 
-- **Unit tests** (`*.test.ts{,x}`) — run under vitest with jsdom. No external dependencies.
-- **Vitest e2e** (`src/e2e/*.e2e.test.ts`) — hit the test PocketBase directly via `@kirkl/shared/test-utils`.
-- **Playwright e2e** (`apps/home/app/e2e/`) — drive the home app in a real browser, exercising the full stack (PocketBase + API).
+```bash
+./infra/deploy.sh [app ...]      # build → push to registry.kirkl.in → kubectl apply -k
+./infra/deploy.sh --beta         # builds only home and rolls out home-beta
+./infra/deploy.sh --push-only    # re-apply manifests without rebuilding images
+```
 
-Playwright tests run `pnpm dev --port 5174` via `playwright.config.ts`. The dev server proxies `/fn` to the test API container, so invite creation and other API-dependent flows work end-to-end.
+`deploy.sh`:
+- Runs `pnpm lint:pb` before anything else; a broken migration can't reach prod.
+- Snapshots PB to a `pre-deploy-<sha>-*.zip` backup (best-effort; failure does not abort).
+- Writes a row to the `deployments` PB collection on exit so the monitor frontend can show history.
 
-Set `VITE_API_URL` to point the proxy at a different API (the default is `http://127.0.0.1:3001` matching the test compose file).
+For wiring a brand-new app/service end-to-end (build map, k8s manifest, Caddy block, Gatus check), see the "Adding a new app" checklist in [`CLAUDE.md`](CLAUDE.md).
 
-## Tooling
+## Where to look next
 
-- **k3s** — single-node Kubernetes
-- **Caddy** — reverse proxy, automatic HTTPS
-- **PocketBase** — database + auth
-- **pnpm workspaces** + **Turborepo** — JS/TS monorepo
-- **uv** — Python projects (`services/ingest/`)
-- **Vite** — frontend builds
-
-## Migration status
-
-This repo consolidates two previous repos:
-
-- **firebase-apps** — `recipes`, `shopping`, `homepage`, `home`, `life`, `upkeep`, `travel`, shared components, Cloud Functions, and migration scripts
-- **money** — `money` frontend, `ingest` backend, Chrome `extension`
-
-The apps currently depend on Firebase (Firestore, Auth, Cloud Functions). Migrating to PocketBase for data/auth.
+- [`CLAUDE.md`](CLAUDE.md) — full project context, conventions, MCP tool reference, monitoring + backup details
+- [`apps/recipes/README.md`](apps/recipes/README.md), [`apps/money/README.md`](apps/money/README.md) — app-specific notes
+- [`apps/life/ROADMAP.md`](apps/life/ROADMAP.md) — life-app phasing plan
+- [`MONEY_IMPROVEMENTS.md`](MONEY_IMPROVEMENTS.md) — money ingest punch list
+- [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md) — plan for moving money onto PocketBase
+- Forward-looking sync/storage explorations (not yet executed): [`SUPABASE-MIGRATION.md`](SUPABASE-MIGRATION.md), [`ELECTRIC-SQL-MIGRATION.md`](ELECTRIC-SQL-MIGRATION.md), [`SYNC-ENGINE-DESIGN.md`](SYNC-ENGINE-DESIGN.md)
 
 ## License
 
