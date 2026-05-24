@@ -103,6 +103,39 @@ app.get("/push/vapid-key", (c) => {
   if (!key) return c.json({ error: "VAPID keys not configured" }, 503);
   return c.json({ publicKey: key });
 });
+// Backup freshness — drives the Gatus pb-backups-fresh check. Public
+// (Gatus carries no auth) but reveals only the latest daily-* backup's
+// age + key, no record contents. Returns 503 when no daily backup
+// exists yet so Gatus surfaces "no backups" as a failure rather than
+// silently reporting age=null.
+app.get("/health/backups", async (c) => {
+  try {
+    const { getAdminPb } = await import("./lib/pb");
+    const pb = await getAdminPb();
+    // PB exposes the backups index via authStore's pbCollections client.
+    // We need the raw HTTP route since the SDK doesn't wrap /api/backups.
+    const pbUrl = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
+    const res = await fetch(`${pbUrl}/api/backups`, {
+      headers: { Authorization: pb.authStore.token },
+    });
+    if (!res.ok) return c.json({ error: "PB backups API failed", status: res.status }, 503);
+    const backups = await res.json() as Array<{ key: string; size: number; modified: string }>;
+    const daily = backups
+      .filter((b) => b.key.startsWith("daily-"))
+      .sort((a, b) => b.modified.localeCompare(a.modified));
+    if (daily.length === 0) {
+      return c.json({ error: "no daily backups found", age_hours: null, latest_key: null }, 503);
+    }
+    const latest = daily[0];
+    // Normalize PB's "YYYY-MM-DD HH:MM:SS.sssZ" shape to ISO 8601 for Date().
+    const iso = latest.modified.replace(" ", "T");
+    const ageMs = Date.now() - new Date(iso).getTime();
+    const age_hours = Math.round((ageMs / 36e5) * 10) / 10;
+    return c.json({ age_hours, latest_key: latest.key, size: latest.size });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 503);
+  }
+});
 // List info for join flow — needs to work before user is an owner
 app.get("/sharing/list-info/:collection/:listId", async (c) => {
   const { getAdminPb } = await import("./lib/pb");

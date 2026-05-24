@@ -121,6 +121,18 @@ data:
         conditions:
           - "[STATUS] == 200"
 
+      # Backup freshness — fails if the latest daily-* PB backup is older
+      # than 25h. 25 (not 24) gives the pb-backup-daily CronJob some slack
+      # if it lags by minutes. Endpoint is public (no auth) and only
+      # returns age + key, no record contents. See services/api/src/index.ts.
+      - name: pb-backups-fresh
+        group: data
+        url: https://api.kirkl.in/fn/health/backups
+        interval: 5m
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY].age_hours < 25"
+
       # --- internal (cluster-only) ---
       - name: beszel-hub
         group: monitor
