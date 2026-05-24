@@ -7,6 +7,7 @@ import { useAuth, useFeedback, PageContainer, useLifeBackend, AppHeader } from "
 import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { getSession, sessionSubjectId, type Session, type SessionPrompt } from "../manifest";
+import { MorningUpkeepHeader } from "./MorningUpkeepHeader";
 
 /**
  * Convert a session's accumulated answers (prompt id → value) into the
@@ -187,6 +188,7 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
       />
       <PageContainer>
         {stepIndex === 0 && <Greeting>{session.greeting}</Greeting>}
+        {sessionId === "morning" && <MorningUpkeepHeader />}
         <Progress>
           {session.prompts.map((_, i) => (
             <ProgressDot key={i} $active={i === stepIndex} $done={i < stepIndex} />
