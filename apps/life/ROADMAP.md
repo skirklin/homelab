@@ -1,6 +1,6 @@
 # Life App Roadmap
 
-Living plan for evolving the life app from a habit-tracker into a real reflection + intention surface. Updated 2026-05-20.
+Living plan for evolving the life app from a habit-tracker into a real reflection + intention surface. Updated 2026-05-24.
 
 ## Vision
 
