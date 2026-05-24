@@ -299,7 +299,15 @@ echo "Push: ${PUSH_TOTAL} images ($(elapsed $((SECONDS - PUSH_START))))"
 
 echo ""
 echo "=== Applying manifests ==="
-ssh "${VPS}" "mkdir -p ~/homelab-manifests"
+# Clear the remote manifest dir before re-syncing. The previous additive
+# tar-only flow left orphans whenever a manifest was deleted from the repo
+# (caused supabase to keep coming back for months after `0860dd6` removed it).
+# Scoped to top-level .yaml/.yml only — preserves any other files dropped in
+# the dir, doesn't recurse, and won't go anywhere weird if the path expands
+# unexpectedly (no `rm -rf` of a variable).
+ssh "${VPS}" 'set -e
+  mkdir -p ~/homelab-manifests
+  find ~/homelab-manifests -maxdepth 1 -type f \( -name "*.yaml" -o -name "*.yml" \) -delete'
 tar -cf - -C infra/k8s . | ssh "${VPS}" "tar -xf - -C ~/homelab-manifests/"
 ssh "${VPS}" "kubectl apply -k ~/homelab-manifests/"
 
