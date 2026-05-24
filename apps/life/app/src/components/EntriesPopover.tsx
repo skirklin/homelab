@@ -15,7 +15,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
-import { Popover, Button, TimePicker, InputNumber, Input, Switch } from "antd";
+import { Popover, Button, TimePicker, InputNumber, Input, Switch, Segmented } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import type { LifeEvent, LifeEntry } from "@homelab/backend";
@@ -219,19 +219,39 @@ interface EntryEditorProps {
   entry: LifeEntry;
 }
 
+// Duration trackables (unit "min") display as hours when the stored minutes
+// look like a value the user originally meant in hours: >= 60 and an exact
+// multiple of 5. Same heuristic as EventLogger's `defaultDurationInputUnit`,
+// adapted for an existing stored value rather than a manifest default.
+function pickDurationDisplayUnit(minutes: number): "hours" | "minutes" {
+  return minutes >= 60 && minutes % 5 === 0 ? "hours" : "minutes";
+}
+
 function EntryEditor({ event, index, entry }: EntryEditorProps) {
   // Local UI state mirrors the entry's value; resets to upstream on event
   // change (e.g. another tab edited it). Debounced commit for text/number;
   // bool commits immediately.
+  //
+  // Invariant: `local` for number entries is in canonical units (i.e. minutes
+  // for unit="min"). The duration toggle is display-only — the InputNumber's
+  // value is derived from `local` at render time, and edits are converted back
+  // to canonical before being written to `local` / committed.
   const [local, setLocal] = useState<LifeEntry["value"]>(entry.value);
   const [saving, setSaving] = useState(false);
+  const isDuration = entry.type === "number" && entry.unit === "min";
+  const [durationUnit, setDurationUnit] = useState<"hours" | "minutes">(() =>
+    isDuration ? pickDurationDisplayUnit(entry.value as number) : "minutes",
+  );
   // Track upstream value so we know what to revert to on failure.
   const upstreamRef = useRef<LifeEntry["value"]>(entry.value);
 
   useEffect(() => {
     upstreamRef.current = entry.value;
     setLocal(entry.value);
-  }, [entry.value]);
+    if (isDuration) {
+      setDurationUnit(pickDurationDisplayUnit(entry.value as number));
+    }
+  }, [entry.value, isDuration]);
 
   const life = useLifeBackend();
   const { message } = useFeedback();
@@ -289,6 +309,51 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
   }
 
   if (entry.type === "number") {
+    if (isDuration) {
+      // Stored canonical minutes; display in `durationUnit`.
+      const storedMinutes = local as number;
+      const displayed =
+        durationUnit === "hours"
+          ? Math.round((storedMinutes / 60) * 100) / 100
+          : storedMinutes;
+      return (
+        <ValueLine>
+          <EntryName>{entry.name}</EntryName>
+          <InputNumber
+            size="small"
+            value={displayed}
+            min={0}
+            step={durationUnit === "hours" ? 0.5 : 1}
+            onChange={(v) => {
+              if (typeof v !== "number") return;
+              const minutes =
+                durationUnit === "hours" ? Math.round(v * 60) : v;
+              setLocal(minutes);
+              scheduleCommit(minutes);
+            }}
+            onBlur={() => {
+              // Flush any pending debounce immediately on blur.
+              if (debounceRef.current) {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = null;
+                void commit(local);
+              }
+            }}
+            style={{ width: 80 }}
+          />
+          <Segmented
+            size="small"
+            options={[
+              { label: "min", value: "minutes" },
+              { label: "hr", value: "hours" },
+            ]}
+            value={durationUnit}
+            onChange={(v) => setDurationUnit(v as "hours" | "minutes")}
+          />
+          {saving && <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>…</span>}
+        </ValueLine>
+      );
+    }
     return (
       <ValueLine>
         <EntryName>{entry.name}</EntryName>
