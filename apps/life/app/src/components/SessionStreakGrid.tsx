@@ -14,6 +14,9 @@
  * Pure CSS grid; the diagonal split is a single hard-stop linear-gradient. No
  * chart library, no horizontal scrolling — the grid is sized to fit any
  * StreakCard width.
+ *
+ * Also exports `computeStreaks` + the `SessionStreaks` shape, which the
+ * dashboard uses to render the streak counters above the grid.
  */
 import { useMemo } from "react";
 import styled from "styled-components";
@@ -55,12 +58,13 @@ const Grid = styled.div`
   align-self: flex-end;
 `;
 
-const Cell = styled.div<{ $bg: string; $today: boolean }>`
+const Cell = styled.div<{ $bg: string; $today: boolean; $hidden: boolean }>`
   width: ${CELL_PX}px;
   height: ${CELL_PX}px;
   border-radius: 2px;
   background: ${(p) => p.$bg};
   border: 1px solid ${(p) => (p.$today ? "var(--color-text, #333)" : "transparent")};
+  visibility: ${(p) => (p.$hidden ? "hidden" : "visible")};
 `;
 
 const Legend = styled.div`
@@ -95,11 +99,11 @@ interface DayData {
   evening: boolean;
 }
 
-interface YearHeatmapProps {
+interface SessionStreakGridProps {
   entries: LogEntry[];
 }
 
-export function YearHeatmap({ entries }: YearHeatmapProps) {
+export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
   const morningSubject = sessionSubjectId("morning");
   const eveningSubject = sessionSubjectId("evening");
 
@@ -150,7 +154,7 @@ export function YearHeatmap({ entries }: YearHeatmapProps) {
                 key={c.key}
                 $bg={splitBg(false, false)}
                 $today={false}
-                style={{ visibility: "hidden" }}
+                $hidden
               />
             );
           }
@@ -162,7 +166,11 @@ export function YearHeatmap({ entries }: YearHeatmapProps) {
           else tip = `${labelDate} — nothing logged`;
           return (
             <Tooltip key={c.key} title={tip} mouseEnterDelay={0.1}>
-              <Cell $bg={splitBg(c.morning, c.evening)} $today={c.key === todayKey} />
+              <Cell
+                $bg={splitBg(c.morning, c.evening)}
+                $today={c.key === todayKey}
+                $hidden={false}
+              />
             </Tooltip>
           );
         })}

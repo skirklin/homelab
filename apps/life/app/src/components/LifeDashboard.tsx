@@ -31,7 +31,8 @@ import { useEntriesSubscription } from "../subscription";
 import { EventLogger } from "./EventLogger";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
-import { YearHeatmap, computeStreaks } from "./YearHeatmap";
+import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
+import { Hint } from "./Hint";
 import { TRACKABLES, GROUP_ORDER, RANDOM_SAMPLES, SESSIONS, sessionSubjectId, type Trackable, type Session } from "../manifest";
 import {
   initializeMessaging,
@@ -198,11 +199,6 @@ const SessionCardTitle = styled.span`
   font-weight: 500;
 `;
 
-const SessionCardHint = styled.span`
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-`;
-
 const SessionCardCheck = styled.span`
   display: inline-flex;
   align-items: center;
@@ -227,7 +223,7 @@ const StreakItem = styled.div`
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 110px;
+  min-width: 110px; /* width for "longest: N day" text */
 `;
 
 const StreakLabel = styled.div`
@@ -246,13 +242,6 @@ const StreakValue = styled.div`
   font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--color-text);
-`;
-
-const StreakBest = styled.span`
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  font-weight: 400;
-  margin-left: 6px;
 `;
 
 interface LifeDashboardProps {
@@ -791,9 +780,9 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
                         <CheckCircleFilled /> logged at {formatHHmm(logged)}
                       </SessionCardCheck>
                     ) : session.id === "morning" && isAfternoon ? (
-                      <SessionCardHint>missed earlier?</SessionCardHint>
+                      <Hint>missed earlier?</Hint>
                     ) : session.id === "weekly_review" && sessionContext.isSunday ? (
-                      <SessionCardHint>Sunday review</SessionCardHint>
+                      <Hint>Sunday review</Hint>
                     ) : null}
                   </SessionCard>
                 );
@@ -809,7 +798,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
               <StreakValue>
                 {morningStreaks.current} {morningStreaks.current === 1 ? "day" : "days"}
                 {morningStreaks.longest > morningStreaks.current && (
-                  <StreakBest>best: {morningStreaks.longest}</StreakBest>
+                  <Hint style={{ fontWeight: 400, marginLeft: 6 }}>best: {morningStreaks.longest}</Hint>
                 )}
               </StreakValue>
             </StreakItem>
@@ -818,12 +807,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
               <StreakValue>
                 {eveningStreaks.current} {eveningStreaks.current === 1 ? "day" : "days"}
                 {eveningStreaks.longest > eveningStreaks.current && (
-                  <StreakBest>best: {eveningStreaks.longest}</StreakBest>
+                  <Hint style={{ fontWeight: 400, marginLeft: 6 }}>best: {eveningStreaks.longest}</Hint>
                 )}
               </StreakValue>
             </StreakItem>
           </StreakCard>
-          <YearHeatmap entries={allEntries} />
+          <SessionStreakGrid entries={allEntries} />
         </Section>
 
         <Section>
