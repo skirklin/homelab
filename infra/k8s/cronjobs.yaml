@@ -184,8 +184,13 @@ spec:
               args:
                 - |
                   set -e
-                  # alpine/curl ships only curl — install jq for token + filtering.
-                  apk add --no-cache jq >/dev/null
+                  # alpine/curl ships only curl — install jq for token + filtering,
+                  # and coreutils to replace BusyBox `date` (which silently returns
+                  # "invalid date" for the RFC3339-ish strings PB hands back in
+                  # `modified`, so the `|| echo ""` fallback below caught *every*
+                  # row and nothing was ever pruned — see 2026-05-24 nightly logs).
+                  # After `apk add coreutils`, /bin/date is GNU date with full -d.
+                  apk add --no-cache jq coreutils >/dev/null
                   PB=http://pocketbase.homelab.svc.cluster.local:8090
                   TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
                     -H "Content-Type: application/json" \
@@ -197,7 +202,7 @@ spec:
                   # GET /api/backups returns [{key, size, modified}, ...].
                   # `modified` is RFC3339-ish UTC ("2026-05-22 09:00:00.123Z"
                   # in current PB versions). Normalize space→T and strip
-                  # sub-seconds so busybox date can parse it.
+                  # sub-seconds so `date -d` (GNU, installed above) parses it.
                   BACKUPS=$(curl -sf "$PB/api/backups" -H "Authorization: $TOKEN")
                   # Monthly exempt set: chronologically-first daily-* of each
                   # calendar month (grouped by YYYY-MM extracted from key).
