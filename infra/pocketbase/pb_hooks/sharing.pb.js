@@ -53,6 +53,27 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
     catch (_) { return []; }
   }
 
+  // Inlined helper: PB stores JSON columns as Go []byte; in goja that can
+  // surface as a JS array of byte values (one number per UTF-8 byte),
+  // NOT a parsed object. We need this for travel_slugs below (an object
+  // map { slug: log_id }) so the for-in iteration doesn't silently
+  // no-op and drop the slug mapping. Module-scope helpers are NOT
+  // reachable inside routerAdd callbacks (header note above), so this
+  // mirrors lib/pb-json.js inline. See 2026-05-22 incident.
+  function unwrapPbJsonObject(raw) {
+    if (raw == null) return {};
+    if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try { return JSON.parse(raw); } catch (_) { return {}; }
+    }
+    if (Array.isArray(raw)) {
+      var s = "";
+      for (var i = 0; i < raw.length; i++) s += String.fromCharCode(raw[i]);
+      try { return JSON.parse(s); } catch (_) { return {}; }
+    }
+    return {};
+  }
+
   const authRecord = e.auth;
   if (!authRecord) {
     return e.json(401, { error: "Authentication required" });
@@ -133,7 +154,10 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
         }
       }
     } else if (targetType === "travel_log") {
-      const slugs = user.get("travel_slugs") || {};
+      // Defensive unwrap — `user.get("travel_slugs")` may be a goja []byte
+      // array (silent no-op on for-in) instead of a parsed object.
+      // 2026-05-22 incident class.
+      const slugs = unwrapPbJsonObject(user.get("travel_slugs"));
       // Already mapped? Skip.
       let alreadyMapped = false;
       for (const k in slugs) {

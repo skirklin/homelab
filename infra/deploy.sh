@@ -71,6 +71,17 @@ if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$VPS" 'true' >/dev/null 2>&1; th
     exit 1
 fi
 
+# Pre-deploy lint — block the deploy if PB migrations / hooks carry the
+# 2026-05-22 goja JSON byte-array bug pattern. Cheap (sub-second) so we
+# always run it; hard exit so a known-bad pattern can never ship. Allowlist
+# for frozen historical migrations lives inside the script.
+if [ -x "infra/scripts/lint-pb-migrations.sh" ]; then
+    if ! infra/scripts/lint-pb-migrations.sh; then
+        echo "[deploy.sh] PB migration/hook lint failed — fix findings above or annotate with \`// lint-skip: <reason>\`. Aborting deploy." >&2
+        exit 1
+    fi
+fi
+
 # Pre-deploy PB backup — belt-and-suspenders on top of the nightly
 # pb-backup-daily CronJob. A migration shipped on a Wednesday and the
 # nightly only ran Tuesday is exactly the gap that bit us on 2026-05-22.
