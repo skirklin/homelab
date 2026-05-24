@@ -36,6 +36,7 @@ import {
   primaryEntryName,
 } from "../lib/format";
 import { EntriesPopover } from "./EntriesPopover";
+import { Hint } from "./Hint";
 
 interface EventLoggerProps {
   trackable: Trackable;
@@ -96,11 +97,6 @@ const ValueBadge = styled.button<{ $logged: boolean; $size: WidgetSize }>`
       color: white;
     }
   `}
-`;
-
-const Hint = styled.span`
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
 `;
 
 const FormRow = styled.div`
@@ -547,12 +543,12 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
             </Button>
           </Actions>
           {dayEvents.length > 0 && (
-            <Hint>{dayEvents.length} logged today{breakdown ? ` · ${breakdown}` : ""}</Hint>
+            <Hint $muted>{dayEvents.length} logged today{breakdown ? ` · ${breakdown}` : ""}</Hint>
           )}
         </FormRow>
       )}
 
-      {!open && breakdown && <Hint style={{ marginTop: 4 }}>{breakdown}</Hint>}
+      {!open && breakdown && <Hint $muted style={{ marginTop: 4 }}>{breakdown}</Hint>}
     </Card>
   );
 }
