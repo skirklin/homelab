@@ -33,7 +33,7 @@ import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
 import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
 import { Hint } from "./Hint";
-import { TRACKABLES, GROUP_ORDER, RANDOM_SAMPLES, SESSIONS, sessionSubjectId, type Trackable, type Session } from "../manifest";
+import { TRACKABLES, GROUP_ORDER, RANDOM_SAMPLES, SESSIONS, sessionSubjectId, sessionPath, type Trackable, type Session } from "../manifest";
 import {
   initializeMessaging,
   requestNotificationPermission,
@@ -771,7 +771,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
                     $size={size}
                     $muted={muted}
                     style={cardStyle}
-                    onClick={() => navigate(session.id)}
+                    onClick={() => navigate(sessionPath(session.id))}
                   >
                     {icon}
                     <SessionCardTitle>{session.title}</SessionCardTitle>

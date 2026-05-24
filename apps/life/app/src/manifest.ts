@@ -226,6 +226,11 @@ export function sessionSubjectId(sessionId: Session["id"]): string {
   return `${sessionId}_session`;
 }
 
+/** Router path slug. Most ids match the route, but weekly_review → /weekly. */
+export function sessionPath(sessionId: Session["id"]): string {
+  return sessionId === "weekly_review" ? "weekly" : sessionId;
+}
+
 // ---------- Random samples ----------
 //
 // The schedule + question list moved to @homelab/backend so the api service
