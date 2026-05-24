@@ -82,10 +82,12 @@ fi
 pre_deploy_backup() {
     local api_url="${HOMELAB_API_URL:-https://api.${DOMAIN:-kirkl.in}}"
     local pb_url="${PB_URL:-${api_url}}"
-    local email="${PB_ADMIN_EMAIL:-}"
+    # Solo-user: email is well-known, hardcoded as the default everywhere else
+    # too (services/scripts/*.ts). Only PB_ADMIN_PASSWORD must come from .env.
+    local email="${PB_ADMIN_EMAIL:-scott.kirklin@gmail.com}"
     local password="${PB_ADMIN_PASSWORD:-}"
-    if [ -z "$email" ] || [ -z "$password" ]; then
-        echo "[deploy.sh] (pre-deploy-backup) skipped: PB_ADMIN_EMAIL/PASSWORD not in .env" >&2
+    if [ -z "$password" ]; then
+        echo "[deploy.sh] (pre-deploy-backup) skipped: PB_ADMIN_PASSWORD not in .env" >&2
         return 0
     fi
     command -v jq >/dev/null 2>&1 || {
