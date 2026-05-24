@@ -88,6 +88,14 @@ const ValueBadge = styled.button<{ $logged: boolean; $size: WidgetSize }>`
   font-weight: 600;
   font-size: ${(p) => (p.$size === "compact" ? "var(--font-size-xs)" : "var(--font-size-sm)")};
   cursor: ${(p) => (p.$logged ? "pointer" : "default")};
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+
+  ${(p) => p.$logged && `
+    &:hover {
+      background: var(--color-primary);
+      color: white;
+    }
+  `}
 `;
 
 const Hint = styled.span`
