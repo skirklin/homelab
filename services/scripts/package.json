@@ -13,7 +13,8 @@
     "export:firestore": "tsx export/export-firestore.ts",
     "migrate:firebase-to-pb": "tsx migrate-firebase.ts",
     "prune-dangling-recipe-boxes": "tsx prune-dangling-recipe-boxes.ts",
-    "journey:import": "tsx import-journey.ts"
+    "journey:import": "tsx import-journey.ts",
+    "recover:life-events": "tsx recover-life-events.ts"
   },
   "dependencies": {
     "@homelab/backend": "workspace:*",
