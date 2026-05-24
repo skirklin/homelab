@@ -37,10 +37,14 @@
  * -------------
  *   - Pull rows from backup where `json_extract(data, '$.notes')` is a
  *     non-empty string.
- *   - For each, GET the matching row from current PB by id.
- *   - Only PATCH if the current row exists AND has empty `entries`
- *     (length 0 or null). If someone added notes after the migration, do
- *     NOT overwrite — log and skip.
+ *   - **Match on timestamp**, not id. The backup pre-dates the Firebase→PB
+ *     ID renumbering, so ids changed but timestamps (ms precision) survived
+ *     intact. Backup row at "2025-12-30 21:17:26.542Z" maps to the current
+ *     PB row at the same exact timestamp.
+ *   - If exactly 1 PB row matches the timestamp, PATCH it.
+ *   - Only PATCH if the current row has empty `entries` (length 0 or null).
+ *     If someone added notes after the migration, do NOT overwrite — log
+ *     and skip.
  *   - Write back as
  *     `{ entries: [{name: "notes", type: "text", value: <backupNotes>}] }`.
  *
@@ -150,18 +154,29 @@ async function authSuperuser(): Promise<string> {
 
 interface RecipeEventRow {
   id: string;
+  timestamp: string;
   entries: Array<{ name: string; type: string; value: unknown }> | null;
 }
 
-async function getRecipeEvent(token: string, id: string): Promise<RecipeEventRow | null> {
-  const url = `${pbUrl}/api/collections/recipe_events/records/${encodeURIComponent(id)}`;
+interface RecipeEventList {
+  items: RecipeEventRow[];
+  totalItems: number;
+}
+
+async function findRecipeEventsByTimestamp(token: string, timestamp: string): Promise<RecipeEventRow[]> {
+  // PB filter values use double quotes; the timestamp string itself contains
+  // none, so a direct interpolation is safe here.
+  const filter = `timestamp = "${timestamp}"`;
+  const url =
+    `${pbUrl}/api/collections/recipe_events/records?perPage=10&filter=` +
+    encodeURIComponent(filter);
   const res = await fetch(url, { headers: { Authorization: token } });
-  if (res.status === 404) return null;
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`GET ${id} ${res.status}: ${body}`);
+    throw new Error(`LIST ts=${timestamp} ${res.status}: ${body}`);
   }
-  return (await res.json()) as RecipeEventRow;
+  const json = (await res.json()) as RecipeEventList;
+  return json.items;
 }
 
 async function patchRecipeEvent(
@@ -193,9 +208,9 @@ console.log("  PB auth OK");
 // Pull every backup row whose data.notes is a non-empty string. `json_extract`
 // returns NULL when the path is missing or the value is not a scalar string —
 // the `!= ''` guard drops empty strings as well.
-const backupRows = sqliteAll<{ id: string; notes: string }>(
+const backupRows = sqliteAll<{ id: string; timestamp: string; notes: string }>(
   backupPath,
-  "SELECT id, json_extract(data, '$.notes') AS notes FROM recipe_events " +
+  "SELECT id, timestamp, json_extract(data, '$.notes') AS notes FROM recipe_events " +
     "WHERE json_extract(data, '$.notes') IS NOT NULL " +
     "AND json_extract(data, '$.notes') != ''",
 );
@@ -205,54 +220,61 @@ console.log("");
 let recovered = 0;
 let skipped = 0;
 let missing = 0;
+let ambiguous = 0;
 let errors = 0;
 
 for (const row of backupRows) {
   if (typeof row.notes !== "string" || row.notes.length === 0) {
     // Shouldn't happen given the SQL filter, but guard anyway.
     skipped++;
-    console.log(`  skipped ${row.id} (backup notes empty)`);
+    console.log(`  skipped backup-id=${row.id} (backup notes empty)`);
     continue;
   }
 
-  let current: RecipeEventRow | null;
+  let matches: RecipeEventRow[];
   try {
-    current = await getRecipeEvent(token, row.id);
+    matches = await findRecipeEventsByTimestamp(token, row.timestamp);
   } catch (err: any) {
     errors++;
-    console.log(`  error  ${row.id} (GET: ${err.message})`);
+    console.log(`  error  ts=${row.timestamp} (LIST: ${err.message})`);
     continue;
   }
 
-  if (!current) {
+  if (matches.length === 0) {
     missing++;
-    console.log(`  missing ${row.id} (not in current PB)`);
+    console.log(`  missing ts=${row.timestamp} (no current PB row at that timestamp)`);
+    continue;
+  }
+  if (matches.length > 1) {
+    ambiguous++;
+    console.log(`  ambiguous ts=${row.timestamp} (${matches.length} matches; manual review needed)`);
     continue;
   }
 
+  const current = matches[0];
   const entries = Array.isArray(current.entries) ? current.entries : [];
   if (entries.length > 0) {
     skipped++;
-    console.log(`  skipped ${row.id} (already has entries)`);
+    console.log(`  skipped current-id=${current.id} (already has entries)`);
     continue;
   }
 
   if (dryRun) {
     recovered++;
-    console.log(`  would recover ${row.id} (${row.notes.length} chars)`);
+    console.log(`  would recover current-id=${current.id} (${row.notes.length} chars)`);
     continue;
   }
 
-  const result = await patchRecipeEvent(token, row.id, row.notes);
+  const result = await patchRecipeEvent(token, current.id, row.notes);
   if (result.ok) {
     recovered++;
-    console.log(`  recovered ${row.id}`);
+    console.log(`  recovered current-id=${current.id}`);
   } else {
     errors++;
-    console.log(`  error  ${row.id} (PATCH ${result.status}: ${result.body})`);
+    console.log(`  error  current-id=${current.id} (PATCH ${result.status}: ${result.body})`);
   }
 }
 
 console.log("");
-console.log(`recovered=${recovered} skipped=${skipped} missing=${missing} errors=${errors}`);
+console.log(`recovered=${recovered} skipped=${skipped} missing=${missing} ambiguous=${ambiguous} errors=${errors}`);
 process.exit(errors > 0 ? 1 : 0);
