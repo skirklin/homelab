@@ -201,6 +201,70 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     );
   }
 
+  async renameHistoryEntry(id: string, newIngredient: string): Promise<void> {
+    const normalized = normalizeIngredient(newIngredient);
+    if (!normalized) return;
+
+    // Find the source row to learn its list (so we can scope the dedup lookup).
+    // Try the optimistic view first so a still-pending rename of the same row
+    // (or a still-pending create) is visible without a round-trip.
+    const fromView = this.wpb.collection("shopping_history").viewCollection<RecordModel>(
+      (r) => r.id === id,
+    );
+    const source = fromView.length > 0
+      ? fromView[0]
+      : await this.pb().collection("shopping_history").getOne(id, { $autoCancel: false });
+    const listId = source.list;
+
+    // No-op if the user typed the same normalized value back in.
+    if (source.ingredient === normalized) return;
+
+    // Optimistic-view-first dedup lookup (same pattern as upsertHistory — see
+    // the race fix in commit 21878cc).
+    const canonicalFromQueue = this.wpb.collection("shopping_history").viewCollection<RecordModel>(
+      (r) => r.list === listId && r.ingredient === normalized && r.id !== id,
+    );
+    let canonical: RecordModel | null = canonicalFromQueue[0] ?? null;
+    if (!canonical) {
+      const filter = this.pb().filter(
+        "list = {:listId} && ingredient = {:ingredient} && id != {:id}",
+        { listId, ingredient: normalized, id },
+      );
+      try {
+        canonical = await this.pb().collection("shopping_history").getFirstListItem(
+          filter,
+          { $autoCancel: false },
+        );
+      } catch {
+        canonical = null;
+      }
+    }
+
+    if (!canonical) {
+      // No collision — just rename in place.
+      await this.wpb.collection("shopping_history").update(id, { ingredient: normalized });
+      return;
+    }
+
+    // Merge: pick the most-recent-last_added side's category, take the max
+    // last_added, write that onto the canonical row, then delete the source.
+    const sourceLastAdded = new Date(source.last_added).getTime();
+    const canonicalLastAdded = new Date(canonical.last_added).getTime();
+    const sourceIsNewer = sourceLastAdded > canonicalLastAdded;
+    const mergedLastAdded = sourceIsNewer ? source.last_added : canonical.last_added;
+    const mergedCategoryId = sourceIsNewer ? source.category_id : canonical.category_id;
+
+    await this.wpb.collection("shopping_history").update(canonical.id, {
+      last_added: mergedLastAdded,
+      category_id: mergedCategoryId,
+    });
+    await this.wpb.collection("shopping_history").delete(id);
+  }
+
+  async deleteHistoryEntry(id: string): Promise<void> {
+    await this.wpb.collection("shopping_history").delete(id);
+  }
+
   /** Upsert a history entry — find existing by (list, ingredient) and update, else create.
    *
    * The optimistic-view check must come first. Reading through the live PB

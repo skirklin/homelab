@@ -130,6 +130,7 @@ function subscribeToListViaBackend(
       dispatch({
         type: "SET_HISTORY",
         history: entries.map((e) => ({
+          id: e.id,
           ingredient: e.ingredient,
           categoryId: e.categoryId,
           lastAdded: e.lastAdded,

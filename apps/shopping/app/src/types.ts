@@ -35,6 +35,7 @@ export interface ShoppingList {
 }
 
 export interface ItemHistory {
+  id: string;
   ingredient: string;
   categoryId: CategoryId;
   lastAdded: Date;
