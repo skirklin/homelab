@@ -1,5 +1,19 @@
 /// <reference path="../pb_data/types.d.ts" />
 
+// HISTORICAL NOTE: this migration corrupted sessions + lost composite-
+// trackable data on 2026-05-23 because it didn't use unwrapPbJson() to
+// handle PB's []byte JSON storage form in goja. The defensive JSON
+// round-trip below (`JSON.parse(JSON.stringify(r.get("data") || {}))`)
+// turns a Go []byte JSON column into a JS array of byte numbers, not a
+// parsed object — so per-subject mapRow branches saw arrays instead of
+// objects. Sessions retained the byte array as `entries` (recoverable
+// via char-code decode); composite trackables (sleep/exercise/work/
+// symptoms/mood/content) produced empty entries (recovery via the
+// pre-migration PB backup). Recovery via
+// services/scripts/recover-life-events.ts. The future migration template
+// should always use unwrapPbJson() — see
+// infra/pocketbase/pb_migrations/lib/pb-json.js.
+
 /**
  * life_events: unify the row shape behind a single `entries` array.
  *
