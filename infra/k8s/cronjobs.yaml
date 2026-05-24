@@ -290,8 +290,11 @@ spec:
               args:
                 - |
                   set -e
-                  # alpine/curl ships only curl — install jq for token + URI encoding.
-                  apk add --no-cache jq >/dev/null
+                  # alpine/curl ships only curl — install jq for token + URI
+                  # encoding, and coreutils to replace BusyBox `date` (which
+                  # doesn't grok `-d '10 days ago'` or `-d @<epoch>`). After
+                  # `apk add coreutils`, /bin/date is GNU date with full -d.
+                  apk add --no-cache jq coreutils >/dev/null
                   PB=http://pocketbase.homelab.svc.cluster.local:8090
                   TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
                     -H "Content-Type: application/json" \
@@ -300,11 +303,8 @@ spec:
                   # PB stores `created` as "YYYY-MM-DD HH:MM:SS.sssZ" (space
                   # separator, ms precision, trailing Z). Build the cutoff in
                   # that exact shape so the string compare in the filter works.
-                  # NOTE: alpine/curl uses BusyBox date which doesn't grok
-                  # GNU's `-d '10 days ago'` syntax. Compute the epoch offset
-                  # in shell and pass `@<unix_ts>` — supported by both.
-                  CUTOFF_TS=$(( $(date -u +%s) - 10*86400 ))
-                  CUTOFF=$(date -u -d "@$CUTOFF_TS" +'%Y-%m-%d %H:%M:%S.000Z')
+                  # Relies on coreutils `date -d` (installed above).
+                  CUTOFF=$(date -u -d '10 days ago' +'%Y-%m-%d %H:%M:%S.000Z')
                   FILTER="created < \"$CUTOFF\" && type = \"Normal\""
                   # PB filter must be URI-encoded; jq -sRr @uri is the safe path
                   # (handles quotes, spaces, &, <, =, etc. consistently).
