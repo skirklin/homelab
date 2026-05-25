@@ -141,8 +141,12 @@ const RatingRow = styled.div`
 
 const RatingNum = styled.button<{ $selected: boolean }>`
   flex: 1;
-  min-width: 36px;
-  height: 36px;
+  /* min-width: 0 lets flex shrink the buttons below their content width so
+     5 buttons + gaps always fit a narrow card. Height is locked; width
+     adapts. */
+  min-width: 0;
+  height: 32px;
+  padding: 0;
   border-radius: 8px;
   border: 1px solid ${(p) => (p.$selected ? "var(--color-primary)" : "var(--color-border)")};
   background: ${(p) => (p.$selected ? "var(--color-primary)" : "var(--color-bg)")};
@@ -417,28 +421,34 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     );
   }
 
-  // Rating mode: always-expanded numeric picker. No "open" state.
+  // Rating mode: picker is inline while no value is logged. Once logged,
+  // collapse to just the header — the value badge in the header opens the
+  // EntriesPopover, which has a 1..scale-constrained number editor for
+  // re-logging.
   if (rating) {
     const nums = [1, 2, 3, 4, 5];
+    const logged = dayEvents.length > 0;
     return (
-      <Card $size={size} $highlighted={dayEvents.length > 0}>
+      <Card $size={size} $highlighted={logged}>
         <HeaderRow>
           {headerLabel}
           {valueDisplay}
         </HeaderRow>
-        <RatingRow style={{ marginTop: "var(--space-sm)" }}>
-          {nums.map((n) => (
-            <RatingNum
-              key={n}
-              $selected={false}
-              onClick={() => handleRatingClick(n)}
-              disabled={saving || !logId}
-              aria-label={`Log ${n}`}
-            >
-              {n}
-            </RatingNum>
-          ))}
-        </RatingRow>
+        {!logged && (
+          <RatingRow style={{ marginTop: "var(--space-sm)" }}>
+            {nums.map((n) => (
+              <RatingNum
+                key={n}
+                $selected={false}
+                onClick={() => handleRatingClick(n)}
+                disabled={saving || !logId}
+                aria-label={`Log ${n}`}
+              >
+                {n}
+              </RatingNum>
+            ))}
+          </RatingRow>
+        )}
       </Card>
     );
   }
