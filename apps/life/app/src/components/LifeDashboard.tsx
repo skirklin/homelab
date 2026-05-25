@@ -425,8 +425,9 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const allEntries = Array.from(state.entries.values());
 
   // Group trackables for layout. Unknown groups (or trackables without a
-  // group) fall through to "more".
-  const grouped = TRACKABLES.reduce<Record<string, Trackable[]>>((acc, t) => {
+  // group) fall through to "more". `hidden` trackables are kept in the
+  // manifest (so historical events still aggregate) but skipped here.
+  const grouped = TRACKABLES.filter((t) => !t.hidden).reduce<Record<string, Trackable[]>>((acc, t) => {
     const key = t.group ?? "more";
     (acc[key] ??= []).push(t);
     return acc;

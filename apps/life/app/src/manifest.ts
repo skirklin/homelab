@@ -48,13 +48,19 @@ export interface Trackable {
   defaultValue?: number;
   /** If true, the log form shows a notes textarea (stored as a text entry). */
   hasNotes?: boolean;
+  /**
+   * Per-trackable opt-out from the dashboard grid. Events still write/read
+   * fine for any code that references the id — this just hides the card so
+   * historical data aggregates correctly if the flag is later removed.
+   */
+  hidden?: boolean;
 }
 
 export const TRACKABLES: Trackable[] = [
   // medical
   { id: "vyvanse",       label: "Vyvanse",       unit: "mg",     group: "medical",     defaultValue: 30 },
-  { id: "vitamins",      label: "Vitamins",      unit: "ct",     group: "medical",     defaultValue: 1 },
-  { id: "ibuprofin",     label: "Ibuprofin",     unit: "mg",     group: "medical",     defaultValue: 400 },
+  { id: "vitamins",      label: "Vitamins",      unit: "ct",     group: "medical",     defaultValue: 1,   hidden: true },
+  { id: "ibuprofin",     label: "Ibuprofin",     unit: "mg",     group: "medical",     defaultValue: 400, hidden: true },
 
   // consumables
   { id: "edibles",       label: "Edibles",       unit: "mg",     group: "consumables", defaultValue: 5 },
@@ -71,17 +77,20 @@ export const TRACKABLES: Trackable[] = [
 
   // time-based — defaultValue is in minutes; the inline form auto-switches to
   // hours input when defaultValue >= 60 and converts back on submit.
+  // sleep_quality sits adjacent to sleep so the two render side-by-side.
   { id: "sleep",         label: "Sleep",         unit: "min",    group: "time-based", defaultValue: 480, hasNotes: true },
+  { id: "sleep_quality", label: "Sleep quality", unit: "rating", group: "time-based" },
   { id: "exercise",      label: "Exercise",      unit: "min",    group: "time-based",
     categories: ["walk", "run", "bike", "PT", "lift", "yoga", "other"],
     hasIntensity: true, defaultValue: 30 },
   { id: "focus",         label: "Focus",         unit: "min",    group: "time-based",
     categories: ["chinese", "coding", "learning", "trip planning"], defaultValue: 25 },
 
-  // rating-shaped
-  { id: "mood",          label: "Mood",          unit: "rating", group: "ratings" },
-  { id: "content",       label: "Content",       unit: "rating", group: "ratings" },
-  { id: "sleep_quality", label: "Sleep quality", unit: "rating", group: "ratings" },
+  // rating-shaped — hidden while random sampling is paused. No events being
+  // generated, so the cards just sit empty on the grid. Un-hide if sampling
+  // resumes; entries persist either way.
+  { id: "mood",          label: "Mood",          unit: "rating", group: "ratings", hidden: true },
+  { id: "content",       label: "Content",       unit: "rating", group: "ratings", hidden: true },
 ];
 
 export function getTrackable(id: string): Trackable | undefined {
@@ -92,7 +101,7 @@ export function getTrackable(id: string): Trackable | undefined {
  * Group order on the dashboard. Items not in this list fall through to the
  * "standalone" bucket. Tweak freely — solo app.
  */
-export const GROUP_ORDER = ["medical", "consumables", "bio", "time-based", "ratings"] as const;
+export const GROUP_ORDER = ["medical", "consumables", "bio", "time-based"] as const;
 
 // ---------- Sessions ----------
 
