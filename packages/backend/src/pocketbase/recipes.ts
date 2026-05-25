@@ -1,9 +1,22 @@
 /**
  * PocketBase implementation of RecipesBackend.
  *
- * Writes route through the optimistic wrapper. Per-box subscriptions
- * (recipe_boxes record + recipes filtered by box) use wpb so optimistic
- * mutations fan to the right box.
+ * Writes route through the optimistic wrapper. Subscriptions ride on the
+ * PBMirror: subscribeToUser composes a user-record slice with a dynamic
+ * per-box slice set (one box-record watch + one recipes-filter watch per
+ * subscribed box). When the user's `recipe_boxes` field changes, the
+ * outer watch diffs against the current per-box watches and adds/removes
+ * mirror handles accordingly. subscribeToCookingLog is a single
+ * filter-only-wildcard slice on recipe_events.
+ *
+ * The legacy implementation hand-rolled three races (initial-load batch,
+ * cancel-before-resolve on every inner subscribe, recipe-box-change ghost
+ * when a recipe moved between boxes). All three retire here:
+ *   - the mirror delivers full state per slice, no batch dance
+ *   - WatchHandle.unsubscribe is synchronous & safe pre-bootstrap
+ *   - per-box predicate (`r.box === boxId`) re-runs on every state
+ *     change, so a recipe whose `box` changes naturally disappears from
+ *     its old slice and appears in the new one — no ghost
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
@@ -13,13 +26,15 @@ import type { Visibility, Unsubscribe } from "../types/common";
 import type { LifeEntry } from "../types/life";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
+import type { PBMirror, RawRecord, WatchHandle } from "../wrapped-pb/mirror";
 
 /**
  * Defensive parser for the post-migration recipe_events.entries column.
  * Same shape as task_events / life_events.
  */
-function entriesFromRecord(r: RecordModel): LifeEntry[] {
-  const raw = Array.isArray(r.entries) ? r.entries : [];
+function entriesFromRecord(r: RecordModel | RawRecord): LifeEntry[] {
+  const x = r as Record<string, unknown>;
+  const raw = Array.isArray(x.entries) ? x.entries : [];
   const out: LifeEntry[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
@@ -38,9 +53,10 @@ function entriesFromRecord(r: RecordModel): LifeEntry[] {
   return out;
 }
 
-function labelsFromRecord(r: RecordModel): Record<string, string> | undefined {
-  return r.labels && typeof r.labels === "object" && !Array.isArray(r.labels)
-    ? (r.labels as Record<string, string>)
+function labelsFromRecord(r: RecordModel | RawRecord): Record<string, string> | undefined {
+  const x = r as Record<string, unknown>;
+  return x.labels && typeof x.labels === "object" && !Array.isArray(x.labels)
+    ? (x.labels as Record<string, string>)
     : undefined;
 }
 
@@ -51,66 +67,72 @@ function notesEntries(notes?: string): LifeEntry[] {
 
 // --- Record → domain type mappers ---
 
-function userFromRecord(r: RecordModel): RecipesUser {
+function userFromRecord(r: RecordModel | RawRecord): RecipesUser {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    boxes: r.recipe_boxes || [],
-    lastSeenUpdateVersion: r.last_seen_update_version || 0,
+    boxes: (x.recipe_boxes as string[]) || [],
+    lastSeenUpdateVersion: (x.last_seen_update_version as number) || 0,
   };
 }
 
-function boxFromRecord(r: RecordModel): RecipeBox {
+function boxFromRecord(r: RecordModel | RawRecord): RecipeBox {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    name: r.name || "",
-    description: r.description || "",
-    owners: Array.isArray(r.owners) ? r.owners : [],
-    subscribers: Array.isArray(r.subscribers) ? r.subscribers : [],
-    visibility: r.visibility || "private",
-    created: r.created,
-    updated: r.updated,
-    creator: r.creator || "",
-    lastUpdatedBy: r.last_updated_by || "",
+    name: (x.name as string) || "",
+    description: (x.description as string) || "",
+    owners: Array.isArray(x.owners) ? (x.owners as string[]) : [],
+    subscribers: Array.isArray(x.subscribers) ? (x.subscribers as string[]) : [],
+    visibility: (x.visibility as RecipeBox["visibility"]) || "private",
+    created: x.created as string,
+    updated: x.updated as string,
+    creator: (x.creator as string) || "",
+    lastUpdatedBy: (x.last_updated_by as string) || "",
   };
 }
 
-function recipeFromRecord(r: RecordModel): Recipe {
+function recipeFromRecord(r: RecordModel | RawRecord): Recipe {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    box: r.box,
-    data: (r.data || {}) as RecipeData,
-    owners: Array.isArray(r.owners) ? r.owners : [],
-    visibility: r.visibility || "private",
-    enrichmentStatus: r.enrichment_status || "needed",
-    pendingChanges: r.pending_changes || null,
-    stepIngredients: r.step_ingredients || null,
-    cookingLog: r.cooking_log || null,
-    created: r.created,
-    updated: r.updated,
-    creator: r.creator || "",
-    lastUpdatedBy: r.last_updated_by || "",
+    box: x.box as string,
+    data: (x.data || {}) as RecipeData,
+    owners: Array.isArray(x.owners) ? (x.owners as string[]) : [],
+    visibility: (x.visibility as Recipe["visibility"]) || "private",
+    enrichmentStatus: (x.enrichment_status as Recipe["enrichmentStatus"]) || "needed",
+    pendingChanges: (x.pending_changes as Recipe["pendingChanges"]) || null,
+    stepIngredients: (x.step_ingredients as Recipe["stepIngredients"]) || null,
+    cookingLog: (x.cooking_log as Recipe["cookingLog"]) || null,
+    created: x.created as string,
+    updated: x.updated as string,
+    creator: (x.creator as string) || "",
+    lastUpdatedBy: (x.last_updated_by as string) || "",
   };
 }
 
-function eventFromRecord(r: RecordModel): CookingLogEvent {
+function eventFromRecord(r: RecordModel | RawRecord): CookingLogEvent {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    subjectId: r.subject_id,
-    timestamp: new Date(r.timestamp),
-    endTime: r.end_time ? new Date(r.end_time) : undefined,
+    subjectId: x.subject_id as string,
+    timestamp: new Date(x.timestamp as string),
+    endTime: x.end_time ? new Date(x.end_time as string) : undefined,
     entries: entriesFromRecord(r),
     labels: labelsFromRecord(r),
-    createdBy: r.created_by || "",
-    created: r.created,
-    updated: r.updated,
+    createdBy: (x.created_by as string) || "",
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
 export class PocketBaseRecipesBackend implements RecipesBackend {
   private wpb: WrappedPocketBase;
+  private mirror: PBMirror;
 
-  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase, mirror: PBMirror) {
     this.wpb = wpb;
+    this.mirror = mirror;
   }
 
   // --- User ---
@@ -331,48 +353,23 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
     recipeId: string,
     onEvents: (events: CookingLogEvent[]) => void,
   ): Unsubscribe {
-    // Mirrors the per-box recipes pattern: wpb.subscribe('*', filter) auto-loads
-    // the initial set + delivers each as a 'create', then forwards live events.
-    // We defer the first emit until subscribe() resolves so consumers see one
-    // batched onEvents([...]) instead of N per-record callbacks.
-    let cancelled = false;
-    const eventsMap = new Map<string, CookingLogEvent>();
-
-    const emit = () => {
-      if (cancelled) return;
-      const list = Array.from(eventsMap.values()).sort(
-        (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
-      );
-      onEvents(list);
-    };
-
-    let initialDone = false;
-    let unsub: (() => void) | undefined;
-    this.wpb.collection("recipe_events").subscribe("*", (e) => {
-      if (cancelled) return;
-      const rec = e.record as RecordModel;
-      if (rec.box !== boxId || rec.subject_id !== recipeId) return;
-      if (e.action === "delete") {
-        eventsMap.delete(rec.id);
-      } else {
-        eventsMap.set(rec.id, eventFromRecord(rec));
-      }
-      if (initialDone) emit();
-    }, {
-      filter: this.pb().filter("box = {:boxId} && subject_id = {:recipeId}", { boxId, recipeId }),
-      local: (r) => r.box === boxId && r.subject_id === recipeId,
-    }).then((fn) => {
-      unsub = fn;
-      if (!cancelled) {
-        initialDone = true;
-        emit();
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
+    // Filter-only wildcard slice on recipe_events scoped to (box, recipe).
+    // UI still wants newest-first.
+    const handle = this.mirror.watch(
+      {
+        collection: "recipe_events",
+        topic: "*",
+        filter: this.pb().filter("box = {:boxId} && subject_id = {:recipeId}", { boxId, recipeId }),
+        predicate: (r) => r.box === boxId && r.subject_id === recipeId,
+      },
+      (records) => {
+        const list = records
+          .map(eventFromRecord)
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        onEvents(list);
+      },
+    );
+    return () => handle.unsubscribe();
   }
 
   subscribeToUser(
@@ -381,106 +378,120 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
       onUser: (user: RecipesUser) => void;
       onBox: (box: RecipeBox, recipes: Recipe[]) => void;
       onBoxRemoved: (boxId: string) => void;
-      onRecipeChanged: (boxId: string, recipe: Recipe) => void;
-      onRecipeRemoved: (boxId: string, recipeId: string) => void;
+      onRecipes: (boxId: string, recipes: Recipe[]) => void;
     },
   ): Unsubscribe {
-    let cancelled = false;
-    const boxUnsubs = new Map<string, Array<() => void>>();
+    // Dynamic per-box slice set. The user-record watch is the driver:
+    // every time `recipe_boxes` changes, diff against the active per-box
+    // watches and add/remove handles accordingly.
+    //
+    // Each per-box entry holds two mirror handles: the box record and
+    // the recipes filter. We track whether the initial `onBox` has been
+    // emitted so we can deliver the box + first recipe batch together
+    // (matching prior behavior). Subsequent emits go through `onRecipes`
+    // (for recipe-side changes) and `onBox` (for box metadata changes).
+    interface BoxSlice {
+      handles: WatchHandle[];
+      initialBoxEmitted: boolean;
+      lastBox: RecipeBox | null;
+      lastRecipes: Recipe[];
+      hasInitialBox: boolean;
+      hasInitialRecipes: boolean;
+    }
+    const boxSlices = new Map<string, BoxSlice>();
 
-    // Buffer initial box+recipes events and emit a single combined onBox
-    // call once both subscriptions have delivered their initial state. This
-    // matches the prior behavior (one batched onBox(box, recipes) call) so
-    // the consumer doesn't see N intermediate callbacks during initial load.
-    const setupBox = (boxId: string) => {
-      if (cancelled || boxUnsubs.has(boxId)) return;
-      const unsubs: Array<() => void> = [];
-      boxUnsubs.set(boxId, unsubs);
-
-      let boxInitialDone = false;
-      let recipesInitialDone = false;
-      let initialBox: RecipeBox | null = null;
-      const initialRecipes: Recipe[] = [];
-      let combinedEmitted = false;
-
-      const tryEmitInitial = () => {
-        if (combinedEmitted || !boxInitialDone || !recipesInitialDone) return;
-        combinedEmitted = true;
-        if (initialBox) handlers.onBox(initialBox, initialRecipes);
-      };
-
-      // Box record — wpb auto-loads via getOne, delivers as a "create".
-      this.wpb.collection("recipe_boxes").subscribe(boxId, (e) => {
-        if (cancelled) return;
-        if (e.action === "delete") {
-          handlers.onBoxRemoved(boxId);
-          return;
-        }
-        const box = boxFromRecord(e.record);
-        if (!combinedEmitted) {
-          initialBox = box;
-          return;
-        }
-        handlers.onBox(box, []);
-      }).then((unsub) => {
-        unsubs.push(unsub);
-        if (cancelled) return;
-        boxInitialDone = true;
-        tryEmitInitial();
-      });
-
-      // Recipes for this box — wpb auto-loads via getFullList(filter),
-      // delivers each as a "create", then forwards live events.
-      this.wpb.collection("recipes").subscribe("*", (e) => {
-        if (cancelled || (e.record as RecordModel).box !== boxId) return;
-        if (e.action === "delete") {
-          handlers.onRecipeRemoved(boxId, e.record.id);
-          return;
-        }
-        const recipe = recipeFromRecord(e.record);
-        if (!combinedEmitted) {
-          initialRecipes.push(recipe);
-          return;
-        }
-        handlers.onRecipeChanged(boxId, recipe);
-      }, {
-        filter: this.pb().filter("box = {:boxId}", { boxId }),
-        local: (r) => r.box === boxId,
-      }).then((unsub) => {
-        unsubs.push(unsub);
-        if (cancelled) return;
-        recipesInitialDone = true;
-        tryEmitInitial();
-      });
+    const tryEmitInitial = (boxId: string) => {
+      const s = boxSlices.get(boxId);
+      if (!s || s.initialBoxEmitted) return;
+      if (!s.hasInitialBox || !s.hasInitialRecipes) return;
+      if (!s.lastBox) return;
+      s.initialBoxEmitted = true;
+      handlers.onBox(s.lastBox, s.lastRecipes);
     };
 
-    // User record drives the box list. wpb.subscribe(id) auto-loads and
-    // delivers the user as the first "create" event, which sets up
-    // per-box subscriptions; subsequent updates re-reconcile the set.
-    let userUnsub: (() => void) | undefined;
-    this.wpb.collection("users").subscribe(userId, (e) => {
-      if (cancelled) return;
-      if (e.action === "delete") return;
-      const user = userFromRecord(e.record);
-      handlers.onUser(user);
+    const setupBox = (boxId: string): void => {
+      if (boxSlices.has(boxId)) return;
+      const slice: BoxSlice = {
+        handles: [],
+        initialBoxEmitted: false,
+        lastBox: null,
+        lastRecipes: [],
+        hasInitialBox: false,
+        hasInitialRecipes: false,
+      };
+      boxSlices.set(boxId, slice);
 
-      const currentBoxes = new Set(user.boxes);
-      for (const [boxId, unsubs] of boxUnsubs) {
-        if (!currentBoxes.has(boxId)) {
-          unsubs.forEach((u) => u());
-          boxUnsubs.delete(boxId);
+      slice.handles.push(this.mirror.watch(
+        { collection: "recipe_boxes", topic: boxId },
+        (records) => {
+          if (records.length === 0) {
+            // The box was deleted (or never existed). The mirror emits
+            // empty for both cases; if we'd previously seen the box,
+            // surface the removal so the consumer drops it.
+            if (slice.lastBox) handlers.onBoxRemoved(boxId);
+            return;
+          }
+          const box = boxFromRecord(records[0]);
+          slice.lastBox = box;
+          slice.hasInitialBox = true;
+          if (!slice.initialBoxEmitted) {
+            tryEmitInitial(boxId);
+          } else {
+            // Post-initial: surface metadata changes by re-emitting onBox
+            // with the current known recipes. Consumers treat this as a
+            // box-fields update.
+            handlers.onBox(box, slice.lastRecipes);
+          }
+        },
+      ));
+
+      slice.handles.push(this.mirror.watch(
+        {
+          collection: "recipes",
+          topic: "*",
+          filter: this.pb().filter("box = {:boxId}", { boxId }),
+          predicate: (r) => r.box === boxId,
+        },
+        (records) => {
+          const recipes = records.map(recipeFromRecord);
+          slice.lastRecipes = recipes;
+          slice.hasInitialRecipes = true;
+          if (!slice.initialBoxEmitted) {
+            tryEmitInitial(boxId);
+          } else {
+            handlers.onRecipes(boxId, recipes);
+          }
+        },
+      ));
+    };
+
+    const teardownBox = (boxId: string): void => {
+      const s = boxSlices.get(boxId);
+      if (!s) return;
+      for (const h of s.handles) h.unsubscribe();
+      boxSlices.delete(boxId);
+    };
+
+    const userHandle = this.mirror.watch(
+      { collection: "users", topic: userId },
+      (records) => {
+        if (records.length === 0) return;
+        const user = userFromRecord(records[0]);
+        handlers.onUser(user);
+
+        const currentBoxes = new Set(user.boxes);
+        // Tear down boxes no longer in the user's set.
+        for (const boxId of Array.from(boxSlices.keys())) {
+          if (!currentBoxes.has(boxId)) teardownBox(boxId);
         }
-      }
-      for (const boxId of user.boxes) setupBox(boxId);
-    }).then((fn) => { userUnsub = fn; });
+        // Set up boxes newly in the set.
+        for (const boxId of user.boxes) setupBox(boxId);
+      },
+    );
 
     return () => {
-      cancelled = true;
-      userUnsub?.();
-      for (const unsubs of boxUnsubs.values()) {
-        unsubs.forEach((u) => u());
-      }
-      boxUnsubs.clear();
+      userHandle.unsubscribe();
+      for (const boxId of Array.from(boxSlices.keys())) teardownBox(boxId);
     };
   }
 }

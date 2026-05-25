@@ -25,7 +25,7 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseRecipesBackend } from "@homelab/backend/pocketbase";
-import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
+import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 import type { CookingLogEvent } from "@homelab/backend";
 import { EnrichmentStatus, Visibility } from "../types";
 
@@ -35,7 +35,8 @@ let recipes: PocketBaseRecipesBackend;
 beforeAll(async () => {
   ctx = await initTestPocketBase();
   const pb = () => ctx.userPb;
-  recipes = new PocketBaseRecipesBackend(pb, wrapPocketBase(pb));
+  const wpb = wrapPocketBase(pb);
+  recipes = new PocketBaseRecipesBackend(pb, wpb, createMirror(pb, wpb));
 });
 
 afterAll(async () => {

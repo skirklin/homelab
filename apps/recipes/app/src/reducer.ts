@@ -175,6 +175,26 @@ export function recipeBoxReducer(prevState: AppState, action: ActionType): AppSt
       newBoxes.set(a.boxId, newBox);
       return { ...prevState, boxes: newBoxes };
     }
+    case "SET_BOX_RECIPES": {
+      const a = action as { boxId?: string; payload?: PlainRecipe[] };
+      if (a.boxId === undefined || a.payload === undefined) {
+        console.warn("SET_BOX_RECIPES requires a boxId and payload.")
+        return prevState
+      }
+      const existingBox = prevState.boxes.get(a.boxId);
+      if (existingBox === undefined) {
+        // The box hasn't been delivered yet (initial onBox is still
+        // pending). Drop this emit — the mirror will redeliver once the
+        // box arrives.
+        return prevState
+      }
+      const newRecipes = new Map<string, PlainRecipe>();
+      for (const r of a.payload) newRecipes.set(r.id, r);
+      const newBox: PlainBox = { ...existingBox, recipes: newRecipes };
+      const newBoxes = new Map(prevState.boxes);
+      newBoxes.set(a.boxId, newBox);
+      return { ...prevState, boxes: newBoxes };
+    }
     case "SET_BOXES": {
       const a = action as { payload: Map<string, PlainBox> };
       return { ...prevState, boxes: new Map([...prevState.boxes, ...a.payload]) }

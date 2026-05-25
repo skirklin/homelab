@@ -59,6 +59,7 @@ export type ActionType =
   | { type: "ADD_BOX"; boxId?: BoxId; payload?: PlainBox }
   | { type: "REMOVE_BOX"; boxId?: BoxId }
   | { type: "REMOVE_RECIPE"; boxId?: BoxId; recipeId?: RecipeId }
+  | { type: "SET_BOX_RECIPES"; boxId: BoxId; payload: PlainRecipe[] }
   | { type: "SET_BOXES"; payload: Map<string, PlainBox> }
   | { type: "CLEAR_BOXES" }
   | { type: "SET_READONLY"; payload: boolean }

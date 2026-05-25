@@ -1,40 +1,27 @@
 /**
  * Offline cache decorator for backends.
  *
- * Usage:
- *   import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
- *   import { withCache } from "@homelab/backend/cache";
- *   const backends = withCache(createPocketBaseBackends(() => getPb()));
+ * Every backend now rides on the PBMirror, which supplies a richer
+ * offline + optimistic story than the IDB hydrate-one decorator ever did:
  *
- * Reads are served from IndexedDB while offline; writes pass through and
- * will reject when the network is unavailable. Subscriptions hydrate from
- * cache immediately, then overlay live PocketBase updates as they arrive.
- *
- * SHOPPING IS DELIBERATELY UNWRAPPED HERE. The PBMirror that backs the
- * shopping backend supplies its own offline + optimistic story:
  *   - Optimistic mutations sit in MutationQueue and are persisted to IDB
  *     by wpb (`persistMutation` / `replayPending`).
  *   - The mirror's bootstrap and SSE event flow keep `queue.viewCollection`
  *     authoritative even across reconnects.
  *   - composeView reconciles server snapshots with pending mutations so a
- *     stale persisted SET can never override fresher server truth (commit
- *     2f4c2e4).
+ *     stale persisted SET can never override fresher server truth.
  *
- * The cache decorator's hydrateOne path adds a parallel "deliver a stale
- * snapshot first, hope the mirror overrides it" mechanism. That's fine in
- * the happy path. The failure mode (shopping.test.ts: REPRO suspected user
- * bug) is that if the mirror's bootstrap silently fails — expired token,
- * PB unreachable, network blip — the hydrateOne emit is the ONLY thing the
- * reducer ever sees, and the user is left looking at the pre-toggle state
- * forever. The mirror has no equivalent failure mode: an offline bootstrap
- * leaves the queue's prior-session state (replayed via wpb.replayPending)
- * visible to consumers, no stale-snapshot pseudo-source-of-truth required.
+ * The legacy hydrateOne path's failure mode (silent stale snapshot when
+ * the live subscription fails to bootstrap — expired token, PB
+ * unreachable, network blip) doesn't exist for the mirror: an offline
+ * bootstrap simply emits the queue's prior-session state replayed via
+ * wpb.replayPending, no pseudo-source-of-truth required.
  *
- * Other backends still need the cache decorator because they use the
- * legacy wpb.subscribe path; they should migrate to the mirror over time
- * (then unwrap from withCache as they do).
+ * `withCache` is therefore a no-op pass-through today. Kept as the
+ * public surface because callers import it; the per-domain decorators
+ * (`withShoppingCache`, etc.) remain re-exported in case a callsite
+ * still composes them manually.
  */
-import { withRecipesCache } from "./recipes";
 
 import type { TravelBackend } from "../interfaces/travel";
 import type { ShoppingBackend } from "../interfaces/shopping";
@@ -53,25 +40,10 @@ export interface BackendBundle {
 }
 
 export function withCache(b: BackendBundle): BackendBundle {
-  return {
-    // travel is on the mirror; subscribeToLog is queue-overlay-aware and
-    // the read helpers (getOrCreateLog, upsertDayEntry lookup) hit the
-    // network directly.
-    travel: b.travel,
-    // shopping is on the mirror — see file comment for why we skip caching.
-    shopping: b.shopping,
-    // upkeep is on the mirror; subscribeToList is queue-overlay-aware and
-    // the read-only helpers (getList, getSubtree, getTasksByTag) hit the
-    // network directly.
-    upkeep: b.upkeep,
-    recipes: withRecipesCache(b.recipes),
-    // life is on the mirror; subscribeToEvents is queue-overlay-aware
-    // and the read-only helpers (getOrCreateLog) hit the network directly.
-    life: b.life,
-    // user is on the mirror; subscribeSlugs is queue-overlay-aware and
-    // the read-only helpers (getProfile, etc.) hit the network directly.
-    user: b.user,
-  };
+  // All backends are mirror-backed; the mirror subsumes the IDB
+  // hydrate-first decorator. Pass-through preserves the existing call
+  // sites (BackendProvider, etc.).
+  return b;
 }
 
 export { cacheClear } from "./storage";

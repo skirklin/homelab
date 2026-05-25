@@ -1,14 +1,14 @@
 /**
  * Recipes backend cache decorator.
  *
- * Subscriptions deliver per-box callbacks rather than a single full-state
- * payload, so we cache an index of known box IDs plus each box's snapshot.
+ * Kept as a thin pass-through for the read-only helpers that still cache
+ * to IDB (`getUser`, `getBox`, `getCookingLogEvents`). The subscription
+ * path is now mirror-backed and doesn't need the hydrate-one snapshot
+ * layer — see cache/index.ts.
  */
 import type { RecipesBackend, RecipesUser } from "../interfaces/recipes";
 import type { RecipeBox, Recipe, CookingLogEvent } from "../types/recipes";
-import type { Unsubscribe } from "../types/common";
 import { cachedRead } from "./helpers";
-import { cacheGet, cacheSet } from "./storage";
 
 type BoxSnapshot = { box: RecipeBox; recipes: Recipe[] };
 
@@ -38,60 +38,6 @@ export function withRecipesCache(inner: RecipesBackend): RecipesBackend {
     updateCookingLogEvent: (id, n) => inner.updateCookingLogEvent(id, n),
     deleteCookingLogEvent: (id) => inner.deleteCookingLogEvent(id),
     subscribeToCookingLog: (bid, rid, cb) => inner.subscribeToCookingLog(bid, rid, cb),
-
-    subscribeToUser(userId, handlers): Unsubscribe {
-      const userKey = `recipes:user:${userId}`;
-      const indexKey = `recipes:userBoxes:${userId}`;
-      let liveSeenUser = false;
-      const liveSeenBoxes = new Set<string>();
-
-      // Hydrate user
-      void (async () => {
-        if (liveSeenUser) return;
-        const cachedUser = await cacheGet<RecipesUser>(userKey);
-        if (cachedUser && !liveSeenUser) handlers.onUser(cachedUser);
-      })();
-
-      // Hydrate per-box snapshots
-      void (async () => {
-        const ids = (await cacheGet<string[]>(indexKey)) ?? [];
-        for (const boxId of ids) {
-          if (liveSeenBoxes.has(boxId)) continue;
-          const snap = await cacheGet<BoxSnapshot>(`recipes:box:${boxId}`);
-          if (snap && !liveSeenBoxes.has(boxId)) {
-            handlers.onBox(snap.box, snap.recipes);
-          }
-        }
-      })();
-
-      return inner.subscribeToUser(userId, {
-        onUser: (u) => {
-          liveSeenUser = true;
-          void cacheSet(userKey, u);
-          handlers.onUser(u);
-        },
-        onBox: (box, recipes) => {
-          liveSeenBoxes.add(box.id);
-          void cacheSet(`recipes:box:${box.id}`, { box, recipes });
-          // Maintain index
-          void (async () => {
-            const ids = (await cacheGet<string[]>(indexKey)) ?? [];
-            if (!ids.includes(box.id)) {
-              await cacheSet(indexKey, [...ids, box.id]);
-            }
-          })();
-          handlers.onBox(box, recipes);
-        },
-        onBoxRemoved: (boxId) => {
-          void (async () => {
-            const ids = (await cacheGet<string[]>(indexKey)) ?? [];
-            await cacheSet(indexKey, ids.filter((id) => id !== boxId));
-          })();
-          handlers.onBoxRemoved(boxId);
-        },
-        onRecipeChanged: handlers.onRecipeChanged,
-        onRecipeRemoved: handlers.onRecipeRemoved,
-      });
-    },
+    subscribeToUser: (uid, h) => inner.subscribeToUser(uid, h),
   };
 }

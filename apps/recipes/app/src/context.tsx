@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, useEffect, useMemo, type ReactNode } from 'react';
 import { useAuth } from '@kirkl/shared';
+import type { Recipe as BackendRecipe } from '@homelab/backend';
 import type { ActionType, AppState } from './types';
 import { initState, recipeBoxReducer } from './reducer';
 import { useRecipesBackend } from '@kirkl/shared';
@@ -33,6 +34,13 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
 
     let initialLoad = true;
 
+    const dispatchRecipesForBox = (boxId: string, boxRecipes: BackendRecipe[]) => {
+      // Replace the whole recipes Map for this box. Matches the mirror's
+      // per-slice full-state delivery: every emit is the authoritative set.
+      const entries = boxRecipes.map(recipeFromBackend);
+      dispatch({ type: "SET_BOX_RECIPES", boxId, payload: entries });
+    };
+
     const unsub = recipes.subscribeToUser(user.uid, {
       onUser: (u) => {
         const userEntry = userFromBackend(u);
@@ -45,20 +53,13 @@ export function RecipesProvider({ children }: { children: ReactNode }) {
       onBox: (box, boxRecipes) => {
         const boxEntry = boxFromBackend(box);
         dispatch({ type: "ADD_BOX", boxId: box.id, payload: boxEntry });
-        for (const r of boxRecipes) {
-          const recipeEntry = recipeFromBackend(r);
-          dispatch({ type: "ADD_RECIPE", recipeId: r.id, boxId: box.id, payload: recipeEntry });
-        }
+        dispatchRecipesForBox(box.id, boxRecipes);
       },
       onBoxRemoved: (boxId) => {
         dispatch({ type: "REMOVE_BOX", boxId });
       },
-      onRecipeChanged: (boxId, r) => {
-        const recipeEntry = recipeFromBackend(r);
-        dispatch({ type: "ADD_RECIPE", recipeId: r.id, boxId, payload: recipeEntry });
-      },
-      onRecipeRemoved: (boxId, recipeId) => {
-        dispatch({ type: "REMOVE_RECIPE", boxId, recipeId });
+      onRecipes: (boxId, boxRecipes) => {
+        dispatchRecipesForBox(boxId, boxRecipes);
       },
     });
 

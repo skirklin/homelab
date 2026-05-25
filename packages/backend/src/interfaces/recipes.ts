@@ -77,7 +77,16 @@ export interface RecipesBackend {
 
   /**
    * Subscribe to the user's recipe state — boxes, recipes, and changes.
-   * The callback fires on initial load and after every relevant change.
+   *
+   * - `onUser` fires on initial user load and on every user-record change.
+   * - `onBox` fires when a box enters the user's subscription set, with the
+   *   initial recipe set for that box.
+   * - `onBoxRemoved` fires when a box leaves the set (unsubscribed or deleted).
+   * - `onRecipes` fires with the full recipe set for a box on every change
+   *   inside that box's slice (create / update / delete). Consumers should
+   *   treat each emit as a replace of that box's recipes. Diffing across
+   *   emits is the consumer's problem (React's reconciler usually doesn't
+   *   need it).
    */
   subscribeToUser(
     userId: string,
@@ -85,8 +94,7 @@ export interface RecipesBackend {
       onUser: (user: RecipesUser) => void;
       onBox: (box: RecipeBox, recipes: Recipe[]) => void;
       onBoxRemoved: (boxId: string) => void;
-      onRecipeChanged: (boxId: string, recipe: Recipe) => void;
-      onRecipeRemoved: (boxId: string, recipeId: string) => void;
+      onRecipes: (boxId: string, recipes: Recipe[]) => void;
     },
   ): Unsubscribe;
 }

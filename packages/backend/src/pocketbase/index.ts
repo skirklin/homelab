@@ -22,7 +22,7 @@ export function createPocketBaseBackends(getPb: () => PocketBase) {
   return {
     shopping: new PocketBaseShoppingBackend(getPb, wpb, mirror) as import("../interfaces/shopping").ShoppingBackend,
     user: new PocketBaseUserBackend(getPb, wpb, mirror) as import("../interfaces/user").UserBackend,
-    recipes: new PocketBaseRecipesBackend(getPb, wpb) as import("../interfaces/recipes").RecipesBackend,
+    recipes: new PocketBaseRecipesBackend(getPb, wpb, mirror) as import("../interfaces/recipes").RecipesBackend,
     upkeep: new PocketBaseUpkeepBackend(getPb, wpb, mirror) as import("../interfaces/upkeep").UpkeepBackend,
     travel: new PocketBaseTravelBackend(getPb, wpb, mirror) as import("../interfaces/travel").TravelBackend,
     life: new PocketBaseLifeBackend(getPb, wpb, mirror) as import("../interfaces/life").LifeBackend,

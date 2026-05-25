@@ -32,6 +32,7 @@ import type { WpbDebug } from "@homelab/backend/wrapped-pb";
 
 const allBackends = createPocketBaseBackends(() => getBackend());
 const wpb = allBackends.wpb;
+const mirror = allBackends.mirror;
 const backends = withCache(allBackends);
 
 // Expose the wpb debug handle on the global so investigating a "writes
@@ -96,14 +97,19 @@ function useOptimisticErrorToast() {
 }
 
 /**
- * On tab re-engagement, run wpb's two recovery sweeps:
- *  - resync(): refetch active subscriptions if SSE has gone idle, so the
- *    user sees writes other peers made while we were backgrounded
- *  - retryErrored(): re-fire writes that failed transiently (network
- *    blip, 5xx, 429, 401), so queued-up local edits land without the
- *    user having to retry by hand
+ * On tab re-engagement, run three recovery sweeps:
+ *  - mirror.resync(): refetch every active mirror slice so the user sees
+ *    writes other peers made while we were backgrounded (the mirror is
+ *    now the only realtime path for every domain backend)
+ *  - wpb.resync(): no-op on the steady-state mirror world (no
+ *    wpb.subscribe consumers left in the PB backends) but kept for
+ *    defense — if any caller ever adds a wpb.subscribe again, focus
+ *    recovery still works for it
+ *  - wpb.retryErrored(): re-fire writes that failed transiently
+ *    (network blip, 5xx, 429, 401), so queued-up local edits land
+ *    without the user having to retry by hand
  *
- * Both short-circuit when there's nothing to do — quiet, healthy tabs
+ * Each short-circuits when there's nothing to do — quiet, healthy tabs
  * pay nothing on every focus blip. Polling on a fixed interval was the
  * wrong default and got removed; focus/pageshow/visibilitychange fire
  * exactly when we need to act. The PB SDK's onDisconnect+PB_CONNECT hook
@@ -123,6 +129,7 @@ function useRealtimeResync() {
       if (inFlight) return;
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       inFlight = Promise.all([
+        mirror.resync().catch(() => { /* offline or auth blip */ }),
         wpb.resync().catch(() => { /* offline or auth blip */ }),
         wpb.retryErrored().catch(() => { /* same */ }),
       ]).then(() => undefined).finally(() => { inFlight = null; });
