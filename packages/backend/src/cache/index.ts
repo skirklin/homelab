@@ -35,7 +35,6 @@
  * (then unwrap from withCache as they do).
  */
 import { withTravelCache } from "./travel";
-import { withUpkeepCache } from "./upkeep";
 import { withRecipesCache } from "./recipes";
 
 import type { TravelBackend } from "../interfaces/travel";
@@ -59,7 +58,10 @@ export function withCache(b: BackendBundle): BackendBundle {
     travel: withTravelCache(b.travel),
     // shopping is on the mirror — see file comment for why we skip caching.
     shopping: b.shopping,
-    upkeep: withUpkeepCache(b.upkeep),
+    // upkeep is on the mirror; subscribeToList is queue-overlay-aware and
+    // the read-only helpers (getList, getSubtree, getTasksByTag) hit the
+    // network directly.
+    upkeep: b.upkeep,
     recipes: withRecipesCache(b.recipes),
     // life is on the mirror; subscribeToEvents is queue-overlay-aware
     // and the read-only helpers (getOrCreateLog) hit the network directly.
@@ -74,8 +76,8 @@ export { cacheClear } from "./storage";
 export { withShoppingCache } from "./shopping";
 export { withUserCache } from "./user";
 export { withLifeCache } from "./life";
+export { withUpkeepCache } from "./upkeep";
 export {
   withTravelCache,
-  withUpkeepCache,
   withRecipesCache,
 };

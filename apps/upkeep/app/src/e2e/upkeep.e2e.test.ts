@@ -30,7 +30,7 @@ beforeAll(async () => {
   const pb = () => ctx.userPb;
   const wpb = wrapPocketBase(pb);
   const mirror = createMirror(pb, wpb);
-  upkeep = new PocketBaseUpkeepBackend(pb, wpb);
+  upkeep = new PocketBaseUpkeepBackend(pb, wpb, mirror);
   userBackend = new PocketBaseUserBackend(pb, wpb, mirror);
 });
 

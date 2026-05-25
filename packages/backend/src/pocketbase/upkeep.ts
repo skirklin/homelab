@@ -7,6 +7,13 @@
  * wpb's in-memory queue, which the active subscription has already
  * populated. Falls back to a 1-extra-fetch path if the parent isn't
  * cached (e.g. deep link), still beating the original 3 RTTs.
+ *
+ * subscribeToList rides on the PBMirror: three slices (the task_list
+ * record, tasks filtered by list, task_events filtered by list). The
+ * mirror absorbs every cancel-before-resolve, ref-counts the SSE
+ * channel per collection, and delivers full state per slice — so the
+ * old bespoke `initSubscribeToRecord` / `initSubscribeToCollection`
+ * helpers + buffer-then-emit dance retire here.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
@@ -16,14 +23,16 @@ import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
+import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
 /**
  * Defensive parser for the post-migration task_events.entries column.
  * Mirrors apps/life/.../life.ts so a half-deployed env or hand-edited row
  * can't crash the UI.
  */
-function entriesFromRecord(r: RecordModel): LifeEntry[] {
-  const raw = Array.isArray(r.entries) ? r.entries : [];
+function entriesFromRecord(r: RecordModel | RawRecord): LifeEntry[] {
+  const x = r as Record<string, unknown>;
+  const raw = Array.isArray(x.entries) ? x.entries : [];
   const out: LifeEntry[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
@@ -42,9 +51,10 @@ function entriesFromRecord(r: RecordModel): LifeEntry[] {
   return out;
 }
 
-function labelsFromRecord(r: RecordModel): Record<string, string> | undefined {
-  return r.labels && typeof r.labels === "object" && !Array.isArray(r.labels)
-    ? (r.labels as Record<string, string>)
+function labelsFromRecord(r: RecordModel | RawRecord): Record<string, string> | undefined {
+  const x = r as Record<string, unknown>;
+  return x.labels && typeof x.labels === "object" && !Array.isArray(x.labels)
+    ? (x.labels as Record<string, string>)
     : undefined;
 }
 
@@ -53,58 +63,66 @@ function notesEntries(notes?: string): LifeEntry[] {
   return trimmed ? [{ name: "notes", type: "text", value: trimmed }] : [];
 }
 
-function listFromRecord(r: RecordModel): TaskList {
+function listFromRecord(r: RecordModel | RawRecord): TaskList {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    name: r.name || "",
-    owners: Array.isArray(r.owners) ? r.owners : [],
-    created: r.created,
-    updated: r.updated,
+    name: (x.name as string) || "",
+    owners: Array.isArray(x.owners) ? (x.owners as string[]) : [],
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
-function taskFromRecord(r: RecordModel): Task {
+function taskFromRecord(r: RecordModel | RawRecord): Task {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    list: r.list,
-    parentId: r.parent_id || "",
-    path: r.path || r.id,
-    position: r.position ?? 0,
-    name: r.name || "",
-    description: r.description || "",
-    taskType: r.task_type || "recurring",
-    frequency: r.frequency || 0,
-    lastCompleted: r.last_completed ? new Date(r.last_completed) : null,
-    completed: !!r.completed,
-    snoozedUntil: r.snoozed_until ? new Date(r.snoozed_until) : null,
-    notifyUsers: Array.isArray(r.notify_users) ? r.notify_users : [],
-    createdBy: r.created_by || "",
-    tags: Array.isArray(r.tags) ? r.tags : [],
-    collapsed: !!r.collapsed,
-    created: r.created,
-    updated: r.updated,
+    list: x.list as string,
+    parentId: (x.parent_id as string) || "",
+    path: (x.path as string) || r.id,
+    position: (x.position as number) ?? 0,
+    name: (x.name as string) || "",
+    description: (x.description as string) || "",
+    taskType: (x.task_type as Task["taskType"]) || "recurring",
+    // Schema/type mismatch: backend Task declares `frequency: Frequency` but
+    // PB stores it as either an object or a number; preserve the original
+    // pass-through behavior (`r.frequency || 0`) here.
+    frequency: (x.frequency || 0) as Task["frequency"],
+    lastCompleted: x.last_completed ? new Date(x.last_completed as string) : null,
+    completed: !!x.completed,
+    snoozedUntil: x.snoozed_until ? new Date(x.snoozed_until as string) : null,
+    notifyUsers: Array.isArray(x.notify_users) ? (x.notify_users as string[]) : [],
+    createdBy: (x.created_by as string) || "",
+    tags: Array.isArray(x.tags) ? (x.tags as string[]) : [],
+    collapsed: !!x.collapsed,
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
-function completionFromRecord(r: RecordModel): TaskCompletion {
+function completionFromRecord(r: RecordModel | RawRecord): TaskCompletion {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    subjectId: r.subject_id || "",
-    timestamp: new Date(r.timestamp),
-    endTime: r.end_time ? new Date(r.end_time) : undefined,
+    subjectId: (x.subject_id as string) || "",
+    timestamp: new Date(x.timestamp as string),
+    endTime: x.end_time ? new Date(x.end_time as string) : undefined,
     entries: entriesFromRecord(r),
     labels: labelsFromRecord(r),
-    createdBy: r.created_by || "",
-    created: r.created,
-    updated: r.updated,
+    createdBy: (x.created_by as string) || "",
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
 export class PocketBaseUpkeepBackend implements UpkeepBackend {
   private wpb: WrappedPocketBase;
+  private mirror: PBMirror;
 
-  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase, mirror: PBMirror) {
     this.wpb = wpb;
+    this.mirror = mirror;
   }
 
   async createList(name: string, userId: string): Promise<string> {
@@ -408,91 +426,57 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       onDeleted?: () => void;
     },
   ): Unsubscribe {
-    let cancelled = false;
-    const isCancelled = () => cancelled;
-    const unsubs: Array<() => void> = [];
-    const tasksMap = new Map<string, Task>();
-    const completionsMap = new Map<string, TaskCompletion>();
+    // Track first-observed-existing so an initial 404 on the list doesn't
+    // misfire onDeleted (same pattern as shopping.subscribeToList).
+    let listKnownExisted = false;
 
-    const emitTasks = () => {
-      if (!cancelled) handlers.onTasks(Array.from(tasksMap.values()));
-    };
-    const emitCompletions = () => {
-      if (cancelled) return;
-      // UI expects newest first, matching the prior `-timestamp` sort.
-      const list = Array.from(completionsMap.values()).sort(
-        (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
-      );
-      handlers.onCompletions(list);
-    };
-
-    // List metadata — optimistic-aware via wpb.
-    this.initSubscribeToRecord("task_lists", listId, isCancelled, unsubs, {
-      onData: (r) => handlers.onList(listFromRecord(r)),
-      onDelete: () => handlers.onDeleted?.(),
-    });
-
-    // Tasks — optimistic-aware via wpb with predicate.
-    this.initSubscribeToCollection("tasks", isCancelled, unsubs, {
-      filter: this.pb().filter("list = {:listId}", { listId }),
-      belongsTo: (r) => r.list === listId,
-      onInitial: (records) => { for (const r of records) tasksMap.set(r.id, taskFromRecord(r)); emitTasks(); },
-      onChange: (action, r) => {
-        if (action === "delete") tasksMap.delete(r.id); else tasksMap.set(r.id, taskFromRecord(r));
-        emitTasks();
+    const listHandle = this.mirror.watch(
+      { collection: "task_lists", topic: listId },
+      (records) => {
+        if (records.length === 0) {
+          if (listKnownExisted) handlers.onDeleted?.();
+          return;
+        }
+        listKnownExisted = true;
+        handlers.onList(listFromRecord(records[0]));
       },
-    });
+    );
 
-    // Completions — per-record via wpb so events land in the optimistic queue
-    // (lets `computeLastCompleted` scan locally without a server round-trip).
-    this.initSubscribeToCollection("task_events", isCancelled, unsubs, {
-      filter: this.pb().filter("list = {:listId}", { listId }),
-      belongsTo: (r) => r.list === listId,
-      onInitial: (records) => { for (const r of records) completionsMap.set(r.id, completionFromRecord(r)); emitCompletions(); },
-      onChange: (action, r) => {
-        if (action === "delete") completionsMap.delete(r.id); else completionsMap.set(r.id, completionFromRecord(r));
-        emitCompletions();
+    const tasksHandle = this.mirror.watch(
+      {
+        collection: "tasks",
+        topic: "*",
+        filter: this.pb().filter("list = {:listId}", { listId }),
+        predicate: (r) => r.list === listId,
       },
-    });
+      (records) => {
+        handlers.onTasks(records.map(taskFromRecord));
+      },
+    );
 
-    return () => { cancelled = true; unsubs.forEach((u) => u()); };
+    // Completions land in the queue too — `computeLastCompleted` reads
+    // through the same queue view, so the local sync works without a
+    // server round-trip.
+    const completionsHandle = this.mirror.watch(
+      {
+        collection: "task_events",
+        topic: "*",
+        filter: this.pb().filter("list = {:listId}", { listId }),
+        predicate: (r) => r.list === listId,
+      },
+      (records) => {
+        // UI expects newest first, matching the prior `-timestamp` sort.
+        const list = records
+          .map(completionFromRecord)
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        handlers.onCompletions(list);
+      },
+    );
+
+    return () => {
+      listHandle.unsubscribe();
+      tasksHandle.unsubscribe();
+      completionsHandle.unsubscribe();
+    };
   }
-
-  // --- Internal subscription helpers ---
-
-  private initSubscribeToRecord(
-    col: string, id: string, cancelled: () => boolean, unsubs: Array<() => void>,
-    cb: { onData: (r: RecordModel) => void; onDelete?: () => void },
-  ) {
-    this.wpb.collection(col).subscribe(id, (e) => {
-      if (cancelled()) return;
-      if (e.action === "delete") cb.onDelete?.(); else cb.onData(e.record);
-    }).then((unsub) => unsubs.push(unsub));
-  }
-
-  private initSubscribeToCollection(
-    col: string, cancelled: () => boolean, unsubs: Array<() => void>,
-    opts: { filter: string; belongsTo: (r: RecordModel) => boolean; onInitial: (rs: RecordModel[]) => void; onChange: (a: string, r: RecordModel) => void },
-  ) {
-    // Buffer initial creates so we can emit one onInitial batch instead of
-    // N per-record onChange calls. After subscribe() resolves, the buffer is
-    // drained as the initial batch and subsequent events go through onChange.
-    let initialDone = false;
-    const initial: RecordModel[] = [];
-    this.wpb.collection(col).subscribe("*", (e) => {
-      if (cancelled() || !opts.belongsTo(e.record)) return;
-      if (!initialDone) {
-        initial.push(e.record);
-        return;
-      }
-      opts.onChange(e.action, e.record);
-    }, { filter: opts.filter, local: (r) => opts.belongsTo(r as RecordModel) }).then((unsub) => {
-      unsubs.push(unsub);
-      if (!cancelled()) {
-        initialDone = true;
-        opts.onInitial(initial);
-      }
-    });
-  }
-
 }
