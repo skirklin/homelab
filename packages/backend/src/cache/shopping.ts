@@ -18,7 +18,7 @@ export function withShoppingCache(inner: ShoppingBackend): ShoppingBackend {
     updateCategories: (id, c) => inner.updateCategories(id, c),
     addItem: (listId, ing, userId, categoryId, note) => inner.addItem(listId, ing, userId, categoryId, note),
     updateItem: (id, u) => inner.updateItem(id, u),
-    updateItemCategory: (id, listId, cat, ing) => inner.updateItemCategory(id, listId, cat, ing),
+    updateItemCategory: (id, cat) => inner.updateItemCategory(id, cat),
     toggleItem: (id, checked, userId) => inner.toggleItem(id, checked, userId),
     deleteItem: (id) => inner.deleteItem(id),
     clearCheckedItems: (id, items) => inner.clearCheckedItems(id, items),

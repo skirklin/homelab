@@ -144,7 +144,7 @@ describe("Item operations", () => {
       filter: `list = "${listId}"`,
     });
 
-    await shopping.updateItemCategory(items[0].id, listId, "fruit", items[0].ingredient);
+    await shopping.updateItemCategory(items[0].id, "fruit");
 
     const updated = await ctx.pb.collection("shopping_items").getOne(items[0].id);
     expect(updated.category_id).toBe("fruit");

@@ -40,15 +40,7 @@ export interface ShoppingBackend {
   ): Promise<string>;
 
   updateItem(itemId: string, updates: { ingredient?: string; note?: string }): Promise<void>;
-  /** `listId` is kept in the signature for parity with `addItem`; the adapter
-   *  no longer uses it (the old history-upsert side-effect was removed when
-   *  `shopping_history` was retired). */
-  updateItemCategory(
-    itemId: string,
-    listId: string,
-    categoryId: string,
-    ingredient: string,
-  ): Promise<void>;
+  updateItemCategory(itemId: string, categoryId: string): Promise<void>;
   toggleItem(itemId: string, checked: boolean, userId: string): Promise<void>;
   deleteItem(itemId: string): Promise<void>;
 

@@ -145,14 +145,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     await this.wpb.collection("shopping_items").update(itemId, data);
   }
 
-  async updateItemCategory(
-    itemId: string,
-    _listId: string,
-    categoryId: string,
-    _ingredient: string,
-  ): Promise<void> {
-    // listId + ingredient are kept in the signature for parity with addItem;
-    // they were only needed for the now-retired history upsert.
+  async updateItemCategory(itemId: string, categoryId: string): Promise<void> {
     await this.wpb.collection("shopping_items").update(itemId, { category_id: categoryId });
   }
 
