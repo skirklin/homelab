@@ -37,7 +37,6 @@
 import { withTravelCache } from "./travel";
 import { withUpkeepCache } from "./upkeep";
 import { withRecipesCache } from "./recipes";
-import { withLifeCache } from "./life";
 
 import type { TravelBackend } from "../interfaces/travel";
 import type { ShoppingBackend } from "../interfaces/shopping";
@@ -62,7 +61,9 @@ export function withCache(b: BackendBundle): BackendBundle {
     shopping: b.shopping,
     upkeep: withUpkeepCache(b.upkeep),
     recipes: withRecipesCache(b.recipes),
-    life: withLifeCache(b.life),
+    // life is on the mirror; subscribeToEvents is queue-overlay-aware
+    // and the read-only helpers (getOrCreateLog) hit the network directly.
+    life: b.life,
     // user is on the mirror; subscribeSlugs is queue-overlay-aware and
     // the read-only helpers (getProfile, etc.) hit the network directly.
     user: b.user,
@@ -72,9 +73,9 @@ export function withCache(b: BackendBundle): BackendBundle {
 export { cacheClear } from "./storage";
 export { withShoppingCache } from "./shopping";
 export { withUserCache } from "./user";
+export { withLifeCache } from "./life";
 export {
   withTravelCache,
   withUpkeepCache,
   withRecipesCache,
-  withLifeCache,
 };

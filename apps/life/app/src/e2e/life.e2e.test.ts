@@ -22,7 +22,7 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseLifeBackend } from "@homelab/backend/pocketbase";
-import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
+import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 
 let ctx: TestContext;
 let life: PocketBaseLifeBackend;
@@ -30,7 +30,8 @@ let life: PocketBaseLifeBackend;
 beforeAll(async () => {
   ctx = await initTestPocketBase();
   const pb = () => ctx.userPb;
-  life = new PocketBaseLifeBackend(pb, wrapPocketBase(pb));
+  const wpb = wrapPocketBase(pb);
+  life = new PocketBaseLifeBackend(pb, wpb, createMirror(pb, wpb));
 });
 
 afterAll(async () => {

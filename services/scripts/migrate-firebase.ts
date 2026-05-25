@@ -139,7 +139,7 @@ const recipes = new PocketBaseRecipesBackend(getPb, wpb);
 const shopping = new PocketBaseShoppingBackend(getPb, wpb, mirror);
 const upkeep = new PocketBaseUpkeepBackend(getPb, wpb);
 const travel = new PocketBaseTravelBackend(getPb, wpb);
-const life = new PocketBaseLifeBackend(getPb, wpb);
+const life = new PocketBaseLifeBackend(getPb, wpb, mirror);
 const userBackend = new PocketBaseUserBackend(getPb, wpb, mirror);
 
 // ---------------------------------------------------------------------------

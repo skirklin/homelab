@@ -1,8 +1,11 @@
 /**
  * PocketBase implementation of LifeBackend.
  *
- * Writes route through the optimistic wrapper. Event subscription uses wpb so
- * optimistic mutations fan to the right log.
+ * Writes route through the optimistic wrapper. Event subscription rides on
+ * the PBMirror — a single filter-only-wildcard slice on `life_events` with
+ * a predicate keyed to the log id. The mirror's queue overlay surfaces
+ * optimistic creates immediately and absorbs every cancel-before-resolve
+ * the legacy wpb.subscribe path had to hand-roll.
  *
  * Schema reference: migration 20260522_221157_life_event_unified_shape.js.
  * Rows have `entries` (json[]), `labels` (json|null), `end_time` (date|null);
@@ -15,6 +18,7 @@ import type { LifeLog, LifeEvent, LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
+import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
 function logFromRecord(r: RecordModel): LifeLog {
   return {
@@ -32,10 +36,11 @@ function logFromRecord(r: RecordModel): LifeLog {
   };
 }
 
-function eventFromRecord(r: RecordModel): LifeEvent {
+function eventFromRecord(r: RecordModel | RawRecord): LifeEvent {
   // `entries` should be an array post-migration; coerce defensively so a
   // half-deployed env or a malformed seed row can't crash the UI.
-  const rawEntries = Array.isArray(r.entries) ? r.entries : [];
+  const x = r as Record<string, unknown>;
+  const rawEntries = Array.isArray(x.entries) ? x.entries : [];
   const entries: LifeEntry[] = [];
   for (const raw of rawEntries) {
     if (!raw || typeof raw !== "object") continue;
@@ -52,29 +57,31 @@ function eventFromRecord(r: RecordModel): LifeEvent {
     }
   }
 
-  const labels = (r.labels && typeof r.labels === "object" && !Array.isArray(r.labels))
-    ? (r.labels as Record<string, string>)
+  const labels = (x.labels && typeof x.labels === "object" && !Array.isArray(x.labels))
+    ? (x.labels as Record<string, string>)
     : undefined;
 
   return {
     id: r.id,
-    log: r.log,
-    subjectId: r.subject_id || "",
-    timestamp: new Date(r.timestamp),
-    endTime: r.end_time ? new Date(r.end_time) : undefined,
+    log: x.log as string,
+    subjectId: (x.subject_id as string) || "",
+    timestamp: new Date(x.timestamp as string),
+    endTime: x.end_time ? new Date(x.end_time as string) : undefined,
     entries,
     labels,
-    createdBy: r.created_by || "",
-    created: r.created,
-    updated: r.updated,
+    createdBy: (x.created_by as string) || "",
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
 export class PocketBaseLifeBackend implements LifeBackend {
   private wpb: WrappedPocketBase;
+  private mirror: PBMirror;
 
-  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase, mirror: PBMirror) {
     this.wpb = wpb;
+    this.mirror = mirror;
   }
 
   async getOrCreateLog(userId: string): Promise<LifeLog> {
@@ -173,41 +180,21 @@ export class PocketBaseLifeBackend implements LifeBackend {
   }
 
   subscribeToEvents(logId: string, onEvents: (events: LifeEvent[]) => void): Unsubscribe {
-    let cancelled = false;
-    const eventsMap = new Map<string, LifeEvent>();
-
-    const emit = () => {
-      if (!cancelled) onEvents(Array.from(eventsMap.values()));
-    };
-
-    // wpb.subscribe with a filter auto-loads matching records, seeds the
-    // optimistic queue, and delivers each as a "create" event before
-    // forwarding live updates. We defer the first emit until subscribe()
-    // resolves so consumers see one batched onEvents instead of N.
-    let initialDone = false;
-    let unsub: (() => void) | undefined;
-    this.wpb.collection("life_events").subscribe("*", (e) => {
-      if (cancelled || e.record.log !== logId) return;
-      if (e.action === "delete") {
-        eventsMap.delete(e.record.id);
-      } else {
-        eventsMap.set(e.record.id, eventFromRecord(e.record));
-      }
-      if (initialDone) emit();
-    }, {
-      filter: this.pb().filter("log = {:logId}", { logId }),
-      local: (r) => r.log === logId,
-    }).then((fn) => {
-      unsub = fn;
-      if (!cancelled) {
-        initialDone = true;
-        emit();
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
+    // Filter-only wildcard slice on life_events keyed to this log. The
+    // mirror's queue overlay surfaces optimistic creates synchronously and
+    // delivers full state on every change; no per-record bookkeeping or
+    // initialDone latch needed.
+    const handle = this.mirror.watch(
+      {
+        collection: "life_events",
+        topic: "*",
+        filter: this.pb().filter("log = {:logId}", { logId }),
+        predicate: (r) => r.log === logId,
+      },
+      (records) => {
+        onEvents(records.map(eventFromRecord));
+      },
+    );
+    return () => handle.unsubscribe();
   }
 }

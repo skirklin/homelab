@@ -25,7 +25,7 @@ export function createPocketBaseBackends(getPb: () => PocketBase) {
     recipes: new PocketBaseRecipesBackend(getPb, wpb) as import("../interfaces/recipes").RecipesBackend,
     upkeep: new PocketBaseUpkeepBackend(getPb, wpb) as import("../interfaces/upkeep").UpkeepBackend,
     travel: new PocketBaseTravelBackend(getPb, wpb) as import("../interfaces/travel").TravelBackend,
-    life: new PocketBaseLifeBackend(getPb, wpb) as import("../interfaces/life").LifeBackend,
+    life: new PocketBaseLifeBackend(getPb, wpb, mirror) as import("../interfaces/life").LifeBackend,
     /** Shared optimistic-write wrapper. Call replayPending() once after auth ready. */
     wpb,
     /** Shared realtime mirror. Domain backends adopt it incrementally. */
