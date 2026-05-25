@@ -12,7 +12,7 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseShoppingBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
-import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
+import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 import type { ShoppingItem } from "@homelab/backend";
 import { UNCATEGORIZED_CATEGORY_ID } from "../types";
 
@@ -24,8 +24,9 @@ beforeAll(async () => {
   ctx = await initTestPocketBase();
   const pb = () => ctx.userPb;
   const wpb = wrapPocketBase(pb);
-  shopping = new PocketBaseShoppingBackend(pb, wpb);
-  userBackend = new PocketBaseUserBackend(pb, wpb);
+  const mirror = createMirror(pb, wpb);
+  shopping = new PocketBaseShoppingBackend(pb, wpb, mirror);
+  userBackend = new PocketBaseUserBackend(pb, wpb, mirror);
 });
 
 afterAll(async () => {

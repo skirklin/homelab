@@ -13,7 +13,7 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseTravelBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
-import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
+import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 import {
   tripToBackend,
   tripUpdatesToBackend,
@@ -30,8 +30,9 @@ beforeAll(async () => {
   ctx = await initTestPocketBase();
   const pb = () => ctx.userPb;
   const wpb = wrapPocketBase(pb);
+  const mirror = createMirror(pb, wpb);
   travel = new PocketBaseTravelBackend(pb, wpb);
-  userBackend = new PocketBaseUserBackend(pb, wpb);
+  userBackend = new PocketBaseUserBackend(pb, wpb, mirror);
 });
 
 afterAll(async () => {

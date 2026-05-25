@@ -20,6 +20,7 @@ import { persistMutation, unpersistMutation, loadAllMutations } from "./persiste
 export { MutationQueue, composeView, type Mutation, type RawRecord, type PendingMutation } from "./queue";
 export { type PersistedMutation, persistMutation, loadAllMutations, clearAllMutations } from "./persistence";
 export { newId } from "../cache/ids";
+export { createMirror, type PBMirror, type WatchSpec, type WatchHandle } from "./mirror";
 
 // ---- Types ----
 

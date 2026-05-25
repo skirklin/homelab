@@ -15,7 +15,7 @@ import {
   type TestContext,
 } from "@kirkl/shared/test-utils";
 import { PocketBaseUpkeepBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
-import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
+import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 
 // The backend Task type declares frequency as `number`, but the actual schema
 // stores it as `{ value: number; unit: string }`. We use `as any` for task
@@ -29,8 +29,9 @@ beforeAll(async () => {
   ctx = await initTestPocketBase();
   const pb = () => ctx.userPb;
   const wpb = wrapPocketBase(pb);
+  const mirror = createMirror(pb, wpb);
   upkeep = new PocketBaseUpkeepBackend(pb, wpb);
-  userBackend = new PocketBaseUserBackend(pb, wpb);
+  userBackend = new PocketBaseUserBackend(pb, wpb, mirror);
 });
 
 afterAll(async () => {

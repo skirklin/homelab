@@ -38,7 +38,6 @@ import { withTravelCache } from "./travel";
 import { withUpkeepCache } from "./upkeep";
 import { withRecipesCache } from "./recipes";
 import { withLifeCache } from "./life";
-import { withUserCache } from "./user";
 
 import type { TravelBackend } from "../interfaces/travel";
 import type { ShoppingBackend } from "../interfaces/shopping";
@@ -64,16 +63,18 @@ export function withCache(b: BackendBundle): BackendBundle {
     upkeep: withUpkeepCache(b.upkeep),
     recipes: withRecipesCache(b.recipes),
     life: withLifeCache(b.life),
-    user: withUserCache(b.user),
+    // user is on the mirror; subscribeSlugs is queue-overlay-aware and
+    // the read-only helpers (getProfile, etc.) hit the network directly.
+    user: b.user,
   };
 }
 
 export { cacheClear } from "./storage";
 export { withShoppingCache } from "./shopping";
+export { withUserCache } from "./user";
 export {
   withTravelCache,
   withUpkeepCache,
   withRecipesCache,
   withLifeCache,
-  withUserCache,
 };

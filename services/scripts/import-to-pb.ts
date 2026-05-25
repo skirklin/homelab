@@ -19,7 +19,7 @@ import {
   PocketBaseLifeBackend,
   PocketBaseUserBackend,
 } from "@homelab/backend/pocketbase";
-import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
+import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -57,12 +57,13 @@ console.log("  PB auth OK\n");
 
 const getPb = () => pb;
 const wpb = wrapPocketBase(getPb);
+const mirror = createMirror(getPb, wpb);
 const recipes = new PocketBaseRecipesBackend(getPb, wpb);
-const shopping = new PocketBaseShoppingBackend(getPb, wpb);
+const shopping = new PocketBaseShoppingBackend(getPb, wpb, mirror);
 const upkeep = new PocketBaseUpkeepBackend(getPb, wpb);
 const travel = new PocketBaseTravelBackend(getPb, wpb);
 const life = new PocketBaseLifeBackend(getPb, wpb);
-const user = new PocketBaseUserBackend(getPb, wpb);
+const user = new PocketBaseUserBackend(getPb, wpb, mirror);
 
 // ---------------------------------------------------------------------------
 // Helpers

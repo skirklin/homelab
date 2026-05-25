@@ -1,14 +1,16 @@
 /**
  * PocketBase implementation of UserBackend.
  *
- * Writes route through the optimistic wrapper. Slug subscription uses wpb
- * so optimistic profile mutations (e.g. timezone push, slug rename) flow
- * to subscribers immediately.
+ * Writes route through the optimistic wrapper. Slug subscription rides on
+ * the PBMirror — a single record-topic slice on `users:userId`, with the
+ * mirror handling cancel-before-resolve, SSE coalescing, and queue overlay
+ * so optimistic slug edits / timezone pushes are visible synchronously.
  */
 import type PocketBase from "pocketbase";
 import type { UserBackend, SlugNamespace } from "../interfaces/user";
 import type { NotificationMode, Unsubscribe } from "../types/common";
 import type { WrappedPocketBase } from "../wrapped-pb";
+import type { PBMirror } from "../wrapped-pb/mirror";
 
 const SLUG_FIELDS: Record<SlugNamespace, string> = {
   shopping: "shopping_slugs",
@@ -18,6 +20,7 @@ const SLUG_FIELDS: Record<SlugNamespace, string> = {
 
 export class PocketBaseUserBackend implements UserBackend {
   private wpb: WrappedPocketBase;
+  private mirror: PBMirror;
   /**
    * Per-(userId|field) promise chain used to serialize read-modify-write
    * operations against JSON columns (slug maps, fcm_tokens array). Two
@@ -34,8 +37,9 @@ export class PocketBaseUserBackend implements UserBackend {
    */
   private writeChains = new Map<string, Promise<unknown>>();
 
-  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase, mirror: PBMirror) {
     this.wpb = wpb;
+    this.mirror = mirror;
   }
 
   /**
@@ -120,50 +124,24 @@ export class PocketBaseUserBackend implements UserBackend {
     namespace: SlugNamespace,
     onSlugs: (slugs: Record<string, string>) => void,
   ): Unsubscribe {
-    let cancelled = false;
+    // One record-topic slice on the user. The mirror handles
+    // cancel-before-resolve and queue overlay; when the record doesn't
+    // exist yet the slice emits an empty array, which we surface as an
+    // empty slugs map so consumers don't hang on initial load.
     const field = SLUG_FIELDS[namespace];
-
-    // wpb.subscribe(id) auto-loads the user record (delivered as a "create"
-    // event), seeds the optimistic queue, then forwards live updates.
-    //
-    // Cancel-before-resolve guard: if the consumer unsubscribes before the
-    // inner subscribe-promise lands, we still receive the underlying
-    // teardown function — call it immediately so we don't leak a SSE
-    // subscription + LocalSubscriber registration. This is the same shape
-    // as the recipes / shopping / life cleanup races fixed earlier in the
-    // week (c1bcf22, c63af4a, c6297e8).
-    let unsub: (() => void) | null = null;
-    let initialDone = false;
-    this.wpb.collection("users").subscribe(userId, (e) => {
-      if (cancelled) return;
-      if (e.action === "delete") return;
-      onSlugs((e.record as Record<string, unknown>)[field] as Record<string, string> || {});
-    }).then((fn) => {
-      if (cancelled) {
-        // Teardown ran before the promise resolved. Drop the late-arriving
-        // unsubscribe now so the underlying subscription isn't orphaned.
-        try { fn(); } catch { /* nothing to do */ }
-        return;
-      }
-      unsub = fn;
-      if (!initialDone) {
-        initialDone = true;
-        // If the user record didn't exist (404 on initial getOne), no event
-        // fired above. Emit empty slugs so consumers don't hang on the
-        // initial-load promise.
-        if (!this.wpb.collection("users").view(userId)) {
+    const handle = this.mirror.watch(
+      { collection: "users", topic: userId },
+      (records) => {
+        if (records.length === 0) {
           onSlugs({});
+          return;
         }
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      if (unsub) {
-        try { unsub(); } catch { /* nothing to do */ }
-        unsub = null;
-      }
-    };
+        onSlugs(
+          ((records[0] as Record<string, unknown>)[field] as Record<string, string>) || {},
+        );
+      },
+    );
+    return () => handle.unsubscribe();
   }
 
   async saveFcmToken(userId: string, token: string): Promise<void> {

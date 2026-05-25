@@ -25,7 +25,7 @@ import {
   PocketBaseLifeBackend,
   PocketBaseUserBackend,
 } from "@homelab/backend/pocketbase";
-import { wrapPocketBase } from "@homelab/backend/wrapped-pb";
+import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -134,12 +134,13 @@ if (config.pbPassword) {
 // All backend interfaces share the admin client
 const getPb = () => adminPb;
 const wpb = wrapPocketBase(getPb);
+const mirror = createMirror(getPb, wpb);
 const recipes = new PocketBaseRecipesBackend(getPb, wpb);
-const shopping = new PocketBaseShoppingBackend(getPb, wpb);
+const shopping = new PocketBaseShoppingBackend(getPb, wpb, mirror);
 const upkeep = new PocketBaseUpkeepBackend(getPb, wpb);
 const travel = new PocketBaseTravelBackend(getPb, wpb);
 const life = new PocketBaseLifeBackend(getPb, wpb);
-const userBackend = new PocketBaseUserBackend(getPb, wpb);
+const userBackend = new PocketBaseUserBackend(getPb, wpb, mirror);
 
 // ---------------------------------------------------------------------------
 // Step 1: Build user mapping

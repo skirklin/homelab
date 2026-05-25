@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type PocketBase from "pocketbase";
 import type { RecordModel, RecordSubscription, UnsubscribeFunc } from "pocketbase";
 import { wrapPocketBase } from "../wrapped-pb";
+import { createMirror } from "../wrapped-pb/mirror";
 import { clearAllMutations } from "../wrapped-pb/persistence";
 import { PocketBaseUserBackend } from "./user";
 
@@ -149,7 +150,8 @@ describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
     stub.col("users").gateGetOne = new Promise<void>((res) => { releaseGetOne = res; });
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb, mirror);
 
     const seen: Array<Record<string, string>> = [];
     const unsubscribe = user.subscribeSlugs("u1", "shopping", (s) => seen.push(s));
@@ -192,7 +194,8 @@ describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb, mirror);
 
     const seen: Array<Record<string, string>> = [];
     const unsubscribe = user.subscribeSlugs("u1", "shopping", (s) => seen.push(s));
@@ -229,7 +232,8 @@ describe("PocketBaseUserBackend.setSlug concurrency", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb, mirror);
 
     await Promise.all([
       user.setSlug("u1", "shopping", "groceries", "L1"),
@@ -256,7 +260,8 @@ describe("PocketBaseUserBackend.setSlug concurrency", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb, mirror);
 
     await Promise.all([
       user.saveFcmToken("u1", "device-A-token"),
@@ -281,7 +286,8 @@ describe("PocketBaseUserBackend.setSlug concurrency", () => {
     } as unknown as RecordModel);
 
     const wpb = wrapPocketBase(() => stub.pb);
-    const user = new PocketBaseUserBackend(() => stub.pb, wpb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    const user = new PocketBaseUserBackend(() => stub.pb, wpb, mirror);
 
     await Promise.all([
       user.setSlug("u1", "shopping", "hardware", "L2"),
