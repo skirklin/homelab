@@ -1,11 +1,13 @@
 /**
  * PocketBase implementation of TravelBackend.
  *
- * Writes route through the optimistic wrapper. Trip/activity/itinerary/day-entry
- * subscriptions use wpb so optimistic mutations fan to the right log. The two
- * read-then-write spots (`getOrCreateLog`, `upsertDayEntry`) keep their server
- * lookup since the filter shape (`trip = X && date = Y`) isn't expressible
- * against the local cache without v2 query-time filtering.
+ * Writes route through the optimistic wrapper. subscribeToLog rides on
+ * the PBMirror with five slices (log record + trips/activities/itineraries/
+ * day_entries filtered by log) — the mirror handles cancel-before-resolve,
+ * ref-counts the SSE channel per collection, and delivers full state per
+ * slice. The two read-then-write spots (`getOrCreateLog`, `upsertDayEntry`)
+ * keep their server lookup since the filter shape (`trip = X && date = Y`)
+ * isn't expressible against the local cache without v2 query-time filtering.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
@@ -14,75 +16,83 @@ import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDa
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../cache/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
+import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
-function logFromRecord(r: RecordModel): TravelLog {
+function logFromRecord(r: RecordModel | RawRecord): TravelLog {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    name: r.name || "",
-    owners: Array.isArray(r.owners) ? r.owners : [],
-    created: r.created,
-    updated: r.updated,
+    name: (x.name as string) || "",
+    owners: Array.isArray(x.owners) ? (x.owners as string[]) : [],
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
-function tripFromRecord(r: RecordModel): Trip {
+function tripFromRecord(r: RecordModel | RawRecord): Trip {
+  const x = r as Record<string, unknown>;
   return {
-    id: r.id, log: r.log, name: r.name || "", destination: r.destination || "",
-    startDate: r.start_date || "", endDate: r.end_date || "", notes: r.notes || "",
-    flagged: !!r.flagged_for_review, flagComment: r.review_comment || "",
-    status: r.status, region: r.region, sourceRefs: r.source_refs,
-    created: r.created, updated: r.updated,
+    id: r.id, log: x.log as string, name: (x.name as string) || "", destination: (x.destination as string) || "",
+    startDate: (x.start_date as string) || "", endDate: (x.end_date as string) || "", notes: (x.notes as string) || "",
+    flagged: !!x.flagged_for_review, flagComment: (x.review_comment as string) || "",
+    status: x.status as Trip["status"], region: x.region as Trip["region"], sourceRefs: x.source_refs as Trip["sourceRefs"],
+    created: x.created as string, updated: x.updated as string,
   };
 }
 
-function activityFromRecord(r: RecordModel): Activity {
+function activityFromRecord(r: RecordModel | RawRecord): Activity {
+  const x = r as Record<string, unknown>;
   return {
-    id: r.id, log: r.log, trip: r.trip_id || undefined, name: r.name || "",
-    location: r.location || "", lat: r.lat, lng: r.lng, placeId: r.place_id,
-    description: r.description || "", rating: r.rating, tags: r.tags || [],
-    category: r.category || "", costNotes: r.cost_notes || "",
-    durationEstimate: r.duration_estimate || "", walkMiles: typeof r.walk_miles === "number" ? r.walk_miles : undefined,
-    elevationGainFeet: typeof r.elevation_gain_feet === "number" ? r.elevation_gain_feet : undefined,
-    difficulty: r.difficulty || undefined,
-    confirmationCode: r.confirmation_code || "",
-    details: r.details, setting: r.setting,
-    ratingCount: r.rating_count,
-    photoRef: r.photo_ref,
-    flightInfo: r.flight_info || undefined,
-    verdict: (r.verdict as ActivityVerdict) || undefined,
-    personalNotes: r.personal_notes || undefined,
-    experiencedAt: r.experienced_at || undefined,
-    created: r.created, updated: r.updated,
+    id: r.id, log: x.log as string, trip: (x.trip_id as string) || undefined, name: (x.name as string) || "",
+    location: (x.location as string) || "", lat: x.lat as Activity["lat"], lng: x.lng as Activity["lng"], placeId: x.place_id as Activity["placeId"],
+    description: (x.description as string) || "", rating: x.rating as Activity["rating"], tags: (x.tags as string[]) || [],
+    category: (x.category as string) || "", costNotes: (x.cost_notes as string) || "",
+    durationEstimate: (x.duration_estimate as string) || "", walkMiles: typeof x.walk_miles === "number" ? x.walk_miles : undefined,
+    elevationGainFeet: typeof x.elevation_gain_feet === "number" ? x.elevation_gain_feet : undefined,
+    difficulty: (x.difficulty as Activity["difficulty"]) || undefined,
+    confirmationCode: (x.confirmation_code as string) || "",
+    details: x.details as Activity["details"], setting: x.setting as Activity["setting"],
+    ratingCount: x.rating_count as Activity["ratingCount"],
+    photoRef: x.photo_ref as Activity["photoRef"],
+    flightInfo: (x.flight_info as Activity["flightInfo"]) || undefined,
+    verdict: (x.verdict as ActivityVerdict) || undefined,
+    personalNotes: (x.personal_notes as string) || undefined,
+    experiencedAt: (x.experienced_at as string) || undefined,
+    created: x.created as string, updated: x.updated as string,
   };
 }
 
-function dayEntryFromRecord(r: RecordModel): DayEntry {
+function dayEntryFromRecord(r: RecordModel | RawRecord): DayEntry {
+  const x = r as Record<string, unknown>;
   return {
     id: r.id,
-    log: r.log,
-    trip: r.trip,
-    date: r.date || "",
-    text: r.text || "",
-    highlight: r.highlight || undefined,
-    mood: typeof r.mood === "number" ? r.mood : undefined,
-    created: r.created,
-    updated: r.updated,
+    log: x.log as string,
+    trip: x.trip as string,
+    date: (x.date as string) || "",
+    text: (x.text as string) || "",
+    highlight: (x.highlight as DayEntry["highlight"]) || undefined,
+    mood: typeof x.mood === "number" ? x.mood : undefined,
+    created: x.created as string,
+    updated: x.updated as string,
   };
 }
 
-function itineraryFromRecord(r: RecordModel): Itinerary {
+function itineraryFromRecord(r: RecordModel | RawRecord): Itinerary {
+  const x = r as Record<string, unknown>;
   return {
-    id: r.id, log: r.log, trip: r.trip_id, name: r.name || "",
-    isActive: r.is_active ?? true, days: r.days || [],
-    created: r.created, updated: r.updated,
+    id: r.id, log: x.log as string, trip: x.trip_id as string, name: (x.name as string) || "",
+    isActive: (x.is_active as boolean) ?? true, days: (x.days as ItineraryDay[]) || [],
+    created: x.created as string, updated: x.updated as string,
   };
 }
 
 export class PocketBaseTravelBackend implements TravelBackend {
   private wpb: WrappedPocketBase;
+  private mirror: PBMirror;
 
-  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase) {
+  constructor(private pb: () => PocketBase, wpb: WrappedPocketBase, mirror: PBMirror) {
     this.wpb = wpb;
+    this.mirror = mirror;
   }
 
   async getOrCreateLog(userId: string): Promise<string> {
@@ -231,48 +241,52 @@ export class PocketBaseTravelBackend implements TravelBackend {
       onDeleted?: () => void;
     },
   ): Unsubscribe {
-    let cancelled = false;
-    const unsubs: Array<() => void> = [];
-    const tripsMap = new Map<string, Trip>();
-    const activitiesMap = new Map<string, Activity>();
-    const itinerariesMap = new Map<string, Itinerary>();
-    const dayEntriesMap = new Map<string, DayEntry>();
+    // Track first-observed-existing so an initial 404 on the log doesn't
+    // misfire onDeleted (same pattern as shopping/upkeep).
+    let logKnownExisted = false;
 
-    // Log metadata — optimistic-aware via wpb.
-    this.sub("travel_logs", logId, () => cancelled, unsubs, {
-      onData: (r) => handlers.onLog(logFromRecord(r)),
-      onDelete: () => handlers.onDeleted?.(),
-    });
+    const logFilter = this.pb().filter("log = {:logId}", { logId });
+    const inLog = (r: RawRecord) => r.log === logId;
 
-    // Trips
-    this.subCol("travel_trips", () => cancelled, unsubs, {
-      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
-      onInitial: (rs) => { for (const r of rs) tripsMap.set(r.id, tripFromRecord(r)); handlers.onTrips(Array.from(tripsMap.values())); },
-      onChange: (a, r) => { if (a === "delete") tripsMap.delete(r.id); else tripsMap.set(r.id, tripFromRecord(r)); handlers.onTrips(Array.from(tripsMap.values())); },
-    });
+    const logHandle = this.mirror.watch(
+      { collection: "travel_logs", topic: logId },
+      (records) => {
+        if (records.length === 0) {
+          if (logKnownExisted) handlers.onDeleted?.();
+          return;
+        }
+        logKnownExisted = true;
+        handlers.onLog(logFromRecord(records[0]));
+      },
+    );
 
-    // Activities
-    this.subCol("travel_activities", () => cancelled, unsubs, {
-      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
-      onInitial: (rs) => { for (const r of rs) activitiesMap.set(r.id, activityFromRecord(r)); handlers.onActivities(Array.from(activitiesMap.values())); },
-      onChange: (a, r) => { if (a === "delete") activitiesMap.delete(r.id); else activitiesMap.set(r.id, activityFromRecord(r)); handlers.onActivities(Array.from(activitiesMap.values())); },
-    });
+    const tripsHandle = this.mirror.watch(
+      { collection: "travel_trips", topic: "*", filter: logFilter, predicate: inLog },
+      (records) => handlers.onTrips(records.map(tripFromRecord)),
+    );
 
-    // Itineraries
-    this.subCol("travel_itineraries", () => cancelled, unsubs, {
-      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
-      onInitial: (rs) => { for (const r of rs) itinerariesMap.set(r.id, itineraryFromRecord(r)); handlers.onItineraries(Array.from(itinerariesMap.values())); },
-      onChange: (a, r) => { if (a === "delete") itinerariesMap.delete(r.id); else itinerariesMap.set(r.id, itineraryFromRecord(r)); handlers.onItineraries(Array.from(itinerariesMap.values())); },
-    });
+    const activitiesHandle = this.mirror.watch(
+      { collection: "travel_activities", topic: "*", filter: logFilter, predicate: inLog },
+      (records) => handlers.onActivities(records.map(activityFromRecord)),
+    );
 
-    // Day entries
-    this.subCol("travel_day_entries", () => cancelled, unsubs, {
-      filter: this.pb().filter("log = {:logId}", { logId }), belongsTo: (r) => r.log === logId,
-      onInitial: (rs) => { for (const r of rs) dayEntriesMap.set(r.id, dayEntryFromRecord(r)); handlers.onDayEntries(Array.from(dayEntriesMap.values())); },
-      onChange: (a, r) => { if (a === "delete") dayEntriesMap.delete(r.id); else dayEntriesMap.set(r.id, dayEntryFromRecord(r)); handlers.onDayEntries(Array.from(dayEntriesMap.values())); },
-    });
+    const itinerariesHandle = this.mirror.watch(
+      { collection: "travel_itineraries", topic: "*", filter: logFilter, predicate: inLog },
+      (records) => handlers.onItineraries(records.map(itineraryFromRecord)),
+    );
 
-    return () => { cancelled = true; unsubs.forEach((u) => u()); };
+    const dayEntriesHandle = this.mirror.watch(
+      { collection: "travel_day_entries", topic: "*", filter: logFilter, predicate: inLog },
+      (records) => handlers.onDayEntries(records.map(dayEntryFromRecord)),
+    );
+
+    return () => {
+      logHandle.unsubscribe();
+      tripsHandle.unsubscribe();
+      activitiesHandle.unsubscribe();
+      itinerariesHandle.unsubscribe();
+      dayEntriesHandle.unsubscribe();
+    };
   }
 
   private tripData(t: Partial<Omit<Trip, "id" | "log" | "created" | "updated">>): Record<string, unknown> {
@@ -322,64 +336,4 @@ export class PocketBaseTravelBackend implements TravelBackend {
     return d;
   }
 
-  /** Subscribe to a single record. Optimistic events for that id are included. */
-  private sub(
-    col: string,
-    id: string,
-    cancelled: () => boolean,
-    unsubs: Array<() => void>,
-    cb: { onData: (r: RecordModel) => void; onDelete?: () => void },
-  ) {
-    this.wpb.collection(col)
-      .subscribe(id, (e) => {
-        if (cancelled()) return;
-        if (e.action === "delete") cb.onDelete?.();
-        else cb.onData(e.record);
-      })
-      .then((unsub) => unsubs.push(unsub))
-      .catch((err) => {
-        // Network blip on initial subscribe shouldn't escape as an
-        // unhandled rejection. Live updates will be missed for this record
-        // until something else re-subscribes (e.g. a route remount).
-        console.warn(`[travel] subscribeToLog: failed to subscribe to ${col}/${id}`, err);
-      });
-  }
-
-  /** Subscribe to a filtered collection with optimistic events. */
-  private subCol(
-    col: string,
-    cancelled: () => boolean,
-    unsubs: Array<() => void>,
-    opts: {
-      filter: string;
-      belongsTo: (r: RecordModel) => boolean;
-      onInitial: (rs: RecordModel[]) => void;
-      onChange: (a: string, r: RecordModel) => void;
-    },
-  ) {
-    let initialDone = false;
-    const initial: RecordModel[] = [];
-    this.wpb.collection(col)
-      .subscribe("*", (e) => {
-        if (cancelled() || !opts.belongsTo(e.record as RecordModel)) return;
-        if (!initialDone) {
-          initial.push(e.record);
-          return;
-        }
-        opts.onChange(e.action, e.record);
-      }, { filter: opts.filter, local: (r) => opts.belongsTo(r as RecordModel) })
-      .then((unsub) => {
-        unsubs.push(unsub);
-        if (!cancelled()) {
-          initialDone = true;
-          opts.onInitial(initial);
-        }
-      })
-      .catch((err) => {
-        // Network blip on initial subscribe shouldn't escape as an
-        // unhandled rejection. The collection just stays empty until
-        // something else re-subscribes.
-        console.warn(`[travel] subscribeToLog: failed to subscribe to ${col}`, err);
-      });
-  }
 }

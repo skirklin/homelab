@@ -34,7 +34,6 @@
  * legacy wpb.subscribe path; they should migrate to the mirror over time
  * (then unwrap from withCache as they do).
  */
-import { withTravelCache } from "./travel";
 import { withRecipesCache } from "./recipes";
 
 import type { TravelBackend } from "../interfaces/travel";
@@ -55,7 +54,10 @@ export interface BackendBundle {
 
 export function withCache(b: BackendBundle): BackendBundle {
   return {
-    travel: withTravelCache(b.travel),
+    // travel is on the mirror; subscribeToLog is queue-overlay-aware and
+    // the read helpers (getOrCreateLog, upsertDayEntry lookup) hit the
+    // network directly.
+    travel: b.travel,
     // shopping is on the mirror — see file comment for why we skip caching.
     shopping: b.shopping,
     // upkeep is on the mirror; subscribeToList is queue-overlay-aware and
@@ -77,7 +79,5 @@ export { withShoppingCache } from "./shopping";
 export { withUserCache } from "./user";
 export { withLifeCache } from "./life";
 export { withUpkeepCache } from "./upkeep";
-export {
-  withTravelCache,
-  withRecipesCache,
-};
+export { withTravelCache } from "./travel";
+export { withRecipesCache } from "./recipes";

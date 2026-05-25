@@ -61,7 +61,7 @@ const mirror = createMirror(getPb, wpb);
 const recipes = new PocketBaseRecipesBackend(getPb, wpb);
 const shopping = new PocketBaseShoppingBackend(getPb, wpb, mirror);
 const upkeep = new PocketBaseUpkeepBackend(getPb, wpb, mirror);
-const travel = new PocketBaseTravelBackend(getPb, wpb);
+const travel = new PocketBaseTravelBackend(getPb, wpb, mirror);
 const life = new PocketBaseLifeBackend(getPb, wpb, mirror);
 const user = new PocketBaseUserBackend(getPb, wpb, mirror);
 

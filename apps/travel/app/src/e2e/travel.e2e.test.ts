@@ -31,7 +31,7 @@ beforeAll(async () => {
   const pb = () => ctx.userPb;
   const wpb = wrapPocketBase(pb);
   const mirror = createMirror(pb, wpb);
-  travel = new PocketBaseTravelBackend(pb, wpb);
+  travel = new PocketBaseTravelBackend(pb, wpb, mirror);
   userBackend = new PocketBaseUserBackend(pb, wpb, mirror);
 });
 
