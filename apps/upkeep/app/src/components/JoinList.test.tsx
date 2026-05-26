@@ -100,6 +100,21 @@ function renderJoinList(listId: string, user: any = { uid: 'user123' }) {
   );
 }
 
+// Same component, but mounted under /upkeep/* like the home shell does so we
+// can verify the post-join navigate stays within the module instead of
+// jumping to the app root (the Bundle 1 #1 regression).
+function renderEmbeddedJoinList(listId: string, user: any = { uid: 'user123' }) {
+  return render(
+    <TestWrapper user={user}>
+      <MemoryRouter initialEntries={[`/upkeep/join/${listId}`]}>
+        <Routes>
+          <Route path="/upkeep/join/:listId" element={<JoinList />} />
+        </Routes>
+      </MemoryRouter>
+    </TestWrapper>
+  );
+}
+
 describe('JoinList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -182,7 +197,31 @@ describe('JoinList', () => {
     await waitFor(() => {
       expect(mockUserBackend.setSlug).toHaveBeenCalledWith('user123', 'household', 'home', 'list123');
     });
-    expect(mockNavigate).toHaveBeenCalledWith('/home');
+    // Route-relative: from `/join/list123` we strip `/join/list123` and append
+    // the new slug, then replace history so the redeem URL doesn't linger.
+    expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true });
+  });
+
+  it('navigates within the module when mounted under /upkeep/* (Bundle 1 #1)', async () => {
+    const user = userEvent.setup();
+    mockGetListInfo.mockResolvedValue({ id: 'list123', name: 'Home', owners: [], rooms: [] });
+    mockUserBackend.setSlug.mockResolvedValue(undefined);
+
+    renderEmbeddedJoinList('list123');
+
+    await waitFor(() => {
+      expect(screen.getByText('Home')).toBeInTheDocument();
+    });
+
+    const joinButton = screen.getByRole('button', { name: 'Add to My Lists' });
+    await user.click(joinButton);
+
+    await waitFor(() => {
+      expect(mockUserBackend.setSlug).toHaveBeenCalledWith('user123', 'household', 'home', 'list123');
+    });
+    // Pre-fix this landed at '/home' (app root); post-fix it lands at
+    // '/upkeep/home' so the home shell stays inside the upkeep module.
+    expect(mockNavigate).toHaveBeenCalledWith('/upkeep/home', { replace: true });
   });
 
   it('shows error when slug already exists', async () => {
