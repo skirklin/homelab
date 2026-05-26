@@ -162,7 +162,7 @@ export function TaskBoard({ embedded = false }: TaskBoardProps) {
         <NotFoundContainer>
           <h2>List not found</h2>
           <p>The list "{slug}" doesn't exist in your account.</p>
-          <button onClick={() => navigate("..")}>Go to My Lists</button>
+          <button onClick={() => navigate({ pathname: "..", search: "?pick=true" })}>Go to My Lists</button>
         </NotFoundContainer>
       </Container>
     );

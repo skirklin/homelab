@@ -197,7 +197,7 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
           <NotFoundText>
             You don't have a list called "/{slug}"
           </NotFoundText>
-          <Button type="primary" onClick={() => navigate("..")}>
+          <Button type="primary" onClick={() => navigate({ pathname: "..", search: "?pick=true" })}>
             Go to My Lists
           </Button>
         </NotFoundContent>
