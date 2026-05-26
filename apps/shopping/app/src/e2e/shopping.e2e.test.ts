@@ -91,7 +91,7 @@ describe("Item operations", () => {
       filter: `list = "${listId}"`,
     });
     expect(items).toHaveLength(1);
-    expect(items[0].ingredient).toBe("Milk");
+    expect(items[0].ingredient).toBe("milk");
     expect(items[0].added_by).toBe(user.id);
     expect(items[0].checked).toBe(false);
   });
@@ -131,7 +131,7 @@ describe("Item operations", () => {
     await shopping.updateItem(items[0].id, { ingredient: "Oat Milk", note: "unsweetened" });
 
     const updated = await ctx.pb.collection("shopping_items").getOne(items[0].id);
-    expect(updated.ingredient).toBe("Oat Milk");
+    expect(updated.ingredient).toBe("oat milk");
     expect(updated.note).toBe("unsweetened");
   });
 
@@ -263,7 +263,7 @@ describe("Trip-derived suggestions", () => {
 
     suggestions = deriveSuggestions(await loadTrips(listId));
     expect(suggestions.has("parsley")).toBe(true);
-    expect(suggestions.get("parsley")?.ingredient).toBe("Parsley");
+    expect(suggestions.get("parsley")?.ingredient).toBe("parsley");
     expect(suggestions.has("parsely")).toBe(false);
     // Category carries over.
     expect(suggestions.get("parsley")?.categoryId).toBe("produce");

@@ -292,7 +292,8 @@ describe("PocketBaseShoppingBackend", () => {
 
     const trip = stub.col("shopping_trips").records.get("T1");
     const items = trip?.items as Array<{ ingredient: string; categoryId: string }>;
-    expect(items[0].ingredient).toBe("Parsley");
+    // Normalized on write — capitalized input lands lowercase.
+    expect(items[0].ingredient).toBe("parsley");
     expect(items[0].categoryId).toBe("produce");
     // Sibling row untouched
     expect(items[1].ingredient).toBe("cheese");

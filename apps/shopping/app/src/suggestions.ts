@@ -12,7 +12,10 @@
 import type { ShoppingTrip, CategoryId } from "./types";
 
 export interface Suggestion {
-  /** Canonical-cased ingredient as last seen on a trip. */
+  /** Normalized (lowercased + trimmed) ingredient. New writes are stored
+   *  pre-normalized at the backend (see `normalizeIngredient` in
+   *  `pocketbase/shopping.ts`); old capitalized trip rows surface here as
+   *  lowercase too because we display the dedup key, not the raw text. */
   ingredient: string;
   categoryId: CategoryId;
   /** Most-recent `trip.completedAt` this ingredient was observed on. */
@@ -21,9 +24,11 @@ export interface Suggestion {
 
 /**
  * Build a Map keyed by normalized (lowercased + trimmed) ingredient name,
- * with the canonical-cased ingredient, most-recent category, and most-recent
- * `lastSeen` per key. Multiple trips with the same ingredient collapse to one
- * entry; the newest trip wins category + display casing.
+ * with the most-recent category and `lastSeen` per key. Multiple trips with
+ * the same ingredient (any casing) collapse to one entry; the newest trip
+ * wins category. The display ingredient is always the normalized key so
+ * mixed-case data from before the lowercase-on-write change still surfaces
+ * consistently.
  *
  * Pure: same input → same output. Suitable for direct use in a `useMemo`.
  */
@@ -40,7 +45,7 @@ export function deriveSuggestions(trips: ShoppingTrip[]): Map<string, Suggestion
       const prior = out.get(key);
       if (!prior || ts > prior.lastSeen.getTime()) {
         out.set(key, {
-          ingredient: item.ingredient,
+          ingredient: key,
           categoryId: item.categoryId,
           lastSeen: trip.completedAt instanceof Date ? trip.completedAt : new Date(trip.completedAt),
         });

@@ -25,6 +25,13 @@ import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
 const TRIPS_PAGE_SIZE = 50;
 
+/** Single chokepoint for ingredient casing/whitespace. Stored items, trip
+ *  snapshots, and suggestion keys all collapse on this form so "Parsley"
+ *  and "parsley " never split into two catalog entries. */
+function normalizeIngredient(s: string): string {
+  return s.toLowerCase().trim();
+}
+
 // --- Record → domain type mappers ---
 
 function listFromRecord(r: RecordModel | RawRecord): ShoppingList {
@@ -139,7 +146,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     await this.wpb.collection("shopping_items").create({
       id: itemId,
       list: listId,
-      ingredient,
+      ingredient: normalizeIngredient(ingredient),
       note: note || "",
       category_id: categoryId,
       checked: false,
@@ -150,7 +157,7 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
 
   async updateItem(itemId: string, updates: { ingredient?: string; note?: string }): Promise<void> {
     const data: Record<string, string> = {};
-    if (updates.ingredient !== undefined) data.ingredient = updates.ingredient;
+    if (updates.ingredient !== undefined) data.ingredient = normalizeIngredient(updates.ingredient);
     if (updates.note !== undefined) data.note = updates.note || "";
     await this.wpb.collection("shopping_items").update(itemId, data);
   }
@@ -215,13 +222,15 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
     // Reject obvious garbage early — a blank rename would silently retire the
     // suggestion derived from this trip item, which is rarely what the user
     // wants. Delete is the right tool for that.
-    if (patch.ingredient !== undefined && !patch.ingredient.trim()) {
+    const normalizedIngredient =
+      patch.ingredient !== undefined ? normalizeIngredient(patch.ingredient) : undefined;
+    if (normalizedIngredient !== undefined && !normalizedIngredient) {
       throw new Error("updateTripItem: ingredient cannot be empty");
     }
     const nextItems = items.map((item, i) => {
       if (i !== itemIndex) return item;
       const next: TripItemRaw = { ...item };
-      if (patch.ingredient !== undefined) next.ingredient = patch.ingredient.trim();
+      if (normalizedIngredient !== undefined) next.ingredient = normalizedIngredient;
       if (patch.note !== undefined) next.note = patch.note;
       if (patch.categoryId !== undefined) next.categoryId = patch.categoryId;
       return next;
