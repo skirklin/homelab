@@ -2549,12 +2549,16 @@ dataRoutes.get("/pod_events", handler(async (c) => {
   const type = c.req.query("type");
   const ns = c.req.query("namespace");
   const since = c.req.query("since");
+  const before = c.req.query("before");
+  const involvedName = c.req.query("involved_name");
 
   const clauses: string[] = [];
   const params: Record<string, unknown> = {};
   if (type) { clauses.push("type = {:type}"); params.type = type; }
   if (ns) { clauses.push("namespace = {:ns}"); params.ns = ns; }
   if (since) { clauses.push("last_seen >= {:since}"); params.since = since; }
+  if (before) { clauses.push("last_seen <= {:before}"); params.before = before; }
+  if (involvedName) { clauses.push("involved_name ~ {:involved_name}"); params.involved_name = involvedName; }
   const filter = clauses.length ? pb.filter(clauses.join(" && "), params) : "";
 
   const records = await pb.collection("pod_events").getList(1, limit, {
