@@ -170,6 +170,10 @@ export function OutlinerRow({
     upkeep.toggleCollapsed(task.id);
   }, [upkeep, task.id]);
 
+  const handleNameClick = useCallback(() => {
+    if (hasChildren) upkeep.toggleCollapsed(task.id);
+  }, [hasChildren, upkeep, task.id]);
+
   const handleToggleComplete = useCallback(() => {
     onToggleOneShot(task.id);
   }, [onToggleOneShot, task.id]);
@@ -318,7 +322,7 @@ export function OutlinerRow({
             onKeyDown={handleKeyDown}
           />
         ) : (
-          <Name $completed={isDone}>{task.name}</Name>
+          <Name $completed={isDone} onClick={handleNameClick}>{task.name}</Name>
         )}
 
         <Meta>
