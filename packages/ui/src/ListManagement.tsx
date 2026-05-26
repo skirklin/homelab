@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, type ReactNode } from "react";
-import { useNavigate, useSearchParams, useParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useParams, useLocation } from "react-router-dom";
 import { Button, Input, List, Modal, Spin, message } from "antd";
 import { PlusOutlined, LinkOutlined, RightOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -445,6 +445,7 @@ export interface JoinListProps {
 export function JoinList({ config, operations }: JoinListProps) {
   const { listId } = useParams<{ listId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [listName, setListName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -520,7 +521,14 @@ export function JoinList({ config, operations }: JoinListProps) {
       await operations.joinList(listId);
       // Save the user's slug mapping
       await operations.setUserSlug(user.uid, cleanSlug, listId);
-      navigate("/" + cleanSlug);
+      // Route-relative: this component mounts at `/join/:listId` (standalone)
+      // or `/shopping/join/:listId` / `/upkeep/join/:listId` (embedded).
+      // Strip the trailing `/join/...` to derive the module base, then append
+      // the user's slug. Replace so the redeem URL doesn't sit in history.
+      // See routing.test.tsx for the absolute-vs-relative pitfall this fixes.
+      const base = location.pathname.replace(/\/join\/[^/]*$/, "");
+      const target = (base || "") + "/" + cleanSlug;
+      navigate(target, { replace: true });
     } catch (err) {
       console.error("[JoinList] Failed to join list:", err);
       const errorMessage = err instanceof Error ? err.message : String(err);
