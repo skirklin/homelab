@@ -43,13 +43,6 @@ import { ShoppingTrips } from "./ShoppingTrips";
 import { ListSettings } from "./ListSettings";
 import { UNCATEGORIZED_CATEGORY_ID, type ShoppingItem, type CategoryId, type CategoryDef } from "../types";
 
-const TopBar = styled.div`
-  background: var(--color-bg);
-  max-width: 600px;
-  margin: 0 auto;
-  width: 100%;
-`;
-
 const Content = styled.main`
   padding-bottom: var(--space-xl);
   max-width: 600px;
@@ -232,15 +225,13 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
 
   return (
     <>
-      <TopBar>
-        <Header
-          listId={listId || ""}
-          onShowHistory={() => setView("history")}
-          onShowSettings={() => setView("settings")}
-          embedded={embedded}
-        />
-        <AddItem />
-      </TopBar>
+      <Header
+        listId={listId || ""}
+        onShowHistory={() => setView("history")}
+        onShowSettings={() => setView("settings")}
+        embedded={embedded}
+      />
+      <AddItem />
       <Content>
         {state.loading ? (
           <LoadingContainer>
