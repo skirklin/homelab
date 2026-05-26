@@ -154,6 +154,7 @@ describe("Task Operations", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -189,6 +190,7 @@ describe("Task Operations", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -226,6 +228,7 @@ describe("Task Operations", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
 
     await upkeep.deleteTask(taskId);
@@ -288,6 +291,7 @@ describe("Task Completion", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -334,6 +338,7 @@ describe("Task Completion", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -385,6 +390,7 @@ describe("Task Completion", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -432,6 +438,7 @@ describe("Task Completion", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -476,6 +483,7 @@ describe("Task Completion", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -515,6 +523,7 @@ describe("Task Completion", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -559,6 +568,7 @@ describe("Snooze Operations", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -670,6 +680,7 @@ describe("Notification Operations", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -723,6 +734,7 @@ describe("Multi-user Scenarios", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -783,6 +795,7 @@ describe("Multi-user Scenarios", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -830,6 +843,7 @@ describe("Frequency Edge Cases", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -861,6 +875,7 @@ describe("Frequency Edge Cases", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -895,6 +910,7 @@ describe("Frequency Edge Cases", () => {
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     cleanup.track("tasks", taskId);
 

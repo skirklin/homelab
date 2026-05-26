@@ -48,9 +48,22 @@ export function getTasksByUrgency(state: UpkeepState) {
   return grouped;
 }
 
-/** Build task tree from flat state (for outliner view). */
-export function getTaskTree(state: UpkeepState): TaskNode[] {
-  return buildTree(getTasksFromState(state));
+/**
+ * Build task tree from flat state (for outliner view). Excludes `cleared`
+ * tasks by default — "Clear done" hides them without deletion. Pass
+ * `includeCleared: true` for a future "show cleared" toggle / archive view.
+ *
+ * Cleared parents drop their whole subtree (a child of a cleared task is
+ * orphaned and naturally excluded by buildTree). That matches the user
+ * expectation that the action hides the row from view, full stop.
+ */
+export function getTaskTree(
+  state: UpkeepState,
+  { includeCleared = false }: { includeCleared?: boolean } = {},
+): TaskNode[] {
+  const all = getTasksFromState(state);
+  const filtered = includeCleared ? all : all.filter((t) => !t.cleared);
+  return buildTree(filtered);
 }
 
 /** Get tasks by tag (for trip checklists, etc.). */

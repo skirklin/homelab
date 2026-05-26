@@ -38,6 +38,12 @@ export interface UpkeepBackend {
   toggleTaskNotification(taskId: string, userId: string, enable: boolean): Promise<void>;
   /** Toggle the collapsed state (expand/collapse children in outliner). */
   toggleCollapsed(taskId: string): Promise<void>;
+  /**
+   * Soft-hide every completed, not-yet-cleared one_shot task in the list by
+   * setting `cleared = true`. Recurring tasks are excluded (they self-reset
+   * via last_completed). Returns the number of tasks actually flipped.
+   */
+  clearDoneTasks(listId: string): Promise<{ clearedCount: number }>;
 
   // --- Tree queries ---
 

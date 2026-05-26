@@ -2094,6 +2094,7 @@ dataRoutes.get("/tasks", handler(async (c) => {
     snoozed_until: t.snoozed_until,
     tags: t.tags,
     collapsed: t.collapsed,
+    cleared: t.cleared,
   })));
 }));
 
@@ -2154,7 +2155,7 @@ dataRoutes.patch("/tasks/:id", handler(async (c) => {
   }
   const body = await c.req.json<Record<string, unknown>>();
   const allowed = ["name", "description", "task_type", "frequency", "position",
-    "completed", "snoozed_until", "tags", "collapsed", "notify_users"];
+    "completed", "snoozed_until", "tags", "collapsed", "cleared", "notify_users"];
   const data: Record<string, unknown> = {};
   for (const key of allowed) {
     if (body[key] !== undefined) data[key] = body[key];
@@ -2336,6 +2337,28 @@ dataRoutes.post("/tasks/:id/unsnooze", handler(async (c) => {
   }
   const record = await pb.collection("tasks").update(id, { snoozed_until: "" });
   return c.json({ id: record.id, snoozed_until: record.snoozed_until });
+}));
+
+// Soft-hide every completed, not-yet-cleared one_shot task in a list.
+// Recurring tasks are excluded — they self-reset via last_completed, so
+// "cleared" doesn't apply. Returns the count actually flipped (no-op safe).
+dataRoutes.post("/tasks/lists/:listId/clear-done", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const listId = c.req.param("listId")!;
+  if (!(await userOwnsTaskList(pb, listId, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  const targets = await pb.collection("tasks").getFullList({
+    filter: pb.filter(
+      "list = {:listId} && task_type = 'one_shot' && completed = true && cleared != true",
+      { listId },
+    ),
+  });
+  for (const t of targets) {
+    await pb.collection("tasks").update(t.id, { cleared: true });
+  }
+  return c.json({ cleared_count: targets.length });
 }));
 
 // Delete a task (and all descendants)

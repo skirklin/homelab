@@ -183,6 +183,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
         notifyUsers: [],
         tags: ["container:trips"],
         collapsed: false,
+        cleared: false,
       });
       tripsRoot = { id, parentId: "" } as Task;
     }
@@ -206,6 +207,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
         notifyUsers: [],
         tags: [tripContainerTag],
         collapsed: false,
+        cleared: false,
       });
       tripContainer = { id, parentId: tripsRoot.id } as Task;
     }
@@ -232,6 +234,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
       notifyUsers: [],
       tags: [tripTag],
       collapsed: false,
+      cleared: false,
     });
     setNewItemText("");
   };
