@@ -43,11 +43,24 @@ import { ShoppingTrips } from "./ShoppingTrips";
 import { ListSettings } from "./ListSettings";
 import { UNCATEGORIZED_CATEGORY_ID, type ShoppingItem, type CategoryId, type CategoryDef } from "../types";
 
-const Content = styled.main`
-  padding-bottom: var(--space-xl);
+// Shopping owns its own 600px column in both standalone and embedded modes.
+// In standalone, the box-shadow gives the desktop card look; on narrow
+// viewports the shadow drops away so the column sits flush. In embedded mode
+// the home shell paints its own page background, so we suppress the shadow
+// to avoid stacking two cards.
+const Column = styled.div<{ $embedded: boolean }>`
   max-width: 600px;
   margin: 0 auto;
-  width: 100%;
+  background: var(--color-bg);
+  ${(p) => (p.$embedded ? "" : "box-shadow: var(--shadow-md);")}
+
+  @media (max-width: 600px) {
+    box-shadow: none;
+  }
+`;
+
+const Content = styled.main`
+  padding-bottom: var(--space-xl);
 `;
 
 const LoadingContainer = styled.div`
@@ -224,7 +237,7 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
     : [...configuredCategories, uncategorizedDef];
 
   return (
-    <>
+    <Column $embedded={embedded}>
       <Header
         listId={listId || ""}
         onShowHistory={() => setView("history")}
@@ -280,6 +293,6 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
           </DndContext>
         )}
       </Content>
-    </>
+    </Column>
   );
 }
