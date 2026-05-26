@@ -20,17 +20,13 @@ const theme = {
   },
 };
 
+// Standalone host: fills the viewport and paints the page background. The
+// 600px column + card shadow live inside <ShoppingList> so the constraint
+// follows the module — same shape in embedded mode under the home shell.
 const AppWrapper = styled.div`
-  max-width: 600px;
-  margin: 0 auto;
   min-height: 100vh;
   min-height: 100dvh;
   background: var(--color-bg);
-  box-shadow: var(--shadow-md);
-
-  @media (max-width: 600px) {
-    box-shadow: none;
-  }
 `;
 
 function AppContent() {
