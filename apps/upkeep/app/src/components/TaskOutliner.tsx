@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Empty, Spin, Typography, Input, Select, InputNumber, Tag, Space } from "antd";
-import { PlusOutlined, CloseOutlined } from "@ant-design/icons";
+import { Button, Empty, Spin, Typography, Input, Select, InputNumber, Tag, Space, message } from "antd";
+import { PlusOutlined, CloseOutlined, ClearOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepBackend } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
@@ -102,6 +102,7 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     setFocusedId(id);
   }, [listId, allTasks, upkeep]);
@@ -123,6 +124,7 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     const parent = allTasks.find((t) => t.id === parentId);
     if (parent?.collapsed) {
@@ -148,6 +150,7 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       notifyUsers: [],
       tags: [],
       collapsed: false,
+      cleared: false,
     });
     setFocusedId(id);
   }, [listId, allTasks, upkeep]);
@@ -251,6 +254,25 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
     }));
   }, [allTasks, getSubtreeIds, upkeep]);
 
+  // Number of currently-clearable tasks (drives the button's enabled state).
+  // Match the backend predicate exactly so the count and the actual flip agree.
+  const clearableCount = useMemo(
+    () => allTasks.filter(
+      (t) => t.taskType === "one_shot" && t.completed && !t.cleared,
+    ).length,
+    [allTasks],
+  );
+
+  const handleClearDone = useCallback(async () => {
+    if (!listId || clearableCount === 0) return;
+    const { clearedCount } = await upkeep.clearDoneTasks(listId);
+    if (clearedCount === 0) {
+      message.info("No completed tasks to clear");
+    } else {
+      message.success(`Cleared ${clearedCount} task${clearedCount === 1 ? "" : "s"}`);
+    }
+  }, [listId, clearableCount, upkeep]);
+
   if (state.loading) {
     return <Container><Spin size="large" /></Container>;
   }
@@ -266,9 +288,23 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
           <Typography.Title level={4} style={{ margin: 0 }}>
             {state.list?.name || "Tasks"}
           </Typography.Title>
-          <Button icon={<PlusOutlined />} onClick={handleAddRoot}>
-            Add task
-          </Button>
+          <Space>
+            <Button
+              icon={<ClearOutlined />}
+              onClick={handleClearDone}
+              disabled={clearableCount === 0}
+              title={
+                clearableCount === 0
+                  ? "No completed tasks to clear"
+                  : `Hide ${clearableCount} completed task${clearableCount === 1 ? "" : "s"}`
+              }
+            >
+              Clear done{clearableCount > 0 ? ` (${clearableCount})` : ""}
+            </Button>
+            <Button icon={<PlusOutlined />} onClick={handleAddRoot}>
+              Add task
+            </Button>
+          </Space>
         </Header>
 
         {tree.length === 0 ? (

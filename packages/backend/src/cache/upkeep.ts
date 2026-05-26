@@ -28,6 +28,7 @@ export function withUpkeepCache(inner: UpkeepBackend): UpkeepBackend {
     toggleComplete: (id) => inner.toggleComplete(id),
     toggleTaskNotification: (id, userId, enable) => inner.toggleTaskNotification(id, userId, enable),
     toggleCollapsed: (id) => inner.toggleCollapsed(id),
+    clearDoneTasks: (listId) => inner.clearDoneTasks(listId),
     instantiateTemplate: (id, tags) => inner.instantiateTemplate(id, tags),
     updateCompletion: (id, u) => inner.updateCompletion(id, u),
     deleteCompletion: (id) => inner.deleteCompletion(id),

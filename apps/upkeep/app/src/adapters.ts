@@ -25,6 +25,7 @@ export function taskFromBackend(t: BackendTask): Task {
     createdBy: t.createdBy,
     tags: t.tags,
     collapsed: t.collapsed,
+    cleared: t.cleared,
     createdAt: new Date(t.created),
     updatedAt: new Date(t.updated),
   };

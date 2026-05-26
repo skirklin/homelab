@@ -1603,6 +1603,7 @@ server.tool(
     tags: z.array(z.string()).optional().describe("Replaces the tag list. For partial edits use tag_task once available."),
     notify_users: z.array(z.string()).optional(),
     collapsed: z.boolean().optional(),
+    cleared: z.boolean().optional().describe("Soft-hide flag set by clear_done_tasks. Set false to un-hide a single task."),
   },
   async ({ id, ...body }) => {
     const data = await api(`/tasks/${id}`, {
@@ -1690,6 +1691,16 @@ server.tool(
   { id: z.string().describe("The task record ID") },
   async ({ id }) => {
     const data = await api(`/tasks/${id}/unsnooze`, { method: "POST" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "clear_done_tasks",
+  "Soft-hide every completed one_shot task in a list (sets `cleared=true`). Recurring tasks are not touched — they self-reset via last_completed. Reversible by setting cleared=false via update_task.",
+  { list_id: z.string().describe("The task list record ID") },
+  async ({ list_id }) => {
+    const data = await api(`/tasks/lists/${list_id}/clear-done`, { method: "POST" });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
 );

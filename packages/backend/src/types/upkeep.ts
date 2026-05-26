@@ -34,6 +34,13 @@ export interface Task {
   createdBy: string;
   tags: string[];
   collapsed: boolean;
+  /**
+   * Soft-hide flag for "Clear done". When true the outliner filters the row
+   * out of the default view; the row is still persisted so the action is
+   * reversible. Only ever set on completed one_shot tasks — recurring tasks
+   * self-reset via last_completed and are never cleared.
+   */
+  cleared: boolean;
   created: string;
   updated: string;
 }

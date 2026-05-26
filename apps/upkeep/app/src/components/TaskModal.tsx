@@ -109,6 +109,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
           notifyUsers: [],
           tags: [],
           collapsed: false,
+          cleared: false,
         });
         message.success("Task added");
       }

@@ -40,6 +40,12 @@ export interface Task {
   createdBy: string;
   tags: string[];
   collapsed: boolean;
+  /**
+   * "Clear done" hides completed one_shot tasks without deleting them.
+   * Default outliner view filters these out; the row remains so the user
+   * can re-show it by toggling the field off.
+   */
+  cleared: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -96,6 +96,7 @@ function taskFromRecord(r: RecordModel | RawRecord): Task {
     createdBy: (x.created_by as string) || "",
     tags: Array.isArray(x.tags) ? (x.tags as string[]) : [],
     collapsed: !!x.collapsed,
+    cleared: !!x.cleared,
     created: x.created as string,
     updated: x.updated as string,
   };
@@ -192,6 +193,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       notify_users: task.notifyUsers || [],
       tags: task.tags || [],
       collapsed: false,
+      cleared: false,
     }, { $autoCancel: false });
 
     return id;
@@ -212,6 +214,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     if (updates.notifyUsers !== undefined) data.notify_users = updates.notifyUsers;
     if (updates.tags !== undefined) data.tags = updates.tags;
     if (updates.collapsed !== undefined) data.collapsed = updates.collapsed;
+    if (updates.cleared !== undefined) data.cleared = updates.cleared;
     if (updates.position !== undefined) data.position = updates.position;
     if (updates.parentId !== undefined) data.parent_id = updates.parentId;
     await this.wpb.collection("tasks").update(taskId, data);
@@ -342,6 +345,35 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     await this.wpb.collection("tasks").update(taskId, { collapsed: !current });
   }
 
+  async clearDoneTasks(listId: string): Promise<{ clearedCount: number }> {
+    // Prefer the local wpb cache (the active subscription has it populated
+    // with every task in the list, including any optimistic mutations).
+    // Falls back to a server fetch only if the cache holds nothing for this
+    // list — keeps this callable from an MCP context that never subscribed,
+    // without spuriously refetching when the cache is hot and simply has no
+    // matches.
+    const cached = this.wpb.collection("tasks").viewCollection<RecordModel>(
+      (r) => r.list === listId,
+    );
+    const targets: RecordModel[] = cached.length > 0
+      ? cached.filter(
+          (r) => r.task_type === "one_shot" && !!r.completed && !r.cleared,
+        )
+      : await this.pb().collection("tasks").getFullList({
+          filter: this.pb().filter(
+            "list = {:listId} && task_type = 'one_shot' && completed = true && cleared != true",
+            { listId },
+          ),
+          $autoCancel: false,
+        });
+
+    if (targets.length === 0) return { clearedCount: 0 };
+    await Promise.all(
+      targets.map((t) => this.wpb.collection("tasks").update(t.id, { cleared: true })),
+    );
+    return { clearedCount: targets.length };
+  }
+
   async getSubtree(rootTaskId: string): Promise<Task[]> {
     const root = await this.pb().collection("tasks").getOne(rootTaskId);
     const descendants = await this.pb().collection("tasks").getFullList({
@@ -380,6 +412,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
         notifyUsers: [],
         tags: tags.filter((t) => !t.startsWith("template:")),
         collapsed: task.collapsed,
+        cleared: false,
       });
       idMap.set(task.id, newId);
     }
