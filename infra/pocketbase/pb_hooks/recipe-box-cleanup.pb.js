@@ -22,11 +22,17 @@
  *       so substring false positives are negligible, but JS re-checks
  *       anyway so we're correct either way.
  *
- *   (b) record.get on a never-set / Go-slice JSON field returns a goja-
- *       wrapped value whose .push appends 0 instead of the supplied value.
- *       Copy into a fresh JS array via Array.prototype.slice.call before
- *       mutating. (Reading via indexOf works fine — the breakage is push.)
- *       We don't push here, but we DO filter/assign, so we copy defensively.
+ *   (b) record.get on a JSON-array field can surface as a goja-wrapped
+ *       Go slice (push appends 0, not the supplied value) OR as a JS
+ *       array of UTF-8 byte values (one number per byte of the stored
+ *       JSON, NOT the decoded elements). Naïve slice.call on the
+ *       byte-array form returns the bytes themselves; push-ing onto
+ *       that and saving corrupts the column into a mix of bytes + the
+ *       appended value (see scott's recipe_boxes incident, 2026-05-26).
+ *       toJsArray below detects all three shapes (real array, JSON
+ *       string, byte-array) and always returns a fresh JS array of
+ *       decoded elements safe to mutate. Mirrors lib/pb-json.js but
+ *       for array-shaped JSON columns (vs object-shaped).
  *
  *   (c) Module-scope helpers aren't reachable from inside the callback;
  *       inline the helper. (See sharing.pb.js header for the full story.)
@@ -35,10 +41,34 @@
  * Re-running on the same delete is a no-op.
  */
 onRecordAfterDeleteSuccess((e) => {
+  // Three goja shapes for a JSON-array column (mirrors sharing.pb.js
+  // and lib/pb-json.js): real JS array, JSON string, byte-array. The
+  // byte-array form looks like an Array but contains UTF-8 byte values
+  // (one number per byte of the stored JSON), and a naïve slice.call
+  // on it returns the bytes themselves — push/filter then corrupts the
+  // column. Decode bytes back via String.fromCharCode + JSON.parse.
+  // See scott's recipe_boxes corruption incident, 2026-05-26.
   function toJsArray(raw) {
     if (!raw) return [];
-    try { return Array.prototype.slice.call(raw); }
-    catch (_) { return []; }
+    if (Array.isArray(raw)) {
+      if (raw.length === 0) return [];
+      if (typeof raw[0] !== "number") {
+        return Array.prototype.slice.call(raw);
+      }
+      var s = "";
+      for (var i = 0; i < raw.length; i++) s += String.fromCharCode(raw[i]);
+      try {
+        var parsed = JSON.parse(s);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_) { return []; }
+    }
+    if (typeof raw === "string") {
+      try {
+        var parsedStr = JSON.parse(raw);
+        return Array.isArray(parsedStr) ? parsedStr : [];
+      } catch (_) { return []; }
+    }
+    return [];
   }
 
   const boxId = e.record.id;
