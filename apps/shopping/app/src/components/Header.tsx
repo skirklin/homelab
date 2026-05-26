@@ -14,7 +14,6 @@ import { appStorage, StorageKeys } from "../storage";
 const SHOPPING_COLLECTIONS = [
   "shopping_lists",
   "shopping_items",
-  "shopping_history",
   "shopping_trips",
 ] as const;
 

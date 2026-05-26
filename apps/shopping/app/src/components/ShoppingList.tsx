@@ -175,7 +175,7 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
     const newCategoryId = over.id as CategoryId;
 
     if (item && newCategoryId && item.categoryId !== newCategoryId && listId) {
-      shopping.updateItemCategory(item.id, listId, newCategoryId, item.ingredient);
+      shopping.updateItemCategory(item.id, newCategoryId);
     }
   };
 

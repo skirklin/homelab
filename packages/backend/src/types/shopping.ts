@@ -30,13 +30,6 @@ export interface ShoppingItem {
   updated: string;
 }
 
-export interface HistoryEntry {
-  id: string;
-  ingredient: string;
-  categoryId: string;
-  lastAdded: Date;
-}
-
 export interface ShoppingTrip {
   id: string;
   list: string;

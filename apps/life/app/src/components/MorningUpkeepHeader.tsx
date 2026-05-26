@@ -4,8 +4,10 @@
  * no complete/snooze affordances. Empty state renders nothing (no flicker, no
  * "Nothing due" message).
  *
- * v1 picks the first task list alphabetically by slug. Users with multiple
- * household lists only see one — see report for follow-up.
+ * Aggregates today's tasks across ALL household lists in the user's slug map.
+ * The morning surface is a "what's due today" union — if you have multiple
+ * lists they're all here. Today there's typically just one list (`home`), but
+ * the union is the right shape for aggregation.
  */
 import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
@@ -46,20 +48,14 @@ const TaskItem = styled.li`
   color: var(--color-text);
 `;
 
-function pickPrimaryListId(slugs: Record<string, string>): string | null {
-  const entries = Object.entries(slugs);
-  if (entries.length === 0) return null;
-  // Deterministic: first slug alphabetically. v1 just picks one.
-  entries.sort(([a], [b]) => a.localeCompare(b));
-  return entries[0][1];
-}
-
 export function MorningUpkeepHeader() {
   const { user } = useAuth();
   const upkeep = useUpkeepBackend();
   const userBackend = useUserBackend();
   const [slugs, setSlugs] = useState<Record<string, string> | null>(null);
-  const [tasks, setTasks] = useState<BackendTask[] | null>(null);
+  // Per-list tasks keyed by listId; merged on read. Keying by listId means a
+  // single list's update only swaps its slot, leaving siblings untouched.
+  const [tasksByList, setTasksByList] = useState<Map<string, BackendTask[]>>(new Map());
 
   // Subscribe to the user's household slug map.
   useEffect(() => {
@@ -72,35 +68,56 @@ export function MorningUpkeepHeader() {
     };
   }, [user?.uid, userBackend]);
 
-  const listId = useMemo(() => (slugs ? pickPrimaryListId(slugs) : null), [slugs]);
+  // Dedup + sort for a stable subscription set.
+  const listIds = useMemo<string[]>(() => {
+    if (!slugs) return [];
+    return Array.from(new Set(Object.values(slugs))).sort();
+  }, [slugs]);
+  // Joined key so the effect's deps array is a primitive that only changes
+  // when the actual set of list IDs does.
+  const listIdsKey = listIds.join(",");
 
-  // Subscribe to the picked list's tasks. Resets when listId changes.
+  // Subscribe to every list's tasks. Resets when the set of lists changes.
   useEffect(() => {
-    if (!user?.uid || !listId) {
-      setTasks(null);
+    if (!user?.uid || listIds.length === 0) {
+      setTasksByList(new Map());
       return;
     }
-    setTasks(null); // clear stale data while next list loads
-    const unsub = upkeep.subscribeToList(listId, user.uid, {
-      onList: () => {},
-      onTasks: (next) => setTasks(next),
-      onCompletions: () => {},
-    });
+    setTasksByList(new Map()); // clear stale slots while next subscriptions warm up
+    const unsubs = listIds.map((listId) =>
+      upkeep.subscribeToList(listId, user.uid, {
+        onList: () => {},
+        onTasks: (next) => {
+          setTasksByList((prev) => {
+            const out = new Map(prev);
+            out.set(listId, next);
+            return out;
+          });
+        },
+        onCompletions: () => {},
+      }),
+    );
     return () => {
-      unsub();
+      for (const unsub of unsubs) unsub();
     };
-  }, [user?.uid, listId, upkeep]);
+    // listIdsKey is the stable-deps proxy for the listIds array contents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, listIdsKey, upkeep]);
 
   const todayTasks = useMemo(() => {
-    if (!tasks) return [];
-    return tasks
+    const all: BackendTask[] = [];
+    for (const tasks of tasksByList.values()) all.push(...tasks);
+    return all
       .filter((t) => t.taskType === "recurring")
       .filter((t) => !isTaskSnoozed(t))
-      .filter((t) => getUrgencyLevel(t) === "today");
-  }, [tasks]);
+      .filter((t) => getUrgencyLevel(t) === "today")
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [tasksByList]);
 
   // Empty / loading / no-lists: render nothing.
-  if (!slugs || !listId || !tasks || todayTasks.length === 0) {
+  // Wait for every list's first onTasks callback before deciding "empty" so
+  // we don't flash a partial union.
+  if (!slugs || listIds.length === 0 || tasksByList.size < listIds.length || todayTasks.length === 0) {
     return null;
   }
 

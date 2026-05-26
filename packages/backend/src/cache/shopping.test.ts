@@ -17,7 +17,6 @@ import type { ShoppingBackend } from "../interfaces/shopping";
 import type {
   ShoppingItem,
   ShoppingList,
-  HistoryEntry,
   ShoppingTrip,
 } from "../types/shopping";
 import type { Unsubscribe } from "../types/common";
@@ -25,7 +24,6 @@ import type { Unsubscribe } from "../types/common";
 interface Handlers {
   onList: (list: ShoppingList) => void;
   onItems: (items: ShoppingItem[]) => void;
-  onHistory: (entries: HistoryEntry[]) => void;
   onTrips: (trips: ShoppingTrip[]) => void;
   onDeleted?: () => void;
 }
@@ -53,8 +51,8 @@ function makeStubBackend(): {
     toggleItem: async () => {},
     deleteItem: async () => {},
     clearCheckedItems: async () => {},
-    renameHistoryEntry: async () => {},
-    deleteHistoryEntry: async () => {},
+    updateTripItem: async () => {},
+    removeTripItem: async () => {},
     subscribeToList(_listId, h): Unsubscribe {
       handlers = h;
       return () => {
@@ -114,7 +112,6 @@ describe("withShoppingCache: refresh-state convergence", () => {
       onItems: (items) => {
         seenEmits.push(items);
       },
-      onHistory: () => {},
       onTrips: () => {},
     });
 
@@ -151,7 +148,6 @@ describe("withShoppingCache: refresh-state convergence", () => {
       onItems: (items) => {
         seenEmits.push(items);
       },
-      onHistory: () => {},
       onTrips: () => {},
     });
 
@@ -194,7 +190,6 @@ describe("withShoppingCache: refresh-state convergence", () => {
       onItems: (items) => {
         seenEmits.push(items);
       },
-      onHistory: () => {},
       onTrips: () => {},
     });
 
@@ -237,7 +232,6 @@ describe("withShoppingCache: failure modes that leave the reducer with stale sta
     const unsub = wrapped.subscribeToList("L1", {
       onList: () => {},
       onItems: (items) => { seen.push(items); },
-      onHistory: () => {},
       onTrips: () => {},
     });
 
@@ -277,7 +271,6 @@ describe("withShoppingCache: failure modes that leave the reducer with stale sta
     const unsub = unwrapped.subscribeToList("L1", {
       onList: () => {},
       onItems: (items) => { seen.push(items); },
-      onHistory: () => {},
       onTrips: () => {},
     });
 
@@ -316,7 +309,6 @@ describe("withShoppingCache: write race that bit beta", () => {
       onItems: (items) => {
         seen.push(items);
       },
-      onHistory: () => {},
       onTrips: () => {},
     });
 

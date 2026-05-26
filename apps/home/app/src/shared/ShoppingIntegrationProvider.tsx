@@ -2,8 +2,8 @@
  * Bridges the recipes app's ShoppingIntegrationContext to the shopping app.
  * This allows recipes to add items to shopping lists when embedded in the home app.
  */
-import type { ReactNode } from "react";
-import { useShoppingContext, useShoppingBackend } from "@kirkl/shopping";
+import { useMemo, type ReactNode } from "react";
+import { useShoppingContext, useShoppingBackend, deriveSuggestions } from "@kirkl/shopping";
 import { ShoppingIntegrationContext } from "@kirkl/recipes";
 import { useAuth } from "@kirkl/shared";
 
@@ -16,13 +16,17 @@ export function ShoppingIntegrationProvider({ children }: ShoppingIntegrationPro
   const { user } = useAuth();
   const shopping = useShoppingBackend();
 
+  // Suggestions are derived from trips — the same single source the shopping
+  // app uses for autocomplete and on-add category lookup.
+  const suggestions = useMemo(() => deriveSuggestions(state.trips), [state.trips]);
+
   const addItem = async (listId: string, ingredient: string, note?: string) => {
     if (!user) {
       throw new Error("User must be authenticated to add items");
     }
     const normalized = ingredient.toLowerCase().trim();
-    const historyEntry = state.history.find((h) => h.ingredient.toLowerCase() === normalized);
-    const categoryId = historyEntry?.categoryId || "uncategorized";
+    const suggestion = suggestions.get(normalized);
+    const categoryId = suggestion?.categoryId || "uncategorized";
     await shopping.addItem(listId, ingredient, user.uid, categoryId, note);
   };
 

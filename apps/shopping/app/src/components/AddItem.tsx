@@ -7,6 +7,7 @@ import { useAuth, useFeedback } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend } from "@kirkl/shared";
 import { getItemsFromState } from "../selectors";
+import { deriveSuggestions } from "../suggestions";
 import { UNCATEGORIZED_CATEGORY_ID } from "../types";
 
 const Container = styled.div`
@@ -37,12 +38,15 @@ export function AddItem() {
   const [note, setNote] = useState("");
   const inputRef = useRef<BaseSelectRef>(null);
 
-  // Filter history for autocomplete options (based on ingredient).
-  // Dedupe by lowercased ingredient name (server can legitimately hold
-  // duplicate rows — see upsertHistory race notes), keeping the most-recent
-  // entry, then rank prefix matches above substring matches so typing "b"
-  // shows items that start with "b" before things that merely contain it.
-  // Within each rank, newest first so recent additions stay reachable.
+  // All trip-derived suggestions, keyed by normalized ingredient. This is the
+  // single source of truth for both autocomplete and the on-add category
+  // lookup — derived from `state.trips`, since `shopping_history` was retired.
+  const suggestions = useMemo(() => deriveSuggestions(state.trips), [state.trips]);
+
+  // Filter the suggestion map for the dropdown. Prefix matches rank above
+  // substring matches so typing "b" shows items that start with "b" before
+  // things that merely contain it. Within each rank, newest first so recent
+  // additions stay reachable.
   const autocompleteOptions = useMemo(() => {
     if (!ingredient.trim()) return [];
 
@@ -50,27 +54,23 @@ export function AddItem() {
     const existingItems = getItemsFromState(state);
     const existingIngredients = new Set(existingItems.map((i) => i.ingredient.toLowerCase()));
 
-    const ts = (d: Date | null | undefined) => d ? d.getTime() : 0;
-
-    const byName = new Map<string, typeof state.history[number]>();
-    for (const h of state.history) {
-      const key = h.ingredient.toLowerCase();
+    const matches: Array<{ key: string; ingredient: string; lastSeenMs: number }> = [];
+    for (const [key, s] of suggestions) {
       if (existingIngredients.has(key)) continue;
       if (!key.includes(searchTerm)) continue;
-      const prior = byName.get(key);
-      if (!prior || ts(h.lastAdded) > ts(prior.lastAdded)) byName.set(key, h);
+      matches.push({ key, ingredient: s.ingredient, lastSeenMs: s.lastSeen.getTime() });
     }
 
-    return Array.from(byName.values())
+    return matches
       .sort((a, b) => {
-        const aPrefix = a.ingredient.toLowerCase().startsWith(searchTerm);
-        const bPrefix = b.ingredient.toLowerCase().startsWith(searchTerm);
+        const aPrefix = a.key.startsWith(searchTerm);
+        const bPrefix = b.key.startsWith(searchTerm);
         if (aPrefix !== bPrefix) return aPrefix ? -1 : 1;
-        return ts(b.lastAdded) - ts(a.lastAdded);
+        return b.lastSeenMs - a.lastSeenMs;
       })
       .slice(0, 8)
-      .map((h) => ({ value: h.ingredient, label: h.ingredient }));
-  }, [ingredient, state.history, state.items]);
+      .map((m) => ({ value: m.ingredient, label: m.ingredient }));
+  }, [ingredient, suggestions, state.items]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,12 +99,10 @@ export function AddItem() {
     // Return focus to input for rapid entry
     inputRef.current?.focus();
 
-    // Look up category from local history (already loaded via subscription)
+    // Look up category from trip-derived suggestions (loaded via subscription)
     const normalizedIngredient = trimmedIngredient.toLowerCase();
-    const historyEntry = state.history.find(
-      (h) => h.ingredient.toLowerCase() === normalizedIngredient
-    );
-    const categoryId = historyEntry?.categoryId || UNCATEGORIZED_CATEGORY_ID;
+    const suggestion = suggestions.get(normalizedIngredient);
+    const categoryId = suggestion?.categoryId || UNCATEGORIZED_CATEGORY_ID;
 
     // Fire and forget - pass category to skip network lookup. We don't
     // catch the promise: transient errors stay queued in wpb for automatic
