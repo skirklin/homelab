@@ -27,8 +27,16 @@ const Column = styled.div<{ $urgency: UrgencyLevel }>`
   display: flex;
   flex-direction: column;
   min-height: 300px;
-  max-height: calc(100vh - 140px);
-  max-height: calc(100dvh - 140px);
+
+  /* Only cap column height on the side-by-side desktop layout so each
+     column gets its own scroller. On mobile (single-column stack from
+     TaskBoard's grid), let the page scroll naturally — a per-column
+     scroller capped at 100dvh fights the page scroll and intermittently
+     traps touch on iOS Safari as the address bar resizes the viewport. */
+  @media (min-width: 601px) {
+    max-height: calc(100vh - 140px);
+    max-height: calc(100dvh - 140px);
+  }
 `;
 
 const ColumnHeader = styled.div<{ $urgency: UrgencyLevel }>`
@@ -58,11 +66,15 @@ const TaskCount = styled.span<{ $urgency: UrgencyLevel }>`
 const TaskList = styled.div`
   flex: 1;
   padding: var(--space-sm);
-  overflow-y: auto;
-  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+
+  /* Inner scroller only exists on desktop where the Column is height-capped.
+     On mobile the column grows to its content height and the page scrolls. */
+  @media (min-width: 601px) {
+    overflow-y: auto;
+  }
 `;
 
 const EmptyState = styled.div`
