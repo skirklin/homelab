@@ -137,7 +137,7 @@ export function TripForm() {
             <Button type="primary" htmlType="submit" loading={saving}>
               {isEdit ? "Save" : "Create Trip"}
             </Button>
-            <Button onClick={() => navigate("..", { replace: true })}>Cancel</Button>
+            <Button onClick={() => navigate("..", { relative: "path", replace: true })}>Cancel</Button>
           </Space>
         </Form.Item>
       </Form>

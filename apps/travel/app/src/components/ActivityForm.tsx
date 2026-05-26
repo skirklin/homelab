@@ -273,7 +273,7 @@ export function ActivityForm() {
             <Button type="primary" htmlType="submit" loading={saving}>
               {isEdit ? "Save" : "Add Activity"}
             </Button>
-            <Button onClick={() => navigate("..", { replace: true })}>Cancel</Button>
+            <Button onClick={() => navigate(`../${tripId}`, { replace: true })}>Cancel</Button>
             {isEdit && (
               <Button danger onClick={handleDelete}>Delete</Button>
             )}
