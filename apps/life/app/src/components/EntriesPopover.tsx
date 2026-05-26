@@ -324,6 +324,11 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
             value={displayed}
             min={0}
             step={durationUnit === "hours" ? 0.5 : 1}
+            // controls={false}: the up/down arrows eat ~28px of the 80px field
+            // on mobile, leaving no room to render digits. Mobile users tap
+            // and type, not the tiny arrows.
+            controls={false}
+            inputMode="decimal"
             onChange={(v) => {
               if (typeof v !== "number") return;
               const minutes =
@@ -339,7 +344,7 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
                 void commit(local);
               }
             }}
-            style={{ width: 80 }}
+            style={{ width: 72 }}
           />
           <Segmented
             size="small"
@@ -362,6 +367,8 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
           value={local as number}
           min={entry.unit === "rating" ? 1 : 0}
           max={entry.unit === "rating" ? entry.scale ?? 5 : undefined}
+          controls={false}
+          inputMode="numeric"
           onChange={(v) => {
             if (typeof v !== "number") return;
             setLocal(v);
@@ -375,7 +382,7 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
               void commit(local);
             }
           }}
-          style={{ width: 80 }}
+          style={{ width: 64 }}
         />
         <EntryName style={{ minWidth: 0 }}>{entry.unit}</EntryName>
         {saving && <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>…</span>}
