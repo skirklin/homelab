@@ -93,6 +93,23 @@ const NotificationToggle = styled.div`
   font-size: var(--font-size-sm);
 `;
 
+/**
+ * Best-effort "this is a phone or touch-tablet" check. Used to hide the push
+ * notification opt-in on laptops/desktops — pushes there are noise the user
+ * doesn't want, and a sub created here would otherwise enter the cron rotation.
+ * Not reactive (won't flip if a mouse is paired mid-session); compute once.
+ */
+function isMobileDevice(): boolean {
+  // Chromium Client Hints — authoritative when present.
+  const uaData = (navigator as { userAgentData?: { mobile?: boolean } }).userAgentData;
+  if (uaData && typeof uaData.mobile === "boolean") return uaData.mobile;
+  // Fallback for Safari/Firefox: primary input is touch and can't hover.
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+  }
+  return false;
+}
+
 const DateNav = styled.div`
   display: flex;
   align-items: center;
@@ -260,6 +277,8 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
+  // Suppress the push-subscription affordance entirely on non-phone devices.
+  const isMobile = useMemo(() => isMobileDevice(), []);
 
   // The URL is the source of truth for the viewed day. `?date=YYYY-MM-DD`
   // (browser-local time) picks a specific day; no param means today.
@@ -699,7 +718,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       >
         Display
       </Button>
-      {samplingEnabled && (
+      {samplingEnabled && isMobile && (
         <Tooltip title={notificationsEnabled ? "Notifications on" : "Enable notifications for random sampling"}>
           <NotificationToggle>
             <BellOutlined />
@@ -715,7 +734,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     </>
   );
 
-  const mobileActions = samplingEnabled ? (
+  const mobileActions = samplingEnabled && isMobile ? (
     <NotificationToggle>
       <BellOutlined />
       <Switch
