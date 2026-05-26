@@ -42,7 +42,8 @@ function DeleteButton(props: DeleteProps) {
   async function del() {
     dispatch({ type: "REMOVE_RECIPE", boxId, recipeId });
     await recipesBackend.deleteRecipe(recipeId);
-    navigate(`${basePath}/boxes/${boxId}`);
+    // Replace history — back would otherwise land on the deleted recipe.
+    navigate(`${basePath}/boxes/${boxId}`, { replace: true });
   }
 
   let elt;

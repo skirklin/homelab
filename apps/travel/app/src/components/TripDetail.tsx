@@ -236,7 +236,8 @@ export function TripDetail() {
 
   const handleDelete = async () => {
     await travel.deleteTrip(trip.id);
-    navigate("..");
+    // Replace history — back would otherwise land on the deleted trip.
+    navigate("..", { replace: true });
   };
 
   const handleToggleFlag = () => {

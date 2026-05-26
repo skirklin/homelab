@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import Plot from 'react-plotly.js'
 import type { Account, BalancePoint, PerformancePoint, Transaction, Holding } from '../api'
 import { fetchAccounts, fetchBalances, fetchPerformance, fetchTransactions, fetchHoldings, updateManualBalance, renameAccount, deleteAccount } from '../api'
@@ -16,6 +16,7 @@ const fmtDollar = (v: number) => {
 
 export default function AccountDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [account, setAccount] = useState<Account | null>(null)
   const [balances, setBalances] = useState<BalancePoint[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -160,7 +161,9 @@ export default function AccountDetail() {
               onClick={async () => {
                 if (!confirm(`Delete "${account.name}"? This cannot be undone.`)) return
                 await deleteAccount(account.id)
-                window.location.href = '/accounts'
+                // Replace so back doesn't return to the deleted account.
+                // Also avoids window.location.href's full-page reload.
+                navigate('/accounts', { replace: true })
               }}
               style={{
                 fontSize: 12,

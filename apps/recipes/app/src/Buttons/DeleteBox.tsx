@@ -33,7 +33,8 @@ function DeleteButton(props: DeleteProps) {
   async function del() {
     dispatch({ type: "REMOVE_BOX", boxId });
     await recipes.deleteBox(boxId);
-    navigate(".")
+    // Replace history — back would otherwise land on the deleted box and 404.
+    navigate(".", { replace: true })
   }
 
   let elt;
