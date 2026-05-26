@@ -43,17 +43,7 @@ import { ShoppingTrips } from "./ShoppingTrips";
 import { ListSettings } from "./ListSettings";
 import { UNCATEGORIZED_CATEGORY_ID, type ShoppingItem, type CategoryId, type CategoryDef } from "../types";
 
-const Container = styled.div`
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-`;
-
-const StickyTop = styled.div`
-  position: sticky;
-  top: 0;
-  z-index: 100;
+const TopBar = styled.div`
   background: var(--color-bg);
   max-width: 600px;
   margin: 0 auto;
@@ -61,7 +51,6 @@ const StickyTop = styled.div`
 `;
 
 const Content = styled.main`
-  flex: 1;
   padding-bottom: var(--space-xl);
   max-width: 600px;
   margin: 0 auto;
@@ -242,8 +231,8 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
     : [...configuredCategories, uncategorizedDef];
 
   return (
-    <Container>
-      <StickyTop>
+    <>
+      <TopBar>
         <Header
           listId={listId || ""}
           onShowHistory={() => setView("history")}
@@ -251,7 +240,7 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
           embedded={embedded}
         />
         <AddItem />
-      </StickyTop>
+      </TopBar>
       <Content>
         {state.loading ? (
           <LoadingContainer>
@@ -300,6 +289,6 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
           </DndContext>
         )}
       </Content>
-    </Container>
+    </>
   );
 }
