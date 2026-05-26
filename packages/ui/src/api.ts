@@ -31,6 +31,24 @@ export async function getListInfo(
   return resp.json();
 }
 
+/**
+ * Look up a sharing invite's target_type / target_module without redeeming.
+ *
+ * Used by the home shell to route /invite/:code into the correct module
+ * (recipes vs travel). Public endpoint — no auth required. Returns null
+ * for unknown / missing codes; callers should fall back to recipes which
+ * is the historical default that still works for the most common case.
+ */
+export async function getInviteInfo(
+  code: string,
+): Promise<{ target_type: string; target_module: string | null; redeemed: boolean } | null> {
+  const resp = await fetch(`${getApiBase()}/sharing/invite-info/${encodeURIComponent(code)}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!resp.ok) return null;
+  return resp.json();
+}
+
 /** Join a list — adds the current user to the list's owners (server-side). */
 export async function joinList(
   collection: string,

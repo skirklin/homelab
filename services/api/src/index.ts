@@ -136,6 +136,39 @@ app.get("/health/backups", async (c) => {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 503);
   }
 });
+// Invite type lookup — needs to work before redemption so the home app
+// can route /invite/:code to the right module's redeemer (recipes vs travel).
+// Returns just target_type (and a sanitized "target_module" alias) so
+// nothing sensitive is leaked. 404 if code is missing, expired, or already
+// redeemed; the redeemer path will surface the same condition with a UX.
+app.get("/sharing/invite-info/:code", async (c) => {
+  const { getAdminPb } = await import("./lib/pb");
+  const code = c.req.param("code") ?? "";
+  if (!code) return c.json({ error: "missing code" }, 400);
+  try {
+    const pb = await getAdminPb();
+    const invite = await pb.collection("sharing_invites").getFirstListItem(
+      pb.filter("code = {:code}", { code }),
+      { $autoCancel: false },
+    );
+    const targetType = invite.target_type as string;
+    // Map invite target_type to the public-URL module prefix used by the
+    // home shell. "box" and "recipe" both redeem inside the recipes module.
+    const moduleMap: Record<string, string> = {
+      box: "recipes",
+      recipe: "recipes",
+      travel_log: "travel",
+    };
+    const target_module = moduleMap[targetType] ?? null;
+    return c.json({
+      target_type: targetType,
+      target_module,
+      redeemed: !!invite.redeemed,
+    });
+  } catch {
+    return c.json({ error: "Invite not found" }, 404);
+  }
+});
 // List info for join flow — needs to work before user is an owner
 app.get("/sharing/list-info/:collection/:listId", async (c) => {
   const { getAdminPb } = await import("./lib/pb");

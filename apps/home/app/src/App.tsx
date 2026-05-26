@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { App as AntApp, ConfigProvider, theme } from "antd";
-import { useEffect } from "react";
-import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary } from "@kirkl/shared";
+import { useEffect, useState } from "react";
+import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary, getInviteInfo } from "@kirkl/shared";
 import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
@@ -25,12 +25,37 @@ function RedirectToLastApp() {
   return <Navigate to={target} replace />;
 }
 
-// Invite links work against either the recipes subdomain (standalone) or the
-// home app (embedded). When they land at /invite/:code here, forward into the
-// recipes module where the redemption UI lives.
+// Invite links work against either the per-app subdomains (standalone) or
+// the home app (embedded). When they land at /invite/:code here, look up the
+// invite's target_type and forward into the module that owns the redemption
+// UI. Falls back to /recipes/invite/:code for unknown codes — recipes was
+// the only invite type when this redirect was first written, and that path's
+// own error UI handles "invalid invite" cleanly.
 function InviteRedirect() {
   const { code } = useParams<{ code: string }>();
-  return <Navigate to={`/recipes/invite/${code}`} replace />;
+  const [target, setTarget] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!code) {
+      setTarget("/recipes");
+      return;
+    }
+    getInviteInfo(code)
+      .then((info) => {
+        if (cancelled) return;
+        const mod = info?.target_module || "recipes";
+        setTarget(`/${mod}/invite/${code}`);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTarget(`/recipes/invite/${code}`);
+      });
+    return () => { cancelled = true; };
+  }, [code]);
+
+  if (!target) return null;
+  return <Navigate to={target} replace />;
 }
 
 const antTheme = {
