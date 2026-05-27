@@ -53,8 +53,11 @@ const Placeholder = styled.span`
 
 const AddToShoppingButton = styled.button`
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  /* position: fixed bypasses the body's safe-area padding, so add the
+     inset explicitly to keep the FAB clear of the iOS home indicator
+     and the right-edge rounded corner. */
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  right: calc(24px + env(safe-area-inset-right));
   background: var(--color-primary);
   border: none;
   border-radius: 50%;

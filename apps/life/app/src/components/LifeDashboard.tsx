@@ -393,11 +393,14 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     updateSelectedDate(newDate);
   }, [selectedDate, updateSelectedDate]);
 
-  // Swipe handlers. We reserve the outer ~20px of each edge for the OS
+  // Swipe handlers. We reserve the outer ~32px of each edge for the OS
   // back/forward gesture (iOS edge-swipe-back, Android edge-swipe-forward) —
   // touches that start inside that band don't arm our day-step handler, so the
-  // browser/OS gets to handle them.
-  const EDGE_RESERVE_PX = 20;
+  // browser/OS gets to handle them. Apple's edge gesture region is ~28–32px
+  // depending on device; 20px was too narrow and our handler kept eating the
+  // back gesture. Fixed value (not env(safe-area-inset-*)) because clientX
+  // is in the same viewport coordinate space — JS can't read the inset.
+  const EDGE_RESERVE_PX = 32;
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     const x = e.touches[0].clientX;
     if (x < EDGE_RESERVE_PX || x > window.innerWidth - EDGE_RESERVE_PX) {

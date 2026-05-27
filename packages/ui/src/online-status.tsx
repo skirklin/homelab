@@ -38,7 +38,10 @@ export function OfflineBanner() {
       aria-live="polite"
       style={{
         position: "fixed",
-        top: 8,
+        // `position: fixed` is anchored to the viewport, so the body's
+        // safe-area padding doesn't apply. Add the inset explicitly so the
+        // pill clears the iOS notch / Dynamic Island.
+        top: "calc(8px + env(safe-area-inset-top))",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 9999,
