@@ -6,8 +6,8 @@
  * users to scroll past the trip header to find it. Day push notifications
  * deep-link here. Each day has its own URL.
  */
-import React, { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeftOutlined,
   CarOutlined,
@@ -233,6 +233,23 @@ export function DayView() {
   }, [activities]);
 
   const itinerary = useSelectedItinerary(itineraries);
+
+  // Keep `?itin=` in sync with the resolved itinerary. useSelectedItinerary
+  // silently falls back to the active/first itinerary when the URL holds a
+  // stale id (e.g. after deletion); without this, a refresh on a stale
+  // `?itin=<deleted-id>` URL renders fine but the URL keeps lying about which
+  // itinerary is selected, so subsequent reads and back/forward drift apart.
+  // Mirrors the same pattern in ItinerarySection (Bundle 3c).
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (!itinerary) return;
+    if (searchParams.get("itin") === itinerary.id) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("itin", itinerary.id);
+      return next;
+    }, { replace: true });
+  }, [itinerary, searchParams, setSearchParams]);
 
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
 
