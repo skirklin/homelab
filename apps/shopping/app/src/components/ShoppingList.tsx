@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import { appStorage, StorageKeys } from "../storage";
+import { appStorage, StorageKeys, collapsedCategoriesKey } from "../storage";
 
 // Custom modifier: only snap Y axis to cursor center, keep original X offset
 const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, transform }) => {
@@ -153,7 +153,13 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
   // String slicing (not regex) so any splat content goes uninterpreted.
   const listPath = stripSplatSuffix(location.pathname, splat);
   const [draggedItem, setDraggedItem] = useState<ShoppingItem | null>(null);
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  // Collapsed category ids, persisted per slug so refresh and list-switching
+  // both restore the user's view. Read on slug change, write on every toggle.
+  // Stored as an array under shopping:collapsed:<slug> because Set isn't
+  // JSON-serializable.
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() =>
+    new Set<string>(slug ? appStorage.get<string[]>(collapsedCategoriesKey(slug), []) : []),
+  );
 
   // Configure sensors for both mouse and touch with activation delay
   const mouseSensor = useSensor(MouseSensor, {
@@ -179,6 +185,16 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
       setCurrentList(listId);
     }
   }, [slug, listId, setCurrentList]);
+
+  // Reload collapsed state when the slug changes (list switch). The
+  // useState initializer only runs on mount, so without this the user
+  // would see the previous list's collapse state on the new one.
+  useEffect(() => {
+    if (!slug) return;
+    setCollapsedCategories(
+      new Set<string>(appStorage.get<string[]>(collapsedCategoriesKey(slug), [])),
+    );
+  }, [slug]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const item = event.active.data.current?.item as ShoppingItem;
@@ -206,6 +222,9 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
         next.delete(categoryId);
       } else {
         next.add(categoryId);
+      }
+      if (slug) {
+        appStorage.set(collapsedCategoriesKey(slug), Array.from(next));
       }
       return next;
     });

@@ -298,16 +298,64 @@ function useSnapshot(debug: WpbDebug): WpbSnapshot {
   return snapshot;
 }
 
+/**
+ * "Browser back closes the modal" pattern, raw — we can't use react-router
+ * URL params because the SyncDot/banner are rendered as a global overlay
+ * outside any router-controlled tree, and consumers vary (some apps wrap
+ * the dot in a Router, some don't).
+ *
+ * On open: push a sentinel history entry so the back gesture has something
+ * to pop. On popstate: close the panel (the entry is already gone — the
+ * browser ate it). On explicit close: call history.back() so the sentinel
+ * we pushed gets popped naturally, keeping the history stack clean.
+ *
+ * Reentrancy guard: the close-triggered history.back() fires popstate too;
+ * `closingRef` prevents it from re-running setOpen(false) and (more
+ * importantly) prevents the cleanup branch from going back twice on unmount.
+ */
+function useHistoryDismiss(open: boolean, setOpen: (v: boolean) => void): void {
+  useEffect(() => {
+    if (!open) return;
+    if (typeof window === "undefined") return;
+
+    let closing = false;
+
+    window.history.pushState({ kirklSyncPanel: true }, "");
+
+    const onPopState = () => {
+      // Browser back was pressed (or our own history.back fired). Either
+      // way the sentinel entry is gone; just mirror that in state.
+      closing = true;
+      setOpen(false);
+    };
+    window.addEventListener("popstate", onPopState);
+
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      // If we're unmounting because the user pressed back, the sentinel
+      // is already popped — nothing to do. Otherwise (explicit close, or
+      // parent re-rendered with open=false), pop our sentinel so the
+      // history stack stays clean.
+      if (!closing && window.history.state && window.history.state.kirklSyncPanel) {
+        window.history.back();
+      }
+    };
+  }, [open, setOpen]);
+}
+
 export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
   const snapshot = useSnapshot(debug);
   const [showPanel, setShowPanel] = useState(false);
   const online = useOnline();
+  useHistoryDismiss(showPanel, setShowPanel);
 
   const state = deriveSyncState(snapshot, Date.now());
   // Banner is only the loud surface — silent when everything looks fine.
   // The persistent per-app dots cover the ambient at-a-glance need.
   if (state.severity === "ok") {
-    return showPanel ? <DetailsPanel debug={debug} onClose={() => setShowPanel(false)} /> : null;
+    return showPanel
+      ? <DetailsPanel debug={debug} onClose={() => window.history.back()} />
+      : null;
   }
 
   const s = SEVERITY_PILL[state.severity];
@@ -342,7 +390,7 @@ export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
           textOverflow: "ellipsis",
         }}
       >{state.label}</button>
-      {showPanel ? <DetailsPanel debug={debug} onClose={() => setShowPanel(false)} /> : null}
+      {showPanel ? <DetailsPanel debug={debug} onClose={() => window.history.back()} /> : null}
     </>
   );
 }
@@ -372,6 +420,7 @@ export function SyncDot({ debug, collections }: SyncDotProps) {
   const [showPanel, setShowPanel] = useState(false);
   const cols = useMemo(() => [...collections], [collections]);
   const state = deriveSyncState(snapshot, Date.now(), cols);
+  useHistoryDismiss(showPanel, setShowPanel);
 
   return (
     <>
@@ -414,7 +463,7 @@ export function SyncDot({ debug, collections }: SyncDotProps) {
           we keep this component dep-free so it can be dropped into any app
           header without extra imports. */}
       <style>{`@keyframes kirkl-sync-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.5 } }`}</style>
-      {showPanel ? <DetailsPanel debug={debug} onClose={() => setShowPanel(false)} /> : null}
+      {showPanel ? <DetailsPanel debug={debug} onClose={() => window.history.back()} /> : null}
     </>
   );
 }

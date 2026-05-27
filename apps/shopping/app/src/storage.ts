@@ -13,3 +13,8 @@ migrateStorageKey("groceries-last-list", "lastList", appStorage);
 export const StorageKeys = {
   LAST_LIST: "lastList",
 } as const;
+
+/** localStorage key for the set of collapsed category ids on a given list. */
+export function collapsedCategoriesKey(slug: string): string {
+  return `collapsed:${slug}`;
+}
