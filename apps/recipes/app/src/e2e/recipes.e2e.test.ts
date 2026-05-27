@@ -667,7 +667,12 @@ describe("User edge cases", () => {
     expect(userEntry!.boxes.length).toBe(0);
   });
 
-  it("handles stale box reference after box deletion", async () => {
+  it("scrubs stale box reference from user when box is deleted", async () => {
+    // The recipe-box-cleanup.pb.js hook (shipped 2026-05-20, commit dba9a96)
+    // listens for recipe_boxes deletes and removes the deleted id from every
+    // user's recipe_boxes JSON array. Without it, each dangling entry produces
+    // a 404 from the recipes app's per-box fetch on every page load. This test
+    // pins that behavior so a future hook regression is caught here.
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
@@ -679,12 +684,13 @@ describe("User edge cases", () => {
     const beforeRecord = await ctx.pb.collection("users").getOne(user.id);
     expect(beforeRecord.recipe_boxes).toContain(boxId);
 
-    // Delete the box directly (bypassing deleteBox)
+    // Delete the box directly (bypassing deleteBox so the cleanup is purely
+    // the hook's doing, not application-layer bookkeeping).
     await ctx.pb.collection("recipe_boxes").delete(boxId);
 
-    // User doc still has stale reference
+    // Hook scrubs the dangling reference from the user's recipe_boxes array.
     const afterRecord = await ctx.pb.collection("users").getOne(user.id);
-    expect(afterRecord.recipe_boxes).toContain(boxId);
+    expect(afterRecord.recipe_boxes).not.toContain(boxId);
 
     // getBox returns null for deleted box
     const result = await recipes.getBox(boxId, user.id);
