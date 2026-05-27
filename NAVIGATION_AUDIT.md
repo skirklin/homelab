@@ -90,36 +90,52 @@ Six per-app commits on main: `fa2e022` recipes, `3638b1a` shopping, `b18042a` tr
 - [ ] **Travel TripList.tsx:354-357** — `search`, `statusFilter`, `regionFilter`, `view` not URL-backed.
 - [ ] **Life Journal/Visualizations** — filter/search/selectedId/viewDate all in `useState`.
 
-## Bundle 4 — surprising (lower priority)
+## Bundle 4 — surprising (lower priority) ✅ shipped 2026-05-26
 
-- [ ] **#12** — No `<ScrollRestoration/>` anywhere across 8 `BrowserRouter` instances. Back always lands at top.
-- [ ] **#13 Recipes Recipe.tsx:20** — `recordRecentView` re-fires on back/forward, re-promoting the recipe in "Recently viewed."
-- [ ] **#14 Recipes RecipesRoutes.tsx:48** — duplicate route fragments history (see Bundle 3 too).
-- [ ] **#15 Home Shell.tsx:143-146** — nav-bar push (every header click adds history entry, even re-clicking active module).
-- [ ] **#16 Home RedirectToLastApp** — `lastPath` not validated; can point at deleted route (e.g. stale `/life/...` after May 20 extraction). PWA cold-launches to 404 with no back. [apps/home/app/src/App.tsx:22-26](apps/home/app/src/App.tsx#L22-L26)
-- [ ] **Modals not URL-backed** (consistency note — pattern, not single bug): recipes "I made it!" / Import / PickBox / NewBox / AddToShopping / BatchEnrichment / Owners / WhatsNew; shopping Share / Rename / Slug / RenameCategory; SyncDot panel. Decide policy: URL-backed modals (good for bookmarking, back-to-close) vs in-memory (current default).
-- [ ] **Filter state not URL-backed** (consistency note): recipes Filterbox + table sort; travel TripList; many money pages; life Journal/Visualizations.
-- [ ] **Recipes Breadcrumbs.tsx:53** — clickable "recipes" segment is a real route but a confusing crumb.
-- [ ] **Recipes RecipeCard.tsx:103** + similar — modal local-state pattern (see modal consistency note).
-- [ ] **Recipes Filterbox.tsx:84** — filter not URL-backed (see filter consistency note).
-- [ ] **Recipes WhatsNew.tsx:40** — auto-opens via `setTimeout(500ms)` with no URL signal; can't be dismissed via browser back.
-- [ ] **Shopping SyncDot panel** — local state, browser back exits app. [packages/ui/src/sync-status.tsx:303,372](packages/ui/src/sync-status.tsx#L303)
-- [ ] **Shopping ShoppingList.tsx:135** — `collapsedCategories` not persisted across slug changes.
-- [ ] **Travel ItinerarySection.tsx:300** — relies on default route-relative resolution; fragile if route tree changes.
-- [ ] **Travel DayView.tsx:250-273** — stale `?itin=` from deleted itinerary doesn't gracefully fall back.
-- [ ] **Travel TripDetail.tsx:225-263** — BackLink `navigate("..")` is fine but worth noting it's not history-aware.
-- [ ] **Upkeep TaskBoard.tsx:113** — `showSnoozed` toggle not URL-backed; refresh collapses Snoozed drawer.
-- [ ] **Upkeep TaskOutliner.tsx:74-75** — `focusedId`/`selectedId` `useState`; refresh loses detail-pane selection.
-- [ ] **Outliner + Kanban tag filter** — no URL surface at all on either view (despite brief expecting one).
-- [ ] **Outliner persistence inconsistency** — Kanban persists `LAST_LIST` to localStorage; outliner does not.
-- [ ] **Home Shell.tsx:129-138** — `lastPath` written on every pathname change including transient deep routes (e.g. mid-scrape).
-- [ ] **Mobile #17** — Life dashboard horizontal swipe (50px threshold, 100% width) competes with iOS edge-swipe-back. [LifeDashboard.tsx:397-419](apps/life/app/src/components/LifeDashboard.tsx#L397-L419)
-- [ ] **Mobile #18** — No `viewport-fit=cover` / no `safe-area-inset` anywhere across 8 apps. PWA notched-iPhone overlap.
-- [ ] **Mobile #19** — SW `navigateFallback: /index.html` has no denylist for deleted routes. After a deploy that removes routes, the SW serves the cached shell so URL "works" but renders nothing useful. [packages/vite-preset/src/index.mjs:57](packages/vite-preset/src/index.mjs#L57)
-- [ ] **Mobile #20** — Stray bare `100vh` at [apps/shopping/app/src/components/ShoppingList.tsx:87](apps/shopping/app/src/components/ShoppingList.tsx#L87). May 20 `100dvh` sweep missed it.
-- [ ] **Mobile** — No `apple-mobile-web-app-capable` / `apple-mobile-web-app-status-bar-style` meta in any index.html. Legacy iOS add-to-home installs don't get full-screen.
-- [ ] **Travel LogPicker.tsx** — dead code, never imported. Cleanup candidate.
-- [ ] **Travel trip-proposal UI missing** — server-side MCP tools exist but no front-end route. Confirm intent (backend-only?) before treating as a bug.
+Six per-app commits on main: `3a53412` cross-cutting infra, `241d052` home, `0c3094c` recipes, `430f7db` upkeep+life, `2716f95` shopping+SyncDot, `69c73e5` travel.
+
+### Cross-cutting infra (`3a53412`)
+- [x] **#18** `viewport-fit=cover` + `apple-mobile-web-app-capable` + `apple-mobile-web-app-status-bar-style` added to all 9 entry HTMLs. Safe-area-inset padding wired into 7 `index.css` files (travel uses an inline `<style>` block since it has no index.css; homepage merges insets into its existing `padding: 4rem 2rem` via `calc`).
+- [x] **#19** SW navigateFallback denylist — **kept as-is**. The current `[/^\/fn\//, /^\/api\//]` is correct: Caddy strips `/fn/*` for the API mount, so backend prefixes (sharing/oauth/mcp/.well-known/health) all sit under `/fn/`. Adding `/sharing/`, `/oauth/`, etc. would break legitimate SPA routes (`/invite/:code`, `/timeline`).
+
+### Home shell (`241d052`)
+- [x] **#15** Nav-bar clicks no longer push on re-click of active module — added `isActive(basePath)` early-return guard. Extended to Timeline + Settings buttons.
+- [x] **#16** `RedirectToLastApp` validates `lastPath` against a `MODULE_ROOTS` allow-list (`/shopping`, `/recipes`, `/travel`, `/upkeep`, `/tasks`); falls back to `/recipes` on stale/invalid entries.
+- [x] `lastPath` write filter — only writes when path matches `MODULE_ROOTS`; transient routes (`/invite/*`, `/recipe/*`, `/settings`, `/timeline`) no longer pollute the stored value.
+- Side cleanup: tightened `isActive` helper (was matching `/recipesfoo`).
+
+### Recipes (`0c3094c`)
+- [x] **#13** `recordRecentView` gated on `useNavigationType() !== "POP"` — back/forward no longer re-promote in "Recently viewed."
+- [x] Breadcrumbs `recipes` (and `boxes`) intermediate segments suppressed via `ROUTE_ONLY_SEGMENTS` filter; rebuilt URLs unaffected.
+- [x] WhatsNew `setTimeout(500ms)` auto-open removed. Modal is now dormant — flagged as a follow-up: a Settings menu trigger would re-activate it.
+
+### Upkeep + life (`430f7db`)
+- [x] TaskBoard `showSnoozed` → `?snoozed=1` (replace).
+- [x] TaskOutliner `focusedId` → `?focus=` (push — back unfocuses). `selectedId` → `?select=` (replace — scrub-style).
+- [x] Outliner LAST_LIST persistence parity with Kanban — slug-change effect added.
+- [x] **#17** Life dashboard swipe — left/right 20px edges reserved for iOS edge-swipe-back / Android edge-swipe-forward. Day-step gesture still works in the middle.
+- Flagged for follow-up (out of scope here):
+  - DetailPanel tag updates use full-set replaces (`onUpdate("tags", filter/concat)`) — race-prone for multi-user lists; should route through `tag_task` atomic ops.
+  - Header back-button LAST_LIST clearing exists in Kanban but not outliner — inconsistent behavior on revisit.
+
+### Shopping + SyncDot (`2716f95`)
+- [x] SyncDot panel — built `useHistoryDismiss(open, setOpen)` hook in `packages/ui/src/sync-status.tsx`. Uses `pushState`/`popstate` with a sentinel state object. Both `SyncStatusBanner` and `SyncDot` use it. Browser back now closes the panel without leaving the page. Cross-app shared code — worth a glance.
+- [x] `collapsedCategories` persisted per slug: `shopping:collapsed:<slug>` in localStorage. Survives refresh + list switches.
+- [x] **#20** stray `100vh` — already fixed (spec was stale; line 82 already has the `100dvh` fallback).
+
+### Travel (`69c73e5`)
+- [x] `LogPicker.tsx` dead code removed (grep confirmed no imports).
+- [x] DayView stale `?itin=` — added effect to mirror ItinerarySection's pattern: writes resolved itinerary id back to URL when the requested id is invalid.
+- Skipped per audit guidance: `ItinerarySection.tsx:300` route-relative nit, `TripDetail` BackLink history-awareness (both deliberate trade-offs).
+- Confirmed missing: **travel trip-proposal UI** — server-side MCP tools exist (`create_trip_proposal` / `resolve_trip_proposal` in `services/api/src/mcp.ts`) but no front-end route, component, or type reference in `apps/travel/`. Feature decision pending — separate conversation.
+
+### Deferred / surfaced for future bundles
+- **#12 `<ScrollRestoration/>`** — separate refactor. Requires manual hook implementation (we use `BrowserRouter`, not `createBrowserRouter`). All 8 apps need the wiring. Worth its own bundle.
+- **Modals-not-URL-backed policy** — architectural decision (14+ modal sites across recipes/shopping). Deferred until you decide on a policy: URL-backed (bookmarkable, back-to-close) vs in-memory (current).
+- **Recipes Filterbox + RecipeTable sort URL-backing** — was in 4c scope but punted to keep the agent's scope tight after an early-termination retry. Mechanical fix, same shape as Bundle 2's `?q=`/`?sort=` patterns.
+- **`AddToShoppingButton` over iOS home indicator** — `position: fixed; bottom: 24px` needs `calc(24px + env(safe-area-inset-bottom))`. Bundle 4a guardrails excluded TSX edits; mechanical follow-up.
+- **WhatsNew Settings menu trigger** — modal now dormant. Add a "What's new" menu item to re-activate.
+- **Travel trip-proposal UI** — confirm intent with user before building.
 
 ## Notes
 
