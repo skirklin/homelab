@@ -1,34 +1,58 @@
-import { useState } from "react";
-import { Checkbox, Button, Input } from "antd";
-import { DeleteOutlined, HolderOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
-import { useDraggable } from "@dnd-kit/core";
+import { useEffect, useRef, useState } from "react";
+import { Checkbox, Button, Input, Drawer } from "antd";
+import { DeleteOutlined, CheckOutlined, CloseOutlined, TagOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import type { ShoppingItem } from "../types";
+import type { ShoppingItem, CategoryDef } from "../types";
+import { UNCATEGORIZED_CATEGORY_ID } from "../types";
 import { useShoppingBackend } from "@kirkl/shared";
+import { useShoppingContext } from "../shopping-context";
 
-const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
+const ItemRow = styled.div<{ $checked: boolean }>`
   display: flex;
   align-items: center;
   padding: var(--space-xs) var(--space-sm);
   background: ${(props) =>
-    props.$isDragging ? "var(--color-primary-light, #e6f7f7)" :
     props.$checked ? "var(--color-bg-muted)" : "var(--color-bg)"};
   border-bottom: 1px solid var(--color-border-light);
   transition: background 0.2s;
-  opacity: ${(props) => (props.$isDragging ? 0.8 : 1)};
 
   &:last-child {
     border-bottom: none;
   }
 `;
 
-const DragHandle = styled.span`
-  color: var(--color-text-muted);
-  margin-right: 2px;
-  cursor: grab;
-  padding: 2px;
-  touch-action: none;
+const SheetList = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const SheetOption = styled.button<{ $current: boolean }>`
+  appearance: none;
+  background: ${(p) => (p.$current ? "var(--color-primary-light, #e6f7f7)" : "transparent")};
+  border: none;
+  border-bottom: 1px solid var(--color-border-light);
+  padding: var(--space-md) var(--space-md);
+  font-size: var(--font-size-md);
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: var(--color-text);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--color-bg-muted);
+  }
+`;
+
+const SheetCheck = styled.span`
+  color: var(--color-primary, #1677ff);
+  font-size: 16px;
 `;
 
 const ItemName = styled.span<{ $checked: boolean }>`
@@ -51,7 +75,9 @@ const ItemNote = styled.span`
   margin-left: var(--space-xs);
 `;
 
-const DeleteButton = styled(Button)`
+// Shared styling for the right-side row actions (move + delete). Half opacity
+// at rest so they recede; full opacity on hover so they feel tappable.
+const ActionButton = styled(Button)`
   opacity: 0.5;
 
   &:hover {
@@ -59,11 +85,23 @@ const DeleteButton = styled(Button)`
   }
 `;
 
+// Thin wrapper around the edit-mode controls (inputs + save/cancel). Exists
+// so the pointerdown-outside listener has a single ref'd node to bounds-check
+// against — clicks inside it stay in edit mode, clicks outside save and exit.
+const EditWrapper = styled.div`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: var(--space-xs);
+  min-width: 0;
+`;
+
 const EditContainer = styled.div`
   flex: 1;
   display: flex;
   gap: var(--space-xs);
-  margin-left: var(--space-xs);
+  min-width: 0;
 `;
 
 const IngredientInput = styled(Input)`
@@ -86,14 +124,53 @@ interface Props {
 export function ShoppingItemRow({ item }: Props) {
   const { user } = useAuth();
   const shopping = useShoppingBackend();
+  const { state } = useShoppingContext();
   const [isEditing, setIsEditing] = useState(false);
   const [editIngredient, setEditIngredient] = useState(item.ingredient);
   const [editNote, setEditNote] = useState(item.note || "");
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false);
 
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: item.id,
-    data: { item },
-  });
+  // Long-press wiring for touch devices. Tapping the item name fired edit
+  // mode too easily on the phone, especially during scrolling. On touch we
+  // now require a ~500ms hold (with a small movement tolerance so a scroll
+  // gesture doesn't latch). Mouse/pen keep the instant-click behavior so
+  // desktop ergonomics don't regress.
+  const longPressTimer = useRef<number | null>(null);
+  const longPressStart = useRef<{ x: number; y: number } | null>(null);
+
+  // While editing, clicks anywhere outside the edit area should commit the
+  // current values (same as the Save button or pressing Enter). Escape is
+  // still available via handleKeyDown for an explicit discard.
+  const editAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current !== null) {
+        window.clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
+  }, []);
+
+  // Categories for the bottom sheet. Mirror the construction in
+  // ShoppingList.tsx so the "Uncategorized" pseudo-category is always an
+  // option even when the list doesn't have it configured.
+  const configuredCategories = state.list?.categories || [];
+  const hasUncategorized = configuredCategories.some((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
+  const uncategorizedDef: CategoryDef = { id: UNCATEGORIZED_CATEGORY_ID, name: "Uncategorized" };
+  const sheetCategories = hasUncategorized
+    ? configuredCategories
+    : [...configuredCategories, uncategorizedDef];
+
+  const currentCategory =
+    sheetCategories.find((c) => c.id === item.categoryId) ?? uncategorizedDef;
+
+  const handleSelectCategory = (categoryId: string) => {
+    if (categoryId !== item.categoryId) {
+      void shopping.updateItemCategory(item.id, categoryId);
+    }
+    setCategorySheetOpen(false);
+  };
 
   const handleToggle = () => {
     if (user) {
@@ -148,21 +225,70 @@ export function ShoppingItemRow({ item }: Props) {
     }
   };
 
+  // Click-outside-to-save: while editing, a pointerdown anywhere outside the
+  // edit wrapper commits the same way Enter or the Save button does. The
+  // listener is rebound on every keystroke so the handler's closure always
+  // sees the latest editIngredient / editNote.
+  useEffect(() => {
+    if (!isEditing) return;
+    const handlePointerDownOutside = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && editAreaRef.current && !editAreaRef.current.contains(target)) {
+        handleSaveEdit();
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDownOutside);
+    return () => document.removeEventListener("pointerdown", handlePointerDownOutside);
+  }, [isEditing, editIngredient, editNote]);
+
+  const handleNamePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType !== "touch") return;
+    longPressStart.current = { x: e.clientX, y: e.clientY };
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = null;
+      longPressStart.current = null;
+      handleStartEdit();
+    }, 500);
+  };
+
+  const handleNamePointerMove = (e: React.PointerEvent) => {
+    if (longPressTimer.current === null || !longPressStart.current) return;
+    const dx = e.clientX - longPressStart.current.x;
+    const dy = e.clientY - longPressStart.current.y;
+    if (Math.hypot(dx, dy) > 5) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      longPressStart.current = null;
+    }
+  };
+
+  const handleNamePointerEnd = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressStart.current = null;
+  };
+
+  const handleNameClick = (e: React.MouseEvent) => {
+    // React's MouseEvent doesn't expose pointerType, but the underlying
+    // native event on a PointerEvent-emitting browser does. Touch "click"
+    // is already handled via the long-press timer in pointerdown, so we
+    // suppress the click path for touch and only fire for mouse/pen.
+    const native = e.nativeEvent as PointerEvent;
+    if (native.pointerType === "touch") return;
+    handleStartEdit();
+  };
+
   return (
-    <ItemRow
-      ref={setNodeRef}
-      $checked={item.checked}
-      $isDragging={isDragging}
-    >
-      <DragHandle {...attributes} {...listeners} data-testid="drag-handle">
-        <HolderOutlined />
-      </DragHandle>
+    <>
+    <ItemRow $checked={item.checked}>
       <Checkbox
         checked={item.checked}
         onChange={handleToggle}
       />
       {isEditing ? (
-        <>
+        <EditWrapper ref={editAreaRef}>
           <EditContainer>
             <IngredientInput
               size="small"
@@ -194,14 +320,33 @@ export function ShoppingItemRow({ item }: Props) {
               onClick={handleCancelEdit}
             />
           </EditActions>
-        </>
+        </EditWrapper>
       ) : (
         <>
-          <ItemName $checked={item.checked} onClick={handleStartEdit}>
+          <ItemName
+            $checked={item.checked}
+            onClick={handleNameClick}
+            onPointerDown={handleNamePointerDown}
+            onPointerMove={handleNamePointerMove}
+            onPointerUp={handleNamePointerEnd}
+            onPointerCancel={handleNamePointerEnd}
+            onPointerLeave={handleNamePointerEnd}
+          >
             {item.ingredient}
             {item.note && <ItemNote>({item.note})</ItemNote>}
           </ItemName>
-          <DeleteButton
+          <ActionButton
+            type="text"
+            size="small"
+            icon={<TagOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              setCategorySheetOpen(true);
+            }}
+            data-testid="category-move-button"
+            title={`Move to category (currently ${currentCategory.name})`}
+          />
+          <ActionButton
             type="text"
             size="small"
             icon={<DeleteOutlined />}
@@ -210,5 +355,34 @@ export function ShoppingItemRow({ item }: Props) {
         </>
       )}
     </ItemRow>
+    <Drawer
+      open={categorySheetOpen}
+      onClose={() => setCategorySheetOpen(false)}
+      placement="bottom"
+      height="auto"
+      title={`Move "${item.ingredient}" to…`}
+      styles={{ body: { padding: 0 }, header: { padding: "12px 16px" } }}
+      data-testid="category-sheet"
+    >
+      <SheetList>
+        {sheetCategories.map((cat) => (
+          <SheetOption
+            key={cat.id}
+            type="button"
+            $current={cat.id === item.categoryId}
+            onClick={() => handleSelectCategory(cat.id)}
+            data-testid={`category-sheet-option-${cat.id}`}
+          >
+            <span>{cat.name}</span>
+            {cat.id === item.categoryId && (
+              <SheetCheck>
+                <CheckOutlined />
+              </SheetCheck>
+            )}
+          </SheetOption>
+        ))}
+      </SheetList>
+    </Drawer>
+    </>
   );
 }
