@@ -1,6 +1,6 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import { kirklPlugins } from '@kirkl/vite-preset'
+import { kirklPlugins, resolveDevVitePort } from '@kirkl/vite-preset'
 
 export default defineConfig({
   plugins: kirklPlugins({
@@ -12,7 +12,7 @@ export default defineConfig({
     ],
   }),
   server: {
-    port: 3000,
+    port: resolveDevVitePort(3000),
   },
   build: {
     outDir: 'build',

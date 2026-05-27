@@ -1,6 +1,6 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import { kirklPlugins, resolveDevApiTarget } from '@kirkl/vite-preset'
+import { kirklPlugins, resolveDevApiTarget, resolveDevVitePort } from '@kirkl/vite-preset'
 
 export default defineConfig({
   plugins: kirklPlugins({
@@ -10,6 +10,7 @@ export default defineConfig({
     importScripts: ['/push-sw.js'],
   }),
   server: {
+    port: resolveDevVitePort(),
     proxy: {
       '/fn': {
         target: resolveDevApiTarget(),

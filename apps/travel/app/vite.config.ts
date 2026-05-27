@@ -1,9 +1,12 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import { kirklPlugins } from '@kirkl/vite-preset'
+import { kirklPlugins, resolveDevVitePort } from '@kirkl/vite-preset'
 
 export default defineConfig({
   plugins: kirklPlugins({ name: 'Travel', shortName: 'Travel', themeColor: '#1677ff' }),
+  server: {
+    port: resolveDevVitePort(),
+  },
   test: {
     globals: true,
     environment: 'jsdom',

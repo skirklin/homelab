@@ -1,6 +1,6 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import { kirklPlugins, resolveDevApiTarget } from '@kirkl/vite-preset'
+import { kirklPlugins, resolveDevApiTarget, resolveDevVitePort } from '@kirkl/vite-preset'
 import { TRACKABLES } from './src/trackables'
 
 /**
@@ -27,6 +27,7 @@ export default defineConfig({
     shortcuts: pwaShortcuts,
   }),
   server: {
+    port: resolveDevVitePort(),
     proxy: {
       '/fn': {
         target: resolveDevApiTarget(),

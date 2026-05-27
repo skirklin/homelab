@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
-import { kirklPlugins, resolveDevApiTarget } from '@kirkl/vite-preset'
+import { kirklPlugins, resolveDevApiTarget, resolveDevVitePort } from '@kirkl/vite-preset'
 
 export default defineConfig({
   plugins: kirklPlugins({
@@ -15,6 +15,7 @@ export default defineConfig({
     dedupe: ['react', 'react-dom', 'react-router-dom'],
   },
   server: {
+    port: resolveDevVitePort(),
     proxy: {
       '/fn': {
         target: resolveDevApiTarget(),
