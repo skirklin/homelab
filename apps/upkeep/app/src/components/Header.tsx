@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button, Popover, Segmented } from "antd";
 import { ShareAltOutlined, LogoutOutlined, PlusOutlined, BellOutlined, BellFilled } from "@ant-design/icons";
 import { AppHeader, ShareModal, useAuth, getBackend, useFeedback, SyncDot, useWpbDebug } from "@kirkl/shared";
@@ -42,12 +42,19 @@ export function Header({ onAddTask, embedded = false }: HeaderProps) {
   const userBackend = useUserBackend();
   const wpbDebug = useWpbDebug();
   const navigate = useNavigate();
+  const location = useLocation();
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [notificationMode, setNotificationModeState] = useState<NotificationMode>("subscribed");
   const [loadingSettings, setLoadingSettings] = useState(true);
 
   const listId = state.list?.id || "";
-  const shareUrl = `${window.location.origin}/join/${listId}`;
+  // Derive the module base from the current pathname so the share link works
+  // whether we're at `/upkeep/<slug>`, `/tasks/<slug>`, or the standalone
+  // `upkeep.kirkl.in/<slug>`. Strip the trailing `/<slug>` to recover the
+  // mount path (empty string when standalone, `/upkeep` or `/tasks` when
+  // embedded). Falls through to `/join/<id>` for the standalone case.
+  const moduleBase = location.pathname.replace(/\/[^/]*\/?$/, "");
+  const shareUrl = `${window.location.origin}${moduleBase}/join/${listId}`;
   const listName = state.list?.name || "Tasks";
 
   // Load notification settings

@@ -127,14 +127,17 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     return (
       <PageContainer>
         <p>Unknown session: {sessionId}</p>
-        <Button onClick={() => navigate("/")}>Back</Button>
+        <Button onClick={() => navigate("..")}>Back</Button>
       </PageContainer>
     );
   }
 
   const goBack = () => {
     if (stepIndex === 0) {
-      navigate("/");
+      // Route-relative: from `/morning` (or `/evening`, `/weekly`) this lands
+      // at the parent dashboard. Survives any future re-embedding (e.g. life
+      // mounted under `/life/*`) without code changes.
+      navigate("..");
     } else {
       setStepIndex(stepIndex - 1);
     }
@@ -165,7 +168,7 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
         { labels: { source: "manual" } },
       );
       message.success(`${session.title} session saved`);
-      navigate("/");
+      navigate("..");
     } catch (err) {
       console.error("Failed to save session:", err);
       message.error("Failed to save");

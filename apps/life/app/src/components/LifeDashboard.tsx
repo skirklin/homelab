@@ -560,7 +560,8 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     }
   }, [user?.uid, state.log?.id, life, message]);
 
-  // Initialize messaging and listen for foreground messages
+  // Initialize messaging and listen for foreground messages. Runs once: don't
+  // wire searchParams in here or this re-registers on every URL change.
   useEffect(() => {
     initializeMessaging();
 
@@ -577,39 +578,41 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       }
     });
 
-    // Check URL for sample or quick response parameters
-    const params = new URLSearchParams(window.location.search);
-    const cleanupConsumedParams = () => {
-      // Strip only the params we just consumed so we don't clobber `date` or
-      // other query state.
-      const next = new URLSearchParams(window.location.search);
-      next.delete("sample");
-      next.delete("quickResponse");
-      const qs = next.toString();
-      window.history.replaceState(
-        {},
-        "",
-        qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
-      );
-    };
-    if (params.get("sample") === "true") {
-      setShowSampleModal(true);
-      cleanupConsumedParams();
-    } else if (params.get("quickResponse")) {
-      // Handle quick response from URL (format: questionId:value)
-      const quickResponse = params.get("quickResponse");
-      const [questionId, valueStr] = quickResponse?.split(":") || [];
-      if (questionId && valueStr) {
-        handleQuickResponse(questionId, parseInt(valueStr, 10));
-      }
-      cleanupConsumedParams();
-    }
-
     return () => {
       unsubscribeForeground?.();
       unsubscribeSW?.();
     };
   }, [handleQuickResponse]);
+
+  // Consume `?sample` / `?quickResponse` from the URL (deep-links from a push
+  // notification action). Strip only the params we consume — preserving
+  // `date` and any other query state — via the react-router store so other
+  // `useSearchParams()` readers see the scrubbed URL. Raw
+  // `history.replaceState` would bypass the store and leave stale params.
+  useEffect(() => {
+    const sampleParam = searchParams.get("sample");
+    const quickResponse = searchParams.get("quickResponse");
+    if (sampleParam !== "true" && !quickResponse) return;
+
+    if (sampleParam === "true") {
+      setShowSampleModal(true);
+    } else if (quickResponse) {
+      const [questionId, valueStr] = quickResponse.split(":");
+      if (questionId && valueStr) {
+        handleQuickResponse(questionId, parseInt(valueStr, 10));
+      }
+    }
+
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("sample");
+        next.delete("quickResponse");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams, handleQuickResponse]);
 
   const handleNotificationToggle = async (enabled: boolean) => {
     if (!user?.uid) return;
