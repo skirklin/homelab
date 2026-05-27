@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import * as ReactRouter from "react-router-dom";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { useUrlParam } from "./useUrlParam";
+import { useUrlParam, useUrlString, useUrlParams } from "./useUrlParam";
 
 // ---- Test harness -----------------------------------------------------------
 
@@ -278,6 +278,326 @@ describe("useUrlParam", () => {
     );
     setNextValue("b");
     expect(calls.at(-1)).toBeUndefined();
+
+    useSearchParamsSpy.mockRestore();
+  });
+
+  it("setter accepts a per-call mode override", () => {
+    const calls: unknown[] = [];
+    const originalUseSearchParams = ReactRouter.useSearchParams;
+    const useSearchParamsSpy = vi.spyOn(ReactRouter, "useSearchParams").mockImplementation(() => {
+      const [params, set] = originalUseSearchParams();
+      const wrappedSet: typeof set = ((next, opts) => {
+        calls.push(opts);
+        return set(next, opts);
+      }) as typeof set;
+      return [params, wrappedSet];
+    });
+
+    function PerCallHost() {
+      const [, setValue] = useUrlParam<string>("q", {
+        parse: (raw) => raw ?? "",
+        serialize: (v) => v || null,
+        default: "",
+        mode: "replace",
+      });
+      return (
+        <>
+          <button data-testid="push" onClick={() => setValue("a", { mode: "push" })}>
+            push
+          </button>
+          <button data-testid="repl" onClick={() => setValue("b", { mode: "replace" })}>
+            replace
+          </button>
+          <button data-testid="default" onClick={() => setValue("c")}>
+            default
+          </button>
+        </>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <PerCallHost />
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      (screen.getByTestId("push") as HTMLButtonElement).click();
+    });
+    expect(calls.at(-1)).toBeUndefined();
+
+    act(() => {
+      (screen.getByTestId("repl") as HTMLButtonElement).click();
+    });
+    expect(calls.at(-1)).toEqual({ replace: true });
+
+    // No per-call mode → falls back to hook default ("replace" here).
+    act(() => {
+      (screen.getByTestId("default") as HTMLButtonElement).click();
+    });
+    expect(calls.at(-1)).toEqual({ replace: true });
+
+    useSearchParamsSpy.mockRestore();
+  });
+});
+
+// ---- useUrlString -----------------------------------------------------------
+
+describe("useUrlString", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function UrlStringHost(props: { name: string; opts?: Parameters<typeof useUrlString>[1] }) {
+    const [value, setValue] = useUrlString(props.name, props.opts);
+    return (
+      <>
+        <span data-testid="val">{value === null ? "<null>" : value}</span>
+        <button
+          data-testid="set"
+          onClick={(e) => {
+            const next = (e.currentTarget as HTMLButtonElement).dataset.next;
+            setValue(next === "__null__" ? null : (next ?? ""));
+          }}
+        >
+          set
+        </button>
+      </>
+    );
+  }
+
+  function setUrlStringNext(value: string | null) {
+    const btn = screen.getByTestId("set") as HTMLButtonElement;
+    btn.dataset.next = value === null ? "__null__" : value;
+    act(() => {
+      btn.click();
+    });
+  }
+
+  it("returns null when the param is absent (no default)", () => {
+    render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <UrlStringHost name="itin" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("val").textContent).toBe("<null>");
+  });
+
+  it("reads the existing URL value as-is (identity-mapped)", () => {
+    render(
+      <MemoryRouter initialEntries={["/x?itin=abc123"]}>
+        <UrlStringHost name="itin" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("val").textContent).toBe("abc123");
+  });
+
+  it("writes a non-default value to the URL", () => {
+    render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <UrlStringHost name="itin" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    setUrlStringNext("xyz");
+    expect(screen.getByTestId("loc").textContent).toContain("itin=xyz");
+  });
+
+  it("setting null deletes the param", () => {
+    render(
+      <MemoryRouter initialEntries={["/x?itin=stale"]}>
+        <UrlStringHost name="itin" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("loc").textContent).toContain("itin=stale");
+    setUrlStringNext(null);
+    expect(screen.getByTestId("loc").textContent).not.toContain("itin=");
+  });
+
+  it("respects opts.default — writing the default deletes the param", () => {
+    render(
+      <MemoryRouter initialEntries={["/x?focus=other"]}>
+        <UrlStringHost name="focus" opts={{ default: "root" }} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    setUrlStringNext("root");
+    expect(screen.getByTestId("loc").textContent).not.toContain("focus=");
+  });
+});
+
+// ---- useUrlParams -----------------------------------------------------------
+
+describe("useUrlParams", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  interface TwoParams {
+    trip: string | null;
+    subcat: string | null;
+  }
+
+  const twoSpec = {
+    trip: {
+      parse: (raw: string | null) => raw,
+      serialize: (v: string | null) => v,
+      default: null,
+    },
+    subcat: {
+      parse: (raw: string | null) => raw,
+      serialize: (v: string | null) => v,
+      default: null,
+    },
+  } as const;
+
+  function TwoParamHost(props: {
+    onClick?: (next: Partial<TwoParams>, opts?: { mode?: "replace" | "push" }) => Partial<TwoParams>;
+    mode?: "replace" | "push";
+  }) {
+    const [value, setValues] = useUrlParams<TwoParams>(twoSpec, { mode: props.mode });
+    return (
+      <>
+        <span data-testid="trip">{value.trip ?? "<null>"}</span>
+        <span data-testid="subcat">{value.subcat ?? "<null>"}</span>
+        <button
+          data-testid="set"
+          onClick={() => {
+            const next = props.onClick?.({}) ?? {};
+            setValues(next);
+          }}
+        >
+          set
+        </button>
+      </>
+    );
+  }
+
+  it("reads multiple params from the URL", () => {
+    render(
+      <MemoryRouter initialEntries={["/x?trip=phx&subcat=food"]}>
+        <TwoParamHost />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("trip").textContent).toBe("phx");
+    expect(screen.getByTestId("subcat").textContent).toBe("food");
+  });
+
+  it("writes multiple keys in a single setSearchParams call (one history entry)", () => {
+    const calls: unknown[][] = [];
+    const originalUseSearchParams = ReactRouter.useSearchParams;
+    const useSearchParamsSpy = vi.spyOn(ReactRouter, "useSearchParams").mockImplementation(() => {
+      const [params, set] = originalUseSearchParams();
+      const wrappedSet: typeof set = ((next, opts) => {
+        calls.push([next, opts]);
+        return set(next, opts);
+      }) as typeof set;
+      return [params, wrappedSet];
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <TwoParamHost
+          onClick={() => ({ trip: "phx", subcat: "food" })}
+          mode="push"
+        />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      (screen.getByTestId("set") as HTMLButtonElement).click();
+    });
+    // Exactly one underlying setSearchParams call for both keys.
+    expect(calls).toHaveLength(1);
+    // mode: "push" → no opts arg.
+    expect(calls[0][1]).toBeUndefined();
+    const loc = screen.getByTestId("loc").textContent ?? "";
+    expect(loc).toContain("trip=phx");
+    expect(loc).toContain("subcat=food");
+
+    useSearchParamsSpy.mockRestore();
+  });
+
+  it("partial update preserves keys not present in next", () => {
+    render(
+      <MemoryRouter initialEntries={["/x?trip=phx&subcat=food"]}>
+        <TwoParamHost onClick={() => ({ subcat: "lodging" })} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    act(() => {
+      (screen.getByTestId("set") as HTMLButtonElement).click();
+    });
+    const loc = screen.getByTestId("loc").textContent ?? "";
+    expect(loc).toContain("trip=phx");
+    expect(loc).toContain("subcat=lodging");
+  });
+
+  it("a value that serializes to the default is deleted from the URL", () => {
+    render(
+      <MemoryRouter initialEntries={["/x?trip=phx&subcat=food"]}>
+        <TwoParamHost onClick={() => ({ trip: null })} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    act(() => {
+      (screen.getByTestId("set") as HTMLButtonElement).click();
+    });
+    const loc = screen.getByTestId("loc").textContent ?? "";
+    expect(loc).not.toContain("trip=");
+    expect(loc).toContain("subcat=food");
+  });
+
+  it("accepts a per-call mode override on the setter", () => {
+    const calls: unknown[] = [];
+    const originalUseSearchParams = ReactRouter.useSearchParams;
+    const useSearchParamsSpy = vi.spyOn(ReactRouter, "useSearchParams").mockImplementation(() => {
+      const [params, set] = originalUseSearchParams();
+      const wrappedSet: typeof set = ((next, opts) => {
+        calls.push(opts);
+        return set(next, opts);
+      }) as typeof set;
+      return [params, wrappedSet];
+    });
+
+    function PerCallHost() {
+      const [, setValues] = useUrlParams<TwoParams>(twoSpec, { mode: "replace" });
+      return (
+        <>
+          <button
+            data-testid="push"
+            onClick={() => setValues({ trip: "a" }, { mode: "push" })}
+          >
+            push
+          </button>
+          <button
+            data-testid="default"
+            onClick={() => setValues({ trip: "b" })}
+          >
+            default
+          </button>
+        </>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <PerCallHost />
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      (screen.getByTestId("push") as HTMLButtonElement).click();
+    });
+    expect(calls.at(-1)).toBeUndefined();
+
+    act(() => {
+      (screen.getByTestId("default") as HTMLButtonElement).click();
+    });
+    expect(calls.at(-1)).toEqual({ replace: true });
 
     useSearchParamsSpy.mockRestore();
   });

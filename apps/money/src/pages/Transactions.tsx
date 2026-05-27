@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { useUrlParam } from '@kirkl/shared'
+import { useUrlParam, useUrlParams } from '@kirkl/shared'
 import type { Transaction } from '../api'
 import { fetchTransactions, reclassifyTransaction } from '../api'
 
@@ -27,11 +26,29 @@ const SORT_KEYS: SortKey[] = ['date', 'amount', 'description', 'category', 'acco
 const DEFAULT_SORT_KEY: SortKey = 'date'
 const DEFAULT_SORT_DIR: SortDir = 'desc'
 
+interface SortState {
+  sort: SortKey
+  dir: SortDir
+}
+
+const SORT_SPEC = {
+  sort: {
+    parse: (raw: string | null): SortKey =>
+      SORT_KEYS.includes(raw as SortKey) ? (raw as SortKey) : DEFAULT_SORT_KEY,
+    serialize: (v: SortKey) => (v === DEFAULT_SORT_KEY ? null : v),
+    default: DEFAULT_SORT_KEY,
+  },
+  dir: {
+    parse: (raw: string | null): SortDir => (raw === 'asc' ? 'asc' : DEFAULT_SORT_DIR),
+    serialize: (v: SortDir) => (v === DEFAULT_SORT_DIR ? null : v),
+    default: DEFAULT_SORT_DIR,
+  },
+} as const
+
 export function Transactions() {
   const [allTxns, setAllTxns] = useState<Transaction[]>([])
   const [reclassifyingId, setReclassifyingId] = useState<number | null>(null)
   const [reclassifyFeedback, setReclassifyFeedback] = useState('')
-  const [searchParams, setSearchParams] = useSearchParams()
 
   // Search input: instant local state for typing feedback; URL lags by 250ms.
   const [urlSearch, setUrlSearch] = useUrlParam<string>('q', {
@@ -56,37 +73,22 @@ export function Transactions() {
   })
   const preset = TIME_PRESETS.find((p) => p.key === timeKey) ?? TIME_PRESETS[0]
   // sort/dir are written together in handleSort (single user action mutates
-  // both params), so they stay on the raw setSearchParams shape — splitting
-  // them into separate useUrlParam calls would create two history entries.
-  const rawSortKey = searchParams.get('sort')
-  const sortKey: SortKey = SORT_KEYS.includes(rawSortKey as SortKey)
-    ? (rawSortKey as SortKey)
-    : DEFAULT_SORT_KEY
-  const rawSortDir = searchParams.get('dir')
-  const sortDir: SortDir = rawSortDir === 'asc' ? 'asc' : DEFAULT_SORT_DIR
+  // both params) — useUrlParams writes both keys atomically in a single
+  // history entry.
+  const [{ sort: sortKey, dir: sortDir }, setSort] = useUrlParams<SortState>(SORT_SPEC)
 
   useEffect(() => {
     fetchTransactions({ limit: 10000 }).then(setAllTxns)
   }, [])
 
   const handleSort = (key: SortKey) => {
-    let nextKey: SortKey
     let nextDir: SortDir
     if (sortKey === key) {
-      nextKey = key
       nextDir = sortDir === 'asc' ? 'desc' : 'asc'
     } else {
-      nextKey = key
       nextDir = key === 'amount' ? 'desc' : key === 'date' ? 'desc' : 'asc'
     }
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (nextKey === DEFAULT_SORT_KEY) next.delete('sort')
-      else next.set('sort', nextKey)
-      if (nextDir === DEFAULT_SORT_DIR) next.delete('dir')
-      else next.set('dir', nextDir)
-      return next
-    }, { replace: true })
+    setSort({ sort: key, dir: nextDir })
   }
 
   const sortIndicator = (key: SortKey) => {

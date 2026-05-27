@@ -1,18 +1,37 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useUrlParams } from '@kirkl/shared'
 import type { Transaction, TripSummary } from '../api'
 import { fetchTransactions, fetchTravelTrips } from '../api'
 import { CategoryChart } from '../components/CategoryChart'
 
+interface TravelDrilldown {
+  trip: string | null
+  subcat: string | null
+}
+
+const TRAVEL_DRILLDOWN_SPEC = {
+  trip: {
+    parse: (raw: string | null) => raw,
+    serialize: (v: string | null) => v,
+    default: null,
+  },
+  subcat: {
+    parse: (raw: string | null) => raw,
+    serialize: (v: string | null) => v,
+    default: null,
+  },
+} as const
+
 export function Travel() {
   const [allTxns, setAllTxns] = useState<Transaction[]>([])
   const [trips, setTrips] = useState<TripSummary[]>([])
-  const [searchParams, setSearchParams] = useSearchParams()
 
-  // Drilldown state lives in the URL so back button steps out one level
-  // (overview ← trip ← subcategory) instead of exiting /travel entirely.
-  const selectedTrip = searchParams.get('trip')
-  const selectedSubcat = searchParams.get('subcat')
+  // Drilldown state (overview ← trip ← subcategory) lives in the URL so the
+  // browser back button steps out one level instead of exiting /travel. Both
+  // params are written in a single setSearchParams call to avoid producing two
+  // history entries per click.
+  const [{ trip: selectedTrip, subcat: selectedSubcat }, setDrilldown] =
+    useUrlParams<TravelDrilldown>(TRAVEL_DRILLDOWN_SPEC, { mode: 'push' })
 
   useEffect(() => {
     fetchTransactions({ limit: 10000, hideTransfers: true }).then(setAllTxns)
@@ -74,25 +93,21 @@ export function Travel() {
 
   // Breadcrumb-up: replace (don't push a new history entry just for going back up).
   const goToOverview = useCallback(() => {
-    setSearchParams({}, { replace: true })
-  }, [setSearchParams])
+    setDrilldown({ trip: null, subcat: null }, { mode: 'replace' })
+  }, [setDrilldown])
 
   const goToTrip = useCallback((trip: string) => {
-    setSearchParams({ trip }, { replace: true })
-  }, [setSearchParams])
+    setDrilldown({ trip, subcat: null }, { mode: 'replace' })
+  }, [setDrilldown])
 
   // Drilldown: push so the browser back button steps out one level.
   const drillToTrip = useCallback((trip: string) => {
-    setSearchParams({ trip })
-  }, [setSearchParams])
+    setDrilldown({ trip, subcat: null })
+  }, [setDrilldown])
 
   const drillToSubcat = useCallback((subcat: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set('subcat', subcat)
-      return next
-    })
-  }, [setSearchParams])
+    setDrilldown({ subcat })
+  }, [setDrilldown])
 
   const breadcrumbs = useMemo(() => {
     const crumbs = [{

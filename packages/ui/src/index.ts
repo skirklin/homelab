@@ -99,8 +99,17 @@ export {
 export { useFeedback } from "./useFeedback";
 
 // URL param hook
-export { useUrlParam } from "./useUrlParam";
-export type { UseUrlParamOptions } from "./useUrlParam";
+export { useUrlParam, useUrlString, useUrlParams } from "./useUrlParam";
+export type {
+  UseUrlParamOptions,
+  UseUrlStringOptions,
+  UseUrlParamsOptions,
+  UrlParamSpec,
+  UrlParamsSpec,
+  UrlParamSetOptions,
+  UrlParamSetter,
+  UrlParamsSetter,
+} from "./useUrlParam";
 
 // Scroll restoration for legacy <BrowserRouter> apps
 export { useScrollRestoration, ScrollRestoration } from "./useScrollRestoration";

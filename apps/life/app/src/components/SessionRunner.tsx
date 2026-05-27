@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useCallback, type ChangeEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useState, useEffect, type ChangeEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Input, InputNumber, Checkbox } from "antd";
 import { LeftOutlined, CheckOutlined } from "@ant-design/icons";
-import { useAuth, useFeedback, PageContainer, useLifeBackend, AppHeader } from "@kirkl/shared";
+import { useAuth, useFeedback, PageContainer, useLifeBackend, AppHeader, useUrlParam } from "@kirkl/shared";
 import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { getSession, sessionSubjectId, type Session, type SessionPrompt } from "../manifest";
@@ -163,17 +163,23 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
   const { message } = useFeedback();
   // Step index lives in the URL (?step=N). Refresh and share-this-link both
   // round-trip the wizard position; refresh mid-wizard no longer warps back
-  // to step 0.
-  const [searchParams, setSearchParams] = useSearchParams();
+  // to step 0. Default mode is "push" — step-advance is a drilldown, so
+  // browser-back unwinds step by step. The step-zero / reset path passes
+  // { mode: "replace" } per call so the cleaned URL doesn't leave a duplicate
+  // history entry.
   const promptCount = session?.prompts.length ?? 0;
-  const stepIndex = useMemo(() => {
-    const raw = searchParams.get("step");
-    if (!raw) return 0;
-    const n = Number.parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 0) return 0;
-    if (promptCount > 0 && n >= promptCount) return promptCount - 1;
-    return n;
-  }, [searchParams, promptCount]);
+  const [stepIndex, setStepIndex] = useUrlParam<number>("step", {
+    parse: (raw) => {
+      if (!raw) return 0;
+      const n = Number.parseInt(raw, 10);
+      if (!Number.isFinite(n) || n < 0) return 0;
+      if (promptCount > 0 && n >= promptCount) return promptCount - 1;
+      return n;
+    },
+    serialize: (v) => (v <= 0 ? null : String(v)),
+    default: 0,
+    mode: "push",
+  });
   // Answers are session-local — sensitive freeform text shouldn't ride in the
   // URL. sessionStorage is also tab-scoped so a parallel tab doing the same
   // wizard doesn't stomp each other (different tabs == different sessions).
@@ -191,32 +197,8 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     saveAnswers(session.id, answers);
   }, [session, answers]);
 
-  const setStepParam = useCallback(
-    (next: number) => {
-      // Step advance is a drilldown — push so browser-back unwinds step by
-      // step instead of exiting the wizard entirely. Stepping back to 0
-      // (the param-strip case) replaces so the cleaned URL doesn't leave a
-      // duplicate history entry.
-      const replace = next <= 0;
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next <= 0) {
-            // Default value isn't written — keeps the URL clean on step 0.
-            params.delete("step");
-          } else {
-            params.set("step", String(next));
-          }
-          return params;
-        },
-        replace ? { replace: true } : undefined,
-      );
-    },
-    [setSearchParams],
-  );
-
   const prompt = session?.prompts[stepIndex];
-  const isLast = useMemo(() => session ? stepIndex === session.prompts.length - 1 : false, [session, stepIndex]);
+  const isLast = session ? stepIndex === session.prompts.length - 1 : false;
 
   if (!session) {
     return (
@@ -236,7 +218,11 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
       // work — only completion clears it.
       navigate("..");
     } else {
-      setStepParam(stepIndex - 1);
+      const next = stepIndex - 1;
+      // Stepping back to 0 strips the param; replace so the cleaned URL
+      // doesn't leave a duplicate history entry. Otherwise fall through to
+      // the hook default ("push").
+      setStepIndex(next, next === 0 ? { mode: "replace" } : undefined);
     }
   };
 
@@ -248,7 +234,8 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     if (isLast) {
       submit();
     } else {
-      setStepParam(stepIndex + 1);
+      // Default hook mode is "push" — drilldown semantics.
+      setStepIndex(stepIndex + 1);
     }
   };
 

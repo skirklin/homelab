@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
 import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
@@ -16,6 +16,7 @@ import {
   SyncDot,
   useWpbDebug,
   useUrlParam,
+  useUrlParams,
 } from "@kirkl/shared";
 
 /** Scope SyncDot to life's collections so a stuck write elsewhere doesn't
@@ -283,11 +284,19 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
 
   // The URL is the source of truth for the viewed day. `?date=YYYY-MM-DD`
   // (browser-local time) picks a specific day; no param means today.
-  const [searchParams, setSearchParams] = useSearchParams();
   const [dateParam, setDateParam] = useUrlParam<string | null>("date", {
     parse: (raw) => raw,
     serialize: (v) => v,
     default: null,
+  });
+  // Deep-link consume params (sample + quickResponse) — read on mount, then
+  // scrubbed atomically in one history entry so neither survives a refresh.
+  const [{ sample: sampleParam, quickResponse }, setDeepLinkParams] = useUrlParams<{
+    sample: string | null;
+    quickResponse: string | null;
+  }>({
+    sample: { parse: (raw) => raw, serialize: (v) => v, default: null },
+    quickResponse: { parse: (raw) => raw, serialize: (v) => v, default: null },
   });
   // todayDate ticks on midnight/visibility/focus so the derived value below
   // re-evaluates "today" without needing to write to the URL.
@@ -584,13 +593,11 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   }, [handleQuickResponse]);
 
   // Consume `?sample` / `?quickResponse` from the URL (deep-links from a push
-  // notification action). Strip only the params we consume — preserving
-  // `date` and any other query state — via the react-router store so other
+  // notification action). Strip both params we consume — preserving `date`
+  // and any other query state — via the react-router store so other
   // `useSearchParams()` readers see the scrubbed URL. Raw
   // `history.replaceState` would bypass the store and leave stale params.
   useEffect(() => {
-    const sampleParam = searchParams.get("sample");
-    const quickResponse = searchParams.get("quickResponse");
     if (sampleParam !== "true" && !quickResponse) return;
 
     if (sampleParam === "true") {
@@ -602,16 +609,9 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       }
     }
 
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("sample");
-        next.delete("quickResponse");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [searchParams, setSearchParams, handleQuickResponse]);
+    // Atomic multi-param scrub: both keys cleared in one history entry.
+    setDeepLinkParams({ sample: null, quickResponse: null });
+  }, [sampleParam, quickResponse, setDeepLinkParams, handleQuickResponse]);
 
   const handleNotificationToggle = async (enabled: boolean) => {
     if (!user?.uid) return;
