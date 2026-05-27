@@ -9,6 +9,8 @@
 #   ./infra/deploy.sh home recipes # build + deploy specific apps
 #   ./infra/deploy.sh --beta       # build home as :beta, deploy to home-beta
 #                                  # (powers beta.kirkl.in; does NOT touch prod home)
+#   ./infra/deploy.sh --skip-tests # bypass pre-deploy typecheck+test gate
+#                                  # (hotfix escape hatch; SKIP_TESTS=1 also works)
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -26,16 +28,28 @@ PUSH_REGISTRY="${REGISTRY_HOST:-registry.${DOMAIN:-kirkl.in}}"
 # k8s pulls from the NodePort on localhost
 K8S_REGISTRY="localhost:30500/homelab"
 
+# Helper used by both the pre-deploy test gate and the build/push phases.
+elapsed() {
+    local secs=$1
+    if [ "$secs" -ge 60 ]; then
+        printf "%dm%02ds" $((secs / 60)) $((secs % 60))
+    else
+        printf "%ds" "$secs"
+    fi
+}
+
 # Parse flags
 PUSH_ONLY=false
 BETA=false
+SKIP_TESTS="${SKIP_TESTS:-0}"
 APPS=()
 for arg in "$@"; do
     case "$arg" in
         --push-only) PUSH_ONLY=true ;;
         --beta) BETA=true ;;
+        --skip-tests) SKIP_TESTS=1 ;;
         --help|-h)
-            sed -n '2,11p' "$0"
+            sed -n '2,13p' "$0"
             exit 0
             ;;
         *) APPS+=("$arg") ;;
@@ -56,6 +70,94 @@ if [ "$BETA" = true ]; then
     APPS=("home")
     IMAGE_TAG="beta"
     DEPLOY_VARIANT="beta"
+fi
+
+# ─── Pre-deploy test gate ────────────────────────────────────────────────────
+# Lightweight CI: typecheck + unit tests must pass before we build images.
+# Runs at the deploy chokepoint the user already feels, so broken code can't
+# silently ship. Skipped on --push-only (no new code is being built) and on
+# --skip-tests / SKIP_TESTS=1 (hotfix escape hatch — prints a loud warning).
+RED=""
+YELLOW=""
+NC=""
+if [ -t 2 ]; then
+    # Only colorize when stderr is a TTY; CI/log capture stays clean.
+    RED=$'\033[31m'
+    YELLOW=$'\033[33m'
+    NC=$'\033[0m'
+fi
+
+if [ "$PUSH_ONLY" = false ] && [ "$SKIP_TESTS" = 1 ]; then
+    {
+        echo ""
+        echo "${RED}⚠  WARNING: SKIPPING PRE-DEPLOY TEST GATE${NC}"
+        echo "${RED}⚠  This deploy may ship broken code.${NC}"
+        echo "${RED}⚠  Override should only be used for hotfixes when tests are environmentally blocked.${NC}"
+        echo ""
+        echo "${YELLOW}   Continuing in 3s (Ctrl-C to abort)...${NC}"
+        echo ""
+    } >&2
+    sleep 3
+elif [ "$PUSH_ONLY" = false ]; then
+    GATE_START=$SECONDS
+    echo "=== Pre-deploy test gate ==="
+
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo "[deploy.sh] pnpm not found on PATH — install pnpm or run \`fnm use\`. Aborting." >&2
+        exit 1
+    fi
+
+    # Test PB must be up for the e2e suites that hit http://127.0.0.1:8091.
+    # We probe directly rather than calling `test-env.sh check` because the
+    # `check` subcommand also requires the test API at :3001, which is only
+    # used by Playwright (not by `pnpm test`). PB alone is sufficient.
+    # Skipping `test-env.sh up` when PB already responds also avoids spurious
+    # port-collision failures from parallel worktree sessions (sibling may
+    # already have :8091 bound but no API).
+    echo "→ Ensuring test PocketBase at 127.0.0.1:8091 is up..."
+    if ! curl -fs --max-time 3 http://127.0.0.1:8091/api/health >/dev/null 2>&1; then
+        if ! infra/test-env.sh up; then
+            {
+                echo ""
+                echo "${RED}[deploy.sh] Test environment failed to start. Common causes:${NC}"
+                echo "${RED}  • Docker daemon not running (start Docker Desktop)${NC}"
+                echo "${RED}  • Port 8091/3001 already in use by another process${NC}"
+                echo "${RED}    (check \`docker ps\` for sibling worktree containers)${NC}"
+                echo "${RED}  • First-run image build failure — run \`infra/test-env.sh up\` manually to see logs${NC}"
+                echo ""
+                echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
+                echo ""
+            } >&2
+            exit 1
+        fi
+    fi
+
+    echo "→ Running \`pnpm typecheck\`..."
+    if ! pnpm typecheck; then
+        {
+            echo ""
+            echo "${RED}[deploy.sh] Pre-deploy gate failed: \`pnpm typecheck\`.${NC}"
+            echo "${RED}  Fix the type errors above before deploying.${NC}"
+            echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
+            echo ""
+        } >&2
+        exit 1
+    fi
+
+    echo "→ Running \`pnpm test\`..."
+    if ! pnpm test; then
+        {
+            echo ""
+            echo "${RED}[deploy.sh] Pre-deploy gate failed: \`pnpm test\`.${NC}"
+            echo "${RED}  Fix the failing tests above before deploying.${NC}"
+            echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
+            echo ""
+        } >&2
+        exit 1
+    fi
+
+    echo "✓ Pre-deploy gate passed ($(elapsed $((SECONDS - GATE_START))))"
+    echo ""
 fi
 
 # Fail fast on SSH/1Password breakage so we don't waste a 5-minute build
@@ -239,15 +341,6 @@ declare -A SERVICE_BUILDS=(
     [functions]="infra/docker/api.Dockerfile"
     [event-watcher]="infra/docker/event-watcher.Dockerfile"
 )
-
-elapsed() {
-    local secs=$1
-    if [ "$secs" -ge 60 ]; then
-        printf "%dm%02ds" $((secs / 60)) $((secs % 60))
-    else
-        printf "%ds" "$secs"
-    fi
-}
 
 # Run `docker build` with the given args and report success/failure.
 # Usage: run_docker_build <app> <progress_prefix> <docker_build_args...>

@@ -235,6 +235,7 @@ Implementations live in `packages/backend/src/pocketbase/`. Apps get backends vi
 - PocketBase collections use snake_case; TypeScript types use camelCase; PB mappers translate between them
 - Backend types are camelCase only — no snake_case aliases
 - Deploy: `./infra/deploy.sh [apps...]` builds locally, pushes to registry, applies k8s manifests
+- **Pre-deploy gate**: `./infra/deploy.sh` runs `pnpm typecheck` + `pnpm test` before any image build. The gate first probes PB at `127.0.0.1:8091`, calling `./infra/test-env.sh up` only if needed (so parallel worktrees don't trip on the port). Bypass with `--skip-tests` (or `SKIP_TESTS=1`) only for hotfixes — fires a loud red warning + 3s pause before continuing.
 - Private Docker registry at `registry.kirkl.in` — deploys take ~30-60s
 - API tokens: `hlk_` prefix, SHA-256 hashed in PocketBase, created via Settings UI
 - `.env` at project root has secrets (gitignored): `PB_ADMIN_PASSWORD`, `HOMELAB_API_TOKEN`, `VITE_GOOGLE_MAPS_API_KEY`
