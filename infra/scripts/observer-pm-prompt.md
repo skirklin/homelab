@@ -64,9 +64,14 @@ Stay within 30 minutes wall-clock per tick. If a task obviously needs longer tha
 - **HONOR the worktree edit-in-isolation contract** from CLAUDE.md for code changes. Doc-only edits to OBSERVER_BUILD_PLAN.md (the daily log + plan-tracking changes) can be made inline on main — that's this cron's basic job. Anything else (code, schema, infra) goes through a worktree.
 - **CRITICAL-REVIEW every worktree** before merging, per the memory entry `feedback_critical_review_worktrees`.
 
-## First-firing-only instructions (2026-05-28)
+## First-firing-only instructions
 
-If today's date is 2026-05-28 AND no Phase 0 work has been started yet (check by inspecting the daily log + `git log --grep="observer\|claude_observations\|P0-" -10`), then for this tick's action: dispatch **two worktree agents in parallel**:
+If no Phase 0 work has been started yet — check by ALL of:
+- the Daily log table contains only the initial plan-write entry (or rows of out-of-band setup ticks), no entries that reference a P0 item
+- `git log --grep="observer\|claude_observations\|P0-" --oneline -20` shows no Phase 0 implementation commits
+- `git worktree list` shows no worktree branches for Phase 0 work
+
+then for this tick's action: dispatch **two worktree agents in parallel**:
 
 - **P0-1** → `pocketbase-expert`: create the `claude_observations` PB collection migration + a new `ObserverBackend` interface in `packages/backend/src/interfaces/` + the PB implementation in `packages/backend/src/pocketbase/`. Wire through `BackendProvider`. Schema reference: ROADMAP.md Phase 2 (`{timestamp, content, period, data_window_start, data_window_end, related_event_ids[]}`).
 - **P0-2** → `general-purpose`: build the view-layer bundle module at `services/api/src/lib/observer/bundle.ts` per DATA_COLLECTION.md V4 + V6 (cross-source narrative bundle assembled from life_events, cooking_log, task_events, active travel; output as markdown prose). Include unit tests in `bundle.test.ts` covering empty period / text-heavy period / trip-imminent period fixtures.
