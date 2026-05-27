@@ -25,7 +25,6 @@ export interface Recipe {
   enrichmentStatus: EnrichmentStatus;
   pendingChanges: PendingChanges | null;
   stepIngredients: Record<string, string[]> | null;
-  cookingLog: unknown;
   created: string;
   updated: string;
   creator: string;

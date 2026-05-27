@@ -33,12 +33,6 @@ export type PendingChanges = {
   model: string,
 }
 
-export type CookingLogEntry = {
-  madeAt: Date,
-  madeBy: string,  // UserId
-  note?: string,
-}
-
 export type AppState = {
   boxes: Map<string, PlainBox>
   users: Map<string, PlainUser>

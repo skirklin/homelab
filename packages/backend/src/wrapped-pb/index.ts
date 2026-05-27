@@ -216,6 +216,69 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   let realtimeHooked = false;
 
   /**
+   * Auth-identity tracking for realtime reset on user switch.
+   *
+   * PocketBase's realtime channel ties a `clientId` to the auth that
+   * originally connected. If `authStore.save()` swaps in a different
+   * user's token while the SSE stream is still open, the next
+   * `/api/realtime` POST (e.g. a new `subscribe()`) ships the new auth
+   * header against the old clientId, and PB rejects it with
+   * `403: The current and the previous request authorization don't match`.
+   *
+   * The PB SDK itself does NOT react to auth changes on realtime — only on
+   * the auto-refresh path. So we explicitly hook authStore.onChange and
+   * disconnect the realtime channel on user-identity flips. Next
+   * `subscribe()` will trigger `connect()` and pick up a fresh clientId
+   * bound to the new auth.
+   *
+   * Triggers on:
+   *   - record.id changes (user A → user B, or sign-in from anon)
+   *   - token cleared (sign-out)
+   *
+   * No-op on token rotation for the same user (the common refresh case).
+   *
+   * The change-tracking handle is lazy: we attach it on the first call
+   * that needs realtime (`hookRealtimeLifecycle`) so test stubs without
+   * an `onChange` method aren't poked.
+   */
+  let lastAuthRecordId: string | null = null;
+  let authChangeUnsub: (() => void) | null = null;
+  function hookAuthChange() {
+    if (authChangeUnsub) return;
+    const client = pb();
+    const store = client.authStore as unknown as {
+      record?: { id?: string } | null;
+      onChange?: (cb: (token: string, record: { id?: string } | null) => void) => () => void;
+    } | undefined;
+    if (!store || typeof store.onChange !== "function") return;
+    lastAuthRecordId = store.record?.id ?? null;
+    authChangeUnsub = store.onChange((token, record) => {
+      const nextId = record?.id ?? null;
+      if (nextId === lastAuthRecordId) return;
+      lastAuthRecordId = nextId;
+      // Identity changed — tear down realtime so the next subscribe gets
+      // a fresh clientId bound to the new auth.
+      try {
+        // PB SDK marks RealtimeService.disconnect as private, but it's
+        // exposed on the runtime object. We need it for the auth-switch
+        // reset (private methods are an SDK packaging detail, not an API
+        // contract). Cast through unknown to bypass the TS visibility
+        // check rather than calling an internal-shaped helper.
+        const rt = (client.realtime as unknown) as { disconnect?: () => void } | undefined;
+        rt?.disconnect?.();
+      } catch {
+        /* SDK without realtime / disconnect — nothing to do */
+      }
+      // The PB_CONNECT subscription we registered via hookRealtimeLifecycle
+      // is still in the SDK's subscription map. After disconnect, the next
+      // pb.realtime.subscribe will reconnect and re-register everything
+      // (including PB_CONNECT) with the new clientId. We do NOT clear
+      // realtimeHooked: the listener is still installed, just temporarily
+      // dormant until the next subscribe.
+    });
+  }
+
+  /**
    * Subscribe to PB_CONNECT so transient write failures get retried the moment
    * realtime reconnects — they likely failed because the network was down,
    * and now isn't. Hooked lazily on the first write so test stubs that
@@ -229,6 +292,10 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
    * tests.
    */
   function hookRealtimeLifecycle() {
+    // Auth-change handler is independent of the PB_CONNECT subscription,
+    // but they're hooked at the same site (first realtime touch) so it's
+    // exactly one call per wpb session. Idempotent inside.
+    hookAuthChange();
     if (realtimeHooked) return;
     const client = pb();
     if (!client.realtime) return;

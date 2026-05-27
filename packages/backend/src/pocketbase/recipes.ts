@@ -103,7 +103,6 @@ function recipeFromRecord(r: RecordModel | RawRecord): Recipe {
     enrichmentStatus: (x.enrichment_status as Recipe["enrichmentStatus"]) || "needed",
     pendingChanges: (x.pending_changes as Recipe["pendingChanges"]) || null,
     stepIngredients: (x.step_ingredients as Recipe["stepIngredients"]) || null,
-    cookingLog: (x.cooking_log as Recipe["cookingLog"]) || null,
     created: x.created as string,
     updated: x.updated as string,
     creator: (x.creator as string) || "",

@@ -31,12 +31,22 @@ interface StubRealtime {
   pbConnectCbs: Set<(e: unknown) => void>;
   /** Test-only: fire PB_CONNECT to simulate the SDK reconnecting. */
   firePbConnect: () => void;
+  /** Disconnect calls observed — for asserting auth-change reset. */
+  disconnectCalls: number;
+}
+
+interface StubAuthStore {
+  record: { id: string } | null;
+  onChangeCbs: Set<(token: string, record: { id: string } | null) => void>;
+  /** Test-only: simulate `authWithPassword` swapping in a new user. */
+  setRecord: (id: string | null) => void;
 }
 
 function makeStubPb(): {
   pb: PocketBase;
   col: (n: string) => StubCollection;
   realtime: StubRealtime;
+  authStore: StubAuthStore;
 } {
   const cols = new Map<string, StubCollection>();
   const get = (n: string): StubCollection => {
@@ -53,6 +63,16 @@ function makeStubPb(): {
     firePbConnect() {
       for (const cb of this.pbConnectCbs) cb({});
     },
+    disconnectCalls: 0,
+  };
+
+  const authStore: StubAuthStore = {
+    record: null,
+    onChangeCbs: new Set(),
+    setRecord(id: string | null) {
+      this.record = id ? { id } : null;
+      for (const cb of this.onChangeCbs) cb(id ? `token-${id}` : "", this.record);
+    },
   };
 
   const stub = {
@@ -63,6 +83,16 @@ function makeStubPb(): {
           return async () => { realtime.pbConnectCbs.delete(cb); };
         }
         return async () => {};
+      },
+      disconnect() {
+        realtime.disconnectCalls += 1;
+      },
+    },
+    authStore: {
+      get record() { return authStore.record; },
+      onChange(cb: (token: string, record: { id: string } | null) => void) {
+        authStore.onChangeCbs.add(cb);
+        return () => { authStore.onChangeCbs.delete(cb); };
       },
     },
     collection: (name: string) => {
@@ -112,7 +142,7 @@ function makeStubPb(): {
     },
   } as unknown as PocketBase;
 
-  return { pb: stub, col: get, realtime };
+  return { pb: stub, col: get, realtime, authStore };
 }
 
 beforeEach(async () => {
@@ -342,5 +372,68 @@ describe("wrapPocketBase transient-error queue + retry", () => {
 
     expect(wpb.debug.snapshot().totalErrored).toBe(0);
     expect(stub.col("items").records.has("a")).toBe(true);
+  });
+});
+
+/**
+ * Auth-identity changes on the same PB client (account switch, sign-out and
+ * back in as a different user) leave PB's realtime channel bound to the
+ * previous auth's clientId. The PB SDK itself does NOT react to authStore
+ * changes on the realtime layer — only on the auto-refresh path — so the
+ * next subscribe POSTs the new auth header against the old clientId and PB
+ * returns `403: The current and the previous request authorization don't
+ * match`.
+ *
+ * wpb closes this gap by hooking authStore.onChange and disconnecting the
+ * realtime channel on identity flip, so the next subscribe forces a fresh
+ * EventSource → fresh clientId bound to the new auth.
+ *
+ * (The bug shows up clearly in the recipes e2e suite when two consecutive
+ * tests use `wpb` and then `createTestUser` swaps auth on the same userPb
+ * client — the recipes.subscribeToCookingLog flake. Fixing it in wpb (not
+ * test-utils) also covers the production "switch account in one tab"
+ * scenario.)
+ */
+describe("wrapPocketBase auth-change realtime reset", () => {
+  it("disconnects the realtime channel when authStore.onChange fires with a new user id", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    // First write hooks the realtime lifecycle, which also wires the
+    // auth-change handler.
+    stub.authStore.setRecord("user-a");
+    await wpb.collection("items").create({ id: "a", list: "L1" });
+    expect(stub.realtime.disconnectCalls).toBe(0);
+
+    // Swap auth to a different user — handler should fire disconnect once.
+    stub.authStore.setRecord("user-b");
+    expect(stub.realtime.disconnectCalls).toBe(1);
+
+    // Swap back — another distinct id flip, another disconnect.
+    stub.authStore.setRecord("user-a");
+    expect(stub.realtime.disconnectCalls).toBe(2);
+  });
+
+  it("does NOT disconnect on token rotation for the same user", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    stub.authStore.setRecord("user-a");
+    await wpb.collection("items").create({ id: "a", list: "L1" });
+
+    // Fire onChange with the same record (token rotation / refresh).
+    for (const cb of stub.authStore.onChangeCbs) cb("new-token", stub.authStore.record);
+    expect(stub.realtime.disconnectCalls).toBe(0);
+  });
+
+  it("disconnects when auth clears (sign-out)", async () => {
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    stub.authStore.setRecord("user-a");
+    await wpb.collection("items").create({ id: "a", list: "L1" });
+
+    stub.authStore.setRecord(null);
+    expect(stub.realtime.disconnectCalls).toBe(1);
   });
 });
