@@ -1,4 +1,3 @@
-import { useDroppable } from "@dnd-kit/core";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import type { ShoppingItem, CategoryDef } from "../types";
@@ -8,12 +7,11 @@ const Section = styled.div`
   margin-bottom: var(--space-xs);
 `;
 
-const CategoryHeader = styled.div<{ $isOver: boolean }>`
+const CategoryHeader = styled.div`
   display: flex;
   align-items: center;
   padding: var(--space-xs) var(--space-sm);
-  background: ${(props) =>
-    props.$isOver ? "var(--color-primary-light, #b8e6e6)" : "var(--color-bg-muted)"};
+  background: var(--color-bg-muted);
   font-weight: 600;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
@@ -37,10 +35,9 @@ const ItemCount = styled.span`
   color: var(--color-text-muted);
 `;
 
-const ItemsContainer = styled.div<{ $isOver: boolean; $collapsed: boolean; $forceCollapse: boolean }>`
-  background: ${(props) =>
-    props.$isOver ? "var(--color-primary-light, #e6f7f7)" : "var(--color-bg)"};
-  transition: ${(props) => props.$forceCollapse ? "none" : "background 0.2s, max-height 0.2s, opacity 0.2s"};
+const ItemsContainer = styled.div<{ $collapsed: boolean }>`
+  background: var(--color-bg);
+  transition: background 0.2s, max-height 0.2s, opacity 0.2s;
   overflow: hidden;
   max-height: ${(props) => (props.$collapsed ? "0" : "2000px")};
   opacity: ${(props) => (props.$collapsed ? 0 : 1)};
@@ -51,15 +48,9 @@ interface Props {
   items: ShoppingItem[];
   collapsed: boolean;
   onToggleCollapse: () => void;
-  forceCollapse?: boolean; // During drag, collapse all
 }
 
-export function CategorySection({ category, items, collapsed, onToggleCollapse, forceCollapse }: Props) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: category.id,
-    data: { categoryId: category.id },
-  });
-
+export function CategorySection({ category, items, collapsed, onToggleCollapse }: Props) {
   const isEmpty = items.length === 0;
 
   // Sort items by added time only (keep position stable when checking)
@@ -67,18 +58,16 @@ export function CategorySection({ category, items, collapsed, onToggleCollapse, 
     return a.addedAt.getTime() - b.addedAt.getTime();
   });
 
-  const isCollapsed = forceCollapse || collapsed;
-
   return (
-    <Section ref={setNodeRef}>
-      <CategoryHeader $isOver={isOver} onClick={onToggleCollapse} data-testid="category-header">
+    <Section>
+      <CategoryHeader onClick={onToggleCollapse} data-testid="category-header">
         <CollapseIcon>
-          {isCollapsed ? <RightOutlined /> : <DownOutlined />}
+          {collapsed ? <RightOutlined /> : <DownOutlined />}
         </CollapseIcon>
         {category.name}
         {!isEmpty && <ItemCount>({items.length})</ItemCount>}
       </CategoryHeader>
-      <ItemsContainer $isOver={isOver} $collapsed={isCollapsed} $forceCollapse={!!forceCollapse}>
+      <ItemsContainer $collapsed={collapsed}>
         {sortedItems.map((item) => (
           <ShoppingItemRow key={item.id} item={item} />
         ))}

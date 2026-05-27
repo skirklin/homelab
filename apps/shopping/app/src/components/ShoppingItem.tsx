@@ -1,34 +1,89 @@
 import { useState } from "react";
-import { Checkbox, Button, Input } from "antd";
-import { DeleteOutlined, HolderOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
-import { useDraggable } from "@dnd-kit/core";
+import { Checkbox, Button, Input, Drawer } from "antd";
+import { DeleteOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
-import type { ShoppingItem } from "../types";
+import type { ShoppingItem, CategoryDef } from "../types";
+import { UNCATEGORIZED_CATEGORY_ID } from "../types";
 import { useShoppingBackend } from "@kirkl/shared";
+import { useShoppingContext } from "../shopping-context";
 
-const ItemRow = styled.div<{ $checked: boolean; $isDragging: boolean }>`
+const ItemRow = styled.div<{ $checked: boolean }>`
   display: flex;
   align-items: center;
   padding: var(--space-xs) var(--space-sm);
   background: ${(props) =>
-    props.$isDragging ? "var(--color-primary-light, #e6f7f7)" :
     props.$checked ? "var(--color-bg-muted)" : "var(--color-bg)"};
   border-bottom: 1px solid var(--color-border-light);
   transition: background 0.2s;
-  opacity: ${(props) => (props.$isDragging ? 0.8 : 1)};
 
   &:last-child {
     border-bottom: none;
   }
 `;
 
-const DragHandle = styled.span`
-  color: var(--color-text-muted);
-  margin-right: 2px;
-  cursor: grab;
-  padding: 2px;
-  touch-action: none;
+// Compact, tappable category chip that sits where the drag handle used to.
+// Click target is roomy on touch; visual footprint stays small so the row
+// height matches the previous drag-handle layout.
+const CategoryBadge = styled.button`
+  appearance: none;
+  border: 1px solid var(--color-border, #d9d9d9);
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 2px 6px;
+  margin-right: var(--space-xs);
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--color-bg);
+    border-color: var(--color-primary, #1677ff);
+    color: var(--color-text);
+  }
+
+  &:active {
+    background: var(--color-primary-light, #e6f7f7);
+  }
+`;
+
+const SheetList = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const SheetOption = styled.button<{ $current: boolean }>`
+  appearance: none;
+  background: ${(p) => (p.$current ? "var(--color-primary-light, #e6f7f7)" : "transparent")};
+  border: none;
+  border-bottom: 1px solid var(--color-border-light);
+  padding: var(--space-md) var(--space-md);
+  font-size: var(--font-size-md);
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: var(--color-text);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--color-bg-muted);
+  }
+`;
+
+const SheetCheck = styled.span`
+  color: var(--color-primary, #1677ff);
+  font-size: 16px;
 `;
 
 const ItemName = styled.span<{ $checked: boolean }>`
@@ -86,14 +141,31 @@ interface Props {
 export function ShoppingItemRow({ item }: Props) {
   const { user } = useAuth();
   const shopping = useShoppingBackend();
+  const { state } = useShoppingContext();
   const [isEditing, setIsEditing] = useState(false);
   const [editIngredient, setEditIngredient] = useState(item.ingredient);
   const [editNote, setEditNote] = useState(item.note || "");
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false);
 
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: item.id,
-    data: { item },
-  });
+  // Categories for the bottom sheet. Mirror the construction in
+  // ShoppingList.tsx so the "Uncategorized" pseudo-category is always an
+  // option even when the list doesn't have it configured.
+  const configuredCategories = state.list?.categories || [];
+  const hasUncategorized = configuredCategories.some((c) => c.id === UNCATEGORIZED_CATEGORY_ID);
+  const uncategorizedDef: CategoryDef = { id: UNCATEGORIZED_CATEGORY_ID, name: "Uncategorized" };
+  const sheetCategories = hasUncategorized
+    ? configuredCategories
+    : [...configuredCategories, uncategorizedDef];
+
+  const currentCategory =
+    sheetCategories.find((c) => c.id === item.categoryId) ?? uncategorizedDef;
+
+  const handleSelectCategory = (categoryId: string) => {
+    if (categoryId !== item.categoryId) {
+      void shopping.updateItemCategory(item.id, categoryId);
+    }
+    setCategorySheetOpen(false);
+  };
 
   const handleToggle = () => {
     if (user) {
@@ -149,14 +221,19 @@ export function ShoppingItemRow({ item }: Props) {
   };
 
   return (
-    <ItemRow
-      ref={setNodeRef}
-      $checked={item.checked}
-      $isDragging={isDragging}
-    >
-      <DragHandle {...attributes} {...listeners} data-testid="drag-handle">
-        <HolderOutlined />
-      </DragHandle>
+    <>
+    <ItemRow $checked={item.checked}>
+      <CategoryBadge
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setCategorySheetOpen(true);
+        }}
+        data-testid="category-badge"
+        title={`Category: ${currentCategory.name}`}
+      >
+        {currentCategory.name}
+      </CategoryBadge>
       <Checkbox
         checked={item.checked}
         onChange={handleToggle}
@@ -210,5 +287,34 @@ export function ShoppingItemRow({ item }: Props) {
         </>
       )}
     </ItemRow>
+    <Drawer
+      open={categorySheetOpen}
+      onClose={() => setCategorySheetOpen(false)}
+      placement="bottom"
+      height="auto"
+      title={`Move "${item.ingredient}" to…`}
+      styles={{ body: { padding: 0 }, header: { padding: "12px 16px" } }}
+      data-testid="category-sheet"
+    >
+      <SheetList>
+        {sheetCategories.map((cat) => (
+          <SheetOption
+            key={cat.id}
+            type="button"
+            $current={cat.id === item.categoryId}
+            onClick={() => handleSelectCategory(cat.id)}
+            data-testid={`category-sheet-option-${cat.id}`}
+          >
+            <span>{cat.name}</span>
+            {cat.id === item.categoryId && (
+              <SheetCheck>
+                <CheckOutlined />
+              </SheetCheck>
+            )}
+          </SheetOption>
+        ))}
+      </SheetList>
+    </Drawer>
+    </>
   );
 }

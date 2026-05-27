@@ -1,47 +1,17 @@
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Spin, Button } from "antd";
-import {
-  DndContext,
-  DragOverlay,
-  MeasuringStrategy,
-  pointerWithin,
-  TouchSensor,
-  MouseSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-  type Modifier,
-} from "@dnd-kit/core";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import { appStorage, StorageKeys, collapsedCategoriesKey } from "../storage";
-
-// Custom modifier: only snap Y axis to cursor center, keep original X offset
-const snapVerticalToCursor: Modifier = ({ activatorEvent, draggingNodeRect, transform }) => {
-  if (!activatorEvent || !draggingNodeRect) return transform;
-
-  const event = activatorEvent as PointerEvent;
-  // How far from the top of the element did we click? (use clientY for viewport-relative coords)
-  const offsetY = event.clientY - draggingNodeRect.top;
-
-  return {
-    ...transform,
-    // Adjust Y so element centers vertically on cursor
-    y: transform.y + offsetY - draggingNodeRect.height / 2,
-  };
-};
 import { useShoppingContext } from "../shopping-context";
 import { getItemsByCategoryId } from "../selectors";
-import { useShoppingBackend } from "@kirkl/shared";
 import { Header } from "./Header";
 import { AddItem } from "./AddItem";
 import { CategorySection } from "./CategorySection";
 import { ShoppingTrips } from "./ShoppingTrips";
 import { ListSettings } from "./ListSettings";
-import { UNCATEGORIZED_CATEGORY_ID, type ShoppingItem, type CategoryId, type CategoryDef } from "../types";
+import { UNCATEGORIZED_CATEGORY_ID, type CategoryDef } from "../types";
 
 // Shopping owns its own 600px column in both standalone and embedded modes.
 // In standalone, the box-shadow gives the desktop card look; on narrow
@@ -68,14 +38,6 @@ const LoadingContainer = styled.div`
   justify-content: center;
   align-items: center;
   padding: var(--space-2xl);
-`;
-
-const DragItem = styled.div`
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg);
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 `;
 
 const NotFoundContainer = styled.div`
@@ -143,7 +105,6 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
   const location = useLocation();
   const { user } = useAuth();
   const { state, setCurrentList } = useShoppingContext();
-  const shopping = useShoppingBackend();
   const view = viewFromSplat(splat);
 
   // Standalone the URL is /<slug>(/history|/settings); embedded under the
@@ -152,7 +113,6 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
   // mounts — beats wrestling with react-router's `..` semantics on splats.
   // String slicing (not regex) so any splat content goes uninterpreted.
   const listPath = stripSplatSuffix(location.pathname, splat);
-  const [draggedItem, setDraggedItem] = useState<ShoppingItem | null>(null);
   // Collapsed category ids, persisted per slug so refresh and list-switching
   // both restore the user's view. Read on slug change, write on every toggle.
   // Stored as an array under shopping:collapsed:<slug> because Set isn't
@@ -160,20 +120,6 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(() =>
     new Set<string>(slug ? appStorage.get<string[]>(collapsedCategoriesKey(slug), []) : []),
   );
-
-  // Configure sensors for both mouse and touch with activation delay
-  const mouseSensor = useSensor(MouseSensor, {
-    activationConstraint: {
-      distance: 10, // 10px movement required before drag starts
-    },
-  });
-  const touchSensor = useSensor(TouchSensor, {
-    activationConstraint: {
-      delay: 200, // 200ms hold before drag starts on touch
-      tolerance: 5, // 5px movement allowed during delay
-    },
-  });
-  const sensors = useSensors(mouseSensor, touchSensor);
 
   // Look up listId from user's slugs
   const listId = slug ? state.userSlugs[slug] : undefined;
@@ -195,25 +141,6 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
       new Set<string>(appStorage.get<string[]>(collapsedCategoriesKey(slug), [])),
     );
   }, [slug]);
-
-  const handleDragStart = (event: DragStartEvent) => {
-    const item = event.active.data.current?.item as ShoppingItem;
-    setDraggedItem(item);
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    setDraggedItem(null);
-
-    const { active, over } = event;
-    if (!over) return;
-
-    const item = active.data.current?.item as ShoppingItem;
-    const newCategoryId = over.id as CategoryId;
-
-    if (item && newCategoryId && item.categoryId !== newCategoryId && listId) {
-      shopping.updateItemCategory(item.id, newCategoryId);
-    }
-  };
 
   const toggleCategoryCollapse = (categoryId: string) => {
     setCollapsedCategories(prev => {
@@ -308,22 +235,12 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
             <Spin size="large" />
           </LoadingContainer>
         ) : (
-          <DndContext
-              sensors={sensors}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              collisionDetection={pointerWithin}
-              measuring={{
-                droppable: {
-                  strategy: MeasuringStrategy.Always,
-                },
-              }}
-            >
+          <>
             {categories.map((category) => {
               const items = itemsByCategoryId.get(category.id) || [];
               // Hide the auto-appended "Uncategorized" pseudo-category when empty.
-              // User-configured categories stay visible even when empty so they
-              // remain drop targets for drag-and-drop.
+              // (User-configured categories stay visible even when empty so
+              // users can see what's defined.)
               if (category.id === UNCATEGORIZED_CATEGORY_ID && items.length === 0) return null;
               return (
                 <CategorySection
@@ -332,22 +249,10 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
                   items={items}
                   collapsed={collapsedCategories.has(category.id)}
                   onToggleCollapse={() => toggleCategoryCollapse(category.id)}
-                  forceCollapse={draggedItem !== null}
                 />
               );
             })}
-            {createPortal(
-              <DragOverlay modifiers={[snapVerticalToCursor]}>
-                {draggedItem ? (
-                  <DragItem data-testid="drag-overlay">
-                    {draggedItem.ingredient}
-                    {draggedItem.note && ` (${draggedItem.note})`}
-                  </DragItem>
-                ) : null}
-              </DragOverlay>,
-              document.body
-            )}
-          </DndContext>
+          </>
         )}
       </Content>
     </Column>
