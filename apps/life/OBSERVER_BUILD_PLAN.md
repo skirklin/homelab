@@ -32,7 +32,7 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - New migration `infra/pocketbase/pb_migrations/YYYYMMDD_HHMMSS_claude_observations.js` adding the collection (see ROADMAP Phase 2 for the schema sketch — `timestamp, content, period, data_window_start, data_window_end, related_event_ids[]`).
 - New backend interface method(s) on a new `ObserverBackend` in `packages/backend/src/interfaces/`, plus PB impl in `packages/backend/src/pocketbase/`.
 - Wire through `BackendProvider`.
-- **Status:** pending dispatch.
+- **Status:** dispatched 2026-05-27. Worktree `agent-a12b2f0c`. Awaiting critical review.
 - **Dispatch trigger:** first cron firing (or sooner if user explicitly asks).
 
 #### P0-2. View-layer bundle module
@@ -40,7 +40,7 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - New `services/api/src/lib/observer/bundle.ts`. Functions to assemble the cross-source narrative document from `life_events`, `cooking_log`, `task_events`, active `travel_trips`. Output is markdown prose (V4 + V6 from DATA_COLLECTION.md).
 - Unit tests in `services/api/src/lib/observer/bundle.test.ts` with fixture data covering: empty period (no events), text-heavy period (lots of journal text), trip-imminent period (active travel context).
 - **Dependencies:** none — can run in parallel with P0-1.
-- **Status:** pending dispatch.
+- **Status:** dispatched 2026-05-27. Worktree `agent-a0fa66fa`. Awaiting critical review.
 
 #### P0-3. `POST /api/observations/generate` endpoint
 
@@ -139,6 +139,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | Date | Action | Outcome |
 |---|---|---|
 | 2026-05-27 | Initial plan write (in conversation, not cron) | Plan doc created; cron set up; first dispatch will happen at 2026-05-28 06:00 PT firing |
+| 2026-05-27 | DISPATCH P0-1 + P0-2 (first firing, parallel) | P0-1 (`worktree-agent-a12b2f0c`): PB migration + ObserverBackend + BackendProvider wiring, typecheck clean. P0-2 (`worktree-agent-a0fa66fa`): bundle.ts + 4 unit tests, typecheck clean. Both need critical review before merge. |
 
 ## Decision log
 
