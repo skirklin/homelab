@@ -14,4 +14,9 @@ body {
   min-width: 320px;
   min-height: 100vh;
   min-height: 100dvh;
+  /* iOS safe-area (notch / home-indicator) — activated by viewport-fit=cover */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }

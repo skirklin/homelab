@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Scott Kirklin</title>
   <style>
     * {
@@ -16,7 +18,12 @@
       color: #333;
       max-width: 600px;
       margin: 0 auto;
-      padding: 4rem 2rem;
+      /* iOS safe-area (notch / home-indicator) — activated by viewport-fit=cover */
+      padding:
+        calc(4rem + env(safe-area-inset-top))
+        calc(2rem + env(safe-area-inset-right))
+        calc(4rem + env(safe-area-inset-bottom))
+        calc(2rem + env(safe-area-inset-left));
     }
     h1 {
       font-size: 2rem;
