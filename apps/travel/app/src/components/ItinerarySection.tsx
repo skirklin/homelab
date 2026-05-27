@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Button,
@@ -274,6 +274,21 @@ export function ItinerarySection({
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("view") || "timeline";
   const currentItin = useSelectedItinerary(itineraries);
+
+  // Keep `?itin=` in sync with the resolved itinerary. useSelectedItinerary
+  // silently falls back to the active/first itinerary when the URL holds a
+  // stale id (e.g. after deletion), which makes the <Select> value and the URL
+  // drift apart. Write the resolved id back so subsequent reads (and
+  // refresh/back-forward navigation) stay consistent.
+  useEffect(() => {
+    if (!currentItin) return;
+    if (searchParams.get("itin") === currentItin.id) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("itin", currentItin.id);
+      return next;
+    }, { replace: true });
+  }, [currentItin, searchParams, setSearchParams]);
 
   const setTab = (tab: string) => {
     setSearchParams((prev) => {

@@ -288,9 +288,12 @@ export function DayView() {
   // `..` strips the date segment, then `{d}` puts us at /{tripId}/day/{d}.
   // Default route-relative resolution would walk up matched routes instead
   // and produce the wrong path for these flat routes.
+  // `replace: true` because prev/next is a "scrubbing" interaction, not a
+  // "navigate" one — a single back press should escape the whole DayView
+  // rather than walk back through every day the user paged through.
   const goToDay = (d?: string) => {
     if (!d) return;
-    navigate(`../${d}`, { relative: "path" });
+    navigate(`../${d}`, { relative: "path", replace: true });
   };
 
   const lodging = day.lodgingActivityId ? activityMap.get(day.lodgingActivityId) : null;

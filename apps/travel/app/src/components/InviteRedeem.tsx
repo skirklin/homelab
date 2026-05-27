@@ -78,7 +78,7 @@ export function InviteRedeem() {
             title="Could not redeem invite"
             subTitle={errorMsg}
             extra={
-              <Button type="primary" onClick={() => navigate("/travel")}>Go to trips</Button>
+              <Button type="primary" onClick={() => navigate("/travel", { replace: true })}>Go to trips</Button>
             }
           />
         )}
