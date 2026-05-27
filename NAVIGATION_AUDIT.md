@@ -137,7 +137,88 @@ Six per-app commits on main: `3a53412` cross-cutting infra, `241d052` home, `0c3
 - **WhatsNew Settings menu trigger** — modal now dormant. Add a "What's new" menu item to re-activate.
 - **Travel trip-proposal UI** — confirm intent with user before building.
 
+## Bundle 5 — post-deploy critical review (in progress)
+
+After Bundles 1–4 shipped, 4 critical reviewers (overall code review, mobile/PWA, URL-state design, UX regression hunt) audited the live result. Findings consolidated here.
+
+### True regressions introduced by Bundles 1–4
+
+- [ ] **Outliner row-click pushes history.** [apps/upkeep/app/src/components/TaskOutliner.tsx:295](apps/upkeep/app/src/components/TaskOutliner.tsx#L295) — Bundle 4d wired `setFocusedId` to push (zoom-into-subtree semantics), but every plain row click and every new-task creation also calls it. Power-users click constantly → browser back becomes a one-row-rewinder. **Fix:** plain row-click `replace`; reserve push for an explicit zoom action.
+- [ ] **Home shell lost "tap active tab → return to module root".** [apps/home/app/src/shared/Shell.tsx:164-168](apps/home/app/src/shared/Shell.tsx#L164) — Bundle 4b's `isActive(basePath)` early-return removed the iOS-native affordance. From `/shopping/grocery/settings`, tapping Shopping should `navigate("/shopping")`; now does nothing. **Fix:** `if (isActive(basePath) && pathname !== basePath) navigate(basePath, { replace: true })`.
+- [ ] **Recipes WhatsNew is dead code.** [apps/recipes/app/src/Modals/WhatsNew.tsx](apps/recipes/app/src/Modals/WhatsNew.tsx) — Bundle 4c removed the auto-open; no menu trigger added. Modal mounts, never opens; `setLastSeenUpdateVersion` is write-only-dead. **Fix:** add Settings menu item OR rip out component + version-tracking plumbing entirely.
+- [ ] **Breadcrumb filter too aggressive.** [apps/recipes/app/src/Header/Breadcrumbs.tsx:64](apps/recipes/app/src/Header/Breadcrumbs.tsx#L64) — `ROUTE_ONLY_SEGMENTS = {boxes, recipes}` filtered globally, but `/recipes/boxes` is a real all-boxes view. Users lose the breadcrumb for it. **Fix:** preserve terminal segments; only filter when followed by an id.
+- [ ] **`useHistoryDismiss` two-panels corruption.** [packages/ui/src/sync-status.tsx:316-344](packages/ui/src/sync-status.tsx#L316-L344) — Banner + Dot push identical `{ kirklSyncPanel: true }` sentinels. popstate fires for both; second cleanup spuriously calls `history.back()` and eats a real history entry. **Fix:** per-instance sentinel id; only `history.back()` if `history.state.kirklSyncPanel === myId`.
+- [ ] **`useHistoryDismiss` deep-link refresh leaks sentinel.** Same file — iOS Safari restores `history.state` across reloads. Sentinel persists; first open after reload spuriously calls `history.back()`. **Fix:** on mount, if state has the flag, `replaceState(null)`.
+- [ ] **`useHistoryDismiss` reacts to router popstate.** Same file — bare `window` `popstate` listener fires for React Router's own back-nav. Cleanup path can `history.back()` on route change. **Fix:** distinguish unmount-via-route-change from unmount-via-explicit-close.
+- [ ] **Money `?range=` collision.** [apps/money/src/pages/Investments.tsx:85](apps/money/src/pages/Investments.tsx#L85) (1Y/3Y/5Y/ALL) and [AccountDetail.tsx:39](apps/money/src/pages/AccountDetail.tsx#L39) (1M/3M/6M/1Y/5Y/ALL) share `?range=`. Cross-page nav causes silent value loss via validator fallback. **Fix:** namespace as `?invRange=` / `?acctRange=`.
+- [ ] **Life wizard step uses replace.** [apps/life/app/src/components/SessionRunner.tsx](apps/life/app/src/components/SessionRunner.tsx) — Bundle 2d's `?step=N` is `replace:true`. Browser back from step 3 exits the wizard instead of unwinding. Wizard is a drilldown — should push.
+- [ ] **Text-input URL pollution (keystroke writes).** [Transactions.tsx:55-57](apps/money/src/pages/Transactions.tsx#L55-L57) and [Journal.tsx:439](apps/life/app/src/components/Journal.tsx#L439) write `?q=` on every keystroke. Only travel TripList debounces (250ms). **Fix:** extract `useDebouncedSearchParam` and apply.
+- [ ] **iOS edge reserve too narrow.** [LifeDashboard.tsx:400](apps/life/app/src/components/LifeDashboard.tsx#L400) — 20px. Apple's edge gesture region is ~28–32px. **Fix:** bump to 32px + consider `touch-action: pan-y`.
+- [ ] **Fixed-position UI ignores body safe-area-inset.** Three sites:
+  - [apps/recipes/app/src/RecipeCard/IngredientList.tsx:54-57](apps/recipes/app/src/RecipeCard/IngredientList.tsx#L54-L57) — AddToShoppingButton FAB `bottom: 24px` hidden under iOS home indicator.
+  - [packages/ui/src/online-status.tsx:40](packages/ui/src/online-status.tsx#L40) — OfflineBanner `top: 8` collides with notch.
+  - [packages/ui/src/sync-status.tsx:369](packages/ui/src/sync-status.tsx#L369) — SyncStatusBanner `top: 8` same.
+
+### Pattern problems (cross-cutting smells the audit converged on)
+
+- [ ] **Catch-all policy diverges 5 ways across apps.** Home: `<NotFound />`. Money: redirect to `/`. Upkeep: silent redirect. Life: dashboard fallback. Recipes: `MissingPage`. Travel + shopping: none. **Fix:** lift home's `NotFound` to `packages/ui`; apply uniformly.
+- [ ] **Validation shape varies app-by-app.** Const tuples + `.includes()` (travel), ternary chains (money — Investments' chain even omits `'3Y'` from the disjunction, works only by default-fallback accident), regex/helper (life). **Fix:** `parseEnumParam(value, allowed, default)` helper in `@kirkl/shared`.
+- [ ] **Default-not-written rule has one leak.** [TripDetail.tsx:401-407](apps/travel/app/src/components/TripDetail.tsx#L401-L407) writes the default tab to URL after one click. Sibling [TripList.tsx:374-385](apps/travel/app/src/components/TripList.tsx#L374-L385) honors the rule with an `updateParam` helper. **Fix:** lift the helper to shared or use it locally.
+- [ ] **Param naming inconsistency.** `?time=` (Spending/Transactions) vs `?range=` (Investments/AccountDetail/NetWorthChart) for the same TimeRange concept. `?view=` overloaded across 3+ pages with different meanings. **Fix:** normalize naming.
+- [ ] **`useHistoryDismiss` advertised as shared but module-private.** Either inline or export.
+
+### Smaller smells
+
+- [ ] **`RESERVED_SLUGS` missing entries.** [ListManagement.tsx:20-26](packages/ui/src/ListManagement.tsx#L20-L26) — doesn't include `history` (shopping sub-route from Bundle 2). `slug-1` collision suffix doesn't uniqueness-check.
+- [ ] **ItinerarySection self-syncing effect.** [ItinerarySection.tsx:280-289](apps/travel/app/src/components/ItinerarySection.tsx#L280-L289) — `searchParams` is in dep array AND written by the effect. Equality guard prevents loops but causes re-runs on every other param change in the page.
+- [ ] **TaskOutliner `?focus=` / `?select=` not validated.** Stale id puts the outliner into a stuck state. **Fix:** allow-list against current task ids.
+- [ ] **InviteRedeem `cancelled` guard incomplete.** [InviteRedeem.tsx:78-104](apps/recipes/app/src/routes/InviteRedeem.tsx#L78-L104) — only guards the navigate, not the PB request. Use AbortController or be honest about scope.
+- [ ] **Money Investments validation by accident.** [Investments.tsx:86-87](apps/money/src/pages/Investments.tsx#L86-L87) — `rawRange === '1Y' || rawRange === '5Y' || rawRange === 'ALL'` omits `'3Y'`. Works only because default-fallback returns `'3Y'`. **Fix:** use `RANGE_VALUES.includes(...)`.
+- [ ] **AppHeader doesn't own top safe-area inset.** Works today only because header isn't sticky/fixed. Time bomb if it ever becomes sticky.
+- [ ] **`#root` extends to `100dvh` without subtracting body padding.** Home indicator can overlap last visible element at scroll-bottom.
+- [ ] **`useSnapshot` polls 1Hz forever.** [sync-status.tsx:290-299](packages/ui/src/sync-status.tsx#L290-L299) — no `document.hidden` pause. Battery hit on backgrounded PWAs.
+- [ ] **SW serves stale catch-all `*` after deploy.** After a deploy that removes a route, the SW returns the cached `index.html` until activation. First nav after deploy may be broken. Bundle 6+ concern.
+
+### Nits / cleanup
+
+- [ ] **`MODULE_ROOTS` dead re-export.** [apps/home/app/src/App.tsx:39](apps/home/app/src/App.tsx#L39) — already exported from `Shell.tsx`.
+- [ ] **`LogPicker` stale build artifacts.** `dist/types/...LogPicker.d.ts` + `.d.ts.map` + tsbuildinfo still reference deleted source. Clears on next clean `tsc -b`.
+- [ ] **`DetailsPanel` `onClose` closure triple-defined.** [sync-status.tsx:357,393,466](packages/ui/src/sync-status.tsx#L357) — extract once.
+- [ ] **DetailPane sticky 72px assumes a header height.** [TaskOutliner.tsx:41-51](apps/upkeep/app/src/components/TaskOutliner.tsx#L41-L51) — fragile if header variant changes.
+- [ ] **`?run=` is a phantom param.** Audit doc mentioned it; not in code. Drift to clean up.
+- [ ] **`apps/recipes/app/public/index.html`** — vestigial CRA leftover, unused by Vite. Safe to delete.
+
+### Recommended architectural change
+
+Both URL-state and code reviewers independently arrived at the same recommendation:
+
+**Build `useUrlParam<T>(name, opts)` in `@kirkl/shared`** with:
+- `{ parse, serialize, default, debounce?, mode: "replace" | "push" }`
+- Deletes the param when value === default (default-not-written by construction)
+- Validates via parse callback (no more ad-hoc enum tuples)
+- Optional debounce for text inputs (kills keystroke-URL-pollution by construction)
+- Defaults to replace mode
+
+Eliminates ~30 ad-hoc `setSearchParams(prev => { ... })` blocks. Multiple regressions in this bundle become unrepresentable by construction.
+
+### Suggested execution plan (Bundle 5)
+
+- **5a — `useUrlParam` foundation + text-input migration** — build the hook; migrate Transactions/Journal text-input search to use it with debounce.
+- **5b — `useHistoryDismiss` 3-bug fix + iOS fixed-position safe-area follow-ups** — same-file work in sync-status.tsx + online-status.tsx + IngredientList FAB + Life edge reserve bump.
+- **5c — Per-app navigation regressions** — Outliner row-click semantics, Home shell active-tap restoration, Recipes breadcrumb terminal preservation + WhatsNew decision, Money `?range=` namespacing + Investments validation fix, Life wizard push, Travel TripDetail default-write, TaskOutliner focus/select validation.
+- **5d — `NotFound` unification** — lift home's `NotFound` to `packages/ui`; apply across all apps' catch-alls.
+
+### Deferred to Bundle 6+
+
+- **#12 `<ScrollRestoration/>`** — cross-cutting refactor.
+- **Modal-URL policy** — architectural decision.
+- **Recipes Filterbox + RecipeTable sort URL-backing** — mechanical follow-up.
+- **Travel trip-proposal UI** — feature decision.
+- **DetailPanel atomic tag updates** — race-prone, non-nav.
+- **SW stale-shell after deploy** — separate concern.
+
 ## Notes
 
 - The cluster of "navigation feels wrong" symptoms ties back to two underlying choices: (1) **absolute vs route-relative `navigate()`** (see `routing.test.tsx` — documented pitfall, still being violated); (2) **state-lives-in-`useState`-not-URL** for tabs, filters, and modal flags. Bundles 1 + 2 attack each.
 - The mobile-web layer (Bundle 4 lower items) is largely independent of the routing bundles and could be done in parallel by another agent.
+- Bundle 5 is largely cleanup of regressions/inconsistencies introduced by 1–4, plus the convergent recommendation for a shared `useUrlParam` hook.
