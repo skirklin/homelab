@@ -163,6 +163,38 @@ const Actions = styled.div`
   gap: var(--space-xs);
 `;
 
+// Preset chips: a row of one-tap quick-log shortcuts shown on the collapsed
+// card (e.g. "7h / 8h / 9h" for sleep). Visually distinct from CategoryChip
+// (which is a *selection* inside the open form) and from ValueBadge (which
+// shows what's already logged today) — a dashed border + bg-muted reads as
+// "tap me to log this" without competing with the value badge for attention.
+const PresetRow = styled.div`
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: var(--space-xs);
+`;
+
+const PresetChip = styled.button`
+  border: 1px dashed var(--color-border);
+  background: var(--color-bg-muted);
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+
+  &:hover:not(:disabled) {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+    border-style: solid;
+  }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+`;
+
 const TapPlus = styled.button<{ $size: WidgetSize }>`
   display: inline-flex;
   align-items: center;
@@ -337,6 +369,15 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
       { name: primaryName, type: "number", value: n, unit: "rating", scale: 5 },
     ]);
   }, [writeEvent, primaryName]);
+
+  // Preset chips: one-tap log of the chip's canonical value. Intentionally
+  // skips category/intensity/notes — the whole point is a fast path. Same
+  // single-entry shape as the rating/one-tap handlers above.
+  const handlePresetClick = useCallback((presetValue: number) => {
+    writeEvent([
+      { name: primaryName, type: "number", value: presetValue, unit: trackable.unit },
+    ]);
+  }, [writeEvent, primaryName, trackable.unit]);
 
   const handleSubmit = useCallback(() => {
     if (value === null) {
@@ -545,6 +586,22 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
             <Hint $muted>{dayEvents.length} logged today{breakdown ? ` · ${breakdown}` : ""}</Hint>
           )}
         </FormRow>
+      )}
+
+      {!open && trackable.presets && trackable.presets.length > 0 && (
+        <PresetRow>
+          {trackable.presets.map((p) => (
+            <PresetChip
+              key={p.label}
+              onClick={() => handlePresetClick(p.value)}
+              disabled={saving || !logId}
+              aria-label={`Quick-log ${p.label}`}
+              title={`Quick-log ${p.label}`}
+            >
+              {p.label}
+            </PresetChip>
+          ))}
+        </PresetRow>
       )}
 
       {!open && breakdown && <Hint $muted style={{ marginTop: 4 }}>{breakdown}</Hint>}
