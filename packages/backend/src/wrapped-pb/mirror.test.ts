@@ -878,6 +878,43 @@ describe("PBMirror: lifecycle", () => {
 // SDK quirk defense (30)
 // =====================================================================
 
+describe("PBMirror: observability", () => {
+  it("surfaces a bootstrap-error event when the initial fetch fails (non-404)", async () => {
+    const { stub, mirror, wpb } = setup();
+    // Filtered "*" watches use getFullList — fail it with a transient.
+    stub.col("items").failNextRead = Object.assign(new Error("auth blip"), { status: 401 });
+
+    const states: RawRecord[][] = [];
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => { states.push(s); },
+    );
+    await flush();
+
+    // Consumer still gets an emit (empty) — bootstrap failure doesn't block delivery.
+    expect(states[states.length - 1]).toEqual([]);
+    // But the failure is observable via the wpb debug ring buffer.
+    const errs = wpb.debug.events().filter((e) => e.kind === "bootstrap-error");
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs[0].collection).toBe("items");
+    expect((errs[0].detail as { phase?: string; status?: number }).phase).toBe("bootstrap");
+    expect((errs[0].detail as { phase?: string; status?: number }).status).toBe(401);
+  });
+
+  it("does NOT surface a bootstrap-error for a 404 on a single-record watch (legitimate empty)", async () => {
+    const { mirror, wpb } = setup();
+    // Record doesn't exist; getOne throws 404. This is the "subscribe(id) on
+    // a missing record stays armed for future creates" path — not an error.
+    const states: RawRecord[][] = [];
+    mirror.watch({ collection: "items", topic: "missing" }, (s) => { states.push(s); });
+    await flush();
+
+    expect(states[states.length - 1]).toEqual([]);
+    const errs = wpb.debug.events().filter((e) => e.kind === "bootstrap-error");
+    expect(errs.length).toBe(0);
+  });
+});
+
 describe("PBMirror: SDK quirk defense / resync", () => {
   it("(30) resync(): re-runs initial fetch; emits drift", async () => {
     const { stub, mirror } = setup();

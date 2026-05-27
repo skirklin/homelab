@@ -188,6 +188,24 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
   const listeners = new Map<string, CollectionListener>();
   let disposed = false;
 
+  /** Surface a bootstrap/refetch failure to wpb's debug ring buffer so
+   *  SyncDot + window.__wpbDebug see a unified event feed. Cheap; no need
+   *  to gate on env. */
+  function recordBootstrapError(
+    collection: string,
+    topic: string,
+    err: unknown,
+    phase: "bootstrap" | "refetch" | "resync",
+  ): void {
+    const status = (err as { status?: number; message?: string })?.status;
+    const message = (err as { message?: string })?.message;
+    wpb.debug.recordEvent({
+      kind: "bootstrap-error",
+      collection,
+      detail: { topic, phase, status, message },
+    });
+  }
+
   // ---- Materialization ----
 
   /** Build a slice's current view with mutation-queue overlay.
@@ -329,7 +347,16 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     l.unsub = null;
     listeners.delete(collection);
     if (pending) {
-      void pending.then((u) => { try { u(); } catch { /* ignore */ } });
+      // The PB SDK's unsubscribe path POSTs a DELETE to /api/realtime
+      // with a stale clientId on disconnect/reconnect races. We don't
+      // care if it fails — the realtime channel is already torn down
+      // server-side for any disconnected client. Catch on both the
+      // promise itself (which can reject if the subscribe call rejected
+      // late) and the inner unsubscribe call. Without this, a stale
+      // clientId yields an unhandledrejection on every page-hide.
+      pending
+        .then((u) => { try { u(); } catch { /* ignore */ } })
+        .catch(() => { /* stale clientId or already disconnected — ignore */ });
     }
   }
 
@@ -395,8 +422,8 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       return;
     }
     slice.refetchInFlight = (async () => {
+      const { collection, topic, filter, sort, limit } = slice.spec;
       try {
-        const { collection, filter, sort, limit } = slice.spec;
         const result = await pb().collection(collection).getList(1, limit ?? 500, {
           filter: filter ?? "",
           sort: sort ?? "",
@@ -407,8 +434,11 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         for (const r of result.items as unknown as RawRecord[]) next.set(r.id, r);
         slice.records = next;
         emitSlice(slice);
-      } catch {
-        // Network blip — leave records as-is; next event or resync will recover.
+      } catch (err) {
+        // Network blip — leave records as-is; next event or resync will
+        // recover. Surface the failure so a stuck sort+limit slice doesn't
+        // silently stay stale.
+        recordBootstrapError(collection, topic, err, "refetch");
       } finally {
         slice.refetchInFlight = null;
         if (slice.refetchAgain) {
@@ -446,8 +476,12 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
           const r = await pb().collection(collection).getOne(topic, { $autoCancel: false });
           initial = [r as unknown as RawRecord];
         } catch (err) {
+          // 404 = record doesn't exist yet, which is a legitimate empty
+          // bootstrap (subscribe(id) on a missing record). Anything else
+          // is a real failure worth surfacing — auth blip, network down,
+          // permission denied, etc. — and resync will retry.
           if ((err as { status?: number })?.status !== 404) {
-            // Non-404 transient — leave initial empty; resync will retry.
+            recordBootstrapError(collection, topic, err, "bootstrap");
           }
         }
       } else if (sort || limit) {
@@ -458,18 +492,26 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
             $autoCancel: false,
           });
           initial = result.items as unknown as RawRecord[];
-        } catch { /* leave empty */ }
+        } catch (err) {
+          recordBootstrapError(collection, topic, err, "bootstrap");
+        }
       } else if (filter !== undefined) {
         try {
           const rs = await pb().collection(collection).getFullList({ filter, $autoCancel: false });
           initial = rs as unknown as RawRecord[];
-        } catch { /* leave empty */ }
+        } catch (err) {
+          recordBootstrapError(collection, topic, err, "bootstrap");
+        }
       } else {
         // Unfiltered "*" wildcard — no canonical initial set.
         initial = [];
       }
     } catch (err) {
+      // Defensive catch — the inner try/catches above should handle
+      // everything. Anything reaching here is a programming error in
+      // our own code, not a network failure, so log loudly.
       console.warn("[mirror] bootstrap fetch failed", { collection, topic }, err);
+      recordBootstrapError(collection, topic, err, "bootstrap");
     }
 
     // Cancel-before-resolve: bail if all consumers gone during the fetch.
@@ -631,8 +673,12 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
               const r = await pb().collection(collection).getOne(topic, { $autoCancel: false });
               fresh = [r as unknown as RawRecord];
             } catch (err) {
-              if ((err as { status?: number })?.status === 404) fresh = [];
-              else return;
+              if ((err as { status?: number })?.status === 404) {
+                fresh = [];
+              } else {
+                recordBootstrapError(collection, topic, err, "resync");
+                return;
+              }
             }
           } else if (sort || limit) {
             const result = await pb().collection(collection).getList(1, limit ?? 500, {
@@ -647,7 +693,8 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
           } else {
             return;
           }
-        } catch {
+        } catch (err) {
+          recordBootstrapError(collection, topic, err, "resync");
           return;
         }
 
@@ -700,7 +747,11 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       const pending = l.unsub;
       l.unsub = null;
       listeners.delete(collection);
-      if (pending) void pending.then((u) => { try { u(); } catch { /* ignore */ } });
+      if (pending) {
+        pending
+          .then((u) => { try { u(); } catch { /* ignore */ } })
+          .catch(() => { /* stale clientId or already disconnected — ignore */ });
+      }
     }
   }
 

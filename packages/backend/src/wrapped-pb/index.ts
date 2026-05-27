@@ -112,11 +112,12 @@ export interface WpbMirrorIntegration {
 
 /** Kinds of internal events recorded for post-hoc debugging. */
 export type WpbEventKind =
-  | "mutation-push"    // wpb pushed a pending mutation to the queue
-  | "mutation-ack"     // server confirmed a mutation
-  | "mutation-error"   // server rejected a mutation
-  | "replay"           // replayPending re-fired a persisted mutation
-  | "retry-batch";     // retryErrored() began a sweep of queued failed writes
+  | "mutation-push"     // wpb pushed a pending mutation to the queue
+  | "mutation-ack"      // server confirmed a mutation
+  | "mutation-error"    // server rejected a mutation
+  | "replay"            // replayPending re-fired a persisted mutation
+  | "retry-batch"       // retryErrored() began a sweep of queued failed writes
+  | "bootstrap-error";  // mirror bootstrap fetch failed for a slice
 
 export interface WpbEvent {
   t: number; // ms since epoch
@@ -154,6 +155,13 @@ export interface WpbDebug {
   snapshot(): WpbSnapshot;
   /** Drop the in-memory ring buffer. Does not touch persisted mutations. */
   clear(): void;
+  /**
+   * Append an event to the ring buffer from outside wpb. PBMirror uses
+   * this to surface bootstrap failures so SyncDot / __wpbDebug see one
+   * unified feed instead of having to query a separate mirror surface.
+   * The timestamp is filled in automatically.
+   */
+  recordEvent(ev: Omit<WpbEvent, "t">): void;
 }
 
 /** Cap on the ring buffer — enough to cover a few minutes of activity, small
@@ -589,6 +597,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         };
       },
       clear: () => { debugRing.length = 0; },
+      recordEvent,
     },
     mirrorIntegration: {
       queue,
