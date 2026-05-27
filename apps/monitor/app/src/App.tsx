@@ -1,9 +1,11 @@
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import { ScrollRestoration } from "@kirkl/shared";
 import { Overview } from "./pages/Overview";
 
 export default function App() {
   return (
     <BrowserRouter>
+      <ScrollRestoration />
       <Layout />
     </BrowserRouter>
   );

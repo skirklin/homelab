@@ -252,7 +252,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     } | undefined;
     if (!store || typeof store.onChange !== "function") return;
     lastAuthRecordId = store.record?.id ?? null;
-    authChangeUnsub = store.onChange((token, record) => {
+    authChangeUnsub = store.onChange((_token, record) => {
       const nextId = record?.id ?? null;
       if (nextId === lastAuthRecordId) return;
       lastAuthRecordId = nextId;
