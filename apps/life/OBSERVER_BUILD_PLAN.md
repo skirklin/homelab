@@ -32,15 +32,14 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - New migration `infra/pocketbase/pb_migrations/YYYYMMDD_HHMMSS_claude_observations.js` adding the collection (see ROADMAP Phase 2 for the schema sketch — `timestamp, content, period, data_window_start, data_window_end, related_event_ids[]`).
 - New backend interface method(s) on a new `ObserverBackend` in `packages/backend/src/interfaces/`, plus PB impl in `packages/backend/src/pocketbase/`.
 - Wire through `BackendProvider`.
-- **Status:** dispatched 2026-05-27. Worktree `agent-a12b2f0c`. Awaiting critical review.
-- **Dispatch trigger:** first cron firing (or sooner if user explicitly asks).
+- **Status:** ✓ MERGED 2026-05-27 (merge commit `30569e5`). Worktree `agent-a12b2f0c` (commits `7ebbedb` + `22c6b0d`). Critically reviewed, top 3 should-fixes applied before merge (authz mirror entries, idempotency guard, period enum). Deferred: index on owner, max on content (Phase 0.5).
 
 #### P0-2. View-layer bundle module
 
 - New `services/api/src/lib/observer/bundle.ts`. Functions to assemble the cross-source narrative document from `life_events`, `cooking_log`, `task_events`, active `travel_trips`. Output is markdown prose (V4 + V6 from DATA_COLLECTION.md).
 - Unit tests in `services/api/src/lib/observer/bundle.test.ts` with fixture data covering: empty period (no events), text-heavy period (lots of journal text), trip-imminent period (active travel context).
 - **Dependencies:** none — can run in parallel with P0-1.
-- **Status:** dispatched 2026-05-27. Worktree `agent-a0fa66fa`. Awaiting critical review.
+- **Status:** ✓ MERGED 2026-05-27 (merge commit `10f05c6`). Worktree `agent-a0fa66fa` (commits `6f91a5d` + `a20a98b`). Critically reviewed, V4 per-day cross-source shape applied + top 3 technical should-fixes (timezone fallback to America/Los_Angeles, ISO yyyy-MM-dd day keys, batched lookups eliminating N+1) + V2 aggregation. Deferred: relatedEventIds field naming, silent fetcher error swallow, smell items (Phase 0.5).
 
 #### P0-3. `POST /api/observations/generate` endpoint
 
@@ -119,6 +118,22 @@ To be filled in by Phase 0.5's findings. Candidates from DATA_COLLECTION.md (in 
 - **A2** (themes collection) — if observations would have been sharper with a stated horizon to compare against
 - **A5** (timestamp precision) — if the observer is making false time-of-day claims
 
+### Phase 0.5 queue — deferred items from P0-1 + P0-2 reviews
+
+Logged here so tomorrow's tick (or later) can pick them up rather than letting them rot in review comments:
+
+**From P0-1 review:**
+- Add index on `claude_observations.owner` — observations are append-only and `listObservations` always filters by owner; full-table-scan as the collection grows
+- Add `max` to `content` field — currently no ceiling, runaway loop could stuff arbitrary blobs
+
+**From P0-2 review:**
+- Rename `relatedEventIds` to `relatedLifeEventIds` (or widen the field to cover cross-source IDs) — current name is misleading since only life_events are populated
+- Replace silent `try { ... } catch { return [] }` in fetchers with logged + surfaced errors — a PB 500 currently produces an "empty week" observation, the worst possible outcome
+- Stale `shopping_history` entry in `0026_authz_strings_source_of_truth.js` (drift from `lib/authz-rules.js` which dropped it post-retire) — invisible to the drift test today; worth a sweep next time someone's in that file
+
+**Test infra papercut surfaced today:**
+- `infra/test-env.sh` derives port `8091 + cksum(basename) % 1000` for worktrees, so a worktree whose basename hashes to offset 0 lands on 8091 — the same port the main-checkout test env claims by default. Effect: that worktree's PB becomes the "main" test PB for any other process talking to 8091, including drift tests that don't have `PB_URL`/`PB_TEST_URL` set. P0-1's authz-mirror test failed against main exactly because of this (worktree `abe77d3ae76ebb63f` is holding 8091 with a stale PB that lacks the new migration). Possible fixes: skip offset 0 in the worktree port derivation, or make `getPbTestUrl()` fail loudly when neither env var is set rather than silently falling back to 8091.
+
 ## Daily wakeup protocol (what the cron does)
 
 The cron fires every day at 6am PT. Fresh Claude session. Has access to the homelab repo, MCP tools, the schedule, and dispatch ability. The prompt runs the following protocol:
@@ -139,6 +154,8 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | Date | Action | Outcome |
 |---|---|---|
 | 2026-05-27 | Initial plan write (in conversation, not cron) | Plan doc created; cron set up; first dispatch will happen at 2026-05-28 06:00 PT firing |
+| 2026-05-27 | DISPATCH P0-1 + P0-2 (first firing, parallel) | P0-1 (agent-a12b2f0c): PB migration + ObserverBackend + BackendProvider wiring. P0-2 (agent-a0fa66fa): bundle.ts + 4 unit tests. Both awaiting critical review. |
+| 2026-05-27 | OOB tick (manual): critically-reviewed + addressed top should-fixes + MERGED P0-1 + P0-2 | P0-1 merge `30569e5` (added authz mirror entries, idempotency guard, period enum). P0-2 merge `10f05c6` (restructured to V4 per-day cross-source shape + tz fallback + ISO day keys + N+1 batched). Deferred items queued under Phase 1+. Test-infra papercut surfaced (worktree on port 8091 → main's drift test runs against stale PB). |
 | 2026-05-27 | DISPATCH P0-1 + P0-2 (first firing, parallel) | P0-1 (`worktree-agent-a12b2f0c`): PB migration + ObserverBackend + BackendProvider wiring, typecheck clean. P0-2 (`worktree-agent-a0fa66fa`): bundle.ts + 4 unit tests, typecheck clean. Both need critical review before merge. |
 
 ## Decision log
