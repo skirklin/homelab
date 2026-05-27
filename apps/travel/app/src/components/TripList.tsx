@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Input, Button, Select, Empty, Spin, Segmented, Space } from "antd";
 import {
   PlusOutlined,
@@ -347,14 +347,65 @@ type ViewMode = "table" | "timeline";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+const ALL_STATUSES: readonly (TripStatus | "all")[] = ["all", ...STATUS_ORDER];
+const VIEW_MODES: readonly ViewMode[] = ["table", "timeline"];
+
 export function TripList({ embedded: _embedded = false }: { embedded?: boolean }) {
   const { state } = useTravelContext();
   const navigate = useNavigate();
   const wpbDebug = useWpbDebug();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<TripStatus | "all">("all");
-  const [regionFilter, setRegionFilter] = useState<string>("all");
-  const [view, setView] = useState<ViewMode>("table");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL-backed filter/view state. Defaults (no param) read as "all" / "table"
+  // so a clean URL like /travel renders the unfiltered list. We only write a
+  // param when it differs from the default, keeping shareable URLs tidy.
+  const statusParam = searchParams.get("status");
+  const statusFilter: TripStatus | "all" =
+    statusParam && (ALL_STATUSES as readonly string[]).includes(statusParam)
+      ? (statusParam as TripStatus | "all")
+      : "all";
+  const regionFilter = searchParams.get("region") || "all";
+  const viewParam = searchParams.get("view");
+  const view: ViewMode =
+    viewParam && (VIEW_MODES as readonly string[]).includes(viewParam)
+      ? (viewParam as ViewMode)
+      : "table";
+
+  const updateParam = (key: string, value: string, defaultValue: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === defaultValue) next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
+
+  const setStatusFilter = (v: TripStatus | "all") => updateParam("status", v, "all");
+  const setRegionFilter = (v: string) => updateParam("region", v, "all");
+  const setView = (v: ViewMode) => updateParam("view", v, "table");
+
+  // Search: keep an immediate local copy so the input feels responsive, debounce
+  // the URL sync so we're not pushing a `?q=` mutation on every keystroke.
+  // Reading the URL-side `?q=` is what feeds the filter useMemo below; the local
+  // state only drives the <Input value=…>.
+  const urlSearch = searchParams.get("q") || "";
+  const [searchInput, setSearchInput] = useState(urlSearch);
+
+  // Adopt URL changes coming from outside the input (back/forward, deep link).
+  useEffect(() => {
+    setSearchInput(urlSearch);
+  }, [urlSearch]);
+
+  useEffect(() => {
+    if (searchInput === urlSearch) return;
+    const handle = setTimeout(() => {
+      updateParam("q", searchInput, "");
+    }, 250);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput, urlSearch]);
+
+  const search = urlSearch;
 
   // Trips currently in progress (today falls within their date range). Surfaced
   // as a banner at the top so the in-progress trip isn't buried in the list.
@@ -511,8 +562,8 @@ export function TripList({ embedded: _embedded = false }: { embedded?: boolean }
       </StatusBar>
 
       <Toolbar>
-        <Input placeholder="Search..." prefix={<SearchOutlined />} value={search}
-          onChange={(e) => setSearch(e.target.value)} allowClear size="small" style={{ maxWidth: 200 }} />
+        <Input placeholder="Search..." prefix={<SearchOutlined />} value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)} allowClear size="small" style={{ maxWidth: 200 }} />
         {regions.length > 1 && (
           <Select value={regionFilter} onChange={setRegionFilter} size="small" style={{ minWidth: 120 }}
             options={[{ label: "All regions", value: "all" }, ...regions.map((r) => ({ label: r, value: r }))]} />

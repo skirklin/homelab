@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
   Tag,
@@ -186,7 +186,7 @@ export function TripDetail() {
   const activeItin = useSelectedItinerary(itineraries);
 
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
-  const [activeTabState, setActiveTabState] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Auto-advance status by trip dates: Booked → Ongoing once start date hits,
   // Ongoing → Completed once end date passes. Only the natural forward path
@@ -395,8 +395,16 @@ export function TripDetail() {
           },
         ];
 
-        const activeTab = activeTabState ?? defaultTab;
-        const setActiveTab = setActiveTabState;
+        const validTabs = new Set(tabItems.map((t) => t.key));
+        const tabParam = searchParams.get("tab");
+        const activeTab = tabParam && validTabs.has(tabParam) ? tabParam : defaultTab;
+        const setActiveTab = (key: string) => {
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.set("tab", key);
+            return next;
+          }, { replace: true });
+        };
 
         return (
           <TwoColumn>
