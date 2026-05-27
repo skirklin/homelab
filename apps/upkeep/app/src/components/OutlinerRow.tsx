@@ -235,6 +235,10 @@ export function OutlinerRow({
     }
   }, [editing, handleSaveName, handleToggleComplete, handleDelete, onAddSibling, onIndent, onOutdent, onMoveUp, onMoveDown, task.id, task.name, task.parentId]);
 
+  // Native HTML5 drag-and-drop — desktop-only. Mobile browsers do not fire
+  // drag events from touch, so reparenting via DnD is inert on phones. If
+  // mobile reparenting matters, replace with a tap-action picker (see the
+  // shopping app's category sheet for the pattern).
   const handleDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", task.id);
     e.dataTransfer.effectAllowed = "move";
