@@ -18,6 +18,18 @@
     },
     "test": {
       "dependsOn": ["^build"]
+    },
+    "test:playwright": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": [
+        "PB_TEST_URL",
+        "PB_URL",
+        "TEST_PB_PORT",
+        "TEST_API_PORT",
+        "TEST_API_URL",
+        "CI"
+      ]
     }
   }
 }

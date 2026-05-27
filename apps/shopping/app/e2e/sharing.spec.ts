@@ -33,10 +33,13 @@ test.describe("List sharing", () => {
     // Close the modal
     await page.keyboard.press("Escape");
 
-    // Open a separate browser context for user B (clean session)
-    const context2 = await page.context().browser()!.newContext();
+    // Open a separate browser context for user B (clean session). Derive
+    // the dev-server URL from page1 so per-worktree vite ports work — the
+    // hardcoded :5173 broke once parallel-worktree port derivation landed.
+    const baseURL = new URL(page.url()).origin;
+    const context2 = await page.context().browser()!.newContext({ baseURL });
     const page2 = await context2.newPage();
-    await page2.goto("http://localhost:5173/?pick=true");
+    await page2.goto("/?pick=true");
     await signInAsUser2(page2);
     await expect(page2.getByText("My Lists")).toBeVisible({ timeout: 10000 });
 

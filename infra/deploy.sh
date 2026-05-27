@@ -158,6 +158,48 @@ elif [ "$PUSH_ONLY" = false ]; then
         exit 1
     fi
 
+    # Playwright suites need the test API container too (not just PB). Probe
+    # it now and bring the test env up if missing — `test-env.sh up` is
+    # idempotent so re-running it when PB is already healthy is cheap.
+    TEST_API_URL=$(infra/test-env.sh url --api)
+    echo "→ Ensuring test API at ${TEST_API_URL} is up (for Playwright)..."
+    if ! curl -fs --max-time 3 "${TEST_API_URL}/health" >/dev/null 2>&1; then
+        if ! infra/test-env.sh up; then
+            {
+                echo ""
+                echo "${RED}[deploy.sh] Test API failed to start. Playwright suite can't run.${NC}"
+                echo "${RED}  Run \`infra/test-env.sh up\` manually to see logs.${NC}"
+                echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
+                echo ""
+            } >&2
+            exit 1
+        fi
+        # Re-probe — `up` may have exited 0 with PB-only ready if api genuinely failed.
+        if ! curl -fs --max-time 3 "${TEST_API_URL}/health" >/dev/null 2>&1; then
+            {
+                echo ""
+                echo "${RED}[deploy.sh] Test API still not healthy at ${TEST_API_URL} after \`up\`.${NC}"
+                echo "${RED}  Check \`docker compose -f docker-compose.test.yml logs api\`.${NC}"
+                echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
+                echo ""
+            } >&2
+            exit 1
+        fi
+    fi
+
+    echo "→ Running \`pnpm test:playwright\`..."
+    if ! pnpm test:playwright; then
+        {
+            echo ""
+            echo "${RED}[deploy.sh] Pre-deploy gate failed: \`pnpm test:playwright\`.${NC}"
+            echo "${RED}  Fix the failing Playwright specs above before deploying.${NC}"
+            echo "${RED}  HTML report: apps/<app>/app/playwright-report/index.html${NC}"
+            echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
+            echo ""
+        } >&2
+        exit 1
+    fi
+
     echo "✓ Pre-deploy gate passed ($(elapsed $((SECONDS - GATE_START))))"
     echo ""
 fi
