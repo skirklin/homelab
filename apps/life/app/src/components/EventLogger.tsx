@@ -20,7 +20,7 @@
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import styled, { css } from "styled-components";
-import { Input, InputNumber, Button, Segmented } from "antd";
+import { Button } from "antd";
 import { PlusOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
 import type { LifeEntry, LifeEvent } from "@homelab/backend";
@@ -36,6 +36,7 @@ import {
   primaryEntryName,
 } from "../lib/format";
 import { EntriesPopover } from "./EntriesPopover";
+import { NumberFieldEditor, DurationFieldEditor, TextFieldEditor } from "./EntryFields";
 import { Hint } from "./Hint";
 
 interface EventLoggerProps {
@@ -199,6 +200,12 @@ function defaultDurationInputUnit(t: Trackable): "hours" | "minutes" {
   return (t.defaultValue ?? 0) >= 60 ? "hours" : "minutes";
 }
 
+/** Phone keyboard hint for the primary input of a trackable. */
+function inputModeFor(t: Trackable): "decimal" | "numeric" {
+  // mg / oz can be fractional (e.g. 2.5mg edibles); counts are integers.
+  return t.unit === "ct" || t.unit === "drinks" ? "numeric" : "decimal";
+}
+
 // ---------- Per-day filtering / aggregation ----------
 
 function startOfDay(d: Date): Date {
@@ -273,14 +280,11 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  // For duration trackables, `value` is held in the *input* unit (hours or
-  // minutes); converted to canonical minutes at submit time.
-  const initialInputValue =
-    trackable.unit === "min" && durationInputUnit === "hours" && trackable.defaultValue !== undefined
-      ? trackable.defaultValue / 60
-      : (trackable.defaultValue ?? null);
-  const [value, setValue] = useState<number | null>(initialInputValue);
-  const [inputUnit, setInputUnit] = useState<"hours" | "minutes">(durationInputUnit);
+  // `value` is always held in the trackable's canonical storage unit (minutes
+  // for durations, mg for doses, etc.) so submit is a no-op conversion. The
+  // shared DurationFieldEditor owns the hours/minutes display toggle.
+  const initialValue = trackable.defaultValue ?? null;
+  const [value, setValue] = useState<number | null>(initialValue);
   const [category, setCategory] = useState<string | undefined>(trackable.categories?.[0]);
   const [intensity, setIntensity] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
@@ -288,13 +292,12 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   // Reset form state on open so each log starts fresh.
   useEffect(() => {
     if (open) {
-      setValue(initialInputValue);
-      setInputUnit(durationInputUnit);
+      setValue(initialValue);
       setCategory(trackable.categories?.[0]);
       setIntensity(null);
       setNotes("");
     }
-  }, [open, trackable, initialInputValue, durationInputUnit]);
+  }, [open, trackable, initialValue]);
 
   const cancelEdit = useCallback(() => {
     setOpen(false);
@@ -340,13 +343,10 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
       message.warning("Enter a value");
       return;
     }
-    // Convert hours→minutes for duration trackables when the input unit is hours.
-    const storedValue =
-      trackable.unit === "min" && inputUnit === "hours"
-        ? Math.round(value * 60)
-        : value;
+    // `value` is already in canonical storage units (minutes for durations,
+    // mg for doses, etc.).
     const eventEntries: LifeEntry[] = [
-      { name: primaryName, type: "number", value: storedValue, unit: trackable.unit },
+      { name: primaryName, type: "number", value, unit: trackable.unit },
     ];
     if (intensity !== null) {
       eventEntries.push({ name: "intensity", type: "number", value: intensity, unit: "rating", scale: 5 });
@@ -357,7 +357,7 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     const labels: Record<string, string> = {};
     if (category) labels.category = category;
     writeEvent(eventEntries, Object.keys(labels).length > 0 ? labels : undefined);
-  }, [value, inputUnit, category, intensity, notes, trackable.unit, primaryName, writeEvent, message]);
+  }, [value, category, intensity, notes, trackable.unit, primaryName, writeEvent, message]);
 
   // Submit on Enter when in the form.
   const formRef = useRef<HTMLDivElement>(null);
@@ -454,7 +454,7 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
   }
 
   // Default mode: card collapsed → tap to open inline form.
-  const showHoursToggle = trackable.unit === "min";
+  const isDuration = trackable.unit === "min";
   return (
     <Card $size={size} $highlighted={dayEvents.length > 0}>
       <HeaderRow>
@@ -471,40 +471,31 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
 
       {open && (
         <FormRow ref={formRef}>
-          <InlineRow>
-            <FieldLabel style={{ minWidth: 60 }}>
-              {showHoursToggle ? "Duration" : trackable.unit}
-            </FieldLabel>
-            <InputNumber
-              value={value}
-              onChange={(v) => setValue(typeof v === "number" ? v : null)}
-              min={0}
-              step={showHoursToggle && inputUnit === "hours" ? 0.5 : 1}
-              autoFocus
-              style={{ flex: 1 }}
+          {/* Stacked layout: label on its own line, input + unit toggle on the
+              next, so the InputNumber claims the full card width on a phone.
+              The previous one-row layout squeezed the field to ~40px wide. */}
+          {isDuration ? (
+            <DurationFieldEditor
+              label="Duration"
+              minutes={value}
+              initialUnit={durationInputUnit}
+              onChange={setValue}
               size={size === "compact" ? "small" : "middle"}
+              autoFocus
             />
-            {showHoursToggle && (
-              <Segmented
-                size="small"
-                options={[
-                  { label: "h", value: "hours" },
-                  { label: "m", value: "minutes" },
-                ]}
-                value={inputUnit}
-                onChange={(v) => {
-                  const next = v as "hours" | "minutes";
-                  if (next === inputUnit) return;
-                  // Convert the current value when the unit flips so the user
-                  // doesn't have to retype.
-                  if (value !== null) {
-                    setValue(next === "hours" ? Math.round((value / 60) * 100) / 100 : Math.round(value * 60));
-                  }
-                  setInputUnit(next);
-                }}
-              />
-            )}
-          </InlineRow>
+          ) : (
+            <NumberFieldEditor
+              label={trackable.unit}
+              value={value}
+              onChange={setValue}
+              min={0}
+              step={1}
+              unit={trackable.unit === "ct" ? undefined : trackable.unit}
+              inputMode={inputModeFor(trackable)}
+              size={size === "compact" ? "small" : "middle"}
+              autoFocus
+            />
+          )}
 
           {trackable.categories && (
             <div>
@@ -533,15 +524,13 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
           )}
 
           {trackable.hasNotes && (
-            <div>
-              <FieldLabel>Notes</FieldLabel>
-              <Input.TextArea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                placeholder="Optional"
-              />
-            </div>
+            <TextFieldEditor
+              label="Notes"
+              value={notes}
+              onChange={setNotes}
+              placeholder="Optional"
+              rows={2}
+            />
           )}
 
           <Actions>

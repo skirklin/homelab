@@ -15,11 +15,12 @@
  */
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
-import { Popover, Button, TimePicker, InputNumber, Input, Switch, Segmented } from "antd";
+import { Popover, Button, TimePicker, Switch } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import type { LifeEvent, LifeEntry } from "@homelab/backend";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
+import { NumberFieldEditor, DurationFieldEditor, TextFieldEditor } from "./EntryFields";
 
 const EntryList = styled.div`
   display: flex;
@@ -219,39 +220,23 @@ interface EntryEditorProps {
   entry: LifeEntry;
 }
 
-// Duration trackables (unit "min") display as hours when the stored minutes
-// look like a value the user originally meant in hours: >= 60 and an exact
-// multiple of 5. Same heuristic as EventLogger's `defaultDurationInputUnit`,
-// adapted for an existing stored value rather than a manifest default.
-function pickDurationDisplayUnit(minutes: number): "hours" | "minutes" {
-  return minutes >= 60 && minutes % 5 === 0 ? "hours" : "minutes";
-}
-
 function EntryEditor({ event, index, entry }: EntryEditorProps) {
   // Local UI state mirrors the entry's value; resets to upstream on event
   // change (e.g. another tab edited it). Debounced commit for text/number;
   // bool commits immediately.
   //
   // Invariant: `local` for number entries is in canonical units (i.e. minutes
-  // for unit="min"). The duration toggle is display-only — the InputNumber's
-  // value is derived from `local` at render time, and edits are converted back
-  // to canonical before being written to `local` / committed.
+  // for unit="min"). The shared DurationFieldEditor owns the display-unit
+  // toggle internally and surfaces canonical minutes via its onChange.
   const [local, setLocal] = useState<LifeEntry["value"]>(entry.value);
   const [saving, setSaving] = useState(false);
-  const isDuration = entry.type === "number" && entry.unit === "min";
-  const [durationUnit, setDurationUnit] = useState<"hours" | "minutes">(() =>
-    isDuration ? pickDurationDisplayUnit(entry.value as number) : "minutes",
-  );
   // Track upstream value so we know what to revert to on failure.
   const upstreamRef = useRef<LifeEntry["value"]>(entry.value);
 
   useEffect(() => {
     upstreamRef.current = entry.value;
     setLocal(entry.value);
-    if (isDuration) {
-      setDurationUnit(pickDurationDisplayUnit(entry.value as number));
-    }
-  }, [entry.value, isDuration]);
+  }, [entry.value]);
 
   const life = useLifeBackend();
   const { message } = useFeedback();
@@ -285,6 +270,13 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
       void commit(next);
     }, DEBOUNCE_MS);
   };
+  const flushPending = () => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+      void commit(local);
+    }
+  };
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -309,83 +301,42 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
   }
 
   if (entry.type === "number") {
+    const isDuration = entry.unit === "min";
     if (isDuration) {
-      // Stored canonical minutes; display in `durationUnit`.
-      const storedMinutes = local as number;
-      const displayed =
-        durationUnit === "hours"
-          ? Math.round((storedMinutes / 60) * 100) / 100
-          : storedMinutes;
       return (
         <ValueLine>
           <EntryName>{entry.name}</EntryName>
-          <InputNumber
-            size="small"
-            value={displayed}
-            min={0}
-            step={durationUnit === "hours" ? 0.5 : 1}
-            // controls={false}: the up/down arrows eat ~28px of the 80px field
-            // on mobile, leaving no room to render digits. Mobile users tap
-            // and type, not the tiny arrows.
-            controls={false}
-            inputMode="decimal"
-            onChange={(v) => {
-              if (typeof v !== "number") return;
-              const minutes =
-                durationUnit === "hours" ? Math.round(v * 60) : v;
+          <DurationFieldEditor
+            label=""
+            minutes={local as number}
+            onChange={(minutes) => {
+              if (minutes === null) return;
               setLocal(minutes);
               scheduleCommit(minutes);
             }}
-            onBlur={() => {
-              // Flush any pending debounce immediately on blur.
-              if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-                debounceRef.current = null;
-                void commit(local);
-              }
-            }}
-            style={{ width: 72 }}
+            onBlur={flushPending}
+            saving={saving}
           />
-          <Segmented
-            size="small"
-            options={[
-              { label: "min", value: "minutes" },
-              { label: "hr", value: "hours" },
-            ]}
-            value={durationUnit}
-            onChange={(v) => setDurationUnit(v as "hours" | "minutes")}
-          />
-          {saving && <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>…</span>}
         </ValueLine>
       );
     }
     return (
       <ValueLine>
         <EntryName>{entry.name}</EntryName>
-        <InputNumber
-          size="small"
+        <NumberFieldEditor
+          label=""
           value={local as number}
           min={entry.unit === "rating" ? 1 : 0}
           max={entry.unit === "rating" ? entry.scale ?? 5 : undefined}
-          controls={false}
-          inputMode="numeric"
+          unit={entry.unit}
           onChange={(v) => {
-            if (typeof v !== "number") return;
+            if (v === null) return;
             setLocal(v);
             scheduleCommit(v);
           }}
-          onBlur={() => {
-            // Flush any pending debounce immediately on blur.
-            if (debounceRef.current) {
-              clearTimeout(debounceRef.current);
-              debounceRef.current = null;
-              void commit(local);
-            }
-          }}
-          style={{ width: 64 }}
+          onBlur={flushPending}
+          saving={saving}
         />
-        <EntryName style={{ minWidth: 0 }}>{entry.unit}</EntryName>
-        {saving && <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>…</span>}
       </ValueLine>
     );
   }
@@ -394,24 +345,16 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
   return (
     <ValueLine style={{ width: "100%" }}>
       <EntryName>{entry.name}</EntryName>
-      <Input
-        size="small"
+      <TextFieldEditor
+        label=""
         value={local as string}
-        onChange={(e) => {
-          const v = e.target.value;
+        onChange={(v) => {
           setLocal(v);
           scheduleCommit(v);
         }}
-        onBlur={() => {
-          if (debounceRef.current) {
-            clearTimeout(debounceRef.current);
-            debounceRef.current = null;
-            void commit(local);
-          }
-        }}
-        style={{ flex: 1 }}
+        onBlur={flushPending}
+        saving={saving}
       />
-      {saving && <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>…</span>}
     </ValueLine>
   );
 }
