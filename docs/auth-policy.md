@@ -108,7 +108,6 @@ All of these have an `owners` field OR a parent-pointer to a row that does. List
 | `recipe_events` (cooking log) | `box` → `recipe_boxes` | `userOwnsRecipeBox` via box id |
 | `shopping_lists` | self (`owners`) | `userOwnsShoppingList` |
 | `shopping_items` | `list` → `shopping_lists` | `userOwnsShoppingList` via list id |
-| `shopping_history` | `list` → `shopping_lists` | `userOwnsShoppingList` via list id |
 | `shopping_trips` | `list` → `shopping_lists` | `userOwnsShoppingList` via list id |
 | `task_lists` | self (`owners`) | `userOwnsTaskList` |
 | `tasks` | `list` → `task_lists` | `userOwnsTaskList` via list id |

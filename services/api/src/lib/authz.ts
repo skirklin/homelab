@@ -164,7 +164,7 @@ export async function userOwnsLifeLog(
  * (services/api/src/middleware/auth.ts); that client ignores PB collection
  * rules entirely, so the route layer is the only ownership gate on this
  * surface for write paths that hit shopping_lists or list-scoped child
- * collections (shopping_items, shopping_history, shopping_trips).
+ * collections (shopping_items, shopping_trips).
  *
  * Mirrors `PB_RULES.shopping_lists.updateRule`.
  */

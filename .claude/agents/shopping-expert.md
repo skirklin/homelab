@@ -18,8 +18,8 @@ You are the shopping app expert. The app is a thin React frontend over `Shopping
 ## Grounding before action
 
 1. Read `packages/backend/src/{pocketbase,supabase}/shopping.ts` — same `ShoppingBackend` interface.
-2. Read `apps/shopping/app/src/shopping-context.tsx` — reducer is plain (`SET_ITEM`/`REMOVE_ITEM`/`CLEAR_ITEMS`/`SET_HISTORY`/`SET_TRIPS`/`SET_LOADING`). Old `SyncStatus` machinery was removed; don't re-add it.
-3. Shared `SyncDot` (`packages/ui/src/sync-status.tsx`) is mounted in `Header.tsx` scoped to `["shopping_lists","shopping_items","shopping_history","shopping_trips"]`. `BackendProvider` mounts the global `SyncStatusBanner` and exposes `useWpbDebug()`.
+2. Read `apps/shopping/app/src/shopping-context.tsx` — reducer is plain (`SET_ITEM`/`REMOVE_ITEM`/`CLEAR_ITEMS`/`SET_TRIPS`/`SET_LOADING`). Old `SyncStatus` machinery was removed; don't re-add it. (`shopping_history` was retired May 2026 — suggestions derive from `shopping_trips` now.)
+3. Shared `SyncDot` (`packages/ui/src/sync-status.tsx`) is mounted in `Header.tsx` scoped to `["shopping_lists","shopping_items","shopping_trips"]`. `BackendProvider` mounts the global `SyncStatusBanner` and exposes `useWpbDebug()`.
 4. On-device debug path: tap the dot → details panel → Copy. DevTools handle: `window.__wpbDebug`.
 
 ## Core responsibilities

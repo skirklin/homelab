@@ -36,7 +36,6 @@ const allCollections = [
   "recipes",
   "recipe_boxes",
   "shopping_items",
-  "shopping_history",
   "shopping_trips",
   "shopping_lists",
   "life_events",
@@ -57,7 +56,7 @@ function matchesPrefix(col: string, prefix: string): boolean {
   // Domain → exact collections that belong to this domain
   const domainMap: Record<string, string[]> = {
     recipes: ["recipes", "recipe_boxes", "recipe_events"],
-    shopping: ["shopping_lists", "shopping_items", "shopping_history", "shopping_trips"],
+    shopping: ["shopping_lists", "shopping_items", "shopping_trips"],
     life: ["life_logs", "life_events"],
     tasks: ["tasks", "task_lists", "task_events"],
     upkeep: ["tasks", "task_lists", "task_events"],

@@ -1,12 +1,21 @@
 /**
- * Migration script to parse grocery history entries into ingredient-only using Claude.
- * This ensures autocomplete and category lookup work correctly with the new format.
+ * HISTORICAL — kept for forensic reference, not part of the steady-state
+ * deploy path. The `shopping_history` PocketBase collection this script
+ * wrote into was retired in May 2026 (suggestions now derive from
+ * `shopping_trips`) and dropped by the
+ * 20260527_*_drop_shopping_history.js migration. The Firebase source it
+ * read from was retired even earlier with the PB cutover. The script
+ * will fail at runtime — leaving it in `historical/` for the record.
  *
- * Prerequisites:
+ * Original purpose: parse grocery history entries into ingredient-only
+ * using Claude so autocomplete + category lookup worked with the new
+ * format.
+ *
+ * Prerequisites (historical):
  *   npm install @anthropic-ai/sdk
  *   export ANTHROPIC_API_KEY=your-key
  *
- * Run with: npx tsx scripts/migrate-grocery-history.ts [--dry-run] [--list-id=xxx]
+ * Run with: npx tsx services/scripts/historical/migrate-grocery-history.ts [--dry-run] [--list-id=xxx]
  */
 
 import * as admin from "firebase-admin";

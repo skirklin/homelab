@@ -15,7 +15,6 @@ export interface CollectionRules {
 export type UserOwnedCollection =
   | "shopping_lists"
   | "shopping_items"
-  | "shopping_history"
   | "shopping_trips"
   | "recipe_boxes"
   | "recipes"

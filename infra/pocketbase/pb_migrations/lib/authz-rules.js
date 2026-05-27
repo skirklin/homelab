@@ -95,13 +95,9 @@ var PB_RULES = Object.freeze({
     updateRule: childRule("list"),
     deleteRule: childRule("list"),
   },
-  shopping_history: {
-    listRule: childRule("list"),
-    viewRule: childRule("list"),
-    createRule: childRule("list"),
-    updateRule: childRule("list"),
-    deleteRule: childRule("list"),
-  },
+  // shopping_history retired May 2026 — suggestions now derive from
+  // shopping_trips. The drop migration is
+  // 20260527_153805_drop_shopping_history.js.
   shopping_trips: {
     listRule: childRule("list"),
     viewRule: childRule("list"),

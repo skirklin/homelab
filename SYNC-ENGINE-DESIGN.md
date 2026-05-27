@@ -110,7 +110,7 @@ a bounded-storage commitment; tunable.
 ## PocketBase hooks
 
 For every user-facing collection (currently 14: shopping_lists,
-shopping_items, shopping_history, shopping_trips, recipe_boxes, recipes,
+shopping_items, shopping_trips, recipe_boxes, recipes,
 recipe_events, life_logs, life_events, task_lists, tasks, task_events,
 travel_trips, travel_activities, travel_itineraries — auth/system
 collections excluded), wire an `OnRecordAfter{Create,Update,Delete}` hook
