@@ -74,6 +74,7 @@ type InvestmentsRange = '1Y' | '3Y' | '5Y' | 'ALL'
 
 const DEFAULT_VIEW: InvestmentsView = 'institution'
 const DEFAULT_RANGE: InvestmentsRange = '3Y'
+const RANGE_VALUES: InvestmentsRange[] = ['1Y', '3Y', '5Y', 'ALL']
 
 export function Investments() {
   const [accounts, setAccounts] = useState<AccountWithPerf[]>([])
@@ -82,9 +83,13 @@ export function Investments() {
 
   const view: InvestmentsView =
     searchParams.get('view') === 'type' ? 'type' : DEFAULT_VIEW
-  const rawRange = searchParams.get('range')
-  const timeRange: InvestmentsRange =
-    rawRange === '1Y' || rawRange === '5Y' || rawRange === 'ALL' ? rawRange : DEFAULT_RANGE
+  // Param name is page-scoped (invRange) so cross-page navigation between
+  // Investments and AccountDetail doesn't silently lose a range chosen on
+  // the other page — the two pages no longer share a key.
+  const rawRange = searchParams.get('invRange')
+  const timeRange: InvestmentsRange = RANGE_VALUES.includes(rawRange as InvestmentsRange)
+    ? (rawRange as InvestmentsRange)
+    : DEFAULT_RANGE
 
   const setView = useCallback((next: InvestmentsView) => {
     setSearchParams((prev) => {
@@ -98,8 +103,8 @@ export function Investments() {
   const setTimeRange = useCallback((next: InvestmentsRange) => {
     setSearchParams((prev) => {
       const params = new URLSearchParams(prev)
-      if (next === DEFAULT_RANGE) params.delete('range')
-      else params.set('range', next)
+      if (next === DEFAULT_RANGE) params.delete('invRange')
+      else params.set('invRange', next)
       return params
     }, { replace: true })
   }, [setSearchParams])

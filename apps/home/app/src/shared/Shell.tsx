@@ -156,13 +156,22 @@ export function Shell() {
 
   /**
    * Navigate to a module, restoring the last visited path within it.
-   * - Re-clicking the already-active module is a no-op (prevents history
-   *   pollution from repeated nav-bar taps).
+   * - Tapping the active tab from a deep route in that module (e.g. tapping
+   *   Shopping while on `/shopping/x/settings`) replaces history with the
+   *   module root — the iOS-native "tap active tab → return to root"
+   *   affordance.
+   * - Tapping the active tab when already AT the module root is a true no-op
+   *   (no history pollution from repeated taps).
    * - Switching modules pushes a new entry so browser-back returns to the
    *   prior module's deep route, matching expected web behavior.
    */
   const goTo = (basePath: string) => {
-    if (isActive(basePath)) return;
+    if (isActive(basePath)) {
+      if (location.pathname !== basePath) {
+        navigate(basePath, { replace: true });
+      }
+      return;
+    }
     const last = localStorage.getItem(`home:lastPath:${basePath}`);
     navigate(last && last !== basePath ? last : basePath);
   };
@@ -213,7 +222,10 @@ export function Shell() {
           </NavButton>
           <NavButton
             $active={isActive("/timeline")}
-            onClick={() => { if (!isActive("/timeline")) navigate("/timeline"); }}
+            onClick={() => {
+              if (!isActive("/timeline")) navigate("/timeline");
+              else if (location.pathname !== "/timeline") navigate("/timeline", { replace: true });
+            }}
           >
             <NavIcon $active={isActive("/timeline")}><HistoryOutlined /></NavIcon>
             <span className="nav-label">Timeline</span>
@@ -221,7 +233,10 @@ export function Shell() {
         </Nav>
         <HeaderActions>
           <Tooltip title="Settings">
-            <IconButton onClick={() => { if (!isActive("/settings")) navigate("/settings"); }}>
+            <IconButton onClick={() => {
+              if (!isActive("/settings")) navigate("/settings");
+              else if (location.pathname !== "/settings") navigate("/settings", { replace: true });
+            }}>
               <SettingOutlined />
             </IconButton>
           </Tooltip>

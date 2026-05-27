@@ -193,6 +193,11 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
 
   const setStepParam = useCallback(
     (next: number) => {
+      // Step advance is a drilldown — push so browser-back unwinds step by
+      // step instead of exiting the wizard entirely. Stepping back to 0
+      // (the param-strip case) replaces so the cleaned URL doesn't leave a
+      // duplicate history entry.
+      const replace = next <= 0;
       setSearchParams(
         (prev) => {
           const params = new URLSearchParams(prev);
@@ -204,7 +209,7 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
           }
           return params;
         },
-        { replace: true },
+        replace ? { replace: true } : undefined,
       );
     },
     [setSearchParams],

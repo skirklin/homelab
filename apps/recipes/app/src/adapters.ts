@@ -8,7 +8,13 @@ import type { Recipe as BackendRecipe, RecipeBox, RecipeData } from "@homelab/ba
 import type { RecipesUser } from "@homelab/backend";
 import { type PlainRecipe, type PlainBox, type PlainUser, getRecipeData } from "./storage";
 import { EnrichmentStatus, Visibility } from "./types";
-import { CURRENT_UPDATE_VERSION } from "./Modals/WhatsNew";
+
+// Newly-onboarded users default to the latest update version so the
+// CookingMode "new feature" popover (the only remaining consumer of this
+// field) doesn't fire for users who never saw the prior WhatsNew modal.
+// Bump in lockstep with COOKING_MODE_VERSION in Header/CookingMode.tsx when
+// a new "what's new" hint is added.
+const CURRENT_UPDATE_VERSION = 2;
 
 export function recipeFromBackend(r: BackendRecipe): PlainRecipe {
   const creator = r.creator || r.owners?.[0] || "";

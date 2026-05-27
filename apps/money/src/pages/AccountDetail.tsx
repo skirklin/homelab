@@ -34,17 +34,19 @@ export default function AccountDetail() {
   const [updateDate, setUpdateDate] = useState('')
   const [updating, setUpdating] = useState(false)
 
-  // Time range (URL-backed so refresh + share preserves it)
+  // Time range (URL-backed so refresh + share preserves it). Param is
+  // page-scoped (acctRange) so navigating to/from Investments — which uses
+  // its own ?invRange= — can't silently overwrite this page's selection.
   const [searchParams, setSearchParams] = useSearchParams()
-  const rawRange = searchParams.get('range')
+  const rawRange = searchParams.get('acctRange')
   const range: TimeRange = RANGE_VALUES.includes(rawRange as TimeRange)
     ? (rawRange as TimeRange)
     : DEFAULT_RANGE
   const setRange = useCallback((next: TimeRange) => {
     setSearchParams((prev) => {
       const params = new URLSearchParams(prev)
-      if (next === DEFAULT_RANGE) params.delete('range')
-      else params.set('range', next)
+      if (next === DEFAULT_RANGE) params.delete('acctRange')
+      else params.set('acctRange', next)
       return params
     }, { replace: true })
   }, [setSearchParams])

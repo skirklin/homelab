@@ -58,9 +58,11 @@ function getHomeUrl(embedded: boolean): string {
   return embedded ? '/recipes' : '/';
 }
 
-// Route-only path segments that are logical containers, not navigable destinations.
-// Filtered out of the breadcrumb chain so /boxes/:boxId/recipes/:recipeId renders
-// as "Recipes / <box> / <recipe>" rather than "Recipes / boxes / <box> / recipes / <recipe>".
+// Route-only path segments that are logical containers, not navigable destinations
+// when they appear mid-path. Filtered out of the breadcrumb chain so
+// /boxes/:boxId/recipes/:recipeId renders as "Recipes / <box> / <recipe>" rather
+// than "Recipes / boxes / <box> / recipes / <recipe>". The TERMINAL segment is
+// always preserved — /recipes/boxes (all-boxes view) is a real destination.
 const ROUTE_ONLY_SEGMENTS = new Set(['boxes', 'recipes']);
 
 function FullBreadcrumbs() {
@@ -80,7 +82,7 @@ function FullBreadcrumbs() {
     },
     ...contentParts
       .map((part, index) => ({ part, index }))
-      .filter(({ part }) => !ROUTE_ONLY_SEGMENTS.has(part))
+      .filter(({ part, index }) => index === contentParts.length - 1 || !ROUTE_ONLY_SEGMENTS.has(part))
       .map(({ part, index }) => {
         const url = buildUrl(contentParts, index, embedded);
         return {
@@ -104,7 +106,7 @@ function CollapsedBreadcrumbs() {
 
   const menuItems = contentParts
     .map((part, index) => ({ part, index }))
-    .filter(({ part }) => !ROUTE_ONLY_SEGMENTS.has(part))
+    .filter(({ part, index }) => index === contentParts.length - 1 || !ROUTE_ONLY_SEGMENTS.has(part))
     .map(({ part, index }) => {
       const url = buildUrl(contentParts, index, embedded);
       return {

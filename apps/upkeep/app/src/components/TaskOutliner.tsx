@@ -74,24 +74,29 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   const upkeep = useUpkeepBackend();
 
   // focusedId + selectedId live in the URL so refresh/share-link round-trip
-  // the view. focusedId pushes history (zooming into a subtree is a meaningful
-  // navigation — back un-focuses). selectedId is a fast-changing detail-pane
-  // highlight; replace.
+  // the view. Both replace history — row-clicks and new-task creation fire
+  // constantly, and the original "zoom into subtree pushes a history entry"
+  // semantics turned browser-back into a one-row rewinder. A future explicit
+  // zoom action can push by calling setSearchParams without { replace } at
+  // that call site.
   const [searchParams, setSearchParams] = useSearchParams();
-  const focusedId = searchParams.get("focus");
+  const rawFocusedId = searchParams.get("focus");
   const selectedId = searchParams.get("select");
 
   const setFocusedId = useCallback(
     (next: string | null) => {
-      setSearchParams((prev) => {
-        const params = new URLSearchParams(prev);
-        if (next) {
-          params.set("focus", next);
-        } else {
-          params.delete("focus");
-        }
-        return params;
-      });
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next) {
+            params.set("focus", next);
+          } else {
+            params.delete("focus");
+          }
+          return params;
+        },
+        { replace: true },
+      );
     },
     [setSearchParams],
   );
@@ -128,6 +133,13 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   const tree = getTaskTree(state);
   const allTasks = getTasksFromState(state);
   const selectedTask = selectedId ? allTasks.find((t) => t.id === selectedId) : null;
+
+  // Drop stale/share-link ?focus= values that don't match any visible task —
+  // otherwise the row would render with a stuck focus border on no row.
+  const focusedId = useMemo(
+    () => (rawFocusedId && allTasks.some((t) => t.id === rawFocusedId) ? rawFocusedId : null),
+    [rawFocusedId, allTasks],
+  );
 
   const handleAddRoot = useCallback(async () => {
     if (!listId) return;

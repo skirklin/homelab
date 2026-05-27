@@ -399,9 +399,13 @@ export function TripDetail() {
         const tabParam = searchParams.get("tab");
         const activeTab = tabParam && validTabs.has(tabParam) ? tabParam : defaultTab;
         const setActiveTab = (key: string) => {
+          // Don't serialize the default — keeps the URL clean for the initial
+          // landing case and matches the pattern Bundle 5 standardized on
+          // (see TripList.tsx's updateParam helper).
           setSearchParams((prev) => {
             const next = new URLSearchParams(prev);
-            next.set("tab", key);
+            if (key === defaultTab) next.delete("tab");
+            else next.set("tab", key);
             return next;
           }, { replace: true });
         };
