@@ -687,10 +687,17 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     getBackend().authStore.clear();
   };
 
+  // Carry the current `?date=YYYY-MM-DD` (if any) through to Journal/Insights
+  // so a tab switch doesn't lose the filter context. Relative `navigate()`
+  // drops the existing query string, so build a suffix manually.
+  const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
+  const journalTarget = `journal${dateQuerySuffix}`;
+  const insightsTarget = `insights${dateQuerySuffix}`;
+
   // Menu items - always include Insights, Display, and Export for mobile access
   const menuItems = [
-    { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("journal") },
-    { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("insights") },
+    { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate(journalTarget) },
+    { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate(insightsTarget) },
     { key: "display", icon: <ControlOutlined />, label: "Display Settings", onClick: () => setShowSettings(true) },
     { type: "divider" as const },
     { key: "export-csv", icon: <DownloadOutlined />, label: "Export CSV", onClick: () => handleExport("csv") },
@@ -705,13 +712,13 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     <>
       <Button
         icon={<BookOutlined />}
-        onClick={() => navigate("journal")}
+        onClick={() => navigate(journalTarget)}
       >
         Journal
       </Button>
       <Button
         icon={<LineChartOutlined />}
-        onClick={() => navigate("insights")}
+        onClick={() => navigate(insightsTarget)}
       >
         Insights
       </Button>

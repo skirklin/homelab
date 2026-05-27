@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import styled from "styled-components";
 import { Select, Empty, Tabs, Button } from "antd";
 import { LeftOutlined, RightOutlined, ArrowLeftOutlined } from "@ant-design/icons";
@@ -273,8 +273,17 @@ function getWeeklyData(entries: LogEntry[], trackable: Trackable): { week: strin
   return data;
 }
 
-function CalendarHeatMap({ entries, trackable }: { entries: LogEntry[]; trackable: Trackable }) {
-  const [viewDate, setViewDate] = useState(new Date());
+function CalendarHeatMap({
+  entries,
+  trackable,
+  viewDate,
+  onMonthChange,
+}: {
+  entries: LogEntry[];
+  trackable: Trackable;
+  viewDate: Date;
+  onMonthChange: (date: Date) => void;
+}) {
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
@@ -287,8 +296,8 @@ function CalendarHeatMap({ entries, trackable }: { entries: LogEntry[]; trackabl
 
   const maxCount = Math.max(...monthData.filter((d) => d.count >= 0).map((d) => d.count), 1);
 
-  const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
-  const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
+  const prevMonth = () => onMonthChange(new Date(year, month - 1, 1));
+  const nextMonth = () => onMonthChange(new Date(year, month + 1, 1));
   const monthName = viewDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   const validDays = monthData.filter((d) => d.count >= 0);
@@ -431,10 +440,88 @@ function WeeklyChart({ entries, trackable }: { entries: LogEntry[]; trackable: T
   );
 }
 
+// `?month=YYYY-MM` → first day of that month in local time. Invalid input
+// falls back to "this month" so URLs from elsewhere don't crash the view.
+const MONTH_RE = /^(\d{4})-(\d{2})$/;
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+}
+function parseMonthParam(raw: string | null): Date {
+  if (!raw) return startOfMonth(new Date());
+  const m = MONTH_RE.exec(raw);
+  if (!m) return startOfMonth(new Date());
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (year < 2000 || year > 9999 || month < 1 || month > 12) {
+    return startOfMonth(new Date());
+  }
+  return new Date(year, month - 1, 1, 0, 0, 0, 0);
+}
+function formatMonthParam(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+function isCurrentMonth(d: Date): boolean {
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+}
+
 export function Visualizations() {
   const { state } = useLifeContext();
   const navigate = useNavigate();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Both the selected trackable and the calendar month live in the URL so
+  // refresh + share-link round-trip the exact view. Defaults (first trackable,
+  // current month) aren't written to keep the URL clean.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const trackableParam = searchParams.get("trackable");
+  const selectedId = trackableParam && TRACKABLES.some((t) => t.id === trackableParam)
+    ? trackableParam
+    : null;
+  const viewDate = useMemo(() => parseMonthParam(searchParams.get("month")), [searchParams]);
+
+  const setSelectedId = useCallback(
+    (next: string) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          // First trackable is the default; don't write it.
+          if (!next || next === TRACKABLES[0]?.id) {
+            params.delete("trackable");
+          } else {
+            params.set("trackable", next);
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const setViewDate = useCallback(
+    (next: Date) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (isCurrentMonth(next)) {
+            params.delete("month");
+          } else {
+            params.set("month", formatMonthParam(next));
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // Preserve any inherited `?date=YYYY-MM-DD` when navigating back to the
+  // dashboard — mirrors Journal's behavior so a tab switch doesn't drop the
+  // per-day context.
+  const dateParam = searchParams.get("date");
+  const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
 
   // Unified shape — read entries directly. No more normalization adapter; the
   // 20260522 migration rewrote every legacy row in place.
@@ -447,7 +534,7 @@ export function Visualizations() {
     return (
       <Container>
         <Header>
-          <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("..")} />
+          <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
           <Title>Insights</Title>
         </Header>
         <Empty description="No trackables configured" />
@@ -474,14 +561,21 @@ export function Visualizations() {
     {
       key: "calendar",
       label: "Calendar",
-      children: <CalendarHeatMap entries={allEntries} trackable={trackable} />,
+      children: (
+        <CalendarHeatMap
+          entries={allEntries}
+          trackable={trackable}
+          viewDate={viewDate}
+          onMonthChange={setViewDate}
+        />
+      ),
     },
   ];
 
   return (
     <Container>
       <Header>
-        <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate("..")} />
+        <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
         <Title>Insights</Title>
         <TrackableSelect
           value={currentId}

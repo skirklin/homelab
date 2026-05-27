@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import styled from "styled-components";
 import { Input, Empty } from "antd";
 import {
@@ -177,6 +177,11 @@ const RatingPill = styled.span`
 
 type FilterKey = "all" | Session["id"] | "journal";
 
+const FILTER_VALUES: readonly FilterKey[] = ["all", "morning", "evening", "weekly_review", "journal"] as const;
+function parseFilter(raw: string | null): FilterKey {
+  return raw && (FILTER_VALUES as readonly string[]).includes(raw) ? (raw as FilterKey) : "all";
+}
+
 function sessionForEntry(entry: LogEntry): Session | undefined {
   return SESSIONS.find((s) => sessionSubjectId(s.id) === entry.subjectId);
 }
@@ -244,8 +249,47 @@ export function Journal() {
   const logId = state.log?.id ?? null;
   useEntriesSubscription(logId);
 
-  const [filter, setFilter] = useState<FilterKey>("all");
-  const [search, setSearch] = useState("");
+  // Filter chips + search live in the URL so a refresh or shared link
+  // (`/journal?filter=morning&q=foo`) round-trips. Defaults aren't written.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter = parseFilter(searchParams.get("filter"));
+  const search = searchParams.get("q") ?? "";
+
+  const setFilter = useCallback(
+    (next: FilterKey) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "all") {
+            params.delete("filter");
+          } else {
+            params.set("filter", next);
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const setSearch = useCallback(
+    (next: string) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "") {
+            params.delete("q");
+          } else {
+            params.set("q", next);
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // All journal-shaped entries (sessions + freeform journal), newest first.
   const journalEntries = useMemo(() => {
@@ -316,12 +360,18 @@ export function Journal() {
     return result;
   }, [journalEntries]);
 
+  // Preserve `?date=YYYY-MM-DD` when crossing between dashboard / journal /
+  // insights so the per-day context survives a tab switch. Only `date` is
+  // shared — filter/q stay local to Journal.
+  const dateParam = searchParams.get("date");
+  const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
+
   const menuItems = [
     {
       key: "insights",
       icon: <LineChartOutlined />,
       label: "Insights",
-      onClick: () => navigate("/insights"),
+      onClick: () => navigate(`/insights${dateQuerySuffix}`),
     },
   ];
 
@@ -329,7 +379,7 @@ export function Journal() {
     <>
       <AppHeader
         title="Journal"
-        onBack={() => navigate("/")}
+        onBack={() => navigate(`/${dateQuerySuffix}`)}
         menuItems={menuItems}
       />
       <PageContainer>
@@ -386,7 +436,7 @@ export function Journal() {
               prefix={<SearchOutlined />}
               placeholder="Search your reflections…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => setSearch(e.target.value ?? "")}
             />
           </SearchWrap>
 

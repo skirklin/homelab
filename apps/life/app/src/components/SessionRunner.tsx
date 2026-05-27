@@ -1,5 +1,5 @@
-import { useState, useMemo, type ChangeEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect, useCallback, type ChangeEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Input, InputNumber, Checkbox } from "antd";
 import { LeftOutlined, CheckOutlined } from "@ant-design/icons";
@@ -8,6 +8,51 @@ import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { getSession, sessionSubjectId, type Session, type SessionPrompt } from "../manifest";
 import { MorningUpkeepHeader } from "./MorningUpkeepHeader";
+
+// sessionStorage holds the freeform answer text — they can be large and/or
+// sensitive, so they don't go in the URL. The step index is in the URL
+// (?step=N) so refresh + share-this-link both round-trip the wizard position.
+// Key shape: `life:wizard:<sessionId>` — one slot per session kind. Starting
+// the same session a second time replaces the previous draft, which is what
+// you'd want ("I started morning, walked away, came back" recovers; "I did
+// morning yesterday and started it again today" doesn't drag in yesterday's
+// half-typed answers because the previous submit cleared the slot).
+const ANSWERS_STORAGE_PREFIX = "life:wizard:";
+
+function answersStorageKey(sessionId: Session["id"]): string {
+  return `${ANSWERS_STORAGE_PREFIX}${sessionId}`;
+}
+
+function loadAnswers(sessionId: Session["id"]): Record<string, unknown> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.sessionStorage.getItem(answersStorageKey(sessionId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAnswers(sessionId: Session["id"], answers: Record<string, unknown>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(answersStorageKey(sessionId), JSON.stringify(answers));
+  } catch {
+    // sessionStorage may be unavailable (private browsing quota, etc.) —
+    // not worth surfacing; in-memory state still works for the current tab.
+  }
+}
+
+function clearAnswers(sessionId: Session["id"]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(answersStorageKey(sessionId));
+  } catch {
+    // ignore — see saveAnswers.
+  }
+}
 
 /**
  * Convert a session's accumulated answers (prompt id → value) into the
@@ -116,9 +161,54 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
   const { state } = useLifeContext();
   const life = useLifeBackend();
   const { message } = useFeedback();
-  const [stepIndex, setStepIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  // Step index lives in the URL (?step=N). Refresh and share-this-link both
+  // round-trip the wizard position; refresh mid-wizard no longer warps back
+  // to step 0.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const promptCount = session?.prompts.length ?? 0;
+  const stepIndex = useMemo(() => {
+    const raw = searchParams.get("step");
+    if (!raw) return 0;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    if (promptCount > 0 && n >= promptCount) return promptCount - 1;
+    return n;
+  }, [searchParams, promptCount]);
+  // Answers are session-local — sensitive freeform text shouldn't ride in the
+  // URL. sessionStorage is also tab-scoped so a parallel tab doing the same
+  // wizard doesn't stomp each other (different tabs == different sessions).
+  // Lazy-init reads any in-progress draft so a refresh restores it.
+  const [answers, setAnswers] = useState<Record<string, unknown>>(() =>
+    session ? loadAnswers(session.id) : {},
+  );
   const [submitting, setSubmitting] = useState(false);
+
+  // Persist any answer change to sessionStorage so refresh restores it.
+  // Effect rather than inline write so React state remains the source of
+  // truth in-render and storage just mirrors it.
+  useEffect(() => {
+    if (!session) return;
+    saveAnswers(session.id, answers);
+  }, [session, answers]);
+
+  const setStepParam = useCallback(
+    (next: number) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next <= 0) {
+            // Default value isn't written — keeps the URL clean on step 0.
+            params.delete("step");
+          } else {
+            params.set("step", String(next));
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const prompt = session?.prompts[stepIndex];
   const isLast = useMemo(() => session ? stepIndex === session.prompts.length - 1 : false, [session, stepIndex]);
@@ -136,10 +226,12 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     if (stepIndex === 0) {
       // Route-relative: from `/morning` (or `/evening`, `/weekly`) this lands
       // at the parent dashboard. Survives any future re-embedding (e.g. life
-      // mounted under `/life/*`) without code changes.
+      // mounted under `/life/*`) without code changes. Leave the answer draft
+      // in sessionStorage so re-entering the wizard restores in-progress
+      // work — only completion clears it.
       navigate("..");
     } else {
-      setStepIndex(stepIndex - 1);
+      setStepParam(stepIndex - 1);
     }
   };
 
@@ -151,7 +243,7 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     if (isLast) {
       submit();
     } else {
-      setStepIndex(stepIndex + 1);
+      setStepParam(stepIndex + 1);
     }
   };
 
@@ -168,6 +260,9 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
         { labels: { source: "manual" } },
       );
       message.success(`${session.title} session saved`);
+      // Wipe the in-progress draft now that it's been persisted to the
+      // backend — re-entering the wizard starts fresh.
+      clearAnswers(session.id);
       navigate("..");
     } catch (err) {
       console.error("Failed to save session:", err);
