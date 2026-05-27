@@ -122,8 +122,9 @@ All of these have an `owners` field OR a parent-pointer to a row that does. List
 | `sharing_invites` | self (`created_by`) | route-level `created_by = userId` check |
 | `push_subscriptions` | self (`user`) | route-level `user = userId` check |
 | `api_tokens` | self (`user`) | route-level `user = userId` check |
-| `trip_proposals` | self (varies — verify) | needs explicit helper if not already present |
 | `oauth_clients` / `oauth_codes` / `oauth_access_tokens` / `oauth_refresh_tokens` | special — admin-only at PB, OAuth-flow-mediated at the route | no helper; flow-specific gates in `routes/oauth.ts` |
+
+The `trip_proposals` collection still exists in PB (migrations 0010, 0011, 0013) but is no longer wired to any code path — the feature was removed before it shipped. Not listed above because nothing references it.
 
 **Recipe is special.** A recipe row carries its own `owners` field (the creator) **plus** inherits authorization from its parent box. Both are valid write-authorization paths. The read path additionally honors recipe-level `visibility` (`"public"`, `"unlisted"`, `"private"`). `userCanReadRecipe` encodes the full rule, mirroring the tightened PB visRule from migration 0024.
 
@@ -454,9 +455,9 @@ Reads on global infra collections accept any authed token. Per §3.2 this is int
 
 Rule is `'@request.auth.id != ""'` — any authed user can create an invite for any target. Validation happens in a PB hook (`pb_hooks/sharing.pb.js`), which is correct in design but means the migration's PB rule alone is **not** the enforcement boundary. Worth a docblock note pointing at the hook as the real gate, and a test that the hook is doing what it claims.
 
-### 8.4 note: `trip_proposals` collection classification not verified in this audit
+### 8.4 ✅ CLOSED — `trip_proposals` collection classification
 
-`trip_proposals` exists (migrations 0010, 0011, 0013) but wasn't audited in this pass. Classify and table-stamp it in §3.1 the next time someone touches it.
+Entry retired. The `trip_proposals` collection still exists in PB (migrations 0010, 0011, 0013) but no code references it — the feature was removed before shipping. Schema is dead but kept to avoid a destructive drop migration.
 
 ### 8.5 note: unsanitized `status` parameter in `/data/travel/trips` filter
 

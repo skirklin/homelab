@@ -127,7 +127,7 @@ Six per-app commits on main: `3a53412` cross-cutting infra, `241d052` home, `0c3
 - [x] `LogPicker.tsx` dead code removed (grep confirmed no imports).
 - [x] DayView stale `?itin=` — added effect to mirror ItinerarySection's pattern: writes resolved itinerary id back to URL when the requested id is invalid.
 - Skipped per audit guidance: `ItinerarySection.tsx:300` route-relative nit, `TripDetail` BackLink history-awareness (both deliberate trade-offs).
-- Confirmed missing: **travel trip-proposal UI** — server-side MCP tools exist (`create_trip_proposal` / `resolve_trip_proposal` in `services/api/src/mcp.ts`) but no front-end route, component, or type reference in `apps/travel/`. Feature decision pending — separate conversation.
+- Confirmed missing: **travel trip-proposal UI** — server-side MCP tools existed but were never built on the frontend. Resolved 2026-05-27 by removing the feature entirely (MCP tools + agent docs); PB schema (`trip_proposals` collection) left in place to avoid a destructive drop.
 
 ### Deferred / surfaced for future bundles
 - **#12 `<ScrollRestoration/>`** — separate refactor. Requires manual hook implementation (we use `BrowserRouter`, not `createBrowserRouter`). All 8 apps need the wiring. Worth its own bundle.
@@ -135,7 +135,6 @@ Six per-app commits on main: `3a53412` cross-cutting infra, `241d052` home, `0c3
 - **Recipes Filterbox + RecipeTable sort URL-backing** — was in 4c scope but punted to keep the agent's scope tight after an early-termination retry. Mechanical fix, same shape as Bundle 2's `?q=`/`?sort=` patterns.
 - **`AddToShoppingButton` over iOS home indicator** — `position: fixed; bottom: 24px` needs `calc(24px + env(safe-area-inset-bottom))`. Bundle 4a guardrails excluded TSX edits; mechanical follow-up.
 - **WhatsNew Settings menu trigger** — modal now dormant. Add a "What's new" menu item to re-activate.
-- **Travel trip-proposal UI** — confirm intent with user before building.
 
 ## Bundle 5 — post-deploy critical review ✅ shipped 2026-05-27
 

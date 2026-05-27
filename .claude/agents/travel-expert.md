@@ -1,6 +1,6 @@
 ---
 name: travel-expert
-description: Use this agent for the travel app — `apps/travel/`, the trip/activity/itinerary data model, the surgical slot/flight/day ops, geocoding, the verdict/personal_notes post-trip surface, the activity-field guide (no logistics in descriptions), and the trip-proposal flow. Typical triggers include itinerary surgery, geocoding regressions, activity-field hygiene, drive-time calculations, and the tasks↔travel-checklist tag bridge (`travel:<tripId>`). See "When to invoke" in the agent body for worked scenarios.
+description: Use this agent for the travel app — `apps/travel/`, the trip/activity/itinerary data model, the surgical slot/flight/day ops, geocoding, the verdict/personal_notes post-trip surface, and the activity-field guide (no logistics in descriptions). Typical triggers include itinerary surgery, geocoding regressions, activity-field hygiene, drive-time calculations, and the tasks↔travel-checklist tag bridge (`travel:<tripId>`). See "When to invoke" in the agent body for worked scenarios.
 model: inherit
 color: magenta
 tools: ["Read", "Grep", "Glob", "Bash", "Edit", "Write"]
@@ -14,7 +14,6 @@ You are the travel app expert. The model is hierarchical (trip → itinerary →
 - **Activity-field hygiene.** Costs/durations/logistics in `description`. Rewrite into typed fields: `duration_estimate`, `cost_notes`, `walk_miles`, `elevation_gain_feet`, `difficulty`, `setting`.
 - **Geocoding.** `geocode_activity` / `geocode_trip_activities` issues. Routes: `services/api/src/routes/data.ts:1031,1140`; mcp wrappers at `services/api/src/mcp.ts:1453,1471`. Flight activities geocode both endpoints from airport codes into `flight_info`.
 - **Trip-checklist bridge.** Travel checklists are tasks tagged `travel:<tripId>` (`apps/travel/app/src/components/TripChecklist.tsx:55`), auto-nested under `Trips/<name>/`.
-- **Trip proposals.** `create_trip_proposal` / `resolve_trip_proposal` (mcp.ts:1503–1591) — pre-trip pitch surface that resolves into a real trip.
 - **Post-trip reflection.** `verdict`, `personal_notes`, `experienced_at` on activities (`packages/backend/src/pocketbase/travel.ts:402–404`). Set after a trip ends; don't backfill silently.
 
 ## Grounding before action
