@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import Plot from 'react-plotly.js'
 import type { PersonDetail as PersonDetailData } from '../api'
 import { fetchPersonDetail } from '../api'
@@ -15,9 +15,15 @@ const fmtDollar = (v: number) => {
 
 export default function PersonDetail() {
   const { person } = useParams<{ person: string }>()
+  const navigate = useNavigate()
   const [data, setData] = useState<PersonDetailData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const goBack = () => {
+    if (window.history.length > 1) navigate(-1)
+    else navigate('/accounts')
+  }
 
   useEffect(() => {
     if (!person) return
@@ -40,9 +46,22 @@ export default function PersonDetail() {
     <section className="chart-section">
       <div className="section-header">
         <div>
-          <Link to="/accounts" style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, textDecoration: 'none' }}>
-            &larr; All Accounts
-          </Link>
+          <button
+            type="button"
+            onClick={goBack}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              color: 'rgba(255,255,255,0.4)',
+              fontSize: 12,
+              textDecoration: 'none',
+              font: 'inherit',
+            }}
+          >
+            &larr; Back
+          </button>
           <h2 style={{ margin: '4px 0 0' }}>{data.name}</h2>
           <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 2 }}>
             {data.accounts.length} account{data.accounts.length !== 1 ? 's' : ''}

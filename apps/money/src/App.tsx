@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import type { Account, NetWorthSummary } from './api'
 import { fetchAccounts, fetchNetWorthSummary } from './api'
 import { Overview } from './pages/Overview'
@@ -38,7 +38,7 @@ function NetWorthHeader({ summary }: { summary: NetWorthSummary | null }) {
   )
 }
 
-function App() {
+function AppContent() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [netWorth, setNetWorth] = useState<NetWorthSummary | null>(null)
   const [loading, setLoading] = useState(true)
@@ -61,36 +61,43 @@ function App() {
   if (error) return <div className="error">Error: {error}</div>
 
   return (
+    <div className="app">
+      <header>
+        <h1>Money</h1>
+        <NetWorthHeader summary={netWorth} />
+        <nav className="nav">
+          <NavLink to="/" end>Overview</NavLink>
+          <NavLink to="/investments">Investments</NavLink>
+          <NavLink to="/spending">Spending</NavLink>
+          <NavLink to="/transactions">Transactions</NavLink>
+          <NavLink to="/travel">Travel</NavLink>
+          <NavLink to="/accounts">Accounts</NavLink>
+          <NavLink to="/settings" title="Settings" style={{ opacity: 0.5, fontSize: '0.9em' }}>&#9881;</NavLink>
+        </nav>
+      </header>
+      <main>
+        <Routes>
+          <Route path="/" element={<Overview accounts={accounts} />} />
+          <Route path="/investments" element={<Investments />} />
+          <Route path="/spending" element={<Spending />} />
+          <Route path="/transactions" element={<Transactions />} />
+          <Route path="/travel" element={<Travel />} />
+          <Route path="/accounts" element={<Accounts />} />
+          <Route path="/accounts/:id" element={<AccountDetail />} />
+          <Route path="/people/:person" element={<PersonDetail />} />
+          <Route path="/institutions/:institution" element={<InstitutionDetail />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </div>
+  )
+}
+
+function App() {
+  return (
     <BrowserRouter>
-      <div className="app">
-        <header>
-          <h1>Money</h1>
-          <NetWorthHeader summary={netWorth} />
-          <nav className="nav">
-            <NavLink to="/" end>Overview</NavLink>
-            <NavLink to="/investments">Investments</NavLink>
-            <NavLink to="/spending">Spending</NavLink>
-            <NavLink to="/transactions">Transactions</NavLink>
-            <NavLink to="/travel">Travel</NavLink>
-            <NavLink to="/accounts">Accounts</NavLink>
-            <NavLink to="/settings" title="Settings" style={{ opacity: 0.5, fontSize: '0.9em' }}>&#9881;</NavLink>
-          </nav>
-        </header>
-        <main>
-          <Routes>
-            <Route path="/" element={<Overview accounts={accounts} />} />
-            <Route path="/investments" element={<Investments />} />
-            <Route path="/spending" element={<Spending />} />
-            <Route path="/transactions" element={<Transactions />} />
-            <Route path="/travel" element={<Travel />} />
-            <Route path="/accounts" element={<Accounts />} />
-            <Route path="/accounts/:id" element={<AccountDetail />} />
-            <Route path="/people/:person" element={<PersonDetail />} />
-            <Route path="/institutions/:institution" element={<InstitutionDetail />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </main>
-      </div>
+      <AppContent />
     </BrowserRouter>
   )
 }

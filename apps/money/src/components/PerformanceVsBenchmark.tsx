@@ -11,20 +11,17 @@ const BENCHMARK_COLORS: Record<string, string> = {
   VT: 'rgba(255,255,255,0.15)',
 }
 
+type TimeRange = '1Y' | '3Y' | '5Y' | 'ALL'
+
 interface Props {
   institution?: string
-  onTimeRangeChange?: (range: '1Y' | '3Y' | '5Y' | 'ALL') => void
+  timeRange: TimeRange
+  onTimeRangeChange: (range: TimeRange) => void
 }
 
-export function PerformanceVsBenchmark({ institution, onTimeRangeChange }: Props) {
+export function PerformanceVsBenchmark({ institution, timeRange, onTimeRangeChange }: Props) {
   const [perfData, setPerfData] = useState<PerformancePoint[]>([])
   const [benchmarks, setBenchmarks] = useState<Record<string, BenchmarkSeries>>({})
-  const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | 'ALL'>('3Y')
-
-  const handleTimeRangeChange = (range: '1Y' | '3Y' | '5Y' | 'ALL') => {
-    setTimeRange(range)
-    onTimeRangeChange?.(range)
-  }
 
   useEffect(() => {
     fetchPerformance({ institution }).then(setPerfData)
@@ -150,7 +147,7 @@ export function PerformanceVsBenchmark({ institution, onTimeRangeChange }: Props
               <button
                 key={r}
                 className={`range-btn ${timeRange === r ? 'active' : ''}`}
-                onClick={() => handleTimeRangeChange(r)}
+                onClick={() => onTimeRangeChange(r)}
               >
                 {r}
               </button>

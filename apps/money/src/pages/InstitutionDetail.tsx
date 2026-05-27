@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import Plot from 'react-plotly.js'
 import type { InstitutionDetail as InstitutionDetailData } from '../api'
 import { fetchInstitutionDetail } from '../api'
@@ -15,9 +15,15 @@ const fmtDollar = (v: number) => {
 
 export default function InstitutionDetail() {
   const { institution } = useParams<{ institution: string }>()
+  const navigate = useNavigate()
   const [data, setData] = useState<InstitutionDetailData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const goBack = () => {
+    if (window.history.length > 1) navigate(-1)
+    else navigate('/accounts')
+  }
 
   useEffect(() => {
     if (!institution) return
@@ -40,9 +46,22 @@ export default function InstitutionDetail() {
     <section className="chart-section">
       <div className="section-header">
         <div>
-          <Link to="/accounts" style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, textDecoration: 'none' }}>
-            &larr; All Accounts
-          </Link>
+          <button
+            type="button"
+            onClick={goBack}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              color: 'rgba(255,255,255,0.4)',
+              fontSize: 12,
+              textDecoration: 'none',
+              font: 'inherit',
+            }}
+          >
+            &larr; Back
+          </button>
           <h2 style={{ margin: '4px 0 0' }}>
             {data.label}
             {data.url && (

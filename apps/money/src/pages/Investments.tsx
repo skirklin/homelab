@@ -136,7 +136,7 @@ export function Investments() {
 
   return (
     <>
-      <PerformanceVsBenchmark onTimeRangeChange={setTimeRange} />
+      <PerformanceVsBenchmark timeRange={timeRange} onTimeRangeChange={setTimeRange} />
       <AllocationChart />
       <AllocationOverTime />
       <GrantsDetail />
