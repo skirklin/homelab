@@ -310,9 +310,12 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
             label=""
             minutes={local as number}
             onChange={(minutes) => {
-              if (minutes === null) return;
-              setLocal(minutes);
-              scheduleCommit(minutes);
+              // Clearing the field (null) commits as 0 rather than silently
+              // reverting on blur. LifeEntry's value is `number`, not nullable,
+              // so 0 is the honest representation of "user emptied this".
+              const next = minutes ?? 0;
+              setLocal(next);
+              scheduleCommit(next);
             }}
             onBlur={flushPending}
             saving={saving}
@@ -330,9 +333,11 @@ function EntryEditor({ event, index, entry }: EntryEditorProps) {
           max={entry.unit === "rating" ? entry.scale ?? 5 : undefined}
           unit={entry.unit}
           onChange={(v) => {
-            if (v === null) return;
-            setLocal(v);
-            scheduleCommit(v);
+            // Clearing the field (null) commits as 0 rather than silently
+            // reverting on blur. See DurationFieldEditor case above for why.
+            const next = v ?? 0;
+            setLocal(next);
+            scheduleCommit(next);
           }}
           onBlur={flushPending}
           saving={saving}
