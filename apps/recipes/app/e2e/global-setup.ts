@@ -10,9 +10,13 @@
  * baked into infra/pocketbase/pb_hooks/sharing.pb.js, served directly off PB.
  */
 import PocketBase from "pocketbase";
+import { resolveDevApiTarget, resolveTestPbUrl } from "@kirkl/vite-preset";
 
-const PB_URL = process.env.PB_TEST_URL || "http://127.0.0.1:8091";
-const API_URL = process.env.VITE_API_URL || process.env.TEST_API_URL || "http://127.0.0.1:3001";
+// PB_TEST_URL is set in playwright.config.ts via resolveTestPbUrl(), but
+// hold a fallback to the helper here too so a manual `tsx global-setup.ts`
+// invocation still picks the per-worktree port.
+const PB_URL = process.env.PB_TEST_URL || resolveTestPbUrl();
+const API_URL = process.env.VITE_API_URL || process.env.TEST_API_URL || resolveDevApiTarget();
 
 async function globalSetup() {
   console.log(`Verifying test env (PB=${PB_URL}, API=${API_URL})...`);

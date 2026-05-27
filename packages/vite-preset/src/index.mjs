@@ -32,24 +32,59 @@ import { VitePWA } from "vite-plugin-pwa";
  */
 export function resolveDevApiTarget() {
   if (process.env.VITE_API_URL) return process.env.VITE_API_URL;
+  return resolveTestEnvUrl("--api") || "http://127.0.0.1:3001";
+}
 
-  // Walk up from this preset's location to find the repo root (one with
-  // `infra/test-env.sh`). We can't trust process.cwd() — vite resolves the
-  // config from the app dir, which can be many levels deep.
+/**
+ * Resolve the per-worktree test PocketBase URL.
+ *
+ * Priority:
+ *   1. `process.env.PB_TEST_URL` (explicit override — set by `deploy.sh`'s
+ *      pre-deploy gate so the inner `pnpm test:playwright` invocation
+ *      inherits the right URL).
+ *   2. `infra/test-env.sh url --pb` (when run inside this repo: discovers
+ *      the per-worktree test PB port derived from the worktree basename).
+ *   3. `http://127.0.0.1:8091` (legacy default — main checkout's PB port).
+ *
+ * Without #2, running `pnpm test:playwright` directly from a worktree
+ * silently points BOTH the browser (via `VITE_PB_URL`) and the test admin
+ * client at the main checkout's PB on `:8091`, while the worktree's own
+ * test API container (the one the browser's `/fn` calls hit) talks to
+ * the worktree's PB. The auth context for invite creation then mismatches
+ * — the user JWT minted on main's PB can't be refreshed against the
+ * worktree's PB, so `/fn/sharing/invite` returns 401 and the clipboard
+ * shim never sees a URL. Matches the algorithm in `resolveDevApiTarget`.
+ *
+ * Returns a string URL; all errors fall through to the legacy default.
+ */
+export function resolveTestPbUrl() {
+  if (process.env.PB_TEST_URL) return process.env.PB_TEST_URL;
+  return resolveTestEnvUrl("--pb") || "http://127.0.0.1:8091";
+}
+
+/**
+ * Shell out to `infra/test-env.sh url <flag>` to discover a per-worktree
+ * port. Walks up from this preset's location to find the repo root —
+ * `process.cwd()` is unreliable because callers vary (vite from app dir,
+ * playwright from app dir, tests from arbitrary cwd).
+ *
+ * Returns the trimmed URL string on success, or `null` if the script is
+ * missing/broken — the caller decides the fallback.
+ */
+function resolveTestEnvUrl(flag) {
   const here = dirname(fileURLToPath(import.meta.url));
-  // packages/vite-preset/src/ → walk up to repo root.
   let dir = here;
   for (let i = 0; i < 8; i++) {
     const candidate = resolve(dir, "infra", "test-env.sh");
     if (existsSync(candidate)) {
       try {
-        const out = execFileSync(candidate, ["url", "--api"], {
+        const out = execFileSync(candidate, ["url", flag], {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
         if (out.startsWith("http://")) return out;
       } catch {
-        // test-env.sh missing/broken — fall through to legacy default.
+        // test-env.sh missing/broken — fall through.
       }
       break;
     }
@@ -57,7 +92,7 @@ export function resolveDevApiTarget() {
     if (parent === dir) break;
     dir = parent;
   }
-  return "http://127.0.0.1:3001";
+  return null;
 }
 
 /**

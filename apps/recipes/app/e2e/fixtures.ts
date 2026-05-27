@@ -14,8 +14,13 @@
  */
 import { test as base, expect, type Page, type BrowserContext, type Browser } from "@playwright/test";
 import PocketBase from "pocketbase";
+import { resolveTestPbUrl } from "@kirkl/vite-preset";
 
-const PB_URL = process.env.PB_TEST_URL || "http://127.0.0.1:8091";
+// playwright.config.ts sets PB_TEST_URL at config load — but fall back to
+// the helper anyway so manual invocations / one-off tsx runs still hit
+// the per-worktree PB instead of silently landing on :8091 (which on a
+// parallel-sessions machine is some other worktree's database).
+const PB_URL = process.env.PB_TEST_URL || resolveTestPbUrl();
 const ADMIN_EMAIL = "test-admin@test.local";
 const ADMIN_PASSWORD = "testpassword1234";
 const USER_PASSWORD = "testpassword123";
