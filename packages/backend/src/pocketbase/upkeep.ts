@@ -21,7 +21,7 @@ import type { UpkeepBackend } from "../interfaces/upkeep";
 import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
 import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
-import { newId } from "../cache/ids";
+import { newId } from "../wrapped-pb/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 

@@ -14,7 +14,7 @@ import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
 import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, DayEntry } from "../types/travel";
 import type { Unsubscribe } from "../types/common";
-import { newId } from "../cache/ids";
+import { newId } from "../wrapped-pb/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 

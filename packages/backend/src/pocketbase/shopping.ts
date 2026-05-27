@@ -17,7 +17,7 @@ import type { RecordModel } from "pocketbase";
 import type { ShoppingBackend } from "../interfaces/shopping";
 import type { ShoppingList, ShoppingItem, CategoryDef, ShoppingTrip } from "../types/shopping";
 import type { Unsubscribe } from "../types/common";
-import { newId } from "../cache/ids";
+import { newId } from "../wrapped-pb/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 

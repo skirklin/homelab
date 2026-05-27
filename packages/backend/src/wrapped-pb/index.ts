@@ -14,13 +14,13 @@
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel, RecordOptions, RecordListOptions, RecordFullListOptions, ListResult } from "pocketbase";
-import { newId } from "../cache/ids";
+import { newId } from "./ids";
 import { MutationQueue, type Mutation, type RawRecord } from "./queue";
 import { persistMutation, unpersistMutation, loadAllMutations } from "./persistence";
 
 export { MutationQueue, composeView, type Mutation, type RawRecord, type PendingMutation } from "./queue";
 export { type PersistedMutation, persistMutation, loadAllMutations, clearAllMutations } from "./persistence";
-export { newId } from "../cache/ids";
+export { newId } from "./ids";
 export { createMirror, type PBMirror, type WatchSpec, type WatchHandle } from "./mirror";
 
 // ---- Types ----

@@ -14,7 +14,6 @@ import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { message } from "antd";
 import { getBackend } from "./backend";
 import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
-import { withCache } from "@homelab/backend/cache";
 import { WrappedPbError } from "@homelab/backend/wrapped-pb";
 import { OfflineBanner } from "./online-status";
 import { SyncStatusBanner } from "./sync-status";
@@ -30,10 +29,9 @@ import type {
 } from "@homelab/backend";
 import type { WpbDebug } from "@homelab/backend/wrapped-pb";
 
-const allBackends = createPocketBaseBackends(() => getBackend());
-const wpb = allBackends.wpb;
-const mirror = allBackends.mirror;
-const backends = withCache(allBackends);
+const backends = createPocketBaseBackends(() => getBackend());
+const wpb = backends.wpb;
+const mirror = backends.mirror;
 
 // Expose the wpb debug handle on the global so investigating a "writes
 // vanished after cache clear" or "Angela never saw the update" report is

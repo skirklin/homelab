@@ -24,7 +24,7 @@ import type { RecipesBackend, RecipesUser } from "../interfaces/recipes";
 import type { RecipeBox, Recipe, RecipeData, PendingChanges, CookingLogEvent } from "../types/recipes";
 import type { Visibility, Unsubscribe } from "../types/common";
 import type { LifeEntry } from "../types/life";
-import { newId } from "../cache/ids";
+import { newId } from "../wrapped-pb/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord, WatchHandle } from "../wrapped-pb/mirror";
 

@@ -14,10 +14,6 @@
       "types": "./src/pocketbase/index.ts",
       "default": "./src/pocketbase/index.ts"
     },
-    "./cache": {
-      "types": "./src/cache/index.ts",
-      "default": "./src/cache/index.ts"
-    },
     "./wrapped-pb": {
       "types": "./src/wrapped-pb/index.ts",
       "default": "./src/wrapped-pb/index.ts"

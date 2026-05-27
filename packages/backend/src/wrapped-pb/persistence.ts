@@ -7,7 +7,7 @@
  *  - Updates are last-write-wins patches → idempotent on retry
  *  - Deletes are idempotent (404 on retry = "already gone" = success)
  */
-import { getDb, MUTATIONS_STORE } from "../cache/storage";
+import { getDb, MUTATIONS_STORE } from "./idb";
 import type { PendingMutation } from "./queue";
 
 export interface PersistedMutation extends PendingMutation {

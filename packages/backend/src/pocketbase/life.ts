@@ -16,7 +16,7 @@ import type { RecordModel } from "pocketbase";
 import type { LifeBackend } from "../interfaces/life";
 import type { LifeLog, LifeEvent, LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
-import { newId } from "../cache/ids";
+import { newId } from "../wrapped-pb/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
