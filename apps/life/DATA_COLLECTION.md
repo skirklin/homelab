@@ -1,10 +1,14 @@
 # Data collection for the AI observer feedback loop
 
-Written 2026-05-27, after running a one-shot observer experiment on 14 days of real data ([life-app session 2026-05-27](../../README.md)). Two audiences:
+Written 2026-05-27, after running a one-shot observer experiment on 14 days of real data. Two audiences:
 - **Scott** — strategic framing on what to invest in before Phase 2 of the [roadmap](./ROADMAP.md) is worth shipping
 - **Life-app agent** — concrete, file-grounded recommendations for the next data-collection changes
 
 Both audiences should read everything; the labels just say who each recommendation is primarily aimed at.
+
+**Status snapshot (updated 2026-05-27):**
+- **Shipped:** A1 (pull morning intent into evening session), F1 (reject empty-payload events at write time). Both merged in commit `8a12639`. The remaining source-layer recommendations are queued.
+- **Doc restructure:** added the source-vs-view-layer split (see "Two layers" below). Almost everything originally written here was a source-layer recommendation; view-layer recommendations now have their own section.
 
 ## What the experiment actually proved
 
@@ -13,6 +17,36 @@ Four observation styles ("Sunday letter," "sharp observer," "pattern hunter," "r
 That's not a bug in the experiment — it's a structural fact about what LLM observers are good at. An LLM reads language. With 14 days of single-user data, there is no statistical pattern in coffee/sleep/edibles numbers for any tool to find. Even with 6 months of data, finding "you sleep worse after edibles" is a stats job, not a language-model job.
 
 The implication: **the AI observer is a journal reader, not a habit-data analyst.** The right product is one where the model reads what you wrote and connects it across days. The numeric trackers serve the dashboard, the streak, and the heatmap — they don't feed the observer.
+
+## Two layers: source data vs. observer view
+
+The recommendations below split cleanly across two layers, and treating them as one thing pushes false dependencies.
+
+**Layer 1 — Source data.** What gets written into `life_events`, `cooking_log`, `task_events`, etc. Has many consumers beyond the observer (dashboard, heatmap, streak, export, Insights view). Changes are slow because they touch UX, schemas, and habits. Almost everything in the original draft of this doc — the Add / Fix / Drop sections below — is source-layer work.
+
+**Layer 2 — Observer view.** A transformation that takes raw source data and produces a clean digest for the AI specifically. Lives in `services/api/src/lib/observer/` once Phase 2 starts. Single consumer (the model call). Cheap to change. The system prompt is part of this layer too.
+
+### Why the split matters
+
+- **A usable observer can ship now**, against messy source data, by giving the view layer the responsibility to clean things up before the model sees them. You don't have to wait for every source-layer fix to land.
+- **View-layer experiments are cheap and reversible.** Try a different window, join, format, or prompt without touching a byte of source data. Source-layer experiments require schema/UX changes and dogfood time.
+- **As source fixes ship, view-layer logic simplifies.** F1 → view doesn't need to drop empty-payload events. A1 → view doesn't need to manually join morning intention to evening reflection.
+- **The split clarifies which problems each layer can actually solve.** A view layer can aggregate, format, contextualize, cross-source join, redact, prompt-shape. It cannot recover information that was never captured.
+
+### What only each layer can do
+
+| Concern | Source-only | View-only | Both |
+|---|---|---|---|
+| Recover never-captured data (no notes field) | ✓ | | |
+| Resolve unit confusion (8 vs 480 sleep) | ✓ (write guard) | partial (flag, can't fix) | |
+| "Skipped vs missed vs zero" semantics | ✓ (sentinel entry) | partial (heuristic) | |
+| Aggregate ("you flossed 5x this week") | | ✓ | |
+| Cross-collection join (life + cooking + tasks) | | ✓ | |
+| Contextualize ("week before a 6-day trip") | | ✓ | |
+| Normalize timestamps to user-local | partial (capture intent) | ✓ (presentation) | ✓ |
+| Stated intent → reflection reconciliation | A1 makes it structural | could heuristic-match | A1 + view-layer surfacing |
+
+Each recommendation below is tagged `[source]` or `[view]` (`[both]` when there's a meaningful cross-cutting concern). See the cross-cutting map at the end of "View-layer recommendations" for which source fixes retire which view-layer hacks.
 
 ## What the AI observer needs to do its job well
 
@@ -28,7 +62,7 @@ The next four sections are recommendations bucketed by direction: things to **ad
 
 ## Add
 
-### A1. Pull morning intent forward into the evening session — wizard only, no AI
+### A1. Pull morning intent forward into the evening session — wizard only, no AI `[source]` — ✓ shipped 2026-05-27
 
 > Audience: agent. Highest leverage / cheapest item in this doc.
 
@@ -45,7 +79,7 @@ Source pointers:
 - Session schema: [apps/life/app/src/manifest.ts:84-109](app/src/manifest.ts#L84-L109)
 - Add a new prompt to the evening `prompts[]`, and load today's morning event in the SessionRunner.
 
-### A2. Add a `themes` collection — what's the season about?
+### A2. Add a `themes` collection — what's the season about? `[both]` (source adds the data; view layer is what surfaces it to the observer)
 
 > Audience: agent (small build) + Scott (decide if you want this)
 
@@ -65,7 +99,7 @@ collection: themes
 
 Surface: one extra card on the dashboard near the top, "Currently…" listing active themes, plus a Settings page to add/edit/retire. Observer reads `themes` first to anchor every observation.
 
-### A3. Adopt a free-form `quick_capture` event type
+### A3. Adopt a free-form `quick_capture` event type `[source]`
 
 > Audience: both. Modest build, big payoff for the observer.
 
@@ -75,7 +109,7 @@ A `quick_capture` event with one freeform `text` entry, plus optional tags, is t
 
 This is the single fastest way to grow the observer's signal density without adding new numeric trackers.
 
-### A4. Make `notes` ubiquitous, optional, and one tap away
+### A4. Make `notes` ubiquitous, optional, and one tap away `[source]`
 
 > Audience: agent
 
@@ -83,7 +117,7 @@ Several trackables already support `hasNotes: true` (sleep does — [trackables.
 
 Don't require notes; just make them frictionless when the user has one.
 
-### A5. Capture the *time* on real-time logs, capture only the *date* on backfills
+### A5. Capture the *time* on real-time logs, capture only the *date* on backfills `[source]`
 
 > Audience: agent
 
@@ -96,7 +130,7 @@ The observer can then say "you exercised most often in the evenings this month" 
 
 ## Fix
 
-### F1. Stop generating empty-payload entries
+### F1. Stop generating empty-payload entries `[source]` — ✓ shipped 2026-05-27 (see V1 for residual historical rows)
 
 > Audience: agent. This is the biggest data-hygiene problem.
 
@@ -109,7 +143,7 @@ Two fixes, in order of preference:
 
 Audit every code path that calls `addLifeEntry` and check whether the entries array can be empty at write time.
 
-### F2. Unit-confusion guard on sleep (and any duration trackable)
+### F2. Unit-confusion guard on sleep (and any duration trackable) `[source]`
 
 > Audience: agent. Small but real.
 
@@ -119,7 +153,7 @@ Add a sanity range on write: a sleep entry < 60 minutes triggers a confirm modal
 
 Same pattern for any time-based trackable with `defaultValue >= 60`.
 
-### F3. Distinguish "missed" from "skipped" from "zero"
+### F3. Distinguish "missed" from "skipped" from "zero" `[source]`
 
 > Audience: agent + Scott (decide if the distinction matters)
 
@@ -129,7 +163,7 @@ Minimum viable fix: a long-press on the dashboard card surfaces a "mark as skipp
 
 Lower priority than F1; only worth doing once empty-payload entries are eliminated, so the sentinel is meaningful.
 
-### F4. Patch the broken floss-delete UI
+### F4. Patch the broken floss-delete UI `[source]`
 
 > Audience: agent
 
@@ -171,28 +205,155 @@ The roadmap already says this ([ROADMAP.md anti-patterns](./ROADMAP.md)) — cal
 
 Style 4 in the experiment ("reflection prompter") was the most aspirational shape: a Claude that asks you tailored follow-up questions during the evening session. That's a much larger build (chat surface, multi-turn state, prompt engineering against partial answers) and the value is unproven. Ship a passive observation (weekly digest, daily briefing, on-demand "ask Claude about my week") first and learn from it. Conversational comes later if the passive surface produces things worth reacting to.
 
+## View-layer (observer-side) recommendations
+
+Things to design into the observer's data-preparation step (`services/api/src/lib/observer/...`, when it exists). Ordered by how much they let us defer source-layer work and how directly they unblock shipping a usable observer. Every item here is tagged `[view]` — that's the whole point.
+
+### V1. Drop empty-payload events at view time `[view]`
+
+> Audience: agent. Defensive layer behind F1; primary remediation for pre-F1 historical rows.
+
+The F1 backend invariant blocks new empty-payload writes, but historical rows from before F1 are still in the database — and any future code path that slips past the invariant would otherwise be invisible to the observer. The view layer should filter `entries.length === 0` before handing data to the model.
+
+### V2. Aggregate duplicates by `(subjectId, localDay)` for count-typed trackables `[view]`
+
+> Audience: agent.
+
+The May 21 floss data (8 identical entries) would have been hidden from the observer entirely if the view-layer aggregator collapsed same-day same-subject events. Pattern: `groupBy(subjectId + localDay) → sum count` for count/duration trackables; preserve individual entries for text-bearing types (sessions, future `quick_capture`). The output shape becomes "5 floss events" not "5 separate events all listed."
+
+### V3. Materialize a "themes" view heuristically, before A2 ships `[view]`
+
+> Audience: agent.
+
+The view layer can extract recurring noun phrases (or, more robustly, ask a cheap LLM call to extract them) from recent morning intentions / evening lessons and present them as inferred themes. "Recurring threads this period: house decluttering, physical rehab, cooking goals." No new collection needed. When A2 lands the real `themes` collection, swap the heuristic for the real source — the observer's prompt doesn't change.
+
+### V4. Bundle cross-source data into a single document `[view]`
+
+> Audience: agent. Single biggest leverage item on this list.
+
+Today's MCP tools return `life_events`, `cooking_log`, `tasks`, `travel` separately. The observer has to know to fetch each. A view-layer document — call it `observer_bundle` — that pre-joins them into a unified narrative shape:
+
+```
+Period: 2026-05-13 → 2026-05-27 (14 days, user-local)
+Active trip: Mexico City, departs 2026-06-02 (6 days out)
+
+Sessions logged: 6 morning, 7 evening, 0 weekly
+Exercise events: 2 (May 25 walk 2h intensity 2, May 27 lift 75min intensity 5)
+Cooking events: 1 attempt (May 26 ciabatta — flagged "went badly")
+Tasks completed: 7 (all Mexico City trip prep)
+Tasks open: 3 (Mexico City prep), plus recurring household
+
+Recurring themes in journal text:
+  - Physical rehab / personal trainer (5 mentions: May 21, 22, 23, 24, 27)
+  - Donations + Facebook friction (3 morning intentions: May 24, 26, 27)
+  - Cooking goal slip (May 21 evening, May 26 evening)
+
+Notable threads:
+  - 2026-05-26 morning intention: "sit with the feeling of wanting children
+    and try to figure out what to do with that feeling" — not addressed in
+    that evening's session (win was "hiking with Owen and Rihanna")
+  - 2026-05-21 evening: "haven't made anything new this week other than
+    chocolate chip cookies" → next cooking event 5 days later (May 26
+    ciabatta, failed)
+```
+
+…is much easier for the model to reason over than four separate JSON arrays. This is the cheapest path to actually testing observation quality on richer data — without any source-layer work.
+
+### V5. Compute derived fields the source can't (or doesn't yet) express directly `[view]`
+
+> Audience: agent.
+
+Things like "did the morning intent get reflected in the evening?" can be computed in the view layer even without A1's `intention_followup` field. With A1 it becomes a direct join; without, it's a heuristic ("did the evening session text mention any noun phrase from the morning intention?"). Either way, the *derived* field is what the observer sees — letting the prompt assume the field exists, and letting the view layer evolve underneath as source improvements land.
+
+Other candidate derived fields:
+- `days_since_last_<subject>` (last cooking event, last exercise, etc.)
+- `intent_followthrough_pct` over a rolling window
+- `cross_session_silence` (intentions named in morning but never appearing in any subsequent evening text)
+- `trip_proximity` (days until next booked trip, computed from travel data)
+
+### V6. Format the bundle as prose, not JSON `[view]`
+
+> Audience: agent. Easy to overlook.
+
+The model produces sharper observations on a brief prose document ("Wednesday morning, Scott wrote: 'I want to get back to climbing.' Wednesday evening, he reflected: 'Pushed at the gym but stopped before going too far.'") than on raw JSON event arrays. The view layer's last step should render to markdown. JSON is for the machine reading the data; the model reads English better.
+
+### V7. Make the view layer observable to the user `[view]`
+
+> Audience: both (small UI investment, large debug payoff).
+
+Surface the rendered observer bundle in the app — e.g., an `/observations/preview` route that shows exactly what the model will be sent. Without this, observation quality regressions are invisible: was the observation thin because the model's bad, or because the bundle was missing data? With it, you can spot "ah, the bundle didn't include this week's cooking_log" in seconds.
+
+### Cross-cutting map: source improvements that retire view-layer logic
+
+The view-layer items are designed to be **transient scaffolding** — built once, simplified or retired as the source catches up. The migration is bidirectional: build view-layer cleanup first to unblock observer shipping, then retire pieces as the corresponding source fix lands.
+
+| When this source fix ships… | …this view-layer logic can be retired or simplified |
+|---|---|
+| F1 (no empty payloads written) — ✓ | V1 partial (still needed for historical rows; can be removed once historical rows are purged) |
+| F4 (UI delete works) | V2 partial (no need to defend against UI-bug dupes specifically; still useful for legitimate same-day repeats) |
+| A1 (intention_followup field) — ✓ | V5 partial (direct join replaces the noun-phrase heuristic for this specific derivation) |
+| A2 (themes collection) | V3 (replace heuristic with real source; observer prompt unchanged) |
+| A3 (quick_capture events) | (none — pure additive signal; V4 just gains another section to surface) |
+| A4 (notes everywhere) | (none — pure additive signal) |
+| A5 (real timestamps + date precision) | V-time-of-day analyses become trustworthy; before A5, the view layer should drop time-of-day claims rather than make false ones |
+
+What does NOT retire: V4 (cross-source bundle), V6 (prose format), V7 (preview surface). Those are intrinsic to the view layer, not workarounds for source issues.
+
 ## Concrete first cuts for the agent
 
-In order of leverage-per-hour, what to pick up next:
+With the two-layer split made explicit, this is no longer a single-priority list — it's a strategic choice across three paths. Pick one to drive, then optionally back-fill from the other.
 
-1. **A1** — pull morning intent into the evening session. Wizard change, no AI, no migration. Try to ship before the observer feature is even built; the wizard change alone improves the daily loop.
-2. **F1** — eliminate empty-payload entries. Audit `addLifeEntry` call sites. ~1 hr.
-3. **A3** — `quick_capture` event type + one button on the dashboard. Reuses existing pipeline. Mostly UI work. Probably the highest-impact single change for observer signal density.
-4. **A4** — extend `hasNotes` to all trackables (opt-in, optional). One field, every trackable's full form.
-5. **A5** — distinguish backfill-date from real-timestamp. Largest schema change in this list; defer until after the first three.
-6. **F2** — sanity-range confirm on sleep duration. Small.
-7. **A2** — themes collection. Net-new collection + a small UI. Defer until Phase 2 build starts; it's the anchor the observer prompt will read first.
+### Path A — Source-first (continue current trajectory)
 
-After these, the May-2026 data collection surface is genuinely ready for an observer to work against. Until they're done, building Phase 2 ([claude_observations collection, /observations view, scheduled cron](./ROADMAP.md)) is premature — the observer will work, but the observations will be thinner than they should be because the *inputs* aren't carrying enough signal.
+Keep investing in source quality before standing up the observer. Highest-leverage remaining items:
+
+1. **A3** — `quick_capture` event type. Reuses the existing pipeline; mostly UI. Highest-impact single change for observer signal density.
+2. **A4** — extend `hasNotes` to all trackables (opt-in, optional). One field, every trackable's full form.
+3. **F2** — sanity-range confirm on sleep duration. Small. Eliminates the 8-min-vs-480-min ambiguity.
+4. **A5** — distinguish backfill-date from real-timestamp. Largest schema change; defer until after the first three.
+5. **A2** — `themes` collection. Net-new collection + a small UI. Defer until Phase 2 build starts; the observer will want this as an anchor.
+
+When complete, the source surface is ready for a thin-view-layer observer to work against. **Tradeoff:** several weeks of dogfooding before any AI-side validation happens.
+
+### Path B — View-first (ship a v0 observer against today's source)
+
+Build the view layer over what we already have, ship a passive observer, learn from real output, and let that feedback inform what to fix in the source. Highest-leverage view items:
+
+1. **V4** — cross-source bundle (`observer_bundle` shape). Single biggest move. Pre-joins `life_events` + `cooking_log` + tasks + active trip context.
+2. **V6** — prose formatter on top of V4. Cheap; ~50 lines.
+3. **V1 + V2** — empty-payload filter + duplicate aggregator. Defensive scrubbers.
+4. **V7** — `/observations/preview` route surfacing the rendered bundle. Critical for debugging observation quality.
+5. **First Anthropic API call** — wire V4 output + a system prompt into `/api/observations/generate`. Persist to `claude_observations` (Phase 2 schema). One scheduled cron, weekly.
+
+When complete, the loop is *closed* — observations land in the app, you read them, you have signal on which source-layer items are actually blocking quality. **Tradeoff:** the first observations will be thinner than the source-fully-ready version. That's the explicit experiment.
+
+### Path C — Hybrid (lean into the cheapest items from each)
+
+If neither path feels right, the highest-leverage moves regardless of path are:
+
+- **A3** (`quick_capture`) — pure additive signal, retires no view-layer logic, but raises the ceiling for every future observation.
+- **V4 + V6** — cross-source bundle in prose. Most of the observer-shipping work, deferrable on every source-layer item.
+- **V7** preview surface — pays off both paths.
+
+Then ship V0 of the observer against whatever source state exists, and prioritize remaining source-layer items based on what the first observations actually struggled with.
+
+### Strategic call (for Scott)
+
+The original draft of this doc was implicitly Path A — "fix the source first, then build the observer." The view-layer split makes Path B and Path C newly available, and changes the calculus: Path A's strongest argument was "no point shipping an observer that reads slop," but a view-layer cleanup pipeline addresses much of the slop without source-layer waiting.
+
+My current lean is **Path C** — A3 is high-leverage regardless, and V4+V6+V7 + a v0 observer call is genuinely shippable in a focused day. Real observation output on real data, even if thin, beats more theorizing about what the source should look like.
+
+This is a decision worth flagging explicitly — see "Open questions for Scott" below.
 
 ## Open questions for Scott
 
 These are decisions where I don't want to guess on your behalf:
 
-1. **Themes (A2):** worth the build, or too much ceremony for a solo app? If yes, monthly cadence or set-and-forget?
-2. **`quick_capture` (A3):** discoverable button on the dashboard, or only via PWA shortcut / keyboard / voice? The capture-friction story matters.
-3. **Voice capture:** [ROADMAP Phase 4](./ROADMAP.md) lists this. Worth bringing forward to land alongside A3? Voice-to-text is the fastest way to get the journal-text density that the observer actually feeds on.
-4. **What to do with the `mood`/`content` random sampling?** Re-enable with mandatory text, or kill them off cleanly?
+1. **Path selection (A vs B vs C above)** — the single most consequential call. Source-first defers AI validation; view-first ships faster but reads thinner source data; hybrid threads the needle. My lean is C; this is yours to set.
+2. **Themes (A2):** worth the build, or too much ceremony for a solo app? If yes, monthly cadence or set-and-forget? (Also: until A2 ships, V3 can heuristically infer themes — so this is more about whether you want first-class theme-tracking UX in the app, not whether the observer can use themes.)
+3. **`quick_capture` (A3):** discoverable button on the dashboard, or only via PWA shortcut / keyboard / voice? The capture-friction story matters.
+4. **Voice capture:** [ROADMAP Phase 4](./ROADMAP.md) lists this. Worth bringing forward to land alongside A3? Voice-to-text is the fastest way to get the journal-text density that the observer actually feeds on.
+5. **What to do with the `mood`/`content` random sampling?** Re-enable with mandatory text, or kill them off cleanly?
 
 ## A note on the broader feedback loop
 
