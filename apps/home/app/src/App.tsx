@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect, useState } from "react";
 import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary, getInviteInfo } from "@kirkl/shared";
@@ -58,6 +58,55 @@ function InviteRedirect() {
   return <Navigate to={target} replace />;
 }
 
+// Rendered when no route matches. Replaces the previous silent
+// `<Navigate to="/" replace />` catch-all, which swallowed real routing
+// bugs by bouncing typos and stale links back to the user's last module.
+function NotFound() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <div style={{
+      margin: "40px auto",
+      maxWidth: 480,
+      padding: 24,
+      borderRadius: 8,
+      boxShadow: "0 4px 12px 0 rgba(0, 0, 0, 0.15)",
+      background: "white",
+      textAlign: "center",
+    }}>
+      <h1 style={{ color: "var(--color-primary)", marginBottom: 8 }}>Page not found</h1>
+      <p style={{ marginBottom: 16, color: "var(--color-text-subtle, #666)" }}>
+        No route matches <code>{location.pathname}</code>.
+      </p>
+      <button
+        type="button"
+        onClick={() => navigate("/", { replace: true })}
+        style={{
+          padding: "8px 16px",
+          border: "none",
+          borderRadius: 6,
+          background: "var(--color-primary)",
+          color: "white",
+          cursor: "pointer",
+          fontSize: 14,
+          fontWeight: 500,
+          minHeight: 44,
+        }}
+      >
+        Go home
+      </button>
+      <div style={{ marginTop: 16, fontSize: 13, color: "var(--color-text-subtle, #666)" }}>
+        Or jump to{" "}
+        <Link to="/recipes">Recipes</Link>{", "}
+        <Link to="/shopping">Shopping</Link>{", "}
+        <Link to="/upkeep">Upkeep</Link>{", "}
+        <Link to="/travel">Travel</Link>{", "}
+        <Link to="/tasks">Tasks</Link>.
+      </div>
+    </div>
+  );
+}
+
 const antTheme = {
   token: {
     colorPrimary: "#7c3aed",
@@ -80,7 +129,7 @@ function AuthenticatedRoutes() {
         <Route path="/upkeep/*" element={<ErrorBoundary label="Upkeep"><UpkeepRoutes embedded /></ErrorBoundary>} />
         <Route path="/tasks/*" element={<ErrorBoundary label="Tasks"><TasksRoutes embedded /></ErrorBoundary>} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

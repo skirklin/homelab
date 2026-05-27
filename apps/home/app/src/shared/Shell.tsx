@@ -147,7 +147,7 @@ export function Shell() {
 
   const handleSignOut = () => {
     getBackend().authStore.clear();
-    navigate("/");
+    navigate("/", { replace: true });
   };
 
   return (
