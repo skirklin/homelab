@@ -54,7 +54,7 @@
     "build": "tsc -b tsconfig.app.json && vite build",
     "typecheck": "tsc -b tsconfig.app.json",
     "preview": "vite preview",
-    "test": "vitest",
+    "test": "vitest run",
     "lint": "eslint --ext .ts ."
   },
   "eslintConfig": {

@@ -14,7 +14,7 @@
     "typecheck": "tsc -b tsconfig.app.json",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest",
+    "test": "vitest run",
     "test:e2e": "vitest run src/e2e",
     "test:playwright": "playwright test",
     "test:playwright:ui": "playwright test --ui",
