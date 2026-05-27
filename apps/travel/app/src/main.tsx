@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ConfigProvider } from "antd";
-import { AuthProvider, useAuth, LoginScreen } from "@kirkl/shared";
+import { AuthProvider, useAuth, LoginScreen, ScrollRestoration } from "@kirkl/shared";
 import { TravelModule } from "./module";
 
 import { initializeBackend } from "@kirkl/shared";
@@ -19,6 +19,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ConfigProvider>
       <BrowserRouter>
+        <ScrollRestoration />
         <AuthProvider>
           <App />
         </AuthProvider>

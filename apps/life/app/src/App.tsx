@@ -1,6 +1,6 @@
 import { BrowserRouter } from "react-router-dom";
 import { App as AntApp, ConfigProvider } from "antd";
-import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary } from "@kirkl/shared";
+import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary, ScrollRestoration } from "@kirkl/shared";
 import { LifeProvider } from "./life-context";
 import { LifeRoutes } from "./module";
 import { Auth } from "./components/Auth";
@@ -32,6 +32,7 @@ function App() {
     <ConfigProvider theme={theme}>
       <AntApp>
         <BrowserRouter>
+          <ScrollRestoration />
           <AuthProvider>
             <BackendProvider>
               <LifeProvider>

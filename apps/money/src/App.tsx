@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { NotFound } from '@kirkl/shared'
+import { NotFound, ScrollRestoration } from '@kirkl/shared'
 import type { Account, NetWorthSummary } from './api'
 import { fetchAccounts, fetchNetWorthSummary } from './api'
 import { Overview } from './pages/Overview'
@@ -98,6 +98,7 @@ function AppContent() {
 function App() {
   return (
     <BrowserRouter>
+      <ScrollRestoration />
       <AppContent />
     </BrowserRouter>
   )

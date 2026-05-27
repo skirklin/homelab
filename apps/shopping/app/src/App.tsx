@@ -6,7 +6,7 @@
 import { BrowserRouter } from "react-router-dom";
 import { App as AntApp, ConfigProvider } from "antd";
 import styled from "styled-components";
-import { initializeBackend, AuthProvider, useAuth } from "@kirkl/shared";
+import { initializeBackend, AuthProvider, useAuth, ScrollRestoration } from "@kirkl/shared";
 
 // Initialize PocketBase
 initializeBackend();
@@ -48,6 +48,7 @@ function App() {
     <ConfigProvider theme={theme}>
       <AntApp>
       <BrowserRouter>
+        <ScrollRestoration />
         <AuthProvider>
           <AppWrapper>
             <AppContent />

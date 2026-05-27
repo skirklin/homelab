@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { AuthProvider, initializeBackend, BackendProvider } from '@kirkl/shared';
+import { AuthProvider, initializeBackend, BackendProvider, ScrollRestoration } from '@kirkl/shared';
 import { RecipesProvider } from './context';
 import { CookingModeProvider } from './CookingModeContext';
 import Auth from './Auth';
@@ -17,6 +17,7 @@ function App() {
           <CookingModeProvider>
             <Auth>
               <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                <ScrollRestoration />
                 <RecipesRoutes />
               </BrowserRouter>
             </Auth>

@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect, useState } from "react";
-import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary, getInviteInfo, NotFound } from "@kirkl/shared";
+import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary, getInviteInfo, NotFound, ScrollRestoration } from "@kirkl/shared";
 import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
@@ -150,6 +150,7 @@ export function App() {
     <ConfigProvider theme={antTheme}>
       <AntApp>
       <BrowserRouter>
+        <ScrollRestoration />
         <AuthProvider>
           <BackendProvider>
             <ShoppingProvider>

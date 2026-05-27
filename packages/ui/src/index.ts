@@ -102,5 +102,8 @@ export { useFeedback } from "./useFeedback";
 export { useUrlParam } from "./useUrlParam";
 export type { UseUrlParamOptions } from "./useUrlParam";
 
+// Scroll restoration for legacy <BrowserRouter> apps
+export { useScrollRestoration, ScrollRestoration } from "./useScrollRestoration";
+
 // Test utilities — imported directly from "@kirkl/shared/test-utils" in test files,
 // NOT re-exported here to avoid pulling Node.js globals (process.env) into browser bundles.
