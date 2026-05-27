@@ -17,6 +17,7 @@ import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
 import { WrappedPbError } from "@homelab/backend/wrapped-pb";
 import { OfflineBanner } from "./online-status";
 import { SyncStatusBanner } from "./sync-status";
+import { UpdateAvailableBanner } from "./update-available-banner";
 import { registerServiceWorker } from "./sw-register";
 import { useAuth } from "./auth";
 import type {
@@ -158,6 +159,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
             <LifeBackendContext.Provider value={backends.life}>
               <UserBackendContext.Provider value={backends.user}>
                 <OfflineBanner />
+                <UpdateAvailableBanner />
                 <SyncStatusBanner debug={wpb.debug} />
                 {children}
               </UserBackendContext.Provider>

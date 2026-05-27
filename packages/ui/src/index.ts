@@ -28,6 +28,10 @@ export { useOnline, OfflineBanner } from "./online-status";
 export { SyncStatusBanner, SyncDot } from "./sync-status";
 export type { SyncDotProps } from "./sync-status";
 
+// Service worker update detection
+export { useUpdateAvailable } from "./sw-register";
+export { UpdateAvailableBanner } from "./update-available-banner";
+
 // List Management
 export { ListPicker, JoinList, sanitizeSlug } from "./ListManagement";
 export type {
