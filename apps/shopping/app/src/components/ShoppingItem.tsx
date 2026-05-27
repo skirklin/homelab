@@ -85,11 +85,23 @@ const ActionButton = styled(Button)`
   }
 `;
 
+// Thin wrapper around the edit-mode controls (inputs + save/cancel). Exists
+// so the pointerdown-outside listener has a single ref'd node to bounds-check
+// against — clicks inside it stay in edit mode, clicks outside save and exit.
+const EditWrapper = styled.div`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: var(--space-xs);
+  min-width: 0;
+`;
+
 const EditContainer = styled.div`
   flex: 1;
   display: flex;
   gap: var(--space-xs);
-  margin-left: var(--space-xs);
+  min-width: 0;
 `;
 
 const IngredientInput = styled(Input)`
@@ -125,6 +137,11 @@ export function ShoppingItemRow({ item }: Props) {
   // desktop ergonomics don't regress.
   const longPressTimer = useRef<number | null>(null);
   const longPressStart = useRef<{ x: number; y: number } | null>(null);
+
+  // While editing, clicks anywhere outside the edit area should commit the
+  // current values (same as the Save button or pressing Enter). Escape is
+  // still available via handleKeyDown for an explicit discard.
+  const editAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     return () => {
@@ -208,6 +225,22 @@ export function ShoppingItemRow({ item }: Props) {
     }
   };
 
+  // Click-outside-to-save: while editing, a pointerdown anywhere outside the
+  // edit wrapper commits the same way Enter or the Save button does. The
+  // listener is rebound on every keystroke so the handler's closure always
+  // sees the latest editIngredient / editNote.
+  useEffect(() => {
+    if (!isEditing) return;
+    const handlePointerDownOutside = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && editAreaRef.current && !editAreaRef.current.contains(target)) {
+        handleSaveEdit();
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDownOutside);
+    return () => document.removeEventListener("pointerdown", handlePointerDownOutside);
+  }, [isEditing, editIngredient, editNote]);
+
   const handleNamePointerDown = (e: React.PointerEvent) => {
     if (e.pointerType !== "touch") return;
     longPressStart.current = { x: e.clientX, y: e.clientY };
@@ -255,7 +288,7 @@ export function ShoppingItemRow({ item }: Props) {
         onChange={handleToggle}
       />
       {isEditing ? (
-        <>
+        <EditWrapper ref={editAreaRef}>
           <EditContainer>
             <IngredientInput
               size="small"
@@ -287,7 +320,7 @@ export function ShoppingItemRow({ item }: Props) {
               onClick={handleCancelEdit}
             />
           </EditActions>
-        </>
+        </EditWrapper>
       ) : (
         <>
           <ItemName
