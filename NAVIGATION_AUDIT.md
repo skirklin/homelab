@@ -237,12 +237,15 @@ Eliminates ~30 ad-hoc `setSearchParams(prev => { ... })` blocks. Multiple regres
 
 ### Deferred to Bundle 6+
 
-- **#12 `<ScrollRestoration/>`** — cross-cutting refactor.
+- [x] **#12 `<ScrollRestoration/>`** ✅ shipped 2026-05-27 in `ef550b4`. Built `useScrollRestoration()` hook + `<ScrollRestoration />` component in `packages/ui/src/useScrollRestoration.ts`. Module-level `Map<string, number>` keyed by `location.key`, cleared on full reload. Sets `window.history.scrollRestoration = "manual"`. Honors hash anchors. rAF retry (up to 6 ticks ~100ms) handles async-content cases. Wired into all 7 BrowserRouter apps (home, recipes, shopping, upkeep, travel, life, money). 4 tests passing. Implementation note: the original sketched `useEffect` cleanup pattern was wrong (layoutEffect restore runs before effect cleanup save) — agent corrected to a `previousKeyRef` inline in the same layout effect.
 - **Modal-URL policy** — architectural decision.
+- **`useUrlParam` migration sweep** — ~28 other `setSearchParams` sites can collapse onto the hook from Bundle 5a.
 - **Recipes Filterbox + RecipeTable sort URL-backing** — mechanical follow-up.
 - **Travel trip-proposal UI** — feature decision.
 - **DetailPanel atomic tag updates** — race-prone, non-nav.
 - **SW stale-shell after deploy** — separate concern.
+- **Monitor app `<BrowserRouter>` not wired with ScrollRestoration** — agent flagged; one-line addition if monitor's UX matters here. Likely not relevant (monitor is a dashboard with charts, not deep navigable lists).
+- **`apps/recipes/app/src/Router.tsx` is dead code** — discovered during scroll-restoration wiring. `index.tsx` mounts `App.tsx`, not `Router.tsx`. Delete in a cleanup pass.
 
 ## Notes
 
