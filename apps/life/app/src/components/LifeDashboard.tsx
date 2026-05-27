@@ -393,9 +393,18 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     updateSelectedDate(newDate);
   }, [selectedDate, updateSelectedDate]);
 
-  // Swipe handlers
+  // Swipe handlers. We reserve the outer ~20px of each edge for the OS
+  // back/forward gesture (iOS edge-swipe-back, Android edge-swipe-forward) —
+  // touches that start inside that band don't arm our day-step handler, so the
+  // browser/OS gets to handle them.
+  const EDGE_RESERVE_PX = 20;
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
+    const x = e.touches[0].clientX;
+    if (x < EDGE_RESERVE_PX || x > window.innerWidth - EDGE_RESERVE_PX) {
+      touchStartX.current = null;
+      return;
+    }
+    touchStartX.current = x;
   }, []);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {

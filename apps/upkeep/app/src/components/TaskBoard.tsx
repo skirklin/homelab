@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Spin } from "antd";
 import { ClockCircleOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -110,7 +110,25 @@ export function TaskBoard({ embedded = false }: TaskBoardProps) {
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
   const [completingTask, setCompletingTask] = useState<Task | null>(null);
   const [completeModalTab, setCompleteModalTab] = useState<"complete" | "history">("complete");
-  const [showSnoozed, setShowSnoozed] = useState(false);
+
+  // Snoozed-drawer expanded state lives in the URL so refresh/share-link
+  // round-trip the drawer state. Default (collapsed) isn't written.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const showSnoozed = searchParams.get("snoozed") === "1";
+  const toggleSnoozed = () => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (showSnoozed) {
+          params.delete("snoozed");
+        } else {
+          params.set("snoozed", "1");
+        }
+        return params;
+      },
+      { replace: true },
+    );
+  };
 
   // Get list ID from slug
   const listId = slug ? state.userSlugs[slug] : null;
@@ -214,7 +232,7 @@ export function TaskBoard({ embedded = false }: TaskBoardProps) {
 
       {tasksByUrgency.snoozed.length > 0 && (
         <SnoozedSection>
-          <SnoozedHeader onClick={() => setShowSnoozed(!showSnoozed)}>
+          <SnoozedHeader onClick={toggleSnoozed}>
             <ClockCircleOutlined />
             <span>Snoozed</span>
             <SnoozedCount>{tasksByUrgency.snoozed.length}</SnoozedCount>

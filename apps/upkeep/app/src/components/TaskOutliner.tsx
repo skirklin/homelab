@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { Button, Empty, Spin, Typography, Input, Select, InputNumber, Tag, Space, message } from "antd";
 import { PlusOutlined, CloseOutlined, ClearOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -9,6 +9,7 @@ import { getTaskTree, getTasksFromState } from "../selectors";
 import { formatFrequency } from "../types";
 import type { Task } from "../types";
 import { OutlinerRow } from "./OutlinerRow";
+import { appStorage, StorageKeys } from "../storage";
 
 const Container = styled.div`
   max-width: 900px;
@@ -71,14 +72,58 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   const { slug } = useParams<{ slug: string }>();
   const { state, setCurrentList } = useUpkeepContext();
   const upkeep = useUpkeepBackend();
-  const [focusedId, setFocusedId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // focusedId + selectedId live in the URL so refresh/share-link round-trip
+  // the view. focusedId pushes history (zooming into a subtree is a meaningful
+  // navigation — back un-focuses). selectedId is a fast-changing detail-pane
+  // highlight; replace.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusedId = searchParams.get("focus");
+  const selectedId = searchParams.get("select");
+
+  const setFocusedId = useCallback(
+    (next: string | null) => {
+      setSearchParams((prev) => {
+        const params = new URLSearchParams(prev);
+        if (next) {
+          params.set("focus", next);
+        } else {
+          params.delete("focus");
+        }
+        return params;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const setSelectedId = useCallback(
+    (next: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next) {
+            params.set("select", next);
+          } else {
+            params.delete("select");
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const listId = slug ? state.userSlugs[slug] : undefined;
 
+  // Persist last-used list so revisiting /tasks lands on the most recent list
+  // (parity with Kanban's TaskBoard).
   useEffect(() => {
-    if (listId) setCurrentList(listId);
-  }, [listId, setCurrentList]);
+    if (slug && listId) {
+      appStorage.set(StorageKeys.LAST_LIST, slug);
+      setCurrentList(listId);
+    }
+  }, [slug, listId, setCurrentList]);
 
   const tree = getTaskTree(state);
   const allTasks = getTasksFromState(state);
