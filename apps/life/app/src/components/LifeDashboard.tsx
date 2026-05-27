@@ -27,7 +27,6 @@ const TitleWithStatus = styled.div`
   gap: 8px;
 `;
 import { useLifeContext } from "../life-context";
-import { useEntriesSubscription } from "../subscription";
 import { EventLogger } from "./EventLogger";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
@@ -449,10 +448,9 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     return dayjs(selectedDate).format("ddd, MMM D");
   };
 
-  // Subscribe to entries
-  const logId = state.log?.id ?? null;
-  useEntriesSubscription(logId);
-
+  // Entries subscription is mounted once in LifeRoutesInner so every route
+  // (dashboard, /morning, /evening, /weekly, /journal, /insights, /quick)
+  // inherits today's events from a single feed.
   const allEntries = Array.from(state.entries.values());
 
   // Group trackables for layout. Unknown groups (or trackables without a

@@ -94,7 +94,11 @@ export const SESSIONS: Session[] = [
   {
     id: "evening",
     title: "Evening",
-    greeting: "Wind-down time. Three quick reflections.",
+    // Tense-agnostic phrasing: the evening wizard renders 3 or 4 prompts
+    // depending on whether today's morning intention is available for
+    // follow-up (DATA_COLLECTION.md A1). "Three quick" was a lie on the
+    // 4-prompt days; making it dynamic is overkill — soft phrasing wins.
+    greeting: "Wind-down time. A few quick reflections.",
     prompts: [
       {
         // Only renders when there's a morning intention to follow up on —
