@@ -58,6 +58,11 @@ function getHomeUrl(embedded: boolean): string {
   return embedded ? '/recipes' : '/';
 }
 
+// Route-only path segments that are logical containers, not navigable destinations.
+// Filtered out of the breadcrumb chain so /boxes/:boxId/recipes/:recipeId renders
+// as "Recipes / <box> / <recipe>" rather than "Recipes / boxes / <box> / recipes / <recipe>".
+const ROUTE_ONLY_SEGMENTS = new Set(['boxes', 'recipes']);
+
 function FullBreadcrumbs() {
   const location = useLocation();
   const params = useParams();
@@ -73,14 +78,17 @@ function FullBreadcrumbs() {
       className: 'recipes-breadcrumb',
       title: <Link to={getHomeUrl(embedded)}>Recipes</Link>,
     },
-    ...contentParts.map((part, index) => {
-      const url = buildUrl(contentParts, index, embedded);
-      return {
-        key: url,
-        className: 'recipes-breadcrumb',
-        title: <Link to={url}>{partMap.get(part) || part}</Link>,
-      };
-    }),
+    ...contentParts
+      .map((part, index) => ({ part, index }))
+      .filter(({ part }) => !ROUTE_ONLY_SEGMENTS.has(part))
+      .map(({ part, index }) => {
+        const url = buildUrl(contentParts, index, embedded);
+        return {
+          key: url,
+          className: 'recipes-breadcrumb',
+          title: <Link to={url}>{partMap.get(part) || part}</Link>,
+        };
+      }),
   ];
 
   return <Breadcrumb className="recipes-breadcrumb" items={items} />
@@ -94,13 +102,16 @@ function CollapsedBreadcrumbs() {
   const embedded = isEmbedded(location.pathname);
   const contentParts = getContentParts(location.pathname);
 
-  const menuItems = contentParts.map((part, index) => {
-    const url = buildUrl(contentParts, index, embedded);
-    return {
-      key: url,
-      label: <Link to={url}>{partMap.get(part) || part} /</Link>,
-    };
-  });
+  const menuItems = contentParts
+    .map((part, index) => ({ part, index }))
+    .filter(({ part }) => !ROUTE_ONLY_SEGMENTS.has(part))
+    .map(({ part, index }) => {
+      const url = buildUrl(contentParts, index, embedded);
+      return {
+        key: url,
+        label: <Link to={url}>{partMap.get(part) || part} /</Link>,
+      };
+    });
 
   const items: ItemType[] = [
     {

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigationType, useParams } from 'react-router-dom';
 import { Spin } from 'antd';
 import { useAuth, useRecipesBackend } from '@kirkl/shared';
 import { Context } from '../context';
@@ -20,9 +20,16 @@ export function Recipe(props: RecipeProps) {
   const { state, dispatch } = useContext(Context)
   const { user } = useAuth();
   const recipesBackend = useRecipesBackend();
+  const navigationType = useNavigationType();
   const [fetchAttempted, setFetchAttempted] = useState(false);
 
-  useEffect(() => { recordRecentView(recipeId); }, [recipeId]);
+  // Skip recording on browser back/forward — otherwise back-nav re-promotes the
+  // recipe in "Recently viewed" every time.
+  useEffect(() => {
+    if (navigationType !== "POP") {
+      recordRecentView(recipeId);
+    }
+  }, [recipeId, navigationType]);
 
   const recipe = getRecipeFromState(state, boxId, recipeId)
 

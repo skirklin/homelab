@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useState } from 'react';
 import { Modal } from 'antd';
 import styled from 'styled-components';
 import { Context } from '../context';
@@ -35,12 +35,8 @@ function WhatsNew() {
   const recipesBackend = useRecipesBackend();
   const user = getAppUserFromState(state, authUser?.uid);
 
-  useEffect(() => {
-    if (user && user.lastSeenUpdateVersion < CURRENT_UPDATE_VERSION) {
-      const timer = setTimeout(() => setIsOpen(true), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [user]);
+  // Auto-open on mount was removed — the modal now only opens via a user click
+  // (e.g. a future menu item). Until that trigger exists, the modal stays closed.
 
   const handleClose = () => {
     if (user) {
