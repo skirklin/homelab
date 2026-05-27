@@ -137,7 +137,34 @@ Six per-app commits on main: `3a53412` cross-cutting infra, `241d052` home, `0c3
 - **WhatsNew Settings menu trigger** — modal now dormant. Add a "What's new" menu item to re-activate.
 - **Travel trip-proposal UI** — confirm intent with user before building.
 
-## Bundle 5 — post-deploy critical review (in progress)
+## Bundle 5 — post-deploy critical review ✅ shipped 2026-05-27
+
+Six commits on main: `4ccb34c` useHistoryDismiss bugs, `38364eb` safe-area + edge-reserve, `a4d9525` per-app fixes, `b7c816a` NotFound unification, `ead8ee7` useUrlParam hook + tests, `2482dd3` text-input debounce migration.
+
+### Regressions fixed
+- [x] Outliner row-click → replace (in `a4d9525`). `setFocusedId` is now replace; added `?focus=` allow-list validation. Push-on-zoom deferred until an actual zoom UI exists.
+- [x] Home shell tap-active-to-module-root restored (in `a4d9525`). `goTo` returns to `basePath` when on a deeper route; true no-op only at module root. Same shape for Timeline + Settings.
+- [x] Recipes breadcrumb preserves terminal segment (in `a4d9525`).
+- [x] WhatsNew ripped out (in `a4d9525`). Component + Main.tsx mount deleted. Kept `lastSeenUpdateVersion` because CookingMode.tsx still uses it; inlined `CURRENT_UPDATE_VERSION = 2` in adapters.ts with a pointer to `COOKING_MODE_VERSION` for lockstep.
+- [x] `useHistoryDismiss` three bugs (in `4ccb34c`). Per-instance sentinel via `useId()`; mount-time `replaceState(null)` if our sentinel is the only state key and `open=false`; cleanup only `history.back()`s when sentinel is still on top AND the close transition was explicit. Extracted `closePanel`.
+- [x] Fixed-position safe-area (in `38364eb`). IngredientList FAB, OfflineBanner, SyncStatusBanner all wrapped in `calc(... + env(safe-area-inset-...))`.
+- [x] Money `?range=` namespaced (in `a4d9525`): `?invRange=` (Investments), `?acctRange=` (AccountDetail). Investments validator switched to `RANGE_VALUES.includes()`.
+- [x] Life wizard `?step=` now pushes on advance, replaces on completion-strip (in `a4d9525`).
+- [x] Text-input URL pollution fixed (in `2482dd3`). Transactions + Journal use `useUrlParam("q", { debounce: 250 })` — URL lags 250ms behind keystrokes; UI stays instant via local mirror.
+- [x] Life edge reserve bumped 20→32px (in `38364eb`).
+
+### Architectural changes
+- [x] `useUrlParam<T>` hook in `packages/ui/src/useUrlParam.ts` (in `ead8ee7`). Default-not-written by construction; optional debounce; `mode: "replace" | "push"`; 9 passing tests. Migrated 2 text-input call sites; ~28 other `setSearchParams` call sites are migration candidates for a future sweep.
+- [x] `NotFound` lifted to `packages/ui/src/NotFound.tsx` (in `b7c816a`). Accepts `shortcuts?: { label: string; to: string }[]` and `homePath?: string`. Applied across all 7 apps' catch-all routes; deleted recipes' `MissingPage`. Money required `@kirkl/shared` as a new workspace dep and `packages/ui` peerDep broadened to `react-router-dom ^6 || ^7` (money is on v7).
+
+### Drive-by improvements during the bundle
+- `RecordModel` unused import removed from `packages/backend/src/wrapped-pb/mirror.ts` — exposed by money's stricter `noUnusedLocals: true` once `@kirkl/shared` linkage activated transitive checking.
+- `packages/ui` peerDep range broadened to support react-router v6 + v7.
+- Project references added to `apps/money/tsconfig.app.json` so money type-checks against `@kirkl/shared` via `.d.ts` (matches other apps' pattern).
+
+### Notes
+- `pnpm install` was needed after merge to materialize workspace symlinks (`@kirkl/shared` in money's `node_modules`, `vitest` in `packages/ui/node_modules`). The agent's lockfile and package.json edits were correct; symlinks just don't update automatically on rebase.
+- `useUrlParam` mount-time `replaceState` guard only fires when `kirklSyncPanel` is the only key in `history.state` — preserves any other library's use of history state. Worth a manual phone test once Bundle 5 deploys.
 
 After Bundles 1–4 shipped, 4 critical reviewers (overall code review, mobile/PWA, URL-state design, UX regression hunt) audited the live result. Findings consolidated here.
 
