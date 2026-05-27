@@ -98,5 +98,9 @@ export {
 // Ant Design feedback hook
 export { useFeedback } from "./useFeedback";
 
+// URL param hook
+export { useUrlParam } from "./useUrlParam";
+export type { UseUrlParamOptions } from "./useUrlParam";
+
 // Test utilities — imported directly from "@kirkl/shared/test-utils" in test files,
 // NOT re-exported here to avoid pulling Node.js globals (process.env) into browser bundles.
