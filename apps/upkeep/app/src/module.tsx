@@ -2,8 +2,8 @@
  * Upkeep module for embedding in the home app.
  * Provides routes that can be mounted at /upkeep/*
  */
-import { Routes, Route, Navigate } from "react-router-dom";
-import { useAuth } from "@kirkl/shared";
+import { Routes, Route } from "react-router-dom";
+import { useAuth, NotFound } from "@kirkl/shared";
 import { BackendProvider } from "@kirkl/shared";
 import { UpkeepProvider } from "./upkeep-context";
 import { TaskBoard } from "./components/TaskBoard";
@@ -28,7 +28,7 @@ export function UpkeepRoutes({ embedded = false }: UpkeepRoutesProps) {
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
       <Route path="/:slug" element={<TaskBoard embedded={embedded} />} />
-      <Route path="*" element={<Navigate to="" replace />} />
+      <Route path="*" element={<NotFound homePath={embedded ? "/upkeep" : "/"} />} />
     </Routes>
   );
 }
@@ -44,7 +44,7 @@ export function TasksRoutes({ embedded = false }: UpkeepRoutesProps) {
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
       <Route path="/:slug" element={<TaskOutliner embedded={embedded} />} />
-      <Route path="*" element={<Navigate to="" replace />} />
+      <Route path="*" element={<NotFound homePath={embedded ? "/tasks" : "/"} />} />
     </Routes>
   );
 }

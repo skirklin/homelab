@@ -3,6 +3,7 @@
  */
 import { Routes, Route } from 'react-router-dom';
 import { createContext, useContext } from 'react';
+import { NotFound } from '@kirkl/shared';
 
 import Main from './Main';
 import Contents from './routes/Contents';
@@ -10,7 +11,6 @@ import Box from './routes/Box';
 import Boxes from './routes/Boxes';
 import Settings from './routes/Settings';
 import RoutedRecipe from './routes/Recipe';
-import MissingPage from './routes/MissingPage';
 import JoinBox from './routes/JoinBox';
 import InviteRedeem from './routes/InviteRedeem';
 
@@ -46,7 +46,7 @@ export function RecipesRoutes({ embedded = false, basePath }: RecipesRoutesProps
           <Route path="boxes" element={<Boxes />} />
           <Route path="boxes/:boxId" element={<Box />} />
           <Route path="boxes/:boxId/recipes/:recipeId" element={<RoutedRecipe />} />
-          <Route path="*" element={<MissingPage />} />
+          <Route path="*" element={<NotFound homePath={resolvedBase || "/"} />} />
         </Route>
       </Routes>
     </BasePathContext.Provider>

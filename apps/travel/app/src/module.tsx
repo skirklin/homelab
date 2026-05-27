@@ -1,5 +1,5 @@
 import { Routes, Route } from "react-router-dom";
-import { useAuth } from "@kirkl/shared";
+import { useAuth, NotFound } from "@kirkl/shared";
 import { BackendProvider } from "@kirkl/shared";
 import { TravelProvider } from "./travel-context";
 import { TripList } from "./components/TripList";
@@ -31,6 +31,7 @@ export function TravelRoutes({ embedded = false }: TravelRoutesProps) {
         <Route path=":tripId/activities/new" element={<ActivityForm />} />
         <Route path=":tripId/activities/:activityId/edit" element={<ActivityForm />} />
       </Route>
+      <Route path="*" element={<NotFound homePath={embedded ? "/travel" : "/"} />} />
     </Routes>
   );
 }

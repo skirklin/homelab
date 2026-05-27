@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { NotFound } from '@kirkl/shared'
 import type { Account, NetWorthSummary } from './api'
 import { fetchAccounts, fetchNetWorthSummary } from './api'
 import { Overview } from './pages/Overview'
@@ -87,7 +88,7 @@ function AppContent() {
           <Route path="/people/:person" element={<PersonDetail />} />
           <Route path="/institutions/:institution" element={<InstitutionDetail />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
     </div>

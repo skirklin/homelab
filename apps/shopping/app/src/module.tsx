@@ -6,7 +6,7 @@
  */
 
 import { Routes, Route } from "react-router-dom";
-import { useAuth } from "@kirkl/shared";
+import { useAuth, NotFound } from "@kirkl/shared";
 import { BackendProvider } from "@kirkl/shared";
 import { ShoppingProvider } from "./shopping-context";
 import { ShoppingList } from "./components/ShoppingList";
@@ -36,6 +36,9 @@ export function ShoppingRoutes({ embedded = false }: ShoppingRoutesProps) {
           nav audit — putting view in state instead of the URL meant refresh
           / browser-back / deep-link all silently dropped you back to the list. */}
       <Route path="/:slug/*" element={<ShoppingList embedded={embedded} />} />
+      {/* Catch-all — must come after /:slug/* so it only fires on unmatched
+          top-level routes (e.g. /typo, not /grocery/anything). */}
+      <Route path="*" element={<NotFound homePath={embedded ? "/shopping" : "/"} />} />
     </Routes>
   );
 }

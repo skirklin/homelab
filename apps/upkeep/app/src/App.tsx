@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { App as AntApp, ConfigProvider } from "antd";
 import styled from "styled-components";
-import { AuthProvider, useAuth, initializeBackend } from "@kirkl/shared";
+import { AuthProvider, useAuth, initializeBackend, NotFound } from "@kirkl/shared";
 import { BackendProvider } from "@kirkl/shared";
 import { UpkeepProvider } from "./upkeep-context";
 import { Auth } from "./components/Auth";
@@ -51,6 +51,7 @@ function AppContent() {
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
       <Route path="/:slug" element={<TaskBoard />} />
+      <Route path="*" element={<NotFound homePath="/" />} />
     </Routes>
   );
 }

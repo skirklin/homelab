@@ -202,6 +202,9 @@ importers:
 
   apps/money:
     dependencies:
+      '@kirkl/shared':
+        specifier: workspace:*
+        version: link:../../packages/ui
       plotly.js:
         specifier: ^3.4.0
         version: 3.5.0(mapbox-gl@1.13.3)

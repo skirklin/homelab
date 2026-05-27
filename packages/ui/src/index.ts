@@ -52,6 +52,8 @@ export { AppHeader } from "./AppHeader";
 export type { AppHeaderProps } from "./AppHeader";
 export { ShareModal } from "./ShareModal";
 export { ErrorBoundary } from "./ErrorBoundary";
+export { NotFound } from "./NotFound";
+export type { NotFoundProps, NotFoundShortcut } from "./NotFound";
 
 // Styled Components
 export {

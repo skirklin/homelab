@@ -53,7 +53,7 @@
  */
 
 import type PocketBase from "pocketbase";
-import type { RecordModel, UnsubscribeFunc } from "pocketbase";
+import type { UnsubscribeFunc } from "pocketbase";
 import type { WrappedPocketBase } from "./index";
 import type { RawRecord } from "./queue";
 

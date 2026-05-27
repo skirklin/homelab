@@ -6,7 +6,7 @@ import { useEffect, lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
-import { useAuth } from "@kirkl/shared";
+import { useAuth, NotFound } from "@kirkl/shared";
 import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { DisplaySettingsProvider } from "./display-settings";
@@ -73,7 +73,7 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
             <Journal />
           </Suspense>
         } />
-        <Route path="*" element={<LifeDashboard embedded={embedded} />} />
+        <Route path="*" element={<NotFound homePath="/" />} />
       </Routes>
     </DisplaySettingsProvider>
   );
