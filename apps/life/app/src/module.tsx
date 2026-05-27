@@ -12,6 +12,7 @@ import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { DisplaySettingsProvider } from "./display-settings";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { SessionRunner } from "./components/SessionRunner";
+import { QuickLog } from "./components/QuickLog";
 
 const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
 const Journal = lazy(() => import("./components/Journal").then(m => ({ default: m.Journal })));
@@ -63,6 +64,7 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
         <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
         <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
         <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
+        <Route path="/quick/:trackableId" element={<QuickLog />} />
         <Route path="/insights" element={
           <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
             <Visualizations />

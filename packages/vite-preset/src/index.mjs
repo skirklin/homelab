@@ -9,6 +9,15 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 /**
+ * @typedef {Object} ManifestShortcut
+ * @property {string} name
+ * @property {string} [short_name]
+ * @property {string} [description]
+ * @property {string} url
+ * @property {Array<{src:string,sizes:string,type:string}>} [icons]
+ */
+
+/**
  * @typedef {Object} KirklPluginsOptions
  * @property {string} name
  * @property {string} shortName
@@ -18,6 +27,8 @@ import { VitePWA } from "vite-plugin-pwa";
  * @property {Array<{src:string,sizes:string,type:string,purpose?:string}>} [icons]
  * @property {string[]} [importScripts]
  * @property {boolean} [autoUpdate]
+ * @property {ManifestShortcut[]} [shortcuts] PWA manifest shortcuts[] — the
+ *   long-press app-icon menu on Android / right-click jumplist on desktop.
  */
 
 /** @param {KirklPluginsOptions} opts */
@@ -31,6 +42,7 @@ export function kirklPlugins(opts) {
     icons = [{ src: "/favicon.svg", sizes: "any", type: "image/svg+xml" }],
     importScripts = [],
     autoUpdate = true,
+    shortcuts = [],
   } = opts;
 
   return [
@@ -48,6 +60,7 @@ export function kirklPlugins(opts) {
         background_color: backgroundColor,
         theme_color: themeColor,
         icons,
+        ...(shortcuts.length > 0 ? { shortcuts } : {}),
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
