@@ -2311,6 +2311,13 @@ dataRoutes.post("/tasks/:id/complete", handler(async (c) => {
 // Add and/or remove tags atomically without round-tripping through update_task.
 // remove is applied first, then add — so re-tagging in one call does the right
 // thing.
+//
+// The actual read-merge-write happens inside the transactional PB hook at
+// POST /api/tasks/:id/tags (infra/pocketbase/pb_hooks/task_tags.pb.js); we
+// forward there via pb.send() so the admin path inherits the same cross-device
+// atomicity guarantee as the direct-PB path used by the wpb adapter. The hook
+// bypasses its per-list ownership check for superuser callers — we do the
+// userOwnsTaskList() check here first, before forwarding.
 dataRoutes.post("/tasks/:id/tags", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -2327,13 +2334,14 @@ dataRoutes.post("/tasks/:id/tags", handler(async (c) => {
   if (!(await userOwnsTaskList(pb, task.list as string, userId))) {
     return c.json({ error: "access denied" }, 403);
   }
-  const removeSet = new Set(remove);
-  const filtered = ((task.tags as string[] | undefined) ?? []).filter((t) => !removeSet.has(t));
-  const merged = [...filtered];
-  for (const t of add) if (!merged.includes(t)) merged.push(t);
 
-  const record = await pb.collection("tasks").update(id, { tags: merged });
-  return c.json({ id: record.id, tags: record.tags });
+  const result = await pb.send(`/api/tasks/${encodeURIComponent(id)}/tags`, {
+    method: "POST",
+    body: JSON.stringify({ add, remove }),
+    headers: { "Content-Type": "application/json" },
+  }) as { task?: { id: string; tags: string[] } };
+  const taskOut = result.task ?? { id, tags: [] };
+  return c.json({ id: taskOut.id, tags: taskOut.tags });
 }));
 
 // Snooze a task

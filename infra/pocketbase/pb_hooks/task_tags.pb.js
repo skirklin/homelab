@@ -34,6 +34,14 @@
  *   The caller must be in `task_lists[task.list].owners`. Same shape as
  *   the API route's `userOwnsTaskList` check (services/api/src/lib/authz.ts).
  *
+ *   Superuser callers (PB admin client) bypass the ownership check — the
+ *   Hono API service in services/api proxies hlk_/mcpat_ token requests
+ *   through admin-pb and does its own userOwnsTaskList() before hitting
+ *   the hook. Routing those through here closes the same cross-device
+ *   race for the admin path without duplicating the transactional
+ *   merge-and-write logic. Discriminator pattern matches api_tokens.pb.js:
+ *   `auth.collection().name === "_superusers"`.
+ *
  * --------------------------------------------------------------------------
  * goja sharp edges this file works around (mirror sharing.pb.js notes):
  *
@@ -86,6 +94,20 @@ routerAdd("POST", "/api/tasks/{id}/tags", (e) => {
     return e.json(401, { error: "Authentication required" });
   }
 
+  // Identify superuser callers — those bypass the per-list ownership check.
+  // Method form (`auth.collection().name`) because the property form
+  // `auth.collectionName` is undefined under PB 0.25 goja (see api_tokens.pb.js).
+  let isSuperuser = false;
+  try {
+    if (typeof auth.collection === "function") {
+      const coll = auth.collection();
+      if (coll && coll.name === "_superusers") isSuperuser = true;
+    }
+  } catch (_) {
+    // Defensive — if we can't tell, treat as non-superuser (closed-fail).
+    isSuperuser = false;
+  }
+
   const id = e.request.pathValue("id");
   if (!id) {
     return e.json(400, { error: "Missing task id" });
@@ -124,9 +146,13 @@ routerAdd("POST", "/api/tasks/{id}/tags", (e) => {
   }
   // Match `tasks.updateRule` — auth.id must be in list.owners.
   // Owners on read is fine; only push-side goja mangles relations (header (b)).
-  const owners = preList.get("owners") || [];
-  if (owners.indexOf(auth.id) === -1) {
-    return e.json(403, { error: "must be an owner of the task's list" });
+  // Superuser bypass: the Hono API has already done userOwnsTaskList() before
+  // proxying through admin-pb; no second authorization check needed.
+  if (!isSuperuser) {
+    const owners = preList.get("owners") || [];
+    if (owners.indexOf(auth.id) === -1) {
+      return e.json(403, { error: "must be an owner of the task's list" });
+    }
   }
 
   // ---- Transactional read-merge-write ------------------------------------

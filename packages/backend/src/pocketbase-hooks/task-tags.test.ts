@@ -368,4 +368,26 @@ describe("task_tags.pb.js POST /api/tasks/:id/tags", () => {
     expect(calls).toBe(1);
     expect(task._fields.tags).toEqual(["a", "b"]);
   });
+
+  it("bypasses the per-list ownership check for superuser callers (admin-pb path)", () => {
+    // The Hono API service in services/api proxies hlk_/mcpat_ token writes
+    // through admin-pb, then pb.send()'s the new transactional hook to
+    // close the same cross-device race on that path. The hook recognizes
+    // superuser auth (collection().name === "_superusers") and skips the
+    // owners check — the route-side userOwnsTaskList() has already gated
+    // the call.
+    const { task } = setupFixture(hook, {
+      initialTags: ["a"],
+      ownerIds: ["SOMEONE_ELSE001"], // caller is NOT in owners
+    });
+    const superuserAuth = {
+      id: "SUPERUSER000001",
+      collection: () => ({ name: "_superusers" }),
+    };
+    const { e, responses } = makeEvent("SUPERUSER000001", task.id, { add: ["x"] });
+    e.auth = superuserAuth;
+    hook.handler(e);
+    expect(responses[0].status).toBe(200);
+    expect(task._fields.tags).toEqual(["a", "x"]);
+  });
 });
