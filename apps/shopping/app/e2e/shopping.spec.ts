@@ -1,38 +1,5 @@
 import { test, expect } from "./fixtures";
-
-/** The "Item..." input is an Ant Design AutoComplete (combobox role) */
-const itemInput = (page: import("@playwright/test").Page) =>
-  page.getByRole("combobox");
-
-/** Click the "New List" button and fill in the modal to create a list */
-async function createList(page: import("@playwright/test").Page, name: string) {
-  await page.getByRole("button", { name: /New List/ }).click();
-  await expect(page.getByText("Create New List")).toBeVisible();
-  const input = page.locator(".ant-modal input");
-  await input.fill(name);
-  await page.getByRole("button", { name: "Create" }).click();
-  // Wait for the list view to load (the add-item combobox appears)
-  await expect(itemInput(page)).toBeVisible({ timeout: 10000 });
-}
-
-/** Add an item via the add-item form (assumes we're on the list view) */
-async function addItem(page: import("@playwright/test").Page, ingredient: string, note?: string) {
-  const input = itemInput(page);
-  // Clear and type — fill() on Ant Design AutoComplete can be unreliable
-  await input.click();
-  await input.clear();
-  await input.pressSequentially(ingredient);
-  await expect(input).toHaveValue(ingredient, { timeout: 2000 });
-  if (note) {
-    await page.getByRole("textbox", { name: "Note" }).fill(note);
-  }
-  // Click the Note field first to close any autocomplete dropdown, then submit
-  if (!note) {
-    await page.getByRole("textbox", { name: "Note" }).click();
-  }
-  await page.getByRole("button", { name: /Add/ }).click();
-  await expect(page.getByText(ingredient)).toBeVisible({ timeout: 10000 });
-}
+import { addItem, createList, itemInput } from "./helpers";
 
 test.describe("Shopping app", () => {
   test("sign in and see list picker", async ({ authedPage: page }) => {
@@ -134,24 +101,26 @@ test.describe("Shopping app", () => {
     await createList(page, "Dupe Test");
     await addItem(page, "Milk");
 
-    // Try adding the same item again
+    // Try adding the same item again — the form's duplicate-guard surfaces
+    // an Ant Design message.warning ("...is already on the list") instead
+    // of going through the network. The first item stays visible and no
+    // second row appears.
     await itemInput(page).fill("Milk");
     await page.getByRole("button", { name: /Add/ }).click();
 
-    // Should show an alert about duplicates - dismiss it
-    page.on("dialog", (dialog) => dialog.accept());
-    await itemInput(page).fill("Milk");
-    await page.getByRole("button", { name: /Add/ }).click();
+    // The warning toast should appear and we should still only have one row.
+    await expect(page.getByText(/is already on the list/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".ant-checkbox")).toHaveCount(1);
   });
 
   test("navigate back to list picker", async ({ authedPage: page }) => {
-    await createList(page, "Nav Test");
+    const name = await createList(page, "Nav Test");
 
     // Click back button
     await page.locator("[aria-label='arrow-left']").click();
 
     // Should be back at list picker with the list we created
     await expect(page.getByText("My Lists")).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText("Nav Test")).toBeVisible();
+    await expect(page.getByText(name)).toBeVisible();
   });
 });

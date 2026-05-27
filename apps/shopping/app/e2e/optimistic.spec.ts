@@ -9,17 +9,7 @@
  */
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
-
-const itemInput = (page: Page) => page.getByRole("combobox");
-
-async function createList(page: Page, name: string) {
-  await page.getByRole("button", { name: /New List/ }).click();
-  await expect(page.getByText("Create New List")).toBeVisible();
-  const input = page.locator(".ant-modal input");
-  await input.fill(name);
-  await page.getByRole("button", { name: "Create" }).click();
-  await expect(itemInput(page)).toBeVisible({ timeout: 10000 });
-}
+import { createList, itemInput } from "./helpers";
 
 async function fillAddItemForm(page: Page, ingredient: string) {
   const input = itemInput(page);
@@ -31,12 +21,9 @@ async function fillAddItemForm(page: Page, ingredient: string) {
   await page.getByRole("textbox", { name: "Note" }).click();
 }
 
-// Per-run suffix so slugs don't collide with leftovers from prior runs.
-const RUN = Date.now().toString(36);
-
 test.describe("Optimistic writes", () => {
   test("add item appears in the UI before the network create completes", async ({ authedPage: page }) => {
-    await createList(page, `Slow-Net Add ${RUN}`);
+    await createList(page, "Slow-Net Add");
 
     // Hold the create POST for 2s before letting it through.
     await page.route("**/api/collections/shopping_items/records", async (route) => {
@@ -57,7 +44,7 @@ test.describe("Optimistic writes", () => {
   });
 
   test("delete item disappears from the UI before the network delete completes", async ({ authedPage: page }) => {
-    await createList(page, `Slow-Net Delete ${RUN}`);
+    await createList(page, "Slow-Net Delete");
     // Add normally first.
     await fillAddItemForm(page, "Bread");
     await page.getByRole("button", { name: /Add/ }).click();
@@ -81,7 +68,7 @@ test.describe("Optimistic writes", () => {
   });
 
   test("rejected create rolls back the optimistic UI", async ({ authedPage: page }) => {
-    await createList(page, `Rollback ${RUN}`);
+    await createList(page, "Rollback");
 
     // Stub the next create POST to return 403 after a brief delay so the
     // optimistic state is observable before rollback.
