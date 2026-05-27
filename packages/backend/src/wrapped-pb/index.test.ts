@@ -14,10 +14,9 @@ import { wrapPocketBase, WrappedPbError, type MutationQueue } from "./index";
 import { clearAllMutations } from "./persistence";
 
 /** Tests sometimes need to seed the mutation queue with a server snapshot
- *  (what the mirror would do on bootstrap). The queue is exposed via the
- *  mirror integration side-channel; this helper hides the cast. */
+ *  (what the mirror would do on bootstrap). */
 function queueOf(wpb: ReturnType<typeof wrapPocketBase>): MutationQueue {
-  return (wpb as unknown as { __queue: MutationQueue }).__queue;
+  return wpb.mirrorIntegration.queue;
 }
 
 interface StubCollection {

@@ -47,7 +47,7 @@
  * Implementation notes:
  *   - The mirror talks to the raw `pb` client for SSE + reads (so it can
  *     control top-N semantics itself). Optimistic-write events come in via
- *     the `__onMutation` side-channel on wpb, NOT through `pb.subscribe`.
+ *     wpb.mirrorIntegration.subscribeMutations, NOT through `pb.subscribe`.
  *   - A "slice" is keyed by (collection, topic, filter, sort, limit).
  *     Predicates are per-consumer because predicates aren't hashable.
  */
@@ -55,7 +55,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel, UnsubscribeFunc } from "pocketbase";
 import type { WrappedPocketBase } from "./index";
-import type { MutationQueue, RawRecord } from "./queue";
+import type { RawRecord } from "./queue";
 
 export { type RawRecord } from "./queue";
 
@@ -88,14 +88,6 @@ export interface PBMirror {
 }
 
 // ---- Internal types ----
-
-/** Hidden side-channel on a WrappedPocketBase instance, set by wrapPocketBase.
- *  Don't widen this — the mirror lives in the same package and is the
- *  only legitimate consumer. */
-interface InternalWpb extends WrappedPocketBase {
-  __queue: MutationQueue;
-  __onMutation: (cb: (collection: string, recordId: string) => void) => () => void;
-}
 
 interface Consumer {
   spec: WatchSpec;
@@ -185,14 +177,13 @@ function contentHash(records: RawRecord[]): string {
 // ---- Implementation ----
 
 export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMirror {
-  const internal = wpb as InternalWpb;
-  if (!internal.__queue || !internal.__onMutation) {
+  if (!wpb.mirrorIntegration) {
     throw new Error(
-      "[mirror] WrappedPocketBase did not expose its __queue / __onMutation " +
-      "side-channels. wrapPocketBase must set them.",
+      "[mirror] WrappedPocketBase did not expose its mirrorIntegration surface. " +
+      "wrapPocketBase must set it.",
     );
   }
-  const queue = internal.__queue;
+  const { queue, subscribeMutations } = wpb.mirrorIntegration;
   const slices = new Map<string, Slice>();
   const listeners = new Map<string, CollectionListener>();
   let disposed = false;
@@ -320,7 +311,7 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // Subscribe via raw pb (NOT wpb) because we want exact control over
     // initial fetch shape (sort+limit) and we don't want wpb's own initial
     // getFullList that subscribe() does. Optimistic writes flow to the
-    // mirror via the __onMutation hook below.
+    // mirror via the mirrorIntegration.subscribeMutations hook below.
     l.unsub = pb().collection(collection).subscribe("*", (e) => {
       if (disposed) return;
       const action = e.action as "create" | "update" | "delete";
@@ -430,7 +421,7 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
 
   // ---- Mutation queue hook (optimistic writes) ----
 
-  const unhookMutation = internal.__onMutation((collection, _recordId) => {
+  const unhookMutation = subscribeMutations((collection, _recordId) => {
     if (disposed) return;
     for (const slice of slices.values()) {
       if (slice.spec.collection !== collection) continue;

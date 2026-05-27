@@ -87,6 +87,27 @@ export interface WrappedPocketBase {
    * console and run `__wpbDebug.snapshot()` or `__wpbDebug.events()`.
    */
   debug: WpbDebug;
+  /**
+   * Mirror integration surface — for PBMirror's exclusive use.
+   *
+   * `queue` exposes the MutationQueue so the mirror can materialize slice
+   * views (queue.view / queue.viewCollection) and seed it from initial
+   * fetches via applyServer. `subscribeMutations(cb)` registers a callback
+   * fired whenever wpb pushes, drains, or applies a mutation, so the
+   * mirror can re-emit affected slices.
+   *
+   * Domain backends should not touch these — they write through
+   * `collection(...).create/update/delete` and read live state via the
+   * mirror's `watch`. Direct queue access from app code would bypass the
+   * mirror's filtering / sort+limit / per-consumer hashing layer.
+   */
+  mirrorIntegration: WpbMirrorIntegration;
+}
+
+/** Internal surface PBMirror grabs at construction. Not for general use. */
+export interface WpbMirrorIntegration {
+  queue: MutationQueue;
+  subscribeMutations(cb: (collection: string, recordId: string) => void): () => void;
 }
 
 /** Kinds of internal events recorded for post-hoc debugging. */
@@ -569,17 +590,13 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       },
       clear: () => { debugRing.length = 0; },
     },
-    // Side-channels for PBMirror (same package). Not part of the public
-    // WrappedPocketBase contract — mirror.ts casts to access. Promoted to
-    // first-class properties in a follow-up commit.
-    __queue: queue,
-    __onMutation: (cb: (collection: string, recordId: string) => void) => {
-      mutationListeners.add(cb);
-      return () => { mutationListeners.delete(cb); };
+    mirrorIntegration: {
+      queue,
+      subscribeMutations: (cb) => {
+        mutationListeners.add(cb);
+        return () => { mutationListeners.delete(cb); };
+      },
     },
-  } as WrappedPocketBase & {
-    __queue: MutationQueue;
-    __onMutation: (cb: (collection: string, recordId: string) => void) => () => void;
   };
 }
 
