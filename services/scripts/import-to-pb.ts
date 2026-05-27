@@ -69,7 +69,7 @@ const user = new PocketBaseUserBackend(getPb, wpb, mirror);
 // Helpers
 // ---------------------------------------------------------------------------
 
-interface Stats { created: number; skipped: number; errors: number }
+interface Stats { created: number; skipped: number; errors: number; skipped_empty?: number }
 function emptyStats(): Stats { return { created: 0, skipped: 0, errors: 0 }; }
 
 function loadJson(filename: string): any[] {
@@ -422,6 +422,15 @@ async function importLife() {
             else if (typeof v === "number") entries.push({ name: k, type: "number", value: v, unit: "ct" });
             else if (typeof v === "string") entries.push({ name: k, type: "text", value: v });
           }
+          // Skip empty-payload events instead of letting them hit the
+          // addEvent invariant (DATA_COLLECTION.md F1). Pre-F1 historical
+          // data contains ~10/14d of these in the migration sample; counting
+          // them separately keeps the "errors" bucket meaningful (real
+          // import failures only).
+          if (entries.length === 0) {
+            eventStats.skipped_empty = (eventStats.skipped_empty ?? 0) + 1;
+            continue;
+          }
           await life.addEvent(pbLogId, event.subjectId || "", entries, createdBy, {
             timestamp: ts ? new Date(ts) : undefined,
             labels,
@@ -711,14 +720,17 @@ await wireUserProfiles();
 console.log("\n==============================================");
 console.log("  Import Summary");
 console.log("==============================================\n");
-let totalCreated = 0, totalSkipped = 0, totalErrors = 0;
+let totalCreated = 0, totalSkipped = 0, totalErrors = 0, totalSkippedEmpty = 0;
 for (const [name, stats] of Object.entries(allStats)) {
-  console.log(`  ${name.padEnd(22)} created: ${String(stats.created).padStart(5)}  skipped: ${String(stats.skipped).padStart(5)}  errors: ${String(stats.errors).padStart(5)}`);
+  const emptyTail = stats.skipped_empty ? `  skipped_empty: ${String(stats.skipped_empty).padStart(5)}` : "";
+  console.log(`  ${name.padEnd(22)} created: ${String(stats.created).padStart(5)}  skipped: ${String(stats.skipped).padStart(5)}  errors: ${String(stats.errors).padStart(5)}${emptyTail}`);
   totalCreated += stats.created;
   totalSkipped += stats.skipped;
   totalErrors += stats.errors;
+  totalSkippedEmpty += stats.skipped_empty ?? 0;
 }
 console.log("  " + "-".repeat(62));
-console.log(`  ${"TOTAL".padEnd(22)} created: ${String(totalCreated).padStart(5)}  skipped: ${String(totalSkipped).padStart(5)}  errors: ${String(totalErrors).padStart(5)}`);
+const totalEmptyTail = totalSkippedEmpty ? `  skipped_empty: ${String(totalSkippedEmpty).padStart(5)}` : "";
+console.log(`  ${"TOTAL".padEnd(22)} created: ${String(totalCreated).padStart(5)}  skipped: ${String(totalSkipped).padStart(5)}  errors: ${String(totalErrors).padStart(5)}${totalEmptyTail}`);
 
 process.exit(totalErrors > 0 ? 1 : 0);

@@ -2009,6 +2009,14 @@ dataRoutes.post("/life/entries", handler(async (c) => {
   }
 
   const entries = Array.isArray(body.entries) ? body.entries : [];
+  // Mirror the LifeBackend invariant (see packages/backend/src/pocketbase/life.ts
+  // addEvent + apps/life/DATA_COLLECTION.md F1): empty-payload events
+  // poison observation aggregates and are almost always bugs. The MCP
+  // path lands here directly (it doesn't go through the frontend backend
+  // adapter), so the guard has to live in both places.
+  if (entries.length === 0) {
+    return c.json({ error: "entries[] must contain at least one entry" }, 400);
+  }
 
   const payload: Record<string, unknown> = {
     log: body.log,
@@ -2040,6 +2048,16 @@ dataRoutes.patch("/life/entries/:id", handler(async (c) => {
   if (!record) return c.json({ error: "not found" }, 404);
   if (!(await userOwnsLifeLog(pb, record.log as string, userId))) {
     return c.json({ error: "access denied" }, 403);
+  }
+  // Mirror the LifeBackend invariant (see packages/backend/src/pocketbase/life.ts
+  // updateEvent + apps/life/DATA_COLLECTION.md F1): if the caller is
+  // *setting* entries, the new value must be a non-empty array. Omit the
+  // field entirely to leave entries unchanged (e.g. timestamp-only edits).
+  // The MCP `update_life_entry` tool wraps this route, so without the guard
+  // a scripted `update_life_entry({id, entries: []})` would re-introduce
+  // exactly the empty-payload rows the original audit eliminated.
+  if (body.entries !== undefined && (!Array.isArray(body.entries) || body.entries.length === 0)) {
+    return c.json({ error: "entries[] must contain at least one entry when set" }, 400);
   }
   const patch: Record<string, unknown> = {};
   if (body.timestamp) patch.timestamp = body.timestamp;

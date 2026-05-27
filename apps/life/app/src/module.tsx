@@ -13,6 +13,7 @@ import { DisplaySettingsProvider } from "./display-settings";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { SessionRunner } from "./components/SessionRunner";
 import { QuickLog } from "./components/QuickLog";
+import { useEntriesSubscription } from "./subscription";
 
 const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
 const Journal = lazy(() => import("./components/Journal").then(m => ({ default: m.Journal })));
@@ -48,6 +49,16 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
 
     return () => { cancelled = true; };
   }, [user?.uid, dispatch, life]);
+
+  // Subscribe to today's events at the route-tree level so every life
+  // route (dashboard, /morning, /evening, /weekly, /journal, /insights,
+  // /quick) inherits `state.entries` without each having to subscribe on
+  // its own. Critical for the push-notification entry path: the "evening
+  // session" push lands the user directly on /evening with no dashboard
+  // mount, so without this the wizard's `findMorningIntention` lookup ran
+  // against an empty `state.entries` and silently dropped the
+  // intention_followup prompt (DATA_COLLECTION.md A1).
+  useEntriesSubscription(state.log?.id ?? null);
 
   if (!state.log) {
     return (

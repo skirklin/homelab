@@ -140,6 +140,21 @@ export class PocketBaseLifeBackend implements LifeBackend {
     userId: string,
     options?: { timestamp?: Date; endTime?: Date; labels?: Record<string, string> },
   ): Promise<string> {
+    // Invariant: refuse empty-payload writes. An event with no entries[] is
+    // indistinguishable from a real log in aggregates and pollutes any
+    // downstream observer ("8 sleep events" when only 3 had values). See
+    // apps/life/DATA_COLLECTION.md F1 for the May 13–27 audit that
+    // motivated this. Callers that legitimately want to record a
+    // dismissed-prompt analytics event should use a distinct subject_id
+    // (e.g. `<subject>_prompt_dismissed`) rather than poisoning the
+    // canonical trackable.
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw new Error(
+        `addEvent rejected: empty entries[] for subject_id="${subjectId}". ` +
+          `Provide at least one entry, or use a distinct subject_id for ` +
+          `dismissed-prompt analytics.`,
+      );
+    }
     const id = newId();
     const payload: Record<string, unknown> = {
       id,
@@ -164,6 +179,20 @@ export class PocketBaseLifeBackend implements LifeBackend {
       labels?: Record<string, string> | null;
     },
   ): Promise<void> {
+    // Mirror the addEvent invariant (F1): when entries is *being set* on
+    // update, it must not be empty or a non-array. A missing `entries`
+    // key is fine — that just means this update isn't touching entries
+    // (e.g. a timestamp-only backfill correction). Only reject when the
+    // caller is explicitly writing `entries: []`, which re-introduces
+    // exactly the polluting rows the original audit motivated. See
+    // apps/life/DATA_COLLECTION.md F1.
+    if (updates.entries !== undefined && (!Array.isArray(updates.entries) || updates.entries.length === 0)) {
+      throw new Error(
+        `updateEvent rejected: entries must be a non-empty array when set ` +
+          `(eventId="${eventId}"). Omit the field to leave it unchanged, ` +
+          `or delete the event if it should no longer exist.`,
+      );
+    }
     const patch: Record<string, unknown> = {};
     if (updates.timestamp) patch.timestamp = updates.timestamp.toISOString();
     if (updates.endTime !== undefined) {

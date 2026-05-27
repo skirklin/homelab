@@ -42,6 +42,16 @@ export interface SessionPrompt {
   unit?: string;
   /** Allow the user to skip without setting a value. Default: true. */
   optional?: boolean;
+  /**
+   * If set, the prompt only renders when the SessionRunner can resolve the
+   * named context. Today the only resolver is "morning_intention" which
+   * looks up today's `morning_session` event and pulls its `intention` text
+   * to substitute into `{context}` inside `hint`. When the context is
+   * missing (no morning session today, or no intention answered), the
+   * prompt is omitted entirely — never shown with a "you skipped this
+   * morning" nudge, per the ROADMAP's anti-patterns.
+   */
+  contextKey?: "morning_intention";
 }
 
 export interface Session {
@@ -84,8 +94,25 @@ export const SESSIONS: Session[] = [
   {
     id: "evening",
     title: "Evening",
-    greeting: "Wind-down time. Three quick reflections.",
+    // Tense-agnostic phrasing: the evening wizard renders 3 or 4 prompts
+    // depending on whether today's morning intention is available for
+    // follow-up (DATA_COLLECTION.md A1). "Three quick" was a lie on the
+    // 4-prompt days; making it dynamic is overkill — soft phrasing wins.
+    greeting: "Wind-down time. A few quick reflections.",
     prompts: [
+      {
+        // Only renders when there's a morning intention to follow up on —
+        // see SessionPrompt.contextKey. Dropping silently keeps the evening
+        // wizard at 3 prompts on days the user didn't journal in the
+        // morning (no nudge, no "you skipped").
+        id: "intention_followup",
+        type: "text",
+        label: "Did you move on this morning's intention?",
+        hint: "This morning you wrote: “{context}”",
+        placeholder: "Anything from nothing to a full update.",
+        optional: true,
+        contextKey: "morning_intention",
+      },
       {
         id: "win",
         type: "text",

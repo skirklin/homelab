@@ -19,7 +19,6 @@ import {
   useUrlParam,
 } from "@kirkl/shared";
 import { useLifeContext } from "../life-context";
-import { useEntriesSubscription } from "../subscription";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEntry } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
@@ -247,8 +246,8 @@ function isJournalable(entry: LogEntry): boolean {
 export function Journal() {
   const navigate = useNavigate();
   const { state } = useLifeContext();
-  const logId = state.log?.id ?? null;
-  useEntriesSubscription(logId);
+  // Entries subscription is mounted once in LifeRoutesInner so every route
+  // inherits today's events from a single feed.
 
   // Filter chips + search live in the URL so a refresh or shared link
   // (`/journal?filter=morning&q=foo`) round-trips. Defaults aren't written.
