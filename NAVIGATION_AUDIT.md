@@ -234,17 +234,31 @@ Eliminates ~30 ad-hoc `setSearchParams(prev => { ... })` blocks. Multiple regres
 - **5c — Per-app navigation regressions** — Outliner row-click semantics, Home shell active-tap restoration, Recipes breadcrumb terminal preservation + WhatsNew decision, Money `?range=` namespacing + Investments validation fix, Life wizard push, Travel TripDetail default-write, TaskOutliner focus/select validation.
 - **5d — `NotFound` unification** — lift home's `NotFound` to `packages/ui`; apply across all apps' catch-alls.
 
-### Deferred to Bundle 6+
+### Bundle 6 — reliability + readability sweep ✅ shipped 2026-05-27
 
-- [x] **#12 `<ScrollRestoration/>`** ✅ shipped 2026-05-27 in `ef550b4`. Built `useScrollRestoration()` hook + `<ScrollRestoration />` component in `packages/ui/src/useScrollRestoration.ts`. Module-level `Map<string, number>` keyed by `location.key`, cleared on full reload. Sets `window.history.scrollRestoration = "manual"`. Honors hash anchors. rAF retry (up to 6 ticks ~100ms) handles async-content cases. Wired into all 7 BrowserRouter apps (home, recipes, shopping, upkeep, travel, life, money). 4 tests passing. Implementation note: the original sketched `useEffect` cleanup pattern was wrong (layoutEffect restore runs before effect cleanup save) — agent corrected to a `previousKeyRef` inline in the same layout effect.
-- **Modal-URL policy** — architectural decision.
-- **`useUrlParam` migration sweep** — ~28 other `setSearchParams` sites can collapse onto the hook from Bundle 5a.
-- **Recipes Filterbox + RecipeTable sort URL-backing** — mechanical follow-up.
-- **Travel trip-proposal UI** — feature decision.
-- **DetailPanel atomic tag updates** — race-prone, non-nav.
-- **SW stale-shell after deploy** — separate concern.
-- **Monitor app `<BrowserRouter>` not wired with ScrollRestoration** — agent flagged; one-line addition if monitor's UX matters here. Likely not relevant (monitor is a dashboard with charts, not deep navigable lists).
-- **`apps/recipes/app/src/Router.tsx` is dead code** — discovered during scroll-restoration wiring. `index.tsx` mounts `App.tsx`, not `Router.tsx`. Delete in a cleanup pass.
+Four commits on main:
+- `991f858` recipes: URL-back Filterbox search + RecipeTable sort, delete dead `Router.tsx`. Side-effect bug catch: old Filterbox kept stale results on zero-match searches; new impl correctly clears.
+- `195d7f4` chore: trip-proposal removal — reality check revealed the code was already gone in earlier cleanups; this commit closed out docs and the travel-expert agent definition. PB `trip_proposals` collection still exists in prod schema (3 migrations created it); deliberately not dropped via destructive migration. User decision pending.
+- `2b96bc7` fix: atomic tag updates in upkeep DetailPanel. New `tagTask(taskId, {add?, remove?})` op on `UpkeepBackend`; PB impl reads via wpb queue (catches in-flight optimistic mutations on same client), merges, writes. Closes same-client race; cross-device race still possible (would need PB server hook with row-lock — flagged for future).
+- `1699225` `useUrlParam` migration sweep: 16 sites across travel/money/upkeep/life moved onto the shared hook. Net -158 lines. 3 sites kept on raw `setSearchParams`:
+  - Money `Travel.tsx` (true multi-param drilldown — each setter writes/clears multiple params atomically)
+  - Life `SessionRunner.tsx` (per-call mode override — replace on step-zero, push otherwise)
+  - Transactions sort/dir + LifeDashboard deep-link-consume effect (multi-param atomic writes)
+
+### `useUrlParam` API follow-ups surfaced
+
+- `useUrlParams` (plural) helper for multi-param atomic writes — would unblock the 3 skipped sites.
+- Per-call mode override (`setValue(next, { mode: "push" })` or a sibling `pushValue` setter) — would unblock SessionRunner.
+- `useUrlString(name)` shorthand for identity-mapped string params (currently 4+ verbose call sites).
+
+### Deferred to Bundle 7+
+
+- **Modal-URL policy** — architectural decision (~14 modal sites). URL-backed (bookmarkable, back-to-close) vs in-memory (current).
+- **SW stale-shell after deploy** — separate SW-versioning concern. Workbox `clientsClaim + skipWaiting` already on via `autoUpdate`; would need a runtime version check that triggers a hard reload on build-hash mismatch.
+- **Cross-device tag race** in DetailPanel — current `tagTask` only closes same-client race. Truly atomic would need a PB server hook with row-lock that accepts `{add[], remove[]}`.
+- **PB `trip_proposals` collection still in prod** — 3 migrations created it; a dedicated drop migration would remove the orphan schema. Low priority.
+- **Monitor app `<BrowserRouter>` not wired with ScrollRestoration** — one-line addition if needed (likely not — monitor is a charts dashboard).
+- **`useUrlParam` API extensions** — useUrlParams plural, per-call mode, useUrlString shorthand (see above).
 
 ## Notes
 
