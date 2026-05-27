@@ -317,6 +317,36 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
 
   // ---- Collection-level SSE dispatch ----
 
+  /**
+   * Fire-and-forget unsubscribe that swallows both sync throws AND async
+   * rejections. The PB SDK's `unsubscribe` returned from `realtime.subscribe`
+   * POSTs to `/api/realtime`; it returns a Promise which can reject with:
+   *
+   *   - 404 "Missing or invalid client id" — SSE connection never fully
+   *     established before teardown (test finishes fast; rapid mount/unmount
+   *     in dev; auth-change reset between subscribe and unsubscribe).
+   *   - Network errors on page-hide.
+   *
+   * The previous `try { u(); } catch {}` pattern only caught sync throws;
+   * the async rejection escaped as an unhandled rejection, which vitest
+   * treats as a test failure even though the assertion suite passed. The
+   * realtime channel is already torn down server-side, so there's nothing
+   * to do with the rejection — silence it on both edges.
+   */
+  function safeFireAndForgetUnsub(pending: Promise<UnsubscribeFunc>): void {
+    pending
+      .then((u) => {
+        try {
+          // u() returns void in @types but Promise<void> at runtime.
+          const r = (u as unknown as () => unknown)();
+          if (r && typeof (r as Promise<unknown>).then === "function") {
+            (r as Promise<unknown>).catch(() => { /* stale clientId — ignore */ });
+          }
+        } catch { /* ignore */ }
+      })
+      .catch(() => { /* subscribe itself rejected late — ignore */ });
+  }
+
   function ensureCollectionListener(collection: string): void {
     let l = listeners.get(collection);
     if (!l) {
@@ -346,18 +376,7 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     const pending = l.unsub;
     l.unsub = null;
     listeners.delete(collection);
-    if (pending) {
-      // The PB SDK's unsubscribe path POSTs a DELETE to /api/realtime
-      // with a stale clientId on disconnect/reconnect races. We don't
-      // care if it fails — the realtime channel is already torn down
-      // server-side for any disconnected client. Catch on both the
-      // promise itself (which can reject if the subscribe call rejected
-      // late) and the inner unsubscribe call. Without this, a stale
-      // clientId yields an unhandledrejection on every page-hide.
-      pending
-        .then((u) => { try { u(); } catch { /* ignore */ } })
-        .catch(() => { /* stale clientId or already disconnected — ignore */ });
-    }
+    if (pending) safeFireAndForgetUnsub(pending);
   }
 
   /** Decide whether a record belongs in a given slice's window.
@@ -747,11 +766,7 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       const pending = l.unsub;
       l.unsub = null;
       listeners.delete(collection);
-      if (pending) {
-        pending
-          .then((u) => { try { u(); } catch { /* ignore */ } })
-          .catch(() => { /* stale clientId or already disconnected — ignore */ });
-      }
+      if (pending) safeFireAndForgetUnsub(pending);
     }
   }
 
