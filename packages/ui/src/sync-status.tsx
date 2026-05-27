@@ -12,7 +12,7 @@
  * the console handle uses, so the future Supabase realtime wrapper just
  * needs to provide compatible shapes for this UI to keep working.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { WpbDebug, WpbEvent, WpbSnapshot, WpbCollectionSnapshot } from "@homelab/backend/wrapped-pb";
 import { useOnline } from "./online-status";
 
@@ -301,19 +301,63 @@ function useSnapshot(debug: WpbDebug): WpbSnapshot {
  * Reentrancy guard: the close-triggered history.back() fires popstate too;
  * `closingRef` prevents it from re-running setOpen(false) and (more
  * importantly) prevents the cleanup branch from going back twice on unmount.
+ *
+ * Per-instance ownership: the sentinel value is a unique id (via useId) so
+ * banner-and-dot-both-open works correctly — each hook only reacts to its
+ * own popstate and only cleans up its own sentinel.
+ *
+ * Restore hygiene: iOS Safari restores `history.state` across reloads. If
+ * a stale `{ kirklSyncPanel: ... }` survives a refresh while `open=false`,
+ * we clear it on mount to avoid mis-detecting ownership on next open.
+ *
+ * Router-popstate guard: cleanup only calls `history.back()` when the
+ * sentinel actually belongs to this instance AND the panel was still
+ * considered open by this hook. Protects against route-level unmounts
+ * sending the user one extra step back.
  */
 function useHistoryDismiss(open: boolean, setOpen: (v: boolean) => void): void {
+  const instanceId = useId();
+  const wasOpenRef = useRef(false);
+
+  // Clear a leaked sentinel from a previous page-load (iOS history.state
+  // restore) so the first open of this session sees a clean slate. Only
+  // clear if `kirklSyncPanel` is the only key — don't trample any other
+  // library that may also stash state on history.state.
   useEffect(() => {
-    if (!open) return;
+    if (typeof window === "undefined") return;
+    const st = window.history.state;
+    if (!open && st && typeof st === "object" && "kirklSyncPanel" in st) {
+      const keys = Object.keys(st);
+      if (keys.length === 1 && keys[0] === "kirklSyncPanel") {
+        window.history.replaceState(null, "");
+      }
+    }
+    // Run once on mount — subsequent reentries are managed by the open effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
     if (typeof window === "undefined") return;
 
+    wasOpenRef.current = true;
     let closing = false;
 
-    window.history.pushState({ kirklSyncPanel: true }, "");
+    window.history.pushState({ kirklSyncPanel: instanceId }, "");
 
     const onPopState = () => {
-      // Browser back was pressed (or our own history.back fired). Either
-      // way the sentinel entry is gone; just mirror that in state.
+      // Only react if this pop is for *our* sentinel. After our entry has
+      // been popped, the new top of stack will have a different (or no)
+      // kirklSyncPanel value — that's the signal it was ours.
+      const top = window.history.state;
+      const stillOurs = top && typeof top === "object" && top.kirklSyncPanel === instanceId;
+      if (stillOurs) {
+        // A different panel's sentinel above ours got popped — ignore.
+        return;
+      }
       closing = true;
       setOpen(false);
     };
@@ -321,16 +365,23 @@ function useHistoryDismiss(open: boolean, setOpen: (v: boolean) => void): void {
 
     return () => {
       window.removeEventListener("popstate", onPopState);
-      // If we're unmounting because the user pressed back, the sentinel
-      // is already popped — nothing to do. Otherwise (explicit close, or
-      // parent re-rendered with open=false), pop our sentinel so the
-      // history stack stays clean.
-      if (!closing && window.history.state && window.history.state.kirklSyncPanel) {
+      // Only pop our sentinel if:
+      //  - we're not unmounting because back was just pressed (closing flag), and
+      //  - this hook still thinks the panel is open (guards against parent
+      //    re-renders / route-level unmounts), and
+      //  - our sentinel is still on top of the history stack.
+      const top = window.history.state;
+      const stillOurs = top && typeof top === "object" && top.kirklSyncPanel === instanceId;
+      if (!closing && wasOpenRef.current && stillOurs) {
         window.history.back();
       }
     };
-  }, [open, setOpen]);
+  }, [open, setOpen, instanceId]);
 }
+
+/** Trigger panel close by popping our sentinel — popstate handler will
+ *  then call setOpen(false). Used as the panel's onClose. */
+const closePanel = () => window.history.back();
 
 export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
   const snapshot = useSnapshot(debug);
@@ -343,7 +394,7 @@ export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
   // The persistent per-app dots cover the ambient at-a-glance need.
   if (state.severity === "ok") {
     return showPanel
-      ? <DetailsPanel debug={debug} onClose={() => window.history.back()} />
+      ? <DetailsPanel debug={debug} onClose={closePanel} />
       : null;
   }
 
@@ -360,7 +411,12 @@ export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
           // none on top of us (zIndex 9999 vs 9998). It visually occludes us
           // AND blocks taps. Stack below it so both pills are visible and
           // tappable.
-          top: online ? 8 : 44,
+          // Use safe-area inset so the pill clears the iOS notch / Dynamic
+          // Island even though `position: fixed` is anchored to the viewport
+          // rather than the body's safe-area padding.
+          top: online
+            ? "calc(8px + env(safe-area-inset-top))"
+            : "calc(44px + env(safe-area-inset-top))",
           left: "50%",
           transform: "translateX(-50%)",
           zIndex: 9998,
@@ -379,7 +435,7 @@ export function SyncStatusBanner({ debug }: { debug: WpbDebug }) {
           textOverflow: "ellipsis",
         }}
       >{state.label}</button>
-      {showPanel ? <DetailsPanel debug={debug} onClose={() => window.history.back()} /> : null}
+      {showPanel ? <DetailsPanel debug={debug} onClose={closePanel} /> : null}
     </>
   );
 }
@@ -452,7 +508,7 @@ export function SyncDot({ debug, collections }: SyncDotProps) {
           we keep this component dep-free so it can be dropped into any app
           header without extra imports. */}
       <style>{`@keyframes kirkl-sync-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.5 } }`}</style>
-      {showPanel ? <DetailsPanel debug={debug} onClose={() => window.history.back()} /> : null}
+      {showPanel ? <DetailsPanel debug={debug} onClose={closePanel} /> : null}
     </>
   );
 }
