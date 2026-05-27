@@ -45,7 +45,6 @@ export function RecipesRoutes({ embedded = false, basePath }: RecipesRoutesProps
           <Route path="settings" element={<Settings />} />
           <Route path="boxes" element={<Boxes />} />
           <Route path="boxes/:boxId" element={<Box />} />
-          <Route path="boxes/:boxId/recipes" element={<Box />} />
           <Route path="boxes/:boxId/recipes/:recipeId" element={<RoutedRecipe />} />
           <Route path="*" element={<MissingPage />} />
         </Route>

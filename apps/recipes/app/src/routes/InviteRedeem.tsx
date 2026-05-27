@@ -79,7 +79,8 @@ export default function InviteRedeem() {
     if (status !== "success" || !result) return;
     message.success("Invite accepted!");
 
-    async function redirectToTarget() {
+    let cancelled = false;
+    (async () => {
       let path: string;
       if (result!.target_type === "recipe") {
         // Recipes are nested under their box, so look up the box ID
@@ -94,11 +95,12 @@ export default function InviteRedeem() {
       } else {
         path = `${basePath}/boxes/${result!.target_id}`;
       }
+      // If the component unmounted (user pressed back), don't yank them
+      // forward to the target.
+      if (cancelled) return;
       navigate(path, { replace: true });
-    }
-
-    const timer = setTimeout(redirectToTarget, 1000);
-    return () => clearTimeout(timer);
+    })();
+    return () => { cancelled = true; };
   }, [status, result, navigate, basePath, message]);
 
   return (

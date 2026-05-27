@@ -34,7 +34,10 @@ export default function NewButton(props: NewProps) {
         const recipe = createNewRecipe(user);
         const recipeId = `uniqueId=${getUniqueId(recipe)}`
         dispatch({ type: "ADD_RECIPE", payload: recipe, boxId: targetBoxId, recipeId })
-        navigate(`${basePath}/boxes/${targetBoxId}/recipes/${recipeId}`)
+        // The `uniqueId=` URL holds a not-yet-saved draft. Replace so once
+        // SaveRecipe swaps to the real recipe id, the temp URL doesn't sit
+        // in history as a dead back-step.
+        navigate(`${basePath}/boxes/${targetBoxId}/recipes/${recipeId}`, { replace: true })
     }
 
     const handleClick = () => {

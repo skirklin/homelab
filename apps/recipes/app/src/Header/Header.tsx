@@ -39,7 +39,7 @@ function Header({ embedded = false }: HeaderProps) {
   // When embedded, no dropdown menu - parent Shell handles account actions
   // When standalone, dropdown has Manage Boxes (for mobile) and Sign Out
   const menuItems = embedded ? [] : [
-    { key: "boxes", icon: <InboxOutlined />, label: "Manage Boxes", onClick: () => navigate("boxes") },
+    { key: "boxes", icon: <InboxOutlined />, label: "Manage Boxes", onClick: () => navigate(`${basePath}/boxes`) },
     { type: "divider" as const },
     { key: "signout", icon: <LogoutOutlined />, label: "Sign Out", onClick: () => getBackend().authStore.clear() },
   ];

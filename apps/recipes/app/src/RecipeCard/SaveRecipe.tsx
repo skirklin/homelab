@@ -48,7 +48,9 @@ function SaveButton(props: RecipeCardProps) {
       const newId = await recipesBackend.addRecipe(boxId, data, user.id);
       newRecipe.created = newRecipe.updated
       dispatch({type: "REMOVE_RECIPE", recipeId, boxId}) // removes the local-only version of the recipe
-      navigate(`${basePath}/boxes/${boxId}/recipes/${newId}`)
+      // The current URL is the temp `uniqueId=` draft URL — replace so it
+      // doesn't sit in history pointing at a recipe id that no longer exists.
+      navigate(`${basePath}/boxes/${boxId}/recipes/${newId}`, { replace: true })
     } else {
       await recipesBackend.saveRecipe(recipeId, data, user.id);
     }

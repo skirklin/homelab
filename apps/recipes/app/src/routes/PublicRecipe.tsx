@@ -169,10 +169,11 @@ export function PublicRecipe() {
     if (!box || !recipe) return undefined;
     return (rid: string) => (rid === recipe.id ? { boxId: box.id, recipe } : undefined);
   }, [box, recipe]);
-  // PublicRecipe is reachable both standalone (`/r/...`) and embedded under
-  // `/recipes/...`. The pathname prefix is the simplest source of truth for
-  // building hrefs that stay in-app.
-  const basePath = window.location.pathname.startsWith("/recipes") ? "/recipes" : "";
+  // PublicRecipe is always rendered inside the recipes app — either standalone
+  // (recipes.kirkl.in mounts the app at `/`) or embedded under `/recipes/...`
+  // on the home shell. Cross-recipe links should always carry the `/recipes`
+  // prefix so they land in the authenticated app after sign-in.
+  const basePath = "/recipes";
 
   const handleSignIn = () => {
     // Navigate to the main app which will show the auth screen

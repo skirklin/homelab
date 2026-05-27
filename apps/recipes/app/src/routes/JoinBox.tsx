@@ -134,7 +134,7 @@ export default function JoinBox() {
         </Header>
         <Content>
           <Description>This box doesn't exist or may have been deleted.</Description>
-          <Button type="primary" onClick={() => navigate(".")}>
+          <Button type="primary" onClick={() => navigate(basePath || "/", { replace: true })}>
             Go Home
           </Button>
         </Content>
@@ -159,7 +159,7 @@ export default function JoinBox() {
           >
             Add to My Boxes
           </Button>
-          <Button onClick={() => navigate(".")}>
+          <Button onClick={() => navigate(basePath || "/", { replace: true })}>
             Cancel
           </Button>
         </ButtonGroup>
