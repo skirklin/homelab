@@ -1,13 +1,15 @@
-import { CheckCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, DeleteOutlined, DiffOutlined, EditOutlined } from '@ant-design/icons';
 import { useContext, useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { Button, Input, Popconfirm, Spin } from 'antd';
+import { Button, Input, Popconfirm, Spin, Tooltip } from 'antd';
 import { Context } from '../context';
-import { getAppUserFromState, getUserFromState } from '../state';
+import { getAppUserFromState, getRecipeFromState, getUserFromState } from '../state';
+import { getRecipeData } from '../storage';
 import type { RecipeCardProps } from './RecipeCard';
 import { useRecipesBackend } from '@kirkl/shared';
 import { useAuth, useFeedback } from '@kirkl/shared';
 import type { CookingLogEvent, LifeEntry } from '@homelab/backend';
+import { CookingLogDiffModal } from './CookingLogDiffModal';
 
 /** Pull the "notes" text entry out of a unified event row. */
 function getNotes(event: CookingLogEvent): string {
@@ -135,8 +137,14 @@ function CookingLog(props: RecipeCardProps) {
   const [events, setEvents] = useState<CookingLogEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [diffEventId, setDiffEventId] = useState<string | null>(null);
 
   const currentUser = getAppUserFromState(state, authUser?.uid);
+  // Pull the live recipe to compare against snapshots. The diff is "snapshot
+  // at cook time → current recipe.data", so we re-read on every render —
+  // cheap, and stays in sync with edits the user makes in the same session.
+  const liveRecipe = getRecipeFromState(state, boxId, recipeId);
+  const liveData = liveRecipe ? getRecipeData(liveRecipe) : undefined;
 
   // Live-subscribe to cooking-log events so "I made it!" clicks, edits,
   // deletes, and writes from another device all update the UI without a
@@ -254,33 +262,75 @@ function CookingLog(props: RecipeCardProps) {
                   </AddNoteHint>
                 ) : null}
               </LogContent>
-              {editable && !isEditing && (
-                <LogActions>
-                  <ActionButton
-                    type="text"
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => handleStartEdit(event.id)}
-                  />
-                  <Popconfirm
-                    title="Delete this entry?"
-                    onConfirm={() => handleDelete(event.id)}
-                    okText="Delete"
-                    cancelText="Cancel"
-                  >
+              <LogActions>
+                {/* "What changed?" diff button — visible to everyone who can
+                    see the entry, not just the entry's author. Snapshot is
+                    nullable: rows that predate the feature have no snapshot
+                    and the button is disabled with an explanatory tooltip. */}
+                {event.recipeSnapshot ? (
+                  <Tooltip title="See what changed since you cooked this">
                     <ActionButton
                       type="text"
                       size="small"
-                      danger
-                      icon={<DeleteOutlined />}
+                      icon={<DiffOutlined />}
+                      onClick={() => setDiffEventId(event.id)}
                     />
-                  </Popconfirm>
-                </LogActions>
-              )}
+                  </Tooltip>
+                ) : (
+                  <Tooltip title="No snapshot — predates this feature.">
+                    <span>
+                      <ActionButton
+                        type="text"
+                        size="small"
+                        icon={<DiffOutlined />}
+                        disabled
+                      />
+                    </span>
+                  </Tooltip>
+                )}
+                {editable && !isEditing && (
+                  <>
+                    <ActionButton
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => handleStartEdit(event.id)}
+                    />
+                    <Popconfirm
+                      title="Delete this entry?"
+                      onConfirm={() => handleDelete(event.id)}
+                      okText="Delete"
+                      cancelText="Cancel"
+                    >
+                      <ActionButton
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                      />
+                    </Popconfirm>
+                  </>
+                )}
+              </LogActions>
             </LogEntryContainer>
           );
         })}
       </LogList>
+      {(() => {
+        // Render the diff modal outside the entry loop so the entry list
+        // doesn't re-mount it on every state change. Single modal driven by
+        // diffEventId; null means closed.
+        const target = events.find((e) => e.id === diffEventId) ?? null;
+        return (
+          <CookingLogDiffModal
+            open={target !== null}
+            onClose={() => setDiffEventId(null)}
+            snapshot={target?.recipeSnapshot}
+            current={liveData}
+            cookedOnLabel={target ? formatDate(target.timestamp) : ""}
+          />
+        );
+      })()}
     </LogContainer>
   );
 }

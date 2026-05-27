@@ -450,6 +450,87 @@ describe("Recipes", () => {
     expect(oob.status).toBe(400);
   });
 
+  it("POST /data/recipes/:id/cooking-log captures recipe_snapshot and PATCH does not touch it", async () => {
+    // Set the recipe to a known data shape so we can assert on the snapshot.
+    await adminPb.collection("recipes").update(recipe1Id, {
+      data: { name: "Carbonara", recipeIngredient: ["3 cups milk", "2 eggs"] },
+    });
+
+    // POST captures the snapshot. Response body is minimal; read back via
+    // the GET endpoint to confirm.
+    const created = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      method: "POST",
+      token: userToken,
+      body: { notes: "Original" },
+    });
+    expect(created.status).toBe(201);
+    const eventId = created.data.id as string;
+
+    const listAfterCreate = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      token: userToken,
+    });
+    expect(listAfterCreate.status).toBe(200);
+    const seeded = (listAfterCreate.data as any[]).find((e) => e.id === eventId);
+    expect(seeded.recipe_snapshot).toEqual({
+      name: "Carbonara",
+      recipeIngredient: ["3 cups milk", "2 eggs"],
+    });
+
+    // Now mutate the live recipe — snapshot on the existing event must NOT
+    // follow.
+    await adminPb.collection("recipes").update(recipe1Id, {
+      data: { name: "Carbonara", recipeIngredient: ["4 cups milk", "2 eggs"] },
+    });
+
+    // PATCH the cooking-log entry's notes — snapshot must still NOT change.
+    const patched = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: { notes: "After tweaks" },
+    });
+    expect(patched.status).toBe(200);
+
+    const listAfterPatch = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      token: userToken,
+    });
+    const stillSeeded = (listAfterPatch.data as any[]).find((e) => e.id === eventId);
+    expect(stillSeeded.recipe_snapshot).toEqual({
+      name: "Carbonara",
+      recipeIngredient: ["3 cups milk", "2 eggs"],
+    });
+    expect(stillSeeded.notes).toBe("After tweaks");
+
+    // Cleanup
+    await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "DELETE",
+      token: userToken,
+    });
+  });
+
+  it("GET /data/recipes/:id/cooking-log returns null recipe_snapshot for legacy rows", async () => {
+    // Write a row directly via the admin client without a recipe_snapshot
+    // field — mirrors a row that predates the feature.
+    const legacy = await adminPb.collection("recipe_events").create({
+      box: recipeBoxId,
+      subject_id: recipe1Id,
+      timestamp: new Date().toISOString(),
+      created_by: userId,
+      entries: [{ name: "notes", type: "text", value: "legacy cook" }],
+    });
+    try {
+      const list = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+        token: userToken,
+      });
+      expect(list.status).toBe(200);
+      const found = (list.data as any[]).find((e) => e.id === legacy.id);
+      expect(found).toBeDefined();
+      expect(found.recipe_snapshot).toBeNull();
+      expect(found.notes).toBe("legacy cook");
+    } finally {
+      await adminPb.collection("recipe_events").delete(legacy.id);
+    }
+  });
+
   it("PATCH /data/cooking-log/:eventId — edits notes and timestamp independently", async () => {
     // Create a cooking log entry to edit
     const created = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {

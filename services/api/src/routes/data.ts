@@ -46,6 +46,21 @@ function notesFromEntries(entries: unknown): string | undefined {
 }
 
 /**
+ * Normalize a `recipe_snapshot` JSON value for the API boundary.
+ *
+ * PB returns missing JSON columns as `{}` (the default zero value), which
+ * the frontend would otherwise have to distinguish from "empty recipe" by
+ * its own heuristics. Surface `null` instead so the diff UI can render the
+ * disabled-with-tooltip state cleanly. Anything non-object also drops to
+ * null defensively.
+ */
+function normalizeSnapshot(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (Object.keys(raw as Record<string, unknown>).length === 0) return null;
+  return raw as Record<string, unknown>;
+}
+
+/**
  * Build the entries[] patch for a notes-only edit: drop any existing
  * "notes" text entry from the row, append a new one if the caller passed
  * a non-empty value. Preserves any other entries the row may carry.
@@ -799,6 +814,11 @@ dataRoutes.delete("/recipes/:id", handler(async (c) => {
 // List cooking log events for a recipe. Read-gated through the same recipe
 // read check as GET /recipes/:id — if you can't see the recipe, you can't
 // see when it was cooked.
+//
+// Returns `recipe_snapshot` (the recipe.data captured at cook time) inline so
+// the frontend can render its "what changed since I cooked it" diff without a
+// per-entry roundtrip. Rows that predate the feature have no snapshot — they
+// surface as `recipe_snapshot: null`.
 dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -814,6 +834,7 @@ dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
     id: e.id,
     timestamp: e.timestamp,
     notes: notesFromEntries(e.entries),
+    recipe_snapshot: normalizeSnapshot(e.recipe_snapshot),
     created_by: e.created_by,
     created: e.created,
   })));
@@ -823,6 +844,11 @@ dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
 // recipe's box (recipe_events.box → recipe_boxes), so authorization must
 // flow through `box.owners`. Recipe-level owners aren't enough — PB's own
 // `recipe_events` updateRule (childRules-based) requires box ownership.
+//
+// Snapshots `recipe.data` at write time onto `recipe_snapshot` so the
+// "what changed?" UI can later diff against the live recipe. Unconditional
+// — no opt-in. Snapshot is intentionally NOT touched by PATCH (the
+// snapshot represents the cook session, not the row's edit history).
 dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -835,12 +861,14 @@ dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
   const body = await c.req.json<{ notes?: string; timestamp?: string }>().catch(
     () => ({} as { notes?: string; timestamp?: string }),
   );
+  const snapshot = normalizeSnapshot(recipe.data);
   const record = await pb.collection("recipe_events").create({
     box: recipe.box,
     subject_id: id,
     timestamp: body.timestamp ?? new Date().toISOString(),
     created_by: userId,
     entries: patchNotesEntries([], body.notes),
+    recipe_snapshot: snapshot ?? null,
   });
   return c.json({ id: record.id, timestamp: record.timestamp }, 201);
 }));

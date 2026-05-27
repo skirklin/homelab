@@ -111,6 +111,17 @@ function recipeFromRecord(r: RecordModel | RawRecord): Recipe {
   };
 }
 
+function snapshotFromRecord(r: RecordModel | RawRecord): RecipeData | undefined {
+  const x = r as Record<string, unknown>;
+  const raw = x.recipe_snapshot;
+  // Treat empty objects as "no snapshot" so legacy rows (PB defaults missing
+  // JSON columns to {}) don't look like an empty recipe in the diff UI.
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0) {
+    return raw as RecipeData;
+  }
+  return undefined;
+}
+
 function eventFromRecord(r: RecordModel | RawRecord): CookingLogEvent {
   const x = r as Record<string, unknown>;
   return {
@@ -120,6 +131,7 @@ function eventFromRecord(r: RecordModel | RawRecord): CookingLogEvent {
     endTime: x.end_time ? new Date(x.end_time as string) : undefined,
     entries: entriesFromRecord(r),
     labels: labelsFromRecord(r),
+    recipeSnapshot: snapshotFromRecord(r),
     createdBy: (x.created_by as string) || "",
     created: x.created as string,
     updated: x.updated as string,
@@ -321,6 +333,25 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
 
   async addCookingLogEvent(boxId: string, recipeId: string, userId: string, options?: { notes?: string; timestamp?: Date }): Promise<string> {
     const id = newId();
+    // Snapshot the recipe.data at cook time so the UI can later diff it
+    // against the live recipe. Prefer the wpb cache (already populated by
+    // an active recipes subscription) to avoid a round-trip; fall back to
+    // a fresh getOne when not cached. If both fail, persist without a
+    // snapshot rather than blocking the "I made it!" write — losing a
+    // snapshot is preferable to losing the cook event.
+    let snapshot: RecipeData | undefined;
+    const cached = this.wpb.collection("recipes").view<{ data?: RecipeData }>(recipeId);
+    if (cached?.data) {
+      snapshot = cached.data;
+    } else {
+      try {
+        const r = await this.pb().collection("recipes").getOne(recipeId);
+        const data = (r as unknown as { data?: RecipeData }).data;
+        if (data && typeof data === "object") snapshot = data;
+      } catch {
+        snapshot = undefined;
+      }
+    }
     await this.wpb.collection("recipe_events").create({
       id,
       box: boxId,
@@ -328,6 +359,7 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
       timestamp: (options?.timestamp ?? new Date()).toISOString(),
       created_by: userId,
       entries: notesEntries(options?.notes),
+      recipe_snapshot: snapshot ?? null,
     });
     return id;
   }

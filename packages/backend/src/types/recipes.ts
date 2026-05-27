@@ -68,6 +68,14 @@ export interface PendingChanges {
  * A persisted recipe_events row. Same unified shape as LifeEvent and
  * TaskCompletion — entries[] is the canonical place for per-cook data.
  * Today we only write a single text entry named "notes".
+ *
+ * `recipeSnapshot` captures the full recipe.data blob at the moment the
+ * entry was created. The UI uses it to diff "the recipe as it was when I
+ * cooked it" against the live recipe ("milk: 3 cup → 4 cup"). Always
+ * populated on new entries; undefined on rows that predate the feature
+ * (they're not backfilled — the UI renders the diff affordance disabled
+ * for them). Written on create only; updating notes/timestamp does NOT
+ * re-snapshot — the snapshot represents the cook session, not the row.
  */
 export interface CookingLogEvent {
   id: string;
@@ -77,6 +85,7 @@ export interface CookingLogEvent {
   endTime?: Date;
   entries: LifeEntry[];
   labels?: Record<string, string>;
+  recipeSnapshot?: RecipeData;
   createdBy: string;
   created: string;
   updated: string;
