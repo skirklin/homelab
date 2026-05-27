@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { Spin } from "antd";
 import { ClockCircleOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepContext } from "../upkeep-context";
-import { useAuth } from "@kirkl/shared";
+import { useAuth, useUrlParam } from "@kirkl/shared";
 import { getTasksByUrgency } from "../selectors";
 import { Header } from "./Header";
 import { KanbanColumn } from "./KanbanColumn";
@@ -113,22 +113,12 @@ export function TaskBoard({ embedded = false }: TaskBoardProps) {
 
   // Snoozed-drawer expanded state lives in the URL so refresh/share-link
   // round-trip the drawer state. Default (collapsed) isn't written.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const showSnoozed = searchParams.get("snoozed") === "1";
-  const toggleSnoozed = () => {
-    setSearchParams(
-      (prev) => {
-        const params = new URLSearchParams(prev);
-        if (showSnoozed) {
-          params.delete("snoozed");
-        } else {
-          params.set("snoozed", "1");
-        }
-        return params;
-      },
-      { replace: true },
-    );
-  };
+  const [showSnoozed, setShowSnoozed] = useUrlParam<boolean>("snoozed", {
+    parse: (raw) => raw === "1",
+    serialize: (v) => (v ? "1" : null),
+    default: false,
+  });
+  const toggleSnoozed = () => setShowSnoozed(!showSnoozed);
 
   // Get list ID from slug
   const listId = slug ? state.userSlugs[slug] : null;

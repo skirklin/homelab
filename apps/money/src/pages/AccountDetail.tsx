@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useUrlParam } from '@kirkl/shared'
 import Plot from 'react-plotly.js'
 import type { Account, BalancePoint, PerformancePoint, Transaction, Holding } from '../api'
 import { fetchAccounts, fetchBalances, fetchPerformance, fetchTransactions, fetchHoldings, updateManualBalance, renameAccount, deleteAccount } from '../api'
@@ -37,19 +38,14 @@ export default function AccountDetail() {
   // Time range (URL-backed so refresh + share preserves it). Param is
   // page-scoped (acctRange) so navigating to/from Investments — which uses
   // its own ?invRange= — can't silently overwrite this page's selection.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const rawRange = searchParams.get('acctRange')
-  const range: TimeRange = RANGE_VALUES.includes(rawRange as TimeRange)
-    ? (rawRange as TimeRange)
-    : DEFAULT_RANGE
-  const setRange = useCallback((next: TimeRange) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_RANGE) params.delete('acctRange')
-      else params.set('acctRange', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
+  const [range, setRange] = useUrlParam<TimeRange>('acctRange', {
+    parse: (raw) =>
+      RANGE_VALUES.includes(raw as TimeRange)
+        ? (raw as TimeRange)
+        : DEFAULT_RANGE,
+    serialize: (v) => (v === DEFAULT_RANGE ? null : v),
+    default: DEFAULT_RANGE,
+  })
 
   // Rename
   const [editing, setEditing] = useState(false)

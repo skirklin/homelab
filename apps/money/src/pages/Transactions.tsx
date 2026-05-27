@@ -49,23 +49,21 @@ export function Transactions() {
     [setUrlSearch],
   )
 
-  const timeKey = searchParams.get('time') || '1w'
+  const [timeKey, setTimeKey] = useUrlParam<string>('time', {
+    parse: (raw) => raw || '1w',
+    serialize: (v) => (v === '1w' ? null : v),
+    default: '1w',
+  })
   const preset = TIME_PRESETS.find((p) => p.key === timeKey) ?? TIME_PRESETS[0]
+  // sort/dir are written together in handleSort (single user action mutates
+  // both params), so they stay on the raw setSearchParams shape — splitting
+  // them into separate useUrlParam calls would create two history entries.
   const rawSortKey = searchParams.get('sort')
   const sortKey: SortKey = SORT_KEYS.includes(rawSortKey as SortKey)
     ? (rawSortKey as SortKey)
     : DEFAULT_SORT_KEY
   const rawSortDir = searchParams.get('dir')
   const sortDir: SortDir = rawSortDir === 'asc' ? 'asc' : DEFAULT_SORT_DIR
-
-  const setParam = useCallback((key: string, value: string | null) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (value) next.set(key, value)
-      else next.delete(key)
-      return next
-    }, { replace: true })
-  }, [setSearchParams])
 
   useEffect(() => {
     fetchTransactions({ limit: 10000 }).then(setAllTxns)
@@ -136,10 +134,6 @@ export function Transactions() {
 
     return sorted
   }, [allTxns, preset, search, sortKey, sortDir])
-
-  const setTimeKey = useCallback((key: string) => {
-    setParam('time', key === '1w' ? null : key)
-  }, [setParam])
 
   return (
     <>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Button,
   Tag,
@@ -22,7 +22,7 @@ import {
   CheckSquareOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { WideContainer } from "@kirkl/shared";
+import { WideContainer, useUrlParam } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { useTravelBackend } from "@kirkl/shared";
 import { getActivitiesForTrip, getItinerariesForTrip, sourceRefUrl } from "../utils";
@@ -155,6 +155,10 @@ const SourceRef = styled.div<{ $type: string }>`
   }};
 `;
 
+// Static set of valid tab keys for `?tab=` URL param validation. Kept at module
+// scope so the Set isn't re-created on every render.
+const TAB_KEYS = new Set(["itinerary", "activities", "prep"]);
+
 export function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
   const navigate = useNavigate();
@@ -186,7 +190,14 @@ export function TripDetail() {
   const activeItin = useSelectedItinerary(itineraries);
 
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
-  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Tab selection lives in `?tab=`. Defaults (itinerary) aren't serialized.
+  // Valid keys are static — itinerary/activities/prep — see TAB_KEYS above.
+  const [activeTab, setActiveTab] = useUrlParam<string>("tab", {
+    parse: (raw) => (raw && TAB_KEYS.has(raw) ? raw : "itinerary"),
+    serialize: (v) => (v === "itinerary" ? null : v),
+    default: "itinerary",
+  });
 
   // Auto-advance status by trip dates: Booked → Ongoing once start date hits,
   // Ongoing → Completed once end date passes. Only the natural forward path
@@ -394,21 +405,6 @@ export function TripDetail() {
             ),
           },
         ];
-
-        const validTabs = new Set(tabItems.map((t) => t.key));
-        const tabParam = searchParams.get("tab");
-        const activeTab = tabParam && validTabs.has(tabParam) ? tabParam : defaultTab;
-        const setActiveTab = (key: string) => {
-          // Don't serialize the default — keeps the URL clean for the initial
-          // landing case and matches the pattern Bundle 5 standardized on
-          // (see TripList.tsx's updateParam helper).
-          setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            if (key === defaultTab) next.delete("tab");
-            else next.set("tab", key);
-            return next;
-          }, { replace: true });
-        };
 
         return (
           <TwoColumn>

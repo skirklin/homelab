@@ -7,7 +7,7 @@
  * deep-link here. Each day has its own URL.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeftOutlined,
   CarOutlined,
@@ -22,7 +22,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Empty, Popconfirm, Space, Spin } from "antd";
 import styled from "styled-components";
-import { useTravelBackend, WideContainer } from "@kirkl/shared";
+import { useTravelBackend, WideContainer, useUrlParam } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { getActivitiesForTrip, getItinerariesForTrip, mapsUrl } from "../utils";
 import {
@@ -240,16 +240,16 @@ export function DayView() {
   // `?itin=<deleted-id>` URL renders fine but the URL keeps lying about which
   // itinerary is selected, so subsequent reads and back/forward drift apart.
   // Mirrors the same pattern in ItinerarySection (Bundle 3c).
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedItinParam, setSelectedItin] = useUrlParam<string | null>("itin", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
   useEffect(() => {
     if (!itinerary) return;
-    if (searchParams.get("itin") === itinerary.id) return;
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("itin", itinerary.id);
-      return next;
-    }, { replace: true });
-  }, [itinerary, searchParams, setSearchParams]);
+    if (selectedItinParam === itinerary.id) return;
+    setSelectedItin(itinerary.id);
+  }, [itinerary, selectedItinParam, setSelectedItin]);
 
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
 

@@ -1,5 +1,4 @@
 import React, { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
 import {
   Button,
   Empty,
@@ -17,7 +16,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { useTravelBackend } from "@kirkl/shared";
+import { useTravelBackend, useUrlParam } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { daysToBackend } from "../adapters";
 import { mapsUrl } from "../utils";
@@ -271,8 +270,18 @@ export function ItinerarySection({
 }) {
   const travel = useTravelBackend();
   const { state } = useTravelContext();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("view") || "timeline";
+  const [activeTab, setTab] = useUrlParam<string>("view", {
+    parse: (raw) => raw || "timeline",
+    serialize: (v) => v,
+    default: "timeline",
+  });
+  // `?itin=` is identity-mapped: parse passes the raw value through, the setter
+  // writes whatever id is supplied. Default is `null` (no param).
+  const [selectedItinParam, setSelectedItin] = useUrlParam<string | null>("itin", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
   const currentItin = useSelectedItinerary(itineraries);
 
   // Keep `?itin=` in sync with the resolved itinerary. useSelectedItinerary
@@ -282,29 +291,9 @@ export function ItinerarySection({
   // refresh/back-forward navigation) stay consistent.
   useEffect(() => {
     if (!currentItin) return;
-    if (searchParams.get("itin") === currentItin.id) return;
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("itin", currentItin.id);
-      return next;
-    }, { replace: true });
-  }, [currentItin, searchParams, setSearchParams]);
-
-  const setTab = (tab: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("view", tab);
-      return next;
-    }, { replace: true });
-  };
-
-  const setSelectedItin = (id: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("itin", id);
-      return next;
-    }, { replace: true });
-  };
+    if (selectedItinParam === currentItin.id) return;
+    setSelectedItin(currentItin.id);
+  }, [currentItin, selectedItinParam, setSelectedItin]);
 
   const timeline = currentItin ? (
     <ItineraryTimeline

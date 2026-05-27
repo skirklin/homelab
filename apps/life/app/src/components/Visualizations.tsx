@@ -1,5 +1,6 @@
-import { useMemo, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { useUrlParam } from "@kirkl/shared";
 import styled from "styled-components";
 import { Select, Empty, Tabs, Button } from "antd";
 import { LeftOutlined, RightOutlined, ArrowLeftOutlined } from "@ant-design/icons";
@@ -473,54 +474,30 @@ export function Visualizations() {
   // Both the selected trackable and the calendar month live in the URL so
   // refresh + share-link round-trip the exact view. Defaults (first trackable,
   // current month) aren't written to keep the URL clean.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const trackableParam = searchParams.get("trackable");
-  const selectedId = trackableParam && TRACKABLES.some((t) => t.id === trackableParam)
-    ? trackableParam
-    : null;
-  const viewDate = useMemo(() => parseMonthParam(searchParams.get("month")), [searchParams]);
-
-  const setSelectedId = useCallback(
-    (next: string) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          // First trackable is the default; don't write it.
-          if (!next || next === TRACKABLES[0]?.id) {
-            params.delete("trackable");
-          } else {
-            params.set("trackable", next);
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
-
-  const setViewDate = useCallback(
-    (next: Date) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (isCurrentMonth(next)) {
-            params.delete("month");
-          } else {
-            params.set("month", formatMonthParam(next));
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
+  const [selectedId, setSelectedId] = useUrlParam<string | null>("trackable", {
+    parse: (raw) =>
+      raw && TRACKABLES.some((t) => t.id === raw) ? raw : null,
+    // First trackable is the default; don't write it.
+    serialize: (v) => (!v || v === TRACKABLES[0]?.id ? null : v),
+    default: null,
+  });
+  const [viewDate, setViewDate] = useUrlParam<Date>("month", {
+    parse: parseMonthParam,
+    serialize: (v) => (isCurrentMonth(v) ? null : formatMonthParam(v)),
+    // Default-elision compares serialized strings; passing the current month
+    // keeps `serialize(default)` === null so any new value compared via the
+    // default-equality branch never spuriously deletes.
+    default: parseMonthParam(null),
+  });
 
   // Preserve any inherited `?date=YYYY-MM-DD` when navigating back to the
   // dashboard — mirrors Journal's behavior so a tab switch doesn't drop the
   // per-day context.
-  const dateParam = searchParams.get("date");
+  const [dateParam] = useUrlParam<string | null>("date", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
   const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
 
   // Unified shape — read entries directly. No more normalization adapter; the

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useUrlParam } from '@kirkl/shared'
 import Plot from 'react-plotly.js'
 import type { Data as PlotlyData } from 'plotly.js'
 import type { AllocationItem, PerformancePoint } from '../api'
@@ -30,32 +30,20 @@ function shortAccountName(name: string): string {
 export function AllocationOverTime() {
   const [perfData, setPerfData] = useState<PerformancePoint[]>([])
   const [allocation, setAllocation] = useState<AllocationItem[]>([])
-  const [searchParams, setSearchParams] = useSearchParams()
 
-  const rawGroup = searchParams.get('allocGroup')
-  const groupBy: GroupBy = GROUP_BY_VALUES.includes(rawGroup as GroupBy)
-    ? (rawGroup as GroupBy)
-    : DEFAULT_GROUP_BY
-  const valueMode: ValueMode =
-    searchParams.get('allocMode') === 'absolute' ? 'absolute' : DEFAULT_VALUE_MODE
-
-  const setGroupBy = useCallback((next: GroupBy) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_GROUP_BY) params.delete('allocGroup')
-      else params.set('allocGroup', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
-
-  const setValueMode = useCallback((next: ValueMode) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_VALUE_MODE) params.delete('allocMode')
-      else params.set('allocMode', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
+  const [groupBy, setGroupBy] = useUrlParam<GroupBy>('allocGroup', {
+    parse: (raw) =>
+      GROUP_BY_VALUES.includes(raw as GroupBy)
+        ? (raw as GroupBy)
+        : DEFAULT_GROUP_BY,
+    serialize: (v) => (v === DEFAULT_GROUP_BY ? null : v),
+    default: DEFAULT_GROUP_BY,
+  })
+  const [valueMode, setValueMode] = useUrlParam<ValueMode>('allocMode', {
+    parse: (raw) => (raw === 'absolute' ? 'absolute' : DEFAULT_VALUE_MODE),
+    serialize: (v) => (v === DEFAULT_VALUE_MODE ? null : v),
+    default: DEFAULT_VALUE_MODE,
+  })
 
   useEffect(() => {
     fetchPerformance().then(setPerfData)

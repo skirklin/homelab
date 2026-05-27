@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Input, Empty } from "antd";
 import {
@@ -252,8 +252,11 @@ export function Journal() {
 
   // Filter chips + search live in the URL so a refresh or shared link
   // (`/journal?filter=morning&q=foo`) round-trips. Defaults aren't written.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const filter = parseFilter(searchParams.get("filter"));
+  const [filter, setFilter] = useUrlParam<FilterKey>("filter", {
+    parse: parseFilter,
+    serialize: (v) => (v === "all" ? null : v),
+    default: "all",
+  });
 
   // Search: instant local state for typing feedback; URL lags by 250ms.
   const [urlSearch, setUrlSearch] = useUrlParam<string>("q", {
@@ -269,24 +272,6 @@ export function Journal() {
       setUrlSearch(next);
     },
     [setUrlSearch],
-  );
-
-  const setFilter = useCallback(
-    (next: FilterKey) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next === "all") {
-            params.delete("filter");
-          } else {
-            params.set("filter", next);
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
   );
 
   // All journal-shaped entries (sessions + freeform journal), newest first.
@@ -361,7 +346,11 @@ export function Journal() {
   // Preserve `?date=YYYY-MM-DD` when crossing between dashboard / journal /
   // insights so the per-day context survives a tab switch. Only `date` is
   // shared — filter/q stay local to Journal.
-  const dateParam = searchParams.get("date");
+  const [dateParam] = useUrlParam<string | null>("date", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
   const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
 
   const menuItems = [

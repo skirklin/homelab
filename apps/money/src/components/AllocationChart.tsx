@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useUrlParam } from '@kirkl/shared'
 import Plot from 'react-plotly.js'
 import type { AllocationItem } from '../api'
 import { fetchAllocation } from '../api'
@@ -27,19 +27,12 @@ const DEFAULT_ALLOC_VIEW: AllocationView = 'broad'
 
 export function AllocationChart() {
   const [data, setData] = useState<AllocationItem[]>([])
-  const [searchParams, setSearchParams] = useSearchParams()
 
-  const view: AllocationView =
-    searchParams.get('alloc') === 'detailed' ? 'detailed' : DEFAULT_ALLOC_VIEW
-
-  const setView = useCallback((next: AllocationView) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_ALLOC_VIEW) params.delete('alloc')
-      else params.set('alloc', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
+  const [view, setView] = useUrlParam<AllocationView>('alloc', {
+    parse: (raw) => (raw === 'detailed' ? 'detailed' : DEFAULT_ALLOC_VIEW),
+    serialize: (v) => (v === DEFAULT_ALLOC_VIEW ? null : v),
+    default: DEFAULT_ALLOC_VIEW,
+  })
 
   useEffect(() => {
     fetchAllocation().then(setData)

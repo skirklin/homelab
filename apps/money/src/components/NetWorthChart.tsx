@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useUrlParam } from '@kirkl/shared'
 import {
   Area,
   AreaChart,
@@ -32,34 +32,22 @@ const VIEW_VALUES: ViewMode[] = ['liquid', 'with_equity', 'breakdown']
 
 export function NetWorthChart() {
   const [data, setData] = useState<NetWorthPoint[]>([])
-  const [searchParams, setSearchParams] = useSearchParams()
-
-  const rawRange = searchParams.get('nwRange')
-  const range: TimeRange = RANGE_VALUES.includes(rawRange as TimeRange)
-    ? (rawRange as TimeRange)
-    : DEFAULT_RANGE
-  const rawView = searchParams.get('nwView')
-  const view: ViewMode = VIEW_VALUES.includes(rawView as ViewMode)
-    ? (rawView as ViewMode)
-    : DEFAULT_VIEW
-
-  const setRange = useCallback((next: TimeRange) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_RANGE) params.delete('nwRange')
-      else params.set('nwRange', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
-
-  const setView = useCallback((next: ViewMode) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_VIEW) params.delete('nwView')
-      else params.set('nwView', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
+  const [range, setRange] = useUrlParam<TimeRange>('nwRange', {
+    parse: (raw) =>
+      RANGE_VALUES.includes(raw as TimeRange)
+        ? (raw as TimeRange)
+        : DEFAULT_RANGE,
+    serialize: (v) => (v === DEFAULT_RANGE ? null : v),
+    default: DEFAULT_RANGE,
+  })
+  const [view, setView] = useUrlParam<ViewMode>('nwView', {
+    parse: (raw) =>
+      VIEW_VALUES.includes(raw as ViewMode)
+        ? (raw as ViewMode)
+        : DEFAULT_VIEW,
+    serialize: (v) => (v === DEFAULT_VIEW ? null : v),
+    default: DEFAULT_VIEW,
+  })
 
   useEffect(() => {
     const start = getStartDate(range)

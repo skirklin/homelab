@@ -15,6 +15,7 @@ import {
   useFeedback,
   SyncDot,
   useWpbDebug,
+  useUrlParam,
 } from "@kirkl/shared";
 
 /** Scope SyncDot to life's collections so a stuck write elsewhere doesn't
@@ -283,7 +284,11 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // The URL is the source of truth for the viewed day. `?date=YYYY-MM-DD`
   // (browser-local time) picks a specific day; no param means today.
   const [searchParams, setSearchParams] = useSearchParams();
-  const dateParam = searchParams.get("date");
+  const [dateParam, setDateParam] = useUrlParam<string | null>("date", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
   // todayDate ticks on midnight/visibility/focus so the derived value below
   // re-evaluates "today" without needing to write to the URL.
   const [todayDate, setTodayDate] = useState<string>(() => getDateString(new Date()));
@@ -303,35 +308,17 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   useEffect(() => {
     if (!dateParam) return;
     if (parseYmdParam(dateParam) !== null) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("date");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [dateParam, setSearchParams]);
+    setDateParam(null);
+  }, [dateParam, setDateParam]);
 
   // Helper: write the URL. null clears the param (back to "today" with a
   // clean URL); a Date writes ?date=YYYY-MM-DD. Used by prev/next, the
   // DatePicker, swipes, and the "tap to return to today" affordance.
   const updateSelectedDate = useCallback(
-    (date: Date | null, options?: { replace?: boolean }) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (date === null) {
-            next.delete("date");
-          } else {
-            next.set("date", getDateString(date));
-          }
-          return next;
-        },
-        options,
-      );
+    (date: Date | null) => {
+      setDateParam(date === null ? null : getDateString(date));
     },
-    [setSearchParams],
+    [setDateParam],
   );
 
   // Swipe handling

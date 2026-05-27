@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useUrlParam } from '@kirkl/shared'
 import type { RecurringPattern, TimeRange, Transaction } from '../api'
 import { fetchRecurring } from '../api'
 import { SpendingCharts } from '../components/SpendingCharts'
@@ -21,12 +21,23 @@ const TIME_PRESETS: { label: string; key: string; range: TimeRange }[] = [
 
 export function Spending() {
   const [refreshKey, setRefreshKey] = useState(0)
-  const [searchParams, setSearchParams] = useSearchParams()
   const [recurringPatterns, setRecurringPatterns] = useState<RecurringPattern[]>([])
 
-  const prefix = searchParams.get('category') || null
-  const timeKey = searchParams.get('time') || '1y'
-  const showRecurring = searchParams.get('recurring') === '1'
+  const [prefix, setPrefix] = useUrlParam<string | null>('category', {
+    parse: (raw) => raw || null,
+    serialize: (v) => v,
+    default: null,
+  })
+  const [timeKey, setTimeKey] = useUrlParam<string>('time', {
+    parse: (raw) => raw || '1y',
+    serialize: (v) => (v === '1y' ? null : v),
+    default: '1y',
+  })
+  const [showRecurring, setShowRecurring] = useUrlParam<boolean>('recurring', {
+    parse: (raw) => raw === '1',
+    serialize: (v) => (v ? '1' : null),
+    default: false,
+  })
   const timeRange = useMemo(
     () => TIME_PRESETS.find((p) => p.key === timeKey)?.range ?? {},
     [timeKey],
@@ -56,26 +67,9 @@ export function Spending() {
     }
   }, [showRecurring, recurringMatchers])
 
-  const setParam = useCallback((key: string, value: string | null) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (value) next.set(key, value)
-      else next.delete(key)
-      return next
-    }, { replace: true })
-  }, [setSearchParams])
-
-  const setPrefix = useCallback((newPrefix: string | null) => {
-    setParam('category', newPrefix)
-  }, [setParam])
-
-  const setTimeKey = useCallback((key: string) => {
-    setParam('time', key === '1y' ? null : key)
-  }, [setParam])
-
   const toggleRecurring = useCallback(() => {
-    setParam('recurring', showRecurring ? null : '1')
-  }, [setParam, showRecurring])
+    setShowRecurring(!showRecurring)
+  }, [setShowRecurring, showRecurring])
 
   const handleBarClick = useCallback((_month: string, category: string) => {
     const childPrefix = prefix ? `${prefix}/${category}` : category

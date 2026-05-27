@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useUrlParam } from '@kirkl/shared'
 import type { Account, PerformancePoint } from '../api'
 import { fetchAccounts, fetchGrants, fetchPerformance } from '../api'
 import { AllocationChart } from '../components/AllocationChart'
@@ -79,35 +79,23 @@ const RANGE_VALUES: InvestmentsRange[] = ['1Y', '3Y', '5Y', 'ALL']
 export function Investments() {
   const [accounts, setAccounts] = useState<AccountWithPerf[]>([])
   const [perfData, setPerfData] = useState<PerformancePoint[]>([])
-  const [searchParams, setSearchParams] = useSearchParams()
 
-  const view: InvestmentsView =
-    searchParams.get('view') === 'type' ? 'type' : DEFAULT_VIEW
+  const [view, setView] = useUrlParam<InvestmentsView>('view', {
+    parse: (raw) => (raw === 'type' ? 'type' : DEFAULT_VIEW),
+    serialize: (v) => (v === DEFAULT_VIEW ? null : v),
+    default: DEFAULT_VIEW,
+  })
   // Param name is page-scoped (invRange) so cross-page navigation between
   // Investments and AccountDetail doesn't silently lose a range chosen on
   // the other page — the two pages no longer share a key.
-  const rawRange = searchParams.get('invRange')
-  const timeRange: InvestmentsRange = RANGE_VALUES.includes(rawRange as InvestmentsRange)
-    ? (rawRange as InvestmentsRange)
-    : DEFAULT_RANGE
-
-  const setView = useCallback((next: InvestmentsView) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_VIEW) params.delete('view')
-      else params.set('view', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
-
-  const setTimeRange = useCallback((next: InvestmentsRange) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev)
-      if (next === DEFAULT_RANGE) params.delete('invRange')
-      else params.set('invRange', next)
-      return params
-    }, { replace: true })
-  }, [setSearchParams])
+  const [timeRange, setTimeRange] = useUrlParam<InvestmentsRange>('invRange', {
+    parse: (raw) =>
+      RANGE_VALUES.includes(raw as InvestmentsRange)
+        ? (raw as InvestmentsRange)
+        : DEFAULT_RANGE,
+    serialize: (v) => (v === DEFAULT_RANGE ? null : v),
+    default: DEFAULT_RANGE,
+  })
 
   useEffect(() => {
     Promise.all([fetchAccounts(), fetchGrants()]).then(([accts, grants]) => {

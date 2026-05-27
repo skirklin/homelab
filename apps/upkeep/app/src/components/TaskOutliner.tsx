@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { Button, Empty, Spin, Typography, Input, Select, InputNumber, Tag, Space, message } from "antd";
 import { PlusOutlined, CloseOutlined, ClearOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useUpkeepBackend } from "@kirkl/shared";
+import { useUpkeepBackend, useUrlParam } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
 import { getTaskTree, getTasksFromState } from "../selectors";
 import { formatFrequency } from "../types";
@@ -77,47 +77,20 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   // the view. Both replace history — row-clicks and new-task creation fire
   // constantly, and the original "zoom into subtree pushes a history entry"
   // semantics turned browser-back into a one-row rewinder. A future explicit
-  // zoom action can push by calling setSearchParams without { replace } at
-  // that call site.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const rawFocusedId = searchParams.get("focus");
-  const selectedId = searchParams.get("select");
-
-  const setFocusedId = useCallback(
-    (next: string | null) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next) {
-            params.set("focus", next);
-          } else {
-            params.delete("focus");
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
-
-  const setSelectedId = useCallback(
-    (next: string | null) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next) {
-            params.set("select", next);
-          } else {
-            params.delete("select");
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
+  // zoom action can push by passing `mode: "push"` to useUrlParam.
+  // Visibility-against-task-set validation happens below in the `focusedId`
+  // useMemo (we need `allTasks` to know which ids are valid); parse passes
+  // the raw value through.
+  const [rawFocusedId, setFocusedId] = useUrlParam<string | null>("focus", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
+  const [selectedId, setSelectedId] = useUrlParam<string | null>("select", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
 
   const listId = slug ? state.userSlugs[slug] : undefined;
 
