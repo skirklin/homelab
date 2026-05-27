@@ -16,10 +16,11 @@ import { EventSource } from "eventsource";
 import { wrapPocketBase, persistMutation, clearAllMutations, newId } from "../../../../packages/backend/src/wrapped-pb/index";
 import { createMirror, type RawRecord } from "../../../../packages/backend/src/wrapped-pb/mirror";
 import type { PBMirror } from "../../../../packages/backend/src/wrapped-pb/mirror";
+import { getPbTestUrl } from "./pb-test-url";
 
 (globalThis as unknown as { EventSource: typeof EventSource }).EventSource = EventSource;
 
-const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
+const PB_URL = getPbTestUrl();
 
 let adminPb: PocketBase;
 let aliceId: string;

@@ -43,11 +43,9 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import PocketBase from "pocketbase";
 import { createHash, randomBytes } from "crypto";
+import { getPbTestUrl } from "./pb-test-url";
 
-// Test PB defaults to 127.0.0.1:8091 (the convention used by every other
-// e2e test in this directory), but honors PB_URL if set in the environment —
-// useful when running multiple worktrees in parallel.
-const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
+const PB_URL = getPbTestUrl();
 process.env.PB_URL = PB_URL;
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
 process.env.PB_ADMIN_PASSWORD = "testpassword1234";

@@ -5,8 +5,60 @@
  * directly — Node loads vite configs natively and won't run TS through
  * esbuild for cross-package imports.
  */
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+
+/**
+ * Resolve the dev-server proxy target for `/fn` and friends.
+ *
+ * Priority:
+ *   1. `process.env.VITE_API_URL` (explicit override — useful for pointing
+ *      a local `pnpm dev` at prod, a sibling worktree, or a remote tunnel)
+ *   2. `infra/test-env.sh url --api` (when run inside this repo: discovers
+ *      the per-worktree test API port derived from the worktree basename)
+ *   3. `http://127.0.0.1:3001` (legacy default — main checkout's api port)
+ *
+ * Without #2, two worktrees doing `pnpm dev` simultaneously would both
+ * proxy to `:3001`, hitting whichever api container happens to live there
+ * (typically main's, or nothing). The shell-out is cheap because it
+ * happens once at vite config evaluation time, not per request.
+ *
+ * Returns `http://127.0.0.1:<port>` (a string). All errors are swallowed
+ * — falling back to the legacy default is always safe.
+ */
+export function resolveDevApiTarget() {
+  if (process.env.VITE_API_URL) return process.env.VITE_API_URL;
+
+  // Walk up from this preset's location to find the repo root (one with
+  // `infra/test-env.sh`). We can't trust process.cwd() — vite resolves the
+  // config from the app dir, which can be many levels deep.
+  const here = dirname(fileURLToPath(import.meta.url));
+  // packages/vite-preset/src/ → walk up to repo root.
+  let dir = here;
+  for (let i = 0; i < 8; i++) {
+    const candidate = resolve(dir, "infra", "test-env.sh");
+    if (existsSync(candidate)) {
+      try {
+        const out = execFileSync(candidate, ["url", "--api"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        if (out.startsWith("http://")) return out;
+      } catch {
+        // test-env.sh missing/broken — fall through to legacy default.
+      }
+      break;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return "http://127.0.0.1:3001";
+}
 
 /**
  * @typedef {Object} ManifestShortcut

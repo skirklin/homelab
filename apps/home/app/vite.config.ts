@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
-import { kirklPlugins } from '@kirkl/vite-preset'
+import { kirklPlugins, resolveDevApiTarget } from '@kirkl/vite-preset'
 
 export default defineConfig({
   plugins: kirklPlugins({
@@ -17,7 +17,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/fn': {
-        target: process.env.VITE_API_URL || 'http://127.0.0.1:3001',
+        target: resolveDevApiTarget(),
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/fn/, ''),
       },

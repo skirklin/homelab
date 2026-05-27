@@ -31,10 +31,11 @@ import { wrapPocketBase, clearAllMutations } from "../../../../packages/backend/
 import { createMirror } from "../../../../packages/backend/src/wrapped-pb/mirror";
 import { PocketBaseRecipesBackend } from "../../../../packages/backend/src/pocketbase/recipes";
 import type { Recipe, RecipeBox } from "../../../../packages/backend/src/types/recipes";
+import { getPbTestUrl } from "./pb-test-url";
 
 (globalThis as unknown as { EventSource: typeof EventSource }).EventSource = EventSource;
 
-const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
+const PB_URL = getPbTestUrl();
 
 let adminPb: PocketBase;
 let userId: string;

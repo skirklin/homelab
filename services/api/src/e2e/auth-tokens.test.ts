@@ -9,16 +9,17 @@ import { describe, it, expect, beforeAll } from "vitest";
 import PocketBase from "pocketbase";
 import { createHash, randomBytes } from "crypto";
 import { testClient } from "hono/testing";
+import { getPbTestUrl } from "./pb-test-url";
 
 // Build the Hono app the same way index.ts does, but with test PB URL
-process.env.PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
+process.env.PB_URL = getPbTestUrl();
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
 process.env.PB_ADMIN_PASSWORD = "testpassword1234";
 
 // Dynamic import so env vars are set first
 const { default: { app } } = await import("../test-app");
 
-const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
+const PB_URL = getPbTestUrl();
 
 let adminPb: PocketBase;
 let userId: string;
