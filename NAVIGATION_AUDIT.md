@@ -29,36 +29,51 @@ Choose-one-policy work. Pattern to standardize on: URL search params with `setSe
 - [ ] **#6 broken — money Travel drilldown** is React state at [apps/money/src/pages/Travel.tsx:9-10](apps/money/src/pages/Travel.tsx#L9-L10). Back exits the route.
 - [ ] **#8 broken — life wizard state** is `useState` at [apps/life/app/src/components/SessionRunner.tsx:119,151](apps/life/app/src/components/SessionRunner.tsx#L119). Refresh mid-wizard loses progress. Move step + answers to URL or sessionStorage.
 
-## Bundle 3 — remaining broken
+## Bundle 3 — remaining broken ✅ shipped 2026-05-26
 
-- [ ] **#3 broken** — `PublicRecipe` basePath wrong for singular `/recipe/...` route. [apps/recipes/app/src/routes/PublicRecipe.tsx:175,180,282](apps/recipes/app/src/routes/PublicRecipe.tsx#L175). Cross-recipe `[[recipe:…]]` links render unprefixed.
-- [ ] **#7 broken** — Tasks routes have no `/join/:listId`. [apps/upkeep/app/src/module.tsx:42-47](apps/upkeep/app/src/module.tsx#L42-L47). Outliner-only users can't join shared lists from Kanban users.
-- [ ] **Recipe deep-link**: no self-fetch fallback at [apps/recipes/app/src/routes/Recipe.tsx:16](apps/recipes/app/src/routes/Recipe.tsx#L16) (Box does have one). Deep-link to unsubscribed recipe shows "Unable to find recipe."
-- [ ] **Recipes Header.tsx:42** — embedded "Manage Boxes" uses relative `navigate("boxes")`, resolves wrong from deep routes.
-- [ ] **Recipes SaveRecipe.tsx:51** — pushes to a `uniqueId=` URL that no longer renders; back shows "Unable to find recipe."
-- [ ] **Recipes NewBox/NewRecipe.tsx:37** — temp `uniqueId=` URL enters history before save.
-- [ ] **Recipes JoinBox.tsx:137,162** — Cancel uses relative `navigate(".")`.
-- [ ] **Recipes PublicRecipe.tsx:180,282** — sign-in hard-codes `/recipes/...`.
-- [ ] **Recipes InviteRedeem.tsx:97** — `setTimeout(... 1000)` race with user backing out.
-- [ ] **Recipes RecipesRoutes.tsx:48** — `/boxes/:boxId/recipes` duplicates `/boxes/:boxId` route.
-- [ ] **Shopping Header.tsx:109-112** — strips `LAST_LIST` on back; combined with auto-redirect creates the loop in #4.
-- [ ] **Shopping ListSettings.tsx:239** — slug rename inside Settings view: `replace` updates URL but leaves user inside a now-orphaned view.
-- [ ] **Shopping module.tsx:34** — `/:slug` collides with `/join/:listId` if a list is slug'd `"join"`. Saved by route order today, but [ListManagement.tsx:252](packages/ui/src/ListManagement.tsx#L252) slug sanitizer should blacklist `"join"`.
-- [ ] **Travel TripList.tsx:354-357** — `search`, `statusFilter`, `regionFilter`, `view` not URL-backed; lost on refresh, reset on back.
-- [ ] **Travel InviteRedeem.tsx:81** — error path pushes instead of replacing; back re-runs the failing redeem.
-- [ ] **Travel DayView.tsx:293** — `goToDay` arrow clicks each push history; 10 clicks = 10 entries.
-- [ ] **Travel ItinerarySection.tsx:286** — itinerary `Select` shows resolved id while URL holds stale id (drift).
-- [ ] **Upkeep Header.tsx shareUrl** — `${origin}/join/${listId}` (no app prefix); shared link 404s when copied from `kirkl.in/upkeep/...`. [apps/upkeep/app/src/components/Header.tsx:50](apps/upkeep/app/src/components/Header.tsx#L50)
-- [ ] **Upkeep module.tsx** — neither `UpkeepRoutes` nor `TasksRoutes` has a `*` fallback inside the embedded `<Routes>`. `/upkeep/nonexistent` renders blank.
-- [ ] **Life SessionRunner absolute navigate** — uses `navigate("/")` for back/cancel/done. Latent breakage if life is ever re-embedded. [SessionRunner.tsx:130,138,168](apps/life/app/src/components/SessionRunner.tsx#L130)
-- [ ] **Life LifeDashboard.tsx:580-606** — raw `window.history.replaceState` for param scrub bypasses react-router's URL store. Switch to `setSearchParams({ replace: true })`.
-- [ ] **Life Journal/Visualizations** — filter/search/selectedId/viewDate all in `useState`; can't share or refresh. [Journal.tsx:247-248](apps/life/app/src/components/Journal.tsx#L247-L248), [Visualizations.tsx:277,437](apps/life/app/src/components/Visualizations.tsx#L277).
-- [ ] **Money App.tsx:80** — no catch-all `<Route path="*">`. Unknown URLs render empty `<main>`.
-- [ ] **Money App.tsx:64** — `BrowserRouter` mounted inside the loading gate. Hard refresh shows loading with no nav; clicks before fetch resolves are dropped.
-- [ ] **Money PerformanceVsBenchmark.tsx:22** — owns its own `timeRange` state AND notifies parent; two sources of truth.
-- [ ] **Money PersonDetail.tsx:43, InstitutionDetail.tsx:43** — back-link hardcoded to `/accounts` ignores actual referrer.
-- [ ] **Home App.tsx:58** — catch-all `<Navigate to="/" replace />` silently swallows real routing bugs. Consider a real 404.
-- [ ] **Home Shell.tsx:149-151** — sign-out pushes instead of replacing; back re-enters cached authenticated UI.
+Six per-app commits on main: `fa2e022` recipes, `3638b1a` shopping, `b18042a` travel, `888ae65` upkeep+life, `90c907f` money, `c1d2cf8` home shell.
+
+### Recipes (`fa2e022`)
+- [x] **#3** `PublicRecipe` basePath — hardcoded to `/recipes` (singular `/recipe/...` mount always lives in the recipes app).
+- [x] Recipe deep-link self-fetch — added, mirrors `Box.tsx` pattern.
+- [x] Recipes `Header.tsx:42` — dropdown "Manage Boxes" now uses `${basePath}/boxes`.
+- [x] `SaveRecipe.tsx:51` — post-save navigate uses `{ replace: true }`.
+- [x] `NewRecipe.tsx` initial draft URL pushed with `{ replace: true }`. **NewBox.tsx** had no nav to fix — its `NewBoxModal` opens a modal, doesn't navigate.
+- [x] `JoinBox.tsx` Cancel/Go Home — uses `${basePath || "/"}` with replace.
+- [x] `InviteRedeem.tsx:97` — dropped the 1s setTimeout race; added a cancelled guard.
+- [x] `RecipesRoutes.tsx:48` — removed duplicate `/boxes/:boxId/recipes` route. Grep confirmed no internal references.
+
+### Shopping (`3638b1a`)
+- [x] `Header.tsx:109-112` — header back drops the `LAST_LIST` strip, uses `?pick=true` to reach the picker (consistent with Bundle 1's not-found button).
+- [x] `ListSettings.tsx:239` — `TODO(nav-bundle-2):` comment added for the refresh-loses-Settings-view issue. No functional change.
+- [x] **Shopping module.tsx:34 slug collision** — added `RESERVED_SLUGS` set + `sanitizeSlug()` helper in `packages/ui/src/ListManagement.tsx`, exported from `@kirkl/shared`. Reserved: `join`, `login`, `auth`, `settings`, `new`. Collisions get `-1` appended. Side effect: aligned three previously-duplicated sanitizers, so rename input "hello world!" now produces `hello-world` (was `hello-world-`).
+
+### Travel (`b18042a`)
+- [x] `InviteRedeem.tsx:81` — error-path navigate uses `{ replace: true }`.
+- [x] `DayView.tsx:293` — `goToDay` prev/next uses `{ relative: "path", replace: true }`; arrow-scrubbing no longer pollutes history.
+- [x] `ItinerarySection.tsx:286` — added effect that writes resolved itinerary id back to `?itin=` when it differs (also writes on first load when no param is set — gives shareable URLs).
+
+### Upkeep + Life (`888ae65`)
+- [x] **Upkeep Header.tsx:50 shareUrl** — derives module base from `location.pathname` (strips trailing `/<slug>`). Works for standalone (`upkeep.kirkl.in`), `/upkeep/*` embed, and `/tasks/*` embed.
+- [x] **#7** Tasks routes — added `/join/:listId` route; Bundle 1's JoinList fix routes correctly from `/tasks/join/:id` → `/tasks/<slug>`.
+- [x] Upkeep `*` catch-all — added to both `UpkeepRoutes` and `TasksRoutes`.
+- [x] Life `SessionRunner` — three sites swapped from `navigate("/")` to `navigate("..")` (no-op for current standalone deploy, safe if re-embedded).
+- [x] Life `LifeDashboard` param scrub — swapped raw `history.replaceState` for `setSearchParams({ replace: true })`. Subtle fix: required splitting the messaging-init effect from the param-scrub effect so URL changes don't re-register FCM listeners.
+
+### Money (`90c907f`)
+- [x] `App.tsx:80` catch-all — added `<Route path="*" element={<Navigate to="/" replace />} />`.
+- [x] `App.tsx:64` BrowserRouter — moved outside the loading gate (split into `App` wrapping `AppContent`).
+- [x] `PerformanceVsBenchmark.tsx:22` — made controlled; parent (`Investments.tsx`) owns the canonical `timeRange`.
+- [x] `PersonDetail.tsx:43` + `InstitutionDetail.tsx:43` — back-links now use `navigate(-1)` with `/accounts` fallback on deep-link refresh. Label changed from "All Accounts" → "Back" since `-1` may not return there.
+- (Side note: money's typecheck baseline is now clean — could wire `tsc -b` into the build gate as a follow-up.)
+
+### Home shell (`c1d2cf8`)
+- [x] `App.tsx:58` — replaced silent catch-all `<Navigate>` with inline `<NotFound />`: shows offending path, "Go home" button (`navigate("/", { replace: true })`), shortcut links to each module root.
+- [x] `Shell.tsx:149-151` — sign-out now uses `navigate("/", { replace: true })`.
+
+### Deferred to Bundle 2 (URL-state structural)
+- [ ] **Travel TripList.tsx:354-357** — `search`, `statusFilter`, `regionFilter`, `view` not URL-backed.
+- [ ] **Life Journal/Visualizations** — filter/search/selectedId/viewDate all in `useState`.
 
 ## Bundle 4 — surprising (lower priority)
 
