@@ -29,7 +29,7 @@ export { SyncStatusBanner, SyncDot } from "./sync-status";
 export type { SyncDotProps } from "./sync-status";
 
 // List Management
-export { ListPicker, JoinList } from "./ListManagement";
+export { ListPicker, JoinList, sanitizeSlug } from "./ListManagement";
 export type {
   ListPickerConfig,
   ListPickerProps,

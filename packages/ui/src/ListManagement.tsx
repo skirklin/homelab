@@ -11,6 +11,45 @@ import styled from "styled-components";
 import { useAuth } from "./auth";
 import type { AppStorage } from "./appStorage";
 
+/**
+ * Reserved top-level URL segments that must never be used as a list slug.
+ * Slug routes (`/:slug`) live alongside these in shopping/upkeep/tasks
+ * modules; route order saves us today, but a "join"-slugged list would still
+ * confuse share links. Bump this list when adding new top-level routes.
+ */
+const RESERVED_SLUGS = new Set<string>([
+  "join",
+  "login",
+  "auth",
+  "settings",
+  "new",
+]);
+
+/**
+ * Normalize user-entered text into a URL slug, falling back to a safe
+ * disambiguation if the result collides with a reserved top-level route
+ * (see `RESERVED_SLUGS`). Returns "" when the input has no alphanumerics —
+ * callers should treat that as invalid and prompt the user.
+ *
+ * Exported for reuse by per-app settings screens that also accept a slug
+ * (e.g. shopping's rename-URL flow).
+ */
+export function sanitizeSlug(input: string): string {
+  const slug = input
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) return "";
+  if (RESERVED_SLUGS.has(slug)) {
+    // Append a digit to disambiguate; matches the existing "fall back to a
+    // safe default" pattern callers expect (an unambiguously valid slug).
+    return `${slug}-1`;
+  }
+  return slug;
+}
+
 // Styled components
 const Container = styled.div`
   min-height: 100vh;
@@ -249,7 +288,7 @@ export function ListPicker({ config, operations, storage, headerContent }: ListP
     if (!newName.trim() || !user) return;
 
     const name = newName.trim();
-    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "");
+    const slug = sanitizeSlug(name);
 
     // Validate that the slug is not empty and contains at least one alphanumeric
     if (!slug || !/[a-z0-9]/.test(slug)) {
@@ -280,7 +319,7 @@ export function ListPicker({ config, operations, storage, headerContent }: ListP
   const handleAddSharedList = async () => {
     if (!sharedListSlug.trim() || !sharedListId.trim() || !user) return;
 
-    const slug = sharedListSlug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "");
+    const slug = sanitizeSlug(sharedListSlug);
 
     // Validate that the slug is not empty and contains at least one alphanumeric
     if (!slug || !/[a-z0-9]/.test(slug)) {

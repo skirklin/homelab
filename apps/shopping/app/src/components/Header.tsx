@@ -7,7 +7,6 @@ import { getBackend, AppHeader, ShareModal, SyncDot, useWpbDebug } from "@kirkl/
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend } from "@kirkl/shared";
 import { getItemsFromState } from "../selectors";
-import { appStorage, StorageKeys } from "../storage";
 
 /** Collections this app subscribes to. Used to scope the SyncDot so the
  *  shopping dot doesn't yellow because a write is pending in upkeep. */
@@ -107,8 +106,10 @@ export function Header({ listId, onShowHistory, onShowSettings, embedded = false
       <AppHeader
         title={titleWithStatus}
         onBack={() => {
-          appStorage.remove(StorageKeys.LAST_LIST);
-          navigate("..");
+          // Match the "Go to My Lists" button on the not-found screen
+          // (ShoppingList.tsx) — ?pick=true forces the ListPicker to show
+          // even when LAST_LIST would otherwise auto-redirect.
+          navigate({ pathname: "..", search: "?pick=true" });
         }}
         primaryAction={{
           label: `Done (${checkedCount})`,

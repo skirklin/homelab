@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button, Input, Modal } from "antd";
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth, useFeedback } from "@kirkl/shared";
+import { useAuth, useFeedback, sanitizeSlug } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
 import { useShoppingBackend, useUserBackend } from "@kirkl/shared";
 import type { CategoryDef } from "../types";
@@ -220,7 +220,12 @@ export function ListSettings({ slug, listId, onBack }: Props) {
   const handleChangeSlug = async () => {
     if (!newSlug.trim() || !user) return;
 
-    const cleanSlug = newSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const cleanSlug = sanitizeSlug(newSlug);
+
+    if (!cleanSlug) {
+      message.error("URL must contain at least one letter or number");
+      return;
+    }
 
     if (cleanSlug === slug) {
       setSlugModalOpen(false);
@@ -236,6 +241,9 @@ export function ListSettings({ slug, listId, onBack }: Props) {
     try {
       await userBackend.renameSlug(user.uid, "shopping", slug, cleanSlug);
       setSlugModalOpen(false);
+      // TODO(nav-bundle-2): the URL replaces correctly, but `view === "settings"`
+      // is React state — a refresh after rename lands on the list view, not
+      // Settings. Pending the URL-back-the-view-state work in Bundle 2.
       navigate(cleanSlug, { replace: true });
       message.success("URL updated");
     } catch (error) {
