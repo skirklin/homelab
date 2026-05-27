@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Checkbox, Button, Input, Drawer } from "antd";
 import { DeleteOutlined, CheckOutlined, CloseOutlined, TagOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -118,6 +118,23 @@ export function ShoppingItemRow({ item }: Props) {
   const [editNote, setEditNote] = useState(item.note || "");
   const [categorySheetOpen, setCategorySheetOpen] = useState(false);
 
+  // Long-press wiring for touch devices. Tapping the item name fired edit
+  // mode too easily on the phone, especially during scrolling. On touch we
+  // now require a ~500ms hold (with a small movement tolerance so a scroll
+  // gesture doesn't latch). Mouse/pen keep the instant-click behavior so
+  // desktop ergonomics don't regress.
+  const longPressTimer = useRef<number | null>(null);
+  const longPressStart = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current !== null) {
+        window.clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
+  }, []);
+
   // Categories for the bottom sheet. Mirror the construction in
   // ShoppingList.tsx so the "Uncategorized" pseudo-category is always an
   // option even when the list doesn't have it configured.
@@ -191,6 +208,45 @@ export function ShoppingItemRow({ item }: Props) {
     }
   };
 
+  const handleNamePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType !== "touch") return;
+    longPressStart.current = { x: e.clientX, y: e.clientY };
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = null;
+      longPressStart.current = null;
+      handleStartEdit();
+    }, 500);
+  };
+
+  const handleNamePointerMove = (e: React.PointerEvent) => {
+    if (longPressTimer.current === null || !longPressStart.current) return;
+    const dx = e.clientX - longPressStart.current.x;
+    const dy = e.clientY - longPressStart.current.y;
+    if (Math.hypot(dx, dy) > 5) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      longPressStart.current = null;
+    }
+  };
+
+  const handleNamePointerEnd = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressStart.current = null;
+  };
+
+  const handleNameClick = (e: React.MouseEvent) => {
+    // React's MouseEvent doesn't expose pointerType, but the underlying
+    // native event on a PointerEvent-emitting browser does. Touch "click"
+    // is already handled via the long-press timer in pointerdown, so we
+    // suppress the click path for touch and only fire for mouse/pen.
+    const native = e.nativeEvent as PointerEvent;
+    if (native.pointerType === "touch") return;
+    handleStartEdit();
+  };
+
   return (
     <>
     <ItemRow $checked={item.checked}>
@@ -234,7 +290,15 @@ export function ShoppingItemRow({ item }: Props) {
         </>
       ) : (
         <>
-          <ItemName $checked={item.checked} onClick={handleStartEdit}>
+          <ItemName
+            $checked={item.checked}
+            onClick={handleNameClick}
+            onPointerDown={handleNamePointerDown}
+            onPointerMove={handleNamePointerMove}
+            onPointerUp={handleNamePointerEnd}
+            onPointerCancel={handleNamePointerEnd}
+            onPointerLeave={handleNamePointerEnd}
+          >
             {item.ingredient}
             {item.note && <ItemNote>({item.note})</ItemNote>}
           </ItemName>
