@@ -51,56 +51,67 @@ export default function InviteRedeem() {
   const [result, setResult] = useState<RedeemResult | null>(null);
 
   useEffect(() => {
-    async function redeem() {
-      if (!code) {
-        setErrorMsg("No invite code provided.");
-        setStatus("error");
-        return;
-      }
+    if (!code) {
+      setErrorMsg("No invite code provided.");
+      setStatus("error");
+      return;
+    }
+    // PB's SendOptions extends RequestInit, so passing `signal` aborts the
+    // underlying fetch on unmount. Redemption is idempotent server-side (a
+    // re-click on the same link either succeeds again or returns the same
+    // "already redeemed" path), so aborting is safe.
+    const ac = new AbortController();
+    (async () => {
       try {
         const pb = getBackend();
         const res = await pb.send("/api/sharing/redeem", {
           method: "POST",
           body: JSON.stringify({ code }),
           headers: { "Content-Type": "application/json" },
+          signal: ac.signal,
         });
+        if (ac.signal.aborted) return;
         setResult(res as RedeemResult);
         setStatus("success");
       } catch (err: any) {
+        if (ac.signal.aborted) return;
         const msg = err?.data?.message || err?.message || "Failed to redeem invite.";
         setErrorMsg(msg);
         setStatus("error");
       }
-    }
-    redeem();
+    })();
+    return () => ac.abort();
   }, [code]);
 
   useEffect(() => {
     if (status !== "success" || !result) return;
     message.success("Invite accepted!");
 
-    let cancelled = false;
+    // Same AbortController treatment for the box-lookup leg — recipe-target
+    // invites do a second PB read to resolve the parent box; on unmount we
+    // want both the read and the post-read navigate to bail out cleanly.
+    const ac = new AbortController();
     (async () => {
       let path: string;
       if (result!.target_type === "recipe") {
-        // Recipes are nested under their box, so look up the box ID
         try {
           const pb = getBackend();
-          const recipe = await pb.collection("recipes").getOne(result!.target_id);
+          const recipe = await pb.collection("recipes").getOne(result!.target_id, {
+            signal: ac.signal,
+          });
           path = `${basePath}/boxes/${recipe.box}/recipes/${result!.target_id}`;
         } catch {
-          // Fallback to home if we can't resolve the recipe's box
+          // Aborted or fetch failed — fall back to home; the abort check
+          // below stops us from yanking the user forward post-unmount.
           path = `${basePath}/`;
         }
       } else {
         path = `${basePath}/boxes/${result!.target_id}`;
       }
-      // If the component unmounted (user pressed back), don't yank them
-      // forward to the target.
-      if (cancelled) return;
+      if (ac.signal.aborted) return;
       navigate(path, { replace: true });
     })();
-    return () => { cancelled = true; };
+    return () => ac.abort();
   }, [status, result, navigate, basePath, message]);
 
   return (

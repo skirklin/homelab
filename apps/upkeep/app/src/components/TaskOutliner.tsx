@@ -38,6 +38,15 @@ const TreeContainer = styled.div`
   background: white;
 `;
 
+/**
+ * Sticky offset is a magic number tied to AppHeader's rendered height
+ * (currently min-height 52px + var(--space-sm) padding ≈ 68–72px). If
+ * AppHeader's chrome changes, this number drifts and the detail pane
+ * either overlaps the header or leaves a gap. Worth promoting to a CSS
+ * variable (e.g. --app-header-height) on body once we touch the header
+ * again — for now, keep the coupling visible so a future header change
+ * doesn't silently break this.
+ */
 const DetailPane = styled.div`
   width: 280px;
   flex-shrink: 0;

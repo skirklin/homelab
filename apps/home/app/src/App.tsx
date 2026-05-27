@@ -7,7 +7,7 @@ import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } fro
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
 import { UpkeepProvider, UpkeepRoutes, TasksRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
-import { Shell, MODULE_ROOTS, isModulePath } from "./shared/Shell";
+import { Shell, isModulePath } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
 import { Settings } from "./shared/Settings";
 import { ShoppingIntegrationProvider } from "./shared/ShoppingIntegrationProvider";
@@ -34,9 +34,6 @@ function RedirectToLastApp() {
   }
   return <Navigate to={target} replace />;
 }
-
-// Re-export so other call sites can stay in lockstep with the shell.
-export { MODULE_ROOTS };
 
 // Invite links work against either the per-app subdomains (standalone) or
 // the home app (embedded). When they land at /invite/:code here, look up the

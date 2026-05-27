@@ -12,8 +12,11 @@
 body {
   margin: 0;
   min-width: 320px;
+  /* Subtract safe-area insets from min-height so body content box fits inside
+     the visible viewport — otherwise body becomes 100dvh + insets tall and
+     the home indicator can overlap scroll-bottom content. */
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   /* iOS safe-area (notch / home-indicator) — activated by viewport-fit=cover */
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);

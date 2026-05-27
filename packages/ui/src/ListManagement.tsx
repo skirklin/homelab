@@ -16,25 +16,58 @@ import type { AppStorage } from "./appStorage";
  * Slug routes (`/:slug`) live alongside these in shopping/upkeep/tasks
  * modules; route order saves us today, but a "join"-slugged list would still
  * confuse share links. Bump this list when adding new top-level routes.
+ *
+ * Audited against:
+ *  - `apps/shopping/app/src/module.tsx` — `/`, `/join/:listId`, `/:slug/*` (sub-routes: `history`, `settings`)
+ *  - `apps/upkeep/app/src/module.tsx` — `/`, `/join/:listId`, `/:slug` (also `TasksRoutes`)
+ *  - `apps/home/app/src/App.tsx` — module roots: `recipes`, `shopping`, `upkeep`,
+ *    `travel`, `tasks`; plus `timeline`, `settings`, `invite/:code`
+ *
+ * Sub-route names (`history`, `settings`) are included because a list named
+ * "history" makes its share URL `/<slug>/history` ambiguous — cheaper to
+ * reject the slug than untangle the share link later.
  */
 const RESERVED_SLUGS = new Set<string>([
+  // routing primitives
   "join",
   "login",
   "auth",
   "settings",
   "new",
+  // shopping sub-routes under `/:slug/*`
+  "history",
+  // home shell module roots — a slug equal to a sibling app name would
+  // cross-route from the standalone subdomain (e.g. shopping.kirkl.in/recipes
+  // looks like the recipes app, not a shopping list).
+  "recipes",
+  "shopping",
+  "upkeep",
+  "travel",
+  "tasks",
+  "life",
+  "money",
+  // shell-only top-levels
+  "timeline",
+  "invite",
 ]);
 
 /**
  * Normalize user-entered text into a URL slug, falling back to a safe
  * disambiguation if the result collides with a reserved top-level route
- * (see `RESERVED_SLUGS`). Returns "" when the input has no alphanumerics —
- * callers should treat that as invalid and prompt the user.
+ * (see `RESERVED_SLUGS`) or an existing user slug. Returns "" when the
+ * input has no alphanumerics — callers should treat that as invalid and
+ * prompt the user.
+ *
+ * Pass `existing` to also reject collisions against the user's current
+ * slug set; the suffix iterator increments `-1`, `-2`, ... until clean.
+ * Without `existing` the legacy "append -1 on reserved hit" behavior is
+ * preserved (call sites still validate uniqueness themselves before
+ * persisting).
  *
  * Exported for reuse by per-app settings screens that also accept a slug
  * (e.g. shopping's rename-URL flow).
  */
-export function sanitizeSlug(input: string): string {
+export function sanitizeSlug(input: string, existing?: Set<string>): string {
   const slug = input
     .trim()
     .toLowerCase()
@@ -42,12 +75,19 @@ export function sanitizeSlug(input: string): string {
     .replace(/[^a-z0-9-]/g, "")
     .replace(/^-+|-+$/g, "");
   if (!slug) return "";
-  if (RESERVED_SLUGS.has(slug)) {
-    // Append a digit to disambiguate; matches the existing "fall back to a
-    // safe default" pattern callers expect (an unambiguously valid slug).
-    return `${slug}-1`;
+  const taken = (s: string) => RESERVED_SLUGS.has(s) || (existing?.has(s) ?? false);
+  if (!taken(slug)) return slug;
+  // Append a digit to disambiguate; matches the existing "fall back to a
+  // safe default" pattern callers expect (an unambiguously valid slug).
+  // Iterate until clean so we don't hand back a string the caller still
+  // has to reject for collision.
+  for (let i = 1; i < 1000; i++) {
+    const candidate = `${slug}-${i}`;
+    if (!taken(candidate)) return candidate;
   }
-  return slug;
+  // Pathological case — fall through with the original suffix so the
+  // caller's downstream validation still fires.
+  return `${slug}-1`;
 }
 
 // Styled components

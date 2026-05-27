@@ -275,14 +275,28 @@ const SEVERITY_DOT: Record<Severity, string> = {
  * in-memory read; we don't want a per-component setInterval explosion if
  * multiple consumers (banner + per-app dots) mount at once, but in practice
  * each render tree mounts ~one of each, so the cost is bounded.
+ *
+ * Pauses while `document.hidden` so a backgrounded PWA tab doesn't re-render
+ * every second forever. We snap a fresh value on visibilitychange so the
+ * first frame after coming back is current instead of last-second-stale.
  */
 function useSnapshot(debug: WpbDebug): WpbSnapshot {
   const [snapshot, setSnapshot] = useState<WpbSnapshot>(() => debug.snapshot());
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const tick = () => setSnapshot(debug.snapshot());
+    const tick = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      setSnapshot(debug.snapshot());
+    };
     const interval = setInterval(tick, POLL_MS);
-    return () => clearInterval(interval);
+    const onVisibility = () => {
+      if (!document.hidden) setSnapshot(debug.snapshot());
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [debug]);
   return snapshot;
 }

@@ -69,8 +69,11 @@ body {
 }
 
 #root {
+  /* Subtract body's safe-area padding so the home indicator can't overlap
+     scroll-bottom content. Body padding shrinks the available viewport;
+     a bare 100dvh on #root would overshoot by exactly the inset amount. */
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
 
 /* Cooking mode - larger fonts for easier reading while cooking */

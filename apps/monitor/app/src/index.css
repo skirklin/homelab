@@ -27,8 +27,10 @@ a:hover { text-decoration: underline; }
 .layout {
   display: grid;
   grid-template-columns: 220px 1fr;
+  /* Subtract body's safe-area padding so the home indicator can't overlap
+     content at the bottom of the sidebar/main grid. */
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
 
 .sidebar {

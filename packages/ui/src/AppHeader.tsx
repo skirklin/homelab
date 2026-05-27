@@ -13,6 +13,11 @@ const HeaderContainer = styled.header`
   border-bottom: 1px solid var(--color-border);
   gap: var(--space-sm);
   min-height: 52px;
+  /* iOS PWA convention: the header bridges into the status-bar region so the
+     notch sits on the header chrome, not on a stripe of body background.
+     Body still keeps a matching inset as belt-and-suspenders for screens
+     that don't use AppHeader (Auth gate, public recipe view, etc.). */
+  padding-top: calc(var(--space-sm) + env(safe-area-inset-top));
 `;
 
 const LeftSection = styled.div`
