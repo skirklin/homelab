@@ -31,7 +31,11 @@ export function ShoppingRoutes({ embedded = false }: ShoppingRoutesProps) {
     <Routes>
       <Route path="/" element={<ListPicker />} />
       <Route path="/join/:listId" element={<JoinList />} />
-      <Route path="/:slug" element={<ShoppingList embedded={embedded} />} />
+      {/* Wildcard so /:slug/history and /:slug/settings hit the same component,
+          which derives its current sub-view from the URL. Bundle 2 of the
+          nav audit — putting view in state instead of the URL meant refresh
+          / browser-back / deep-link all silently dropped you back to the list. */}
+      <Route path="/:slug/*" element={<ShoppingList embedded={embedded} />} />
     </Routes>
   );
 }

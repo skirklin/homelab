@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Spin, Button } from "antd";
 import {
   DndContext,
@@ -116,17 +116,42 @@ const NotFoundText = styled.p`
 
 type View = "list" | "history" | "settings";
 
+// Derive the current sub-view from the URL suffix. The route is mounted as
+// `/:slug/*`, so the wildcard '*' param is "" for /<slug>, "history" for
+// /<slug>/history, "settings" for /<slug>/settings. Anything else (typos,
+// stale bookmarks) falls back to the list view.
+function viewFromSplat(splat: string | undefined): View {
+  if (splat === "history") return "history";
+  if (splat === "settings") return "settings";
+  return "list";
+}
+
+function stripSplatSuffix(pathname: string, splat: string | undefined): string {
+  if (!splat) return pathname;
+  if (pathname.endsWith(`/${splat}/`)) return pathname.slice(0, -(splat.length + 2));
+  if (pathname.endsWith(`/${splat}`)) return pathname.slice(0, -(splat.length + 1));
+  return pathname;
+}
+
 interface ShoppingListProps {
   embedded?: boolean;
 }
 
 export function ShoppingList({ embedded = false }: ShoppingListProps) {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, "*": splat } = useParams<{ slug: string; "*": string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { state, setCurrentList } = useShoppingContext();
   const shopping = useShoppingBackend();
-  const [view, setView] = useState<View>("list");
+  const view = viewFromSplat(splat);
+
+  // Standalone the URL is /<slug>(/history|/settings); embedded under the
+  // home shell it's /shopping/<slug>(/history|/settings). Strip the splat
+  // off location.pathname to recover the list-view path that works in both
+  // mounts — beats wrestling with react-router's `..` semantics on splats.
+  // String slicing (not regex) so any splat content goes uninterpreted.
+  const listPath = stripSplatSuffix(location.pathname, splat);
   const [draggedItem, setDraggedItem] = useState<ShoppingItem | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
 
@@ -205,13 +230,26 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
     );
   }
 
+  // Back from a sub-view: if we have prior in-app history to pop, use it
+  // (preserves scroll + matches the browser-back gesture). Otherwise — e.g.
+  // the user refreshed on /<slug>/settings or landed via deep-link — fall
+  // back to navigating up to the list. `location.key === "default"` is the
+  // sentinel react-router sets on the *initial* entry of a session.
+  const goBackToList = () => {
+    if (location.key !== "default") {
+      navigate(-1);
+    } else {
+      navigate(listPath, { replace: true });
+    }
+  };
+
   if (view === "history") {
     return (
       <ShoppingTrips
         trips={state.trips}
         categories={state.list?.categories || []}
         userId={user?.uid || ""}
-        onBack={() => setView("list")}
+        onBack={goBackToList}
       />
     );
   }
@@ -221,7 +259,7 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
       <ListSettings
         slug={slug || ""}
         listId={listId || ""}
-        onBack={() => setView("list")}
+        onBack={goBackToList}
       />
     );
   }
@@ -240,8 +278,8 @@ export function ShoppingList({ embedded = false }: ShoppingListProps) {
     <Column $embedded={embedded}>
       <Header
         listId={listId || ""}
-        onShowHistory={() => setView("history")}
-        onShowSettings={() => setView("settings")}
+        onShowHistory={() => navigate(`${listPath}/history`)}
+        onShowSettings={() => navigate(`${listPath}/settings`)}
         embedded={embedded}
       />
       <AddItem />

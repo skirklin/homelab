@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button, Input, Modal } from "antd";
 import { ArrowLeftOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ArrowUpOutlined, ArrowDownOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -119,6 +119,7 @@ interface Props {
 
 export function ListSettings({ slug, listId, onBack }: Props) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { state } = useShoppingContext();
   const { modal, message } = useFeedback();
@@ -241,10 +242,16 @@ export function ListSettings({ slug, listId, onBack }: Props) {
     try {
       await userBackend.renameSlug(user.uid, "shopping", slug, cleanSlug);
       setSlugModalOpen(false);
-      // TODO(nav-bundle-2): the URL replaces correctly, but `view === "settings"`
-      // is React state — a refresh after rename lands on the list view, not
-      // Settings. Pending the URL-back-the-view-state work in Bundle 2.
-      navigate(cleanSlug, { replace: true });
+      // Stay on the Settings sub-route after the rename. We can't hardcode
+      // `/<cleanSlug>/settings` because embedded under the home shell the
+      // real path is `/shopping/<cleanSlug>/settings`; swap just the slug
+      // segment of the current pathname instead.
+      const oldSegment = `/${slug}/settings`;
+      const newSegment = `/${cleanSlug}/settings`;
+      const newPath = location.pathname.endsWith(oldSegment)
+        ? location.pathname.slice(0, -oldSegment.length) + newSegment
+        : `${newSegment}`; // fallback — shouldn't happen
+      navigate(newPath, { replace: true });
       message.success("URL updated");
     } catch (error) {
       console.error("Failed to change slug:", error);
