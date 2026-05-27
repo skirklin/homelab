@@ -27,6 +27,7 @@ import type {
   TravelBackend,
   LifeBackend,
   UserBackend,
+  ObserverBackend,
 } from "@homelab/backend";
 import type { WpbDebug } from "@homelab/backend/wrapped-pb";
 
@@ -48,6 +49,7 @@ const UpkeepBackendContext = createContext<UpkeepBackend>(backends.upkeep);
 const TravelBackendContext = createContext<TravelBackend>(backends.travel);
 const LifeBackendContext = createContext<LifeBackend>(backends.life);
 const UserBackendContext = createContext<UserBackend>(backends.user);
+const ObserverBackendContext = createContext<ObserverBackend>(backends.observer);
 
 /**
  * Push the browser's current IANA timezone to `users.timezone` whenever it
@@ -158,10 +160,12 @@ export function BackendProvider({ children }: { children: ReactNode }) {
           <TravelBackendContext.Provider value={backends.travel}>
             <LifeBackendContext.Provider value={backends.life}>
               <UserBackendContext.Provider value={backends.user}>
-                <OfflineBanner />
-                <UpdateAvailableBanner />
-                <SyncStatusBanner debug={wpb.debug} />
-                {children}
+                <ObserverBackendContext.Provider value={backends.observer}>
+                  <OfflineBanner />
+                  <UpdateAvailableBanner />
+                  <SyncStatusBanner debug={wpb.debug} />
+                  {children}
+                </ObserverBackendContext.Provider>
               </UserBackendContext.Provider>
             </LifeBackendContext.Provider>
           </TravelBackendContext.Provider>
@@ -193,6 +197,10 @@ export function useLifeBackend(): LifeBackend {
 
 export function useUserBackend(): UserBackend {
   return useContext(UserBackendContext);
+}
+
+export function useObserverBackend(): ObserverBackend {
+  return useContext(ObserverBackendContext);
 }
 
 /**

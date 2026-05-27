@@ -10,6 +10,7 @@ export {
   useTravelBackend,
   useLifeBackend,
   useUserBackend,
+  useObserverBackend,
   useWpbDebug,
 } from "./backend-provider";
 

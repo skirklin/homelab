@@ -148,6 +148,17 @@ var PB_RULES = Object.freeze({
     updateRule: LIFE_CHILD_RULE,
     deleteRule: LIFE_CHILD_RULE,
   },
+  // claude_observations is created by the API service on behalf of a user
+  // (createRule = "any authed") and read/updated/deleted only by the owner.
+  // Single-relation `owner` column, same shape as life_logs post-0028 —
+  // direct equality, no `?=` (which is for multi-relations).
+  claude_observations: {
+    listRule: LIFE_OWNER_RULE,
+    viewRule: LIFE_OWNER_RULE,
+    createRule: '@request.auth.id != ""',
+    updateRule: LIFE_OWNER_RULE,
+    deleteRule: LIFE_OWNER_RULE,
+  },
 
   // ===== Upkeep / Tasks =====
   task_lists: {
