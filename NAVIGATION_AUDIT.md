@@ -262,12 +262,21 @@ Three commits on main:
 - **`--app-header-height` CSS var** — would let `TaskOutliner`'s DetailPane sticky offset and any other sticky-below-header element reference the actual header height instead of guessing. Needs ResizeObserver wiring or a stable hard-coded value.
 - **`services/api/src/routes/data.ts:2314` admin-PB tag race** — same cross-device race shape; should call the new PB hook via admin client for consistency once `2076959` deploys.
 
-### Deferred to Bundle 8+
+## Bundle 8 — final cleanup ✅ shipped 2026-05-27
 
+Four commits on main:
+- `e87fc05` SW update banner + 5-min probe interval. New `useUpdateAvailable()` hook + `<UpdateAvailableBanner />` mounted via `BackendProvider` (auto-applied to all 6 frontend apps). Clicking the banner reloads. Picked banner over build-hash injection because the cleaner approach required cross-repo plumbing (deploy.sh + new `/fn/version` endpoint + Vite injection). Banner closes the stale-shell window meaningfully; build-hash check remains the ~1-day clean follow-up if banner-click rate proves low.
+- `8e0baf0` `--app-header-height` CSS var. Defined in shared `packages/ui/src/styles.css` + each app's `index.css`. AppHeader-using apps: `calc(68px + env(safe-area-inset-top))`. Home shell: flat `60px`. Travel standalone: `0px` (no chrome). Migrated `TaskOutliner` DetailPane (was `top: 72px`) + travel `DayView` + `TripDetail` StickyMap. **Caught a regression**: travel standalone had a 72px dead-zone above the sticky map (the magic number was tuned against home-shell's 60px header but applied as 72px). Now `0px`.
+- `298d027` admin-PB tag race fix. `services/api/src/routes/data.ts:2314` now calls the new `POST /api/tasks/:id/tags` transactional hook via `pb.send()` instead of doing read-then-write through admin-PB. Hook learned to bypass per-list ownership check when `auth.collection().name === "_superusers"` (pattern matches `api_tokens.pb.js`). Same atomic guarantee across user-token + admin-token write paths.
+- `c6649b1` Monitor app ScrollRestoration. `@kirkl/shared` added as a workspace dep; `<ScrollRestoration />` mounted inside the `BrowserRouter`. Side-effect: monitor's stricter tsconfig (no project references) exposed a pre-existing unused-param in `packages/backend/src/wrapped-pb/index.ts:255`; renamed `token` → `_token`.
+
+### Future work surfaced
+- **Convert monitor's tsconfig to project references** — currently typechecks `packages/{ui,backend}` source under its own stricter rules. Aligning with other apps would let shared/backend manage their own strictness independently.
+- **SW build-hash version check (option b)** — cleaner than the banner; build-hash via `import.meta.env.VITE_BUILD_HASH` + new `/fn/version` endpoint + route-change listener. Roughly 1 day of work. Worth doing if banner-click rate proves low.
+
+### Truly deferred
 - **Modal-URL policy** — architectural decision (~14 modal sites). User has no current opinion; deferred.
-- **SW stale-shell after deploy** — separate SW-versioning concern. Workbox `clientsClaim + skipWaiting` already on via `autoUpdate`; would need a runtime version check that triggers a hard reload on build-hash mismatch.
 - **PB `trip_proposals` collection still in prod** — 3 migrations created it; a dedicated drop migration would remove the orphan schema. Low priority.
-- **Monitor app `<BrowserRouter>` not wired with ScrollRestoration** — one-line addition if needed (likely not — monitor is a charts dashboard).
 
 ## Notes
 
