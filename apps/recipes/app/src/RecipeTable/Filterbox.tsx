@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import _ from "lodash";
@@ -5,6 +6,7 @@ import type { Recipe } from "schema-dts";
 import type { RowType } from "./RecipeTable";
 import Document from "flexsearch/dist/module/document";
 import styled from "styled-components";
+import { useUrlParam } from "@kirkl/shared";
 
 const SearchInput = styled(Input)`
   border-radius: var(--radius-md);
@@ -19,7 +21,7 @@ const SearchInput = styled(Input)`
 `
 
 interface FilterboxProps {
-  setFilteredRows: (rows: RowType[]) => void,
+  setFilteredRows: (rows: RowType[] | undefined) => void,
   data: RowType[]
 }
 
@@ -59,57 +61,72 @@ function filterFunc(value: RowType, str: string): boolean {
 function Filterbox(props: FilterboxProps) {
   const { data, setFilteredRows } = props;
 
-  const index = new Document({
-    document: {
-      id: "name",
-      index: [
-        "name",
-        "instructions",
-        "ingredients",
-        "tags",
-      ]
-    }
-  })
-  data.forEach((row, idx) => {
-    index.add(idx,
-      {
+  // URL-backed query: instant local state for typing feedback; URL lags by 250ms.
+  const [urlQuery, setUrlQuery] = useUrlParam<string>("q", {
+    parse: (raw) => raw ?? "",
+    serialize: (v) => v || null,
+    default: "",
+    debounce: 250,
+  });
+  const [query, setQueryLocal] = useState(urlQuery);
+  const setQuery = useCallback(
+    (next: string) => {
+      setQueryLocal(next);
+      setUrlQuery(next);
+    },
+    [setUrlQuery],
+  );
+
+  // Rebuild the flexsearch index only when `data` changes, not every render.
+  const index = useMemo(() => {
+    const idx = new Document({
+      document: {
+        id: "name",
+        index: ["name", "instructions", "ingredients", "tags"],
+      },
+    });
+    data.forEach((row, i) => {
+      idx.add(i, {
         name: row.recipe.data.name,
         ingredients: row.recipe.data.recipeIngredient,
         instructions: row.recipe.data.recipeInstructions,
         tags: row.recipe.data.recipeCategory,
-      }
-    )
-  }
-  )
-  function filterRecipes(e: { target: { value: string; }; }) {
-    console.log("searched for:")
-    console.log(e.target.value)
-    if (e.target.value === "") {
-      setFilteredRows(data)
-    } else {
-      const result = index.search(e.target.value)
-      const idxs: (string | number)[] = [];
-      let rows: RowType[] = [];
-      result.forEach((obj: { result: (string | number)[] }) => obj.result.forEach(elt => {
-        const idx = typeof elt === 'string' ? parseInt(elt) : elt;
-        if (!idxs.includes(idx)) {
-          idxs.push(idx);
-          rows.push(data[idx])
-        }
-      }))
-      console.log("found!")
-      console.log(idxs)
-      if (rows.length === 0)  {
-        rows = _.filter(data, (row) => filterFunc(row, e.target.value))
-      }
-      if (rows.length > 0) setFilteredRows(rows)
+      });
+    });
+    return idx;
+  }, [data]);
+
+  // Run the filter whenever the query OR the underlying data changes. This
+  // covers both initial mount with `?q=foo` and live data updates mid-search.
+  useEffect(() => {
+    if (query === "") {
+      setFilteredRows(undefined);
+      return;
     }
-  }
+    const result = index.search(query);
+    const seen = new Set<number>();
+    let rows: RowType[] = [];
+    result.forEach((obj: { result: (string | number)[] }) =>
+      obj.result.forEach((elt) => {
+        const i = typeof elt === "string" ? parseInt(elt) : elt;
+        if (!seen.has(i)) {
+          seen.add(i);
+          rows.push(data[i]);
+        }
+      }),
+    );
+    if (rows.length === 0) {
+      rows = _.filter(data, (row) => filterFunc(row, query));
+    }
+    setFilteredRows(rows);
+  }, [query, data, index, setFilteredRows]);
+
   return (
     <SearchInput
       placeholder="Search recipes..."
       prefix={<SearchOutlined style={{ color: 'var(--color-text-muted)' }} />}
-      onChange={filterRecipes}
+      value={query}
+      onChange={(e) => setQuery(e.target.value ?? "")}
       allowClear
       size="large"
     />

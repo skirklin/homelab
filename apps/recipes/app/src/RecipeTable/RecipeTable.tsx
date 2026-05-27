@@ -1,9 +1,9 @@
 import _ from 'lodash';
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import { Popconfirm, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
-import type { Key, TableRowSelection } from 'antd/es/table/interface';
+import type { Key, SorterResult, TableRowSelection } from 'antd/es/table/interface';
 import { DeleteOutlined, CopyOutlined, RobotOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
@@ -11,7 +11,7 @@ import Filterbox from './Filterbox';
 import NewButton from '../Buttons/NewRecipe';
 import UploadButton from '../Buttons/UploadRecipes';
 import ImportButton from '../Buttons/ImportRecipes';
-import { useRecipesBackend } from '@kirkl/shared';
+import { useRecipesBackend, useUrlParam } from '@kirkl/shared';
 import { recipeDataToBackend } from '../adapters';
 import { getRecentViews } from '../recentlyViewed';
 import { Context } from '../context';
@@ -121,22 +121,39 @@ export function RecipeTable(props: RecipeTableProps) {
   const { writeable, recipes, boxId } = props;
   const { state, dispatch } = useContext(Context)
   const recipesBackend = useRecipesBackend();
-  const [filteredRows, setFilteredRows] = useState<RowType[]>()
+  // `undefined` = no filter active; render the full `recipes` list (sorted).
+  const [filteredRows, setFilteredRows] = useState<RowType[] | undefined>(undefined)
 
   // Count recipes with pending changes (enrichments or modifications)
   const pendingChangesCount = recipes.filter(r => r.recipe.pendingChanges).length;
 
-  useEffect(() => {
+  // URL-backed sort. `null` sortKey means "no explicit sort" — fall back to
+  // recency (recently-viewed first, then by updated time). When the user
+  // toggles a column off, both params get cleared by the hook (default match).
+  const [sortKey, setSortKey] = useUrlParam<string | null>("sort", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
+  const [sortDir, setSortDir] = useUrlParam<"asc" | "desc">("dir", {
+    parse: (raw) => (raw === "desc" ? "desc" : "asc"),
+    serialize: (v) => (v === "desc" ? "desc" : null),
+    default: "asc",
+  });
+
+  // The default (no-sort) ordering: recently-viewed first, then by updated.
+  const recencySorted = useMemo(() => {
     const recentViews = getRecentViews();
-    const sortedRecipes = _.sortBy(recipes, row => {
+    return _.sortBy(recipes, (row) => {
       const viewedAt = recentViews.get(row.recipe.id);
-      // Recently viewed recipes sort first (by view time), then by updated time
       return viewedAt ? -viewedAt : -row.recipe.updated;
     });
-    setFilteredRows(sortedRecipes)
-  },
-    [recipes]
-  )
+  }, [recipes]);
+
+  // What we actually feed to <Table>. Filterbox sets `filteredRows` when a
+  // query is active; otherwise we show the recency-sorted list and let antd
+  // apply the controlled sort on top.
+  const dataSource = filteredRows ?? recencySorted;
 
 
   const onSelectChange = (selectedRowKeys: Key[], selectedRows: RowType[]) => {
@@ -203,6 +220,7 @@ export function RecipeTable(props: RecipeTableProps) {
         </NameCell>
       ),
       sorter: (a: RowType, b: RowType) => sortfunc(getRecipeName(a.recipe) || "", getRecipeName(b.recipe) || ""),
+      sortOrder: sortKey === 'name' ? (sortDir === 'desc' ? 'descend' : 'ascend') : null,
       onCell: onNameCell,
       className: "recipe-table-clickable-column",
       width: 200,
@@ -289,8 +307,22 @@ export function RecipeTable(props: RecipeTableProps) {
         pagination={false}
         rowSelection={rowSelection}
         columns={columns}
-        dataSource={filteredRows}
+        dataSource={dataSource}
         size="middle"
+        onChange={(_pag, _filters, sorter) => {
+          // We only sort by a single column; if antd ever hands us an array
+          // (multi-column sort) pick the first entry.
+          const s = Array.isArray(sorter) ? sorter[0] : sorter as SorterResult<RowType>;
+          const order = s?.order;
+          if (!order) {
+            // User cleared the sort — drop both params.
+            setSortKey(null);
+            setSortDir("asc");
+            return;
+          }
+          setSortKey(s.columnKey != null ? String(s.columnKey) : null);
+          setSortDir(order === "descend" ? "desc" : "asc");
+        }}
       />
     </TableContainer>
   )
