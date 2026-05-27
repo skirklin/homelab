@@ -2,8 +2,8 @@
  * PocketBaseUserBackend tests — unit-level, against a stub PocketBase.
  *
  * Covers the cancel-before-resolve race in subscribeSlugs (Bug B): a caller
- * that calls the returned unsubscribe before wpb.subscribe's promise resolves
- * must NOT leak the underlying local subscriber once the promise lands.
+ * that calls the returned unsubscribe before the mirror's initial fetch
+ * resolves must NOT leak the underlying subscription once the promise lands.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import type PocketBase from "pocketbase";
@@ -18,7 +18,7 @@ type RealtimeCb = (e: { action: string; record: RecordModel }) => void;
 interface StubCollection {
   records: Map<string, RecordModel>;
   realtimeCbs: Set<RealtimeCb>;
-  /** Gates the next getOne; tests use this to keep wpb.subscribe's initial
+  /** Gates the next getOne; tests use this to keep the mirror's initial
    *  load pending while exercising cancel-before-resolve. */
   gateGetOne: Promise<void> | null;
 }
@@ -103,15 +103,12 @@ function makeStubPb(): {
 
 /**
  * Re-implements the visibility wpb deliberately doesn't expose: we want to
- * assert "no orphaned LocalSubscriber sticks around after a racy unsubscribe."
- * Each call to wpb.collection(name).subscribe(...) adds one to a per-collection
- * Set; the returned unsubscribe (or our Bug B fix path) must remove it.
+ * assert "no orphaned subscription sticks around after a racy unsubscribe."
  *
- * We reach in via the stub's realtime-callback count as a proxy: every wpb
- * .subscribe call ends up adding ONE realtime callback to the stub for that
- * collection (via ensureRealSubscription), and the count returns to 0 when
- * the last local subscriber departs. If the local subscriber leaks, the
- * realtime callback also leaks.
+ * We reach in via the stub's realtime-callback count as a proxy: every
+ * mirror watch on a collection adds ONE realtime callback (refcounted) to
+ * the stub for that collection, and the count returns to 0 when the last
+ * watch detaches. If a watch leaks, the realtime callback also leaks.
  */
 function makeProbe(stub: ReturnType<typeof makeStubPb>): WpbInternals {
   return {
@@ -124,13 +121,13 @@ beforeEach(async () => {
 });
 
 describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
-  it("does not leak the underlying subscription when unsub is called before wpb.subscribe resolves", async () => {
+  it("does not leak the underlying subscription when unsub is called before the mirror's initial fetch resolves", async () => {
     // Bug B repro: the cleanup function captured `unsub` by closure, but if
-    // wpb.subscribe's promise (which awaits getOne for initial-load) hasn't
-    // resolved by the time the caller unsubscribes, `unsub` is undefined and
-    // the cleanup is a no-op. Then the promise resolves, the local
-    // subscriber/realtime callback are registered, and nothing ever tears
-    // them down.
+    // the initial-fetch promise hasn't resolved by the time the caller
+    // unsubscribes, `unsub` is undefined and the cleanup is a no-op. Then
+    // the promise resolves, the subscriber/realtime callback are registered,
+    // and nothing ever tears them down. The mirror's WatchHandle.unsubscribe
+    // is synchronous and idempotent, so the leak should no longer be reachable.
     const stub = makeStubPb();
     const probe = makeProbe(stub);
 
@@ -145,7 +142,7 @@ describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
       shopping_slugs: { groceries: "L1" },
     } as unknown as RecordModel);
 
-    // Hold getOne open so wpb.subscribe's promise stays pending.
+    // Hold getOne open so the mirror's initial fetch stays pending.
     let releaseGetOne: () => void = () => {};
     stub.col("users").gateGetOne = new Promise<void>((res) => { releaseGetOne = res; });
 
@@ -156,11 +153,11 @@ describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
     const seen: Array<Record<string, string>> = [];
     const unsubscribe = user.subscribeSlugs("u1", "shopping", (s) => seen.push(s));
 
-    // Immediately tear down — BEFORE the wpb.subscribe promise resolves.
+    // Immediately tear down — BEFORE the mirror's initial fetch resolves.
     unsubscribe();
 
-    // Now let getOne finish, which lets wpb.subscribe's promise resolve and
-    // the inner .then run.
+    // Now let getOne finish, which lets the mirror's bootstrap resolve and
+    // its post-fetch SSE attach (or not, if the watch was cancelled) run.
     releaseGetOne();
     // Drain microtasks so the .then chain inside subscribeSlugs lands.
     await new Promise((r) => setTimeout(r, 0));
@@ -171,7 +168,7 @@ describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
     // tear down the late-resolved subscription as soon as it lands.
     expect(
       probe.countSubscribers("users"),
-      "subscribeSlugs leaked a subscription when teardown raced wpb.subscribe.then",
+      "subscribeSlugs leaked a subscription when teardown raced the mirror's bootstrap",
     ).toBe(0);
 
     // And the callback must never have fired (we unsubscribed before any
@@ -181,7 +178,7 @@ describe("PocketBaseUserBackend.subscribeSlugs cancellation", () => {
 
   it("normal teardown after the promise resolves still works", async () => {
     // Regression guard: the fix path must not break the common case where
-    // wpb.subscribe resolves before cancellation.
+    // the mirror's initial fetch resolves before cancellation.
     const stub = makeStubPb();
     const probe = makeProbe(stub);
     stub.col("users").records.set("u1", {

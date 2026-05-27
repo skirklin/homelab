@@ -267,18 +267,11 @@ export class PocketBaseShoppingBackend implements ShoppingBackend {
   /**
    * Subscribe to all shopping data for a list via the mirror.
    *
-   * Replaces the prior bespoke implementation that ran separate
-   * `wpb.subscribe` / `pb.subscribe` chains, each with its own
-   * cancelled-flag bookkeeping, `trackUnsub` helper, and `itemsMap`
-   * delta-buffering. All of that lived to work around the underlying
-   * async-unsubscribe + delta-event-stream APIs; the mirror inverts both
-   * concerns (synchronous teardown, full-state delivery) so the backend
-   * code becomes three declarative slice descriptions plus a tear-down.
-   *
-   * The mirror's `WatchHandle.unsubscribe()` is synchronous and safe at
-   * any time (including before initial state lands), so we no longer need
-   * `cancelled` flags or `trackUnsub`. Every cancel-before-resolve fix
-   * we made here lives in the mirror now, exercised by mirror.test.ts.
+   * Three declarative slice descriptions (list / items / trips) plus a
+   * tear-down — the mirror handles ref-counted SSE coalescing, optimistic
+   * overlay, sort+limit refetches, and synchronous teardown that's safe
+   * before initial state lands. Every cancel-before-resolve concern lives
+   * in the mirror; see mirror.test.ts for the exhaustive coverage.
    */
   subscribeToList(
     listId: string,

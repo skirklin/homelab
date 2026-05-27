@@ -4,8 +4,8 @@
  * Writes route through the optimistic wrapper. Event subscription rides on
  * the PBMirror — a single filter-only-wildcard slice on `life_events` with
  * a predicate keyed to the log id. The mirror's queue overlay surfaces
- * optimistic creates immediately and absorbs every cancel-before-resolve
- * the legacy wpb.subscribe path had to hand-roll.
+ * optimistic creates immediately, with synchronous-teardown handles that
+ * absorb every cancel-before-resolve.
  *
  * Schema reference: migration 20260522_221157_life_event_unified_shape.js.
  * Rows have `entries` (json[]), `labels` (json|null), `end_time` (date|null);

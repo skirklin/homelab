@@ -2,10 +2,10 @@
  * PocketBaseShoppingBackend tests — unit-level, against a stub PocketBase.
  *
  * Covers the cancel-before-resolve race in subscribeToList: a caller that
- * tears down the subscription before the inner wpb.subscribe / pb.subscribe
- * promises resolve must NOT leak the underlying realtime subscriptions once
- * those promises land. Same shape as the bug fixed in subscribeSlugs (see
- * user.test.ts) and the recipes / life / upkeep cleanup races.
+ * tears down the subscription before the inner pb.subscribe promises
+ * resolve must NOT leak the underlying realtime subscriptions once those
+ * promises land. The mirror handles this with synchronous-teardown
+ * WatchHandles; these tests verify the backend wires through correctly.
  *
  * Also covers the surgical trip-item ops (updateTripItem / removeTripItem)
  * that replaced the editable-history surface when `shopping_history` was
@@ -29,8 +29,8 @@ interface StubCollection {
    *  inner pb.subscribe was never called at all (vs. called-then-unsubscribed,
    *  which is what the outer trackUnsub fix would leave behind). */
   subscribeCalls: number;
-  /** Gates pending reads; tests use this to keep wpb.subscribe / getList
-   *  promises pending while exercising cancel-before-resolve. */
+  /** Gates pending reads; tests use this to keep the mirror's initial
+   *  fetch / getList promises pending while exercising cancel-before-resolve. */
   gateReads: Promise<void> | null;
 }
 
@@ -193,7 +193,7 @@ describe("PocketBaseShoppingBackend", () => {
       category_defs: [],
     } as unknown as RecordModel);
 
-    // Hold all reads so wpb.subscribe / pb.getList stay pending.
+    // Hold all reads so the mirror's initial fetch / pb.getList stay pending.
     stub.hold();
 
     const wpb = wrapPocketBase(() => stub.pb);

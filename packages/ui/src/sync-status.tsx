@@ -52,8 +52,7 @@ interface SyncState {
  *  - severe: any errored writes (already failed once, will retry on
  *    next PB_CONNECT/focus), or in-flight writes older than the severe
  *    threshold
- *  - warn:   realtime channel down + subscribers present (stale view
- *    risk), or in-flight writes older than the grace window
+ *  - warn:   in-flight writes older than the grace window
  *  - ok:     no pending, or all pending are still inside the grace
  *    window (normal in-flight latency)
  */
@@ -68,7 +67,6 @@ function deriveSyncState(
       .filter((c): c is WpbCollectionSnapshot => !!c)
     : Object.values(snapshot.collections);
 
-  const hasAnySubscriber = scope.some((c) => c.subscribers > 0);
   const pending = scope.reduce((sum, c) => sum + c.pendingMutations, 0);
   const errored = scope.reduce((sum, c) => sum + c.erroredMutations, 0);
   const oldestPendingAt = scope
@@ -95,12 +93,6 @@ function deriveSyncState(
       errored,
       oldestAgeMs: oldestErroredAt !== null ? now - oldestErroredAt : null,
     };
-  }
-
-  // Realtime channel down while we have subscribers in scope = stale view
-  // risk for those collections.
-  if (hasAnySubscriber && (!snapshot.realtimeConnected || snapshot.realtimeDirty)) {
-    return { severity: "warn", label: "Reconnecting to live updates…", pending, errored: 0, oldestAgeMs: null };
   }
 
   if (pending === 0 || oldestPendingAt === null) {
@@ -163,16 +155,13 @@ function DetailsPanel({ debug, onClose }: DetailsPanelProps) {
   const originT = events.length > 0 ? events[0].t : Date.now();
 
   const summary = [
-    `realtime: ${snapshot.realtimeConnected ? "connected" : "disconnected"}${snapshot.realtimeDirty ? " (dirty)" : ""}`,
     `total pending: ${snapshot.totalPending} (errored: ${snapshot.totalErrored})`,
     snapshot.oldestPendingAt ? `oldest pending: ${formatAge(Date.now() - snapshot.oldestPendingAt)} ago` : "no pending",
     snapshot.oldestErroredAt ? `oldest errored: ${formatAge(Date.now() - snapshot.oldestErroredAt)} ago` : "no errored",
     "",
     "per-collection:",
     ...Object.entries(snapshot.collections).map(([name, c]) =>
-      `  ${name}  subs=${c.subscribers}  pending=${c.pendingMutations}  errored=${c.erroredMutations}  lastSse=${
-        c.lastSseEventAt ? `${formatAge(Date.now() - c.lastSseEventAt)} ago` : "never"
-      }`),
+      `  ${name}  pending=${c.pendingMutations}  errored=${c.erroredMutations}`),
     "",
     `events (${events.length}, oldest first):`,
     ...events.map((e) => "  " + formatEventLine(e, originT)),

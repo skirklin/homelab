@@ -1,10 +1,11 @@
 /**
  * Optimistic-write wrapper around PocketBase.
  *
- * Mirrors Firestore's mutation-queue + server-snapshot model. UI writes push
- * onto a per-record queue and notify subscribers synchronously; the network
- * call fires in the background. Server events from PB realtime feed the same
- * queue. Convergence falls out of last-write-wins composition.
+ * Mirrors Firestore's mutation-queue + server-snapshot model. Writes push
+ * onto a per-record queue; the network call fires in the background. PBMirror
+ * (mirror.ts) is the sole live-state consumer — it subscribes to the raw
+ * PocketBase realtime channel, drives `applyServer`, and hooks the
+ * `subscribeMutations` callback so optimistic writes flow into its slices.
  *
  * Persistence: pending mutations are written to IndexedDB before dispatch and
  * cleared on ack/reject. A reload mid-flight replays them on next session.
@@ -12,7 +13,7 @@
  * are last-write-wins patches, and deletes treat 404 as success.
  */
 import type PocketBase from "pocketbase";
-import type { RecordModel, RecordSubscription, UnsubscribeFunc, RecordOptions, RecordListOptions, RecordFullListOptions, ListResult } from "pocketbase";
+import type { RecordModel, RecordOptions, RecordListOptions, RecordFullListOptions, ListResult } from "pocketbase";
 import { newId } from "../cache/ids";
 import { MutationQueue, type Mutation, type RawRecord } from "./queue";
 import { persistMutation, unpersistMutation, loadAllMutations } from "./persistence";
@@ -48,29 +49,9 @@ export class WrappedPbError extends Error {
   }
 }
 
-export interface WrappedSubscribeOptions {
-  /**
-   * PocketBase filter string used to scope the initial-load fetch when
-   * `topic === "*"`. Without it, "*" subscribes deliver only live events
-   * (no initial state). For specific-id topics, the id alone scopes the
-   * fetch and `filter` is ignored.
-   */
-  filter?: string;
-  /** JS predicate evaluated locally — required for filtered subscriptions so optimistic mutations route to the right subscribers. */
-  local?: (r: RawRecord) => boolean;
-}
-
-interface LocalSubscriber {
-  collection: string;
-  topic: string; // "*" or a record id
-  filter?: string; // server-side filter that was passed at subscribe time
-  predicate?: (r: RawRecord) => boolean;
-  callback: (e: RecordSubscription) => void;
-}
-
 export interface WrappedCollection {
-  // Reads — passthrough today (overlay is a v2 concern; subscribe channel
-  // delivers pending mutations to live UIs).
+  // Reads — passthrough. Live state goes through PBMirror; these exist for
+  // one-shot lookups (e.g. read-modify-write of a JSON column).
   getFullList<T = RecordModel>(opts?: RecordFullListOptions): Promise<T[]>;
   getFullList<T = RecordModel>(batch?: number, opts?: RecordListOptions): Promise<T[]>;
   getList<T = RecordModel>(page?: number, perPage?: number, opts?: RecordListOptions): Promise<ListResult<T>>;
@@ -84,26 +65,12 @@ export interface WrappedCollection {
   create<T = RecordModel>(body: Record<string, unknown>, opts?: RecordOptions): Promise<T>;
   update<T = RecordModel>(id: string, body: Record<string, unknown>, opts?: RecordOptions): Promise<T>;
   delete(id: string, opts?: RecordOptions): Promise<boolean>;
-  subscribe(
-    topic: string,
-    cb: (e: RecordSubscription) => void,
-    opts?: WrappedSubscribeOptions,
-  ): Promise<UnsubscribeFunc>;
 }
 
 export interface WrappedPocketBase {
   collection(name: string): WrappedCollection;
   /** Triggers persisted-mutation replay. Idempotent. Call once after auth is ready. */
   replayPending(): Promise<void>;
-  /**
-   * Re-fetch every active subscription's matching records, apply them to the
-   * queue, and synthesize create/update/delete events for any drift since
-   * the last delivery. Compensates for PocketBase's 5-minute realtime idle
-   * disconnect (and any mobile-network SSE failure where the SDK's
-   * auto-reconnect misses events) by treating server state as authoritative
-   * on every wake-up. Call on tab focus/pageshow and on a slow interval.
-   */
-  resync(): Promise<void>;
   /**
    * Re-fire every mutation whose dispatch failed transiently (network
    * blip, 5xx, 429, etc.). Wired internally to PB_CONNECT; BackendProvider
@@ -124,17 +91,11 @@ export interface WrappedPocketBase {
 
 /** Kinds of internal events recorded for post-hoc debugging. */
 export type WpbEventKind =
-  | "subscribe"        // a local subscriber attached
-  | "unsubscribe"      // a local subscriber detached
-  | "sse"              // an SSE event was delivered for a collection
   | "mutation-push"    // wpb pushed a pending mutation to the queue
   | "mutation-ack"     // server confirmed a mutation
   | "mutation-error"   // server rejected a mutation
   | "replay"           // replayPending re-fired a persisted mutation
-  | "resync"           // resync() reconciled state for a collection
-  | "retry-batch"      // retryErrored() began a sweep of queued failed writes
-  | "disconnect"       // SDK reported realtime drop
-  | "connect";         // SDK reported realtime (re)connect
+  | "retry-batch";     // retryErrored() began a sweep of queued failed writes
 
 export interface WpbEvent {
   t: number; // ms since epoch
@@ -145,7 +106,6 @@ export interface WpbEvent {
 }
 
 export interface WpbCollectionSnapshot {
-  subscribers: number;
   /** All pending mutations for this collection (in-flight + errored). */
   pendingMutations: number;
   /** Subset of pendingMutations that have failed at least once and are
@@ -156,15 +116,9 @@ export interface WpbCollectionSnapshot {
   /** Oldest errored mutation's first-error timestamp (ms epoch), null if
    *  no errored mutations in this collection. */
   oldestErroredAt: number | null;
-  /** Last SSE-delivered event timestamp (ms epoch), null if none. */
-  lastSseEventAt: number | null;
 }
 
 export interface WpbSnapshot {
-  /** PB SDK's view of whether the realtime EventSource is open. */
-  realtimeConnected: boolean;
-  /** Set when onDisconnect fired and PB_CONNECT hasn't cleared it yet. */
-  realtimeDirty: boolean;
   totalPending: number;
   totalErrored: number;
   oldestPendingAt: number | null;
@@ -175,7 +129,7 @@ export interface WpbSnapshot {
 export interface WpbDebug {
   /** Read-only view of the most recent N events (newest last). */
   events(): readonly WpbEvent[];
-  /** Live snapshot of subscribers, pending writes, and realtime state. */
+  /** Live snapshot of pending writes. */
   snapshot(): WpbSnapshot;
   /** Drop the in-memory ring buffer. Does not touch persisted mutations. */
   clear(): void;
@@ -187,34 +141,13 @@ const DEBUG_RING_CAPACITY = 200;
 
 // ---- Implementation ----
 
-interface CollectionState {
-  subscribers: Set<LocalSubscriber>;
-  realUnsub: Promise<UnsubscribeFunc> | null;
-}
-
-/**
- * Window inside which a recently-seen SSE event proves the realtime channel
- * is alive — resync() skips any collection that delivered an event in the
- * last `SSE_FRESH_MS` ms. PocketBase's idle disconnect kicks in at 5 min, so
- * 90 s is comfortably under the worst-case "we missed everything since the
- * last live event" window while still catching real drop-outs on the very
- * next focus tick.
- */
-const SSE_FRESH_MS = 90 * 1000;
-
 export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   const queue = new MutationQueue();
-  const collections = new Map<string, CollectionState>();
   const origin = newId(); // session id for this wrapper instance
-  /** Per-collection timestamp of the most recent SSE-delivered event. */
-  const lastSseEventAt = new Map<string, number>();
   /**
    * Hook listeners for "any mutation was pushed/drained/applied". PBMirror
    * uses this to re-emit slices when an optimistic write lands or is rolled
-   * back. Kept as a tiny event-emitter rather than widening the public
-   * WrappedPocketBase interface — the mirror lives in the same package and
-   * grabs the hook via the `__onMutation` side-channel on the returned
-   * object. Other code paths don't need this and won't see it.
+   * back.
    */
   const mutationListeners = new Set<(collection: string, recordId: string) => void>();
   function notifyMutationListeners(collection: string, recordId: string): void {
@@ -249,107 +182,25 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     lastMessage?: string;
   }
   const errored = new Map<string, ErroredEntry>();
-  /**
-   * Set when the PB SDK reports a realtime disconnect with active subscriptions.
-   * Cleared after the next successful PB_CONNECT triggers a resync. This is
-   * the desktop-drop fast path: we don't have to wait for tab focus to
-   * notice the SSE died — the SDK tells us, we resync the moment SSE comes
-   * back. Mobile-suspend doesn't fire onDisconnect (the OS freezes the
-   * network stack silently), which is why we still keep the focus-driven
-   * resync as a backstop.
-   */
-  let realtimeDirty = false;
-  /** Idempotency guard for the disconnect hook + PB_CONNECT subscription. */
+
+  /** Idempotency guard for the PB_CONNECT subscription. */
   let realtimeHooked = false;
 
+  /**
+   * Subscribe to PB_CONNECT so transient write failures get retried the moment
+   * realtime reconnects — they likely failed because the network was down,
+   * and now isn't. Hooked lazily on the first write so test stubs that
+   * never touch realtime aren't forced to define a PB_CONNECT handler.
+   */
   function hookRealtimeLifecycle() {
     if (realtimeHooked) return;
     const client = pb();
     if (!client.realtime) return;
     realtimeHooked = true;
-
-    const prev = client.realtime.onDisconnect;
-    client.realtime.onDisconnect = (activeSubs) => {
-      // Only mark dirty when there were live subscriptions to lose — an
-      // unsubscribe-all teardown also fires this, and we don't want to
-      // resync on graceful close.
-      if (activeSubs && activeSubs.length > 0) {
-        realtimeDirty = true;
-        recordEvent({ kind: "disconnect", detail: { activeSubs } });
-      }
-      try { prev?.(activeSubs); } catch { /* hook owner errors are theirs */ }
-    };
-
-    // PB_CONNECT fires on every successful (re)connect, including the very
-    // first. We only resync if a prior disconnect armed us — otherwise the
-    // per-collection subscribe() auto-load already delivered initial state.
     void client.realtime.subscribe("PB_CONNECT", () => {
-      recordEvent({ kind: "connect", detail: { afterDirty: realtimeDirty } });
-      // Always sweep errored writes on a fresh connection — they may have
-      // failed precisely because the network was down, and now isn't.
       // Cheap when the errored map is empty (early return inside).
       void retryErrored();
-      if (!realtimeDirty) return;
-      realtimeDirty = false;
-      void resync();
     });
-  }
-
-  function getColState(name: string): CollectionState {
-    let s = collections.get(name);
-    if (!s) {
-      s = { subscribers: new Set(), realUnsub: null };
-      collections.set(name, s);
-    }
-    return s;
-  }
-
-  function notifySubscribers(
-    collection: string,
-    action: "create" | "update" | "delete",
-    record: RawRecord,
-  ) {
-    const s = collections.get(collection);
-    if (!s) return;
-    for (const sub of s.subscribers) {
-      if (sub.topic !== "*" && sub.topic !== record.id) continue;
-      if (sub.predicate && !sub.predicate(record)) continue;
-      try {
-        sub.callback({ action, record: record as RecordModel });
-      } catch (err) {
-        console.error("[wpb] subscriber callback threw", err);
-      }
-    }
-  }
-
-  function ensureRealSubscription(collection: string): Promise<UnsubscribeFunc> {
-    const state = getColState(collection);
-    if (state.realUnsub) return state.realUnsub;
-    // Hook the realtime lifecycle once — first subscribe is the earliest
-    // we know the app is actually using the channel. Doing it lazily here
-    // avoids materializing pb() in environments that import wpb but never
-    // subscribe (e.g., the test stub before its first subscribe call).
-    hookRealtimeLifecycle();
-    state.realUnsub = pb().collection(collection).subscribe("*", (e) => {
-      // Any SSE delivery proves the realtime channel is currently alive for
-      // this collection. Stamp the time so the focus-driven resync can skip
-      // unnecessary refetches on healthy tabs.
-      lastSseEventAt.set(collection, Date.now());
-      const action = e.action as "create" | "update" | "delete";
-      const record = e.record as RawRecord;
-      recordEvent({ kind: "sse", collection, recordId: record?.id, detail: { action } });
-      if (action === "delete") {
-        const { after } = queue.applyServer(collection, record.id, null);
-        notifySubscribers(collection, "delete", record);
-        // If pending mutations leave a non-null view, also re-emit so listeners stay current.
-        if (after) notifySubscribers(collection, "update", after);
-      } else {
-        const { before, after } = queue.applyServer(collection, record.id, record);
-        const emitAction = before === null && after !== null ? "create" : "update";
-        if (after) notifySubscribers(collection, emitAction, after);
-      }
-    });
-    return state.realUnsub;
   }
 
   function synthesizeRecord(
@@ -435,17 +286,10 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       const result = await fire();
       // Apply server snapshot from the ack response, then drain pending.
       queue.applyServer(collection, recordId, result);
-      const drainResult = queue.drainPending(collection, recordId, mutationId);
+      queue.drainPending(collection, recordId, mutationId);
       void unpersistMutation(mutationId);
       errored.delete(mutationId);
       recordEvent({ kind: "mutation-ack", collection, recordId, detail: { mutationId, op: kind } });
-      // Emit the post-drain view so subscribers see the server-confirmed value.
-      const view = drainResult.after;
-      if (result === null && view === null) {
-        notifySubscribers(collection, "delete", { id: recordId });
-      } else if (view) {
-        notifySubscribers(collection, "update", view);
-      }
       notifyMutationListeners(collection, recordId);
       return result;
     } catch (err) {
@@ -476,15 +320,14 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
           recordId,
           detail: { mutationId, op: kind, status, message, transient: true, attempts: (prior?.attempts ?? 0) + 1 },
         });
-        // Don't notify a revert — the optimistic queue entry is still there,
-        // subscribers' views are unchanged. Don't throw — caller's await
-        // resolves so the UI continues without alarming the user about a
-        // network blip that will likely auto-recover.
+        // Don't throw — caller's await resolves so the UI continues
+        // without alarming the user about a network blip that will
+        // likely auto-recover.
         return null;
       }
 
-      // Permanent error: drain, drop persisted copy, notify revert, throw.
-      const drainResult = queue.drainPending(collection, recordId, mutationId);
+      // Permanent error: drain, drop persisted copy, notify mirror, throw.
+      queue.drainPending(collection, recordId, mutationId);
       void unpersistMutation(mutationId);
       errored.delete(mutationId);
       recordEvent({
@@ -493,15 +336,6 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         recordId,
         detail: { mutationId, op: kind, status, message, transient: false },
       });
-      const view = drainResult.after;
-      if (view === null) {
-        // Use the pre-drain view so subscriber predicates (e.g. r.list === X)
-        // can match. Falls back to the id-only synthesizable record if neither
-        // server snapshot nor any pending mutation existed before the drain.
-        notifySubscribers(collection, "delete", drainResult.before ?? { id: recordId });
-      } else {
-        notifySubscribers(collection, "update", view);
-      }
       notifyMutationListeners(collection, recordId);
       throw new WrappedPbError({ kind, collection, recordId }, err);
     }
@@ -531,9 +365,10 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         return queue.viewCollection(name, predicate as ((r: RawRecord) => boolean) | undefined) as T[];
       },
 
-      // Optimistic create. Subscribers see the create event synchronously;
-      // persistence is fire-and-forget (non-blocking).
+      // Optimistic create. Mirror listeners see the create via the mutation
+      // hook synchronously; persistence is fire-and-forget (non-blocking).
       async create<T = RecordModel>(body: Record<string, unknown>, opts?: RecordOptions): Promise<T> {
+        hookRealtimeLifecycle();
         const id = (body.id as string) || newId();
         const record = synthesizeRecord(name, { ...body, id }, id);
         const mutationId = newId();
@@ -541,7 +376,6 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
 
         queue.pushPending(name, id, mutation, mutationId);
         recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "create" } });
-        notifySubscribers(name, "create", record);
         notifyMutationListeners(name, id);
         void persistMutation({
           id: mutationId,
@@ -561,12 +395,12 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
 
       // Optimistic update.
       async update<T = RecordModel>(id: string, body: Record<string, unknown>, opts?: RecordOptions): Promise<T> {
+        hookRealtimeLifecycle();
         const mutationId = newId();
         const mutation: Mutation = { kind: "update", patch: body };
 
         const { after } = queue.pushPending(name, id, mutation, mutationId);
         recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "update" } });
-        if (after) notifySubscribers(name, "update", after);
         notifyMutationListeners(name, id);
         void persistMutation({
           id: mutationId,
@@ -586,15 +420,12 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
 
       // Optimistic delete.
       async delete(id: string, opts?: RecordOptions): Promise<boolean> {
+        hookRealtimeLifecycle();
         const mutationId = newId();
         const mutation: Mutation = { kind: "delete" };
 
-        // Capture the prior view BEFORE adding the delete mutation so we can
-        // emit it as the event record — predicates need the full record (with
-        // the list/log/parent fields) to match, not just the id.
-        const { before } = queue.pushPending(name, id, mutation, mutationId);
+        queue.pushPending(name, id, mutation, mutationId);
         recordEvent({ kind: "mutation-push", collection: name, recordId: id, detail: { mutationId, op: "delete" } });
-        notifySubscribers(name, "delete", before ?? { id });
         notifyMutationListeners(name, id);
         void persistMutation({
           id: mutationId,
@@ -611,236 +442,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         }, "delete");
         return true;
       },
-
-      // Subscribe with onSnapshot-style semantics: caller gets a unified
-      // stream of "create" events for current matching records (initial load),
-      // followed by live create/update/delete events. Returned promise
-      // resolves only after the initial batch has been delivered, so callers
-      // can flip a loading flag at that point.
-      //
-      // Initial load also seeds the optimistic queue. Without this, a local
-      // delete/update on a record that has only ever been read (never had an
-      // SSE event) would compose against a null server snapshot and emit a
-      // bare {id} (failing subscriber predicates) or no event at all (update
-      // on null is a no-op). On mobile, where SSE is unreliable, that means
-      // the user's own writes never reach the UI until a refresh.
-      async subscribe(
-        topic: string,
-        callback: (e: RecordSubscription) => void,
-        opts?: WrappedSubscribeOptions,
-      ): Promise<UnsubscribeFunc> {
-        const sub: LocalSubscriber = {
-          collection: name,
-          topic,
-          filter: opts?.filter,
-          predicate: opts?.local,
-          callback,
-        };
-        const state = getColState(name);
-        state.subscribers.add(sub);
-        recordEvent({ kind: "subscribe", collection: name, detail: { topic, filter: opts?.filter } });
-        await ensureRealSubscription(name);
-
-        // Auto-load matching records and seed the queue. Two scopes:
-        //  - topic="*" with filter: getFullList(filter) → batch
-        //  - topic=<id>: getOne(id) → single record (404 → empty)
-        // topic="*" without filter is left alone; callers that want raw
-        // event-only semantics can use that form.
-        let initialRecords: RawRecord[] = [];
-        if (topic !== "*") {
-          try {
-            const r = await pb().collection(name).getOne(topic, { $autoCancel: false });
-            initialRecords = [r as unknown as RawRecord];
-          } catch {
-            // 404 / not found is fine — record may not exist yet; live events
-            // will deliver any future create.
-          }
-        } else if (opts?.filter !== undefined) {
-          try {
-            const rs = await pb().collection(name).getFullList({
-              filter: opts.filter,
-              $autoCancel: false,
-            });
-            initialRecords = rs as unknown as RawRecord[];
-          } catch (e) {
-            console.warn(`[wpb] initial load for ${name} failed`, e);
-          }
-        }
-
-        // Seed and deliver. Two distinct concerns here:
-        //  1. Seeding: only seed if the queue doesn't already have a snapshot
-        //     for this id. A prior subscriber's seed (or an SSE event that
-        //     raced ahead during our await) may already hold a fresher view;
-        //     re-seeding from our potentially-stale getFullList would clobber
-        //     it.
-        //  2. Delivery: ALWAYS deliver to THIS subscriber. Whether the queue
-        //     was just-seeded or already populated, this subscriber was just
-        //     attached and has not yet received any event for this record.
-        //     (Pre-fix, skipping delivery when queue.view !== null caused a
-        //     real bug: home shell mounts ShoppingProvider + RecipesProvider
-        //     concurrently and both wpb.subscribe('users', uid); the second
-        //     one's onSlugs callback never fired and lists rendered empty.)
-        // Deliver from queue.view so we forward whatever's freshest, not
-        // necessarily the snapshot we just fetched.
-        for (const r of initialRecords) {
-          // Seed the server snapshot unless the queue already has one for
-          // this record (an SSE event raced ahead during our await; that
-          // snapshot is more authoritative). A pending-only entry must NOT
-          // skip the seed — composeView still needs server truth underneath,
-          // and without it a stale replayed SET would override the freshest
-          // server state (the dogfood oscillation bug A11/A12).
-          if (!queue.hasServerSnapshot(name, r.id)) {
-            queue.applyServer(name, r.id, r);
-          }
-          const view = queue.view(name, r.id);
-          if (!view) continue;
-          if (topic !== "*" && topic !== view.id) continue;
-          if (opts?.local && !opts.local(view)) continue;
-          try {
-            callback({ action: "create", record: view as RecordModel });
-          } catch (err) {
-            console.error("[wpb] initial replay threw", err);
-          }
-        }
-
-        // Replay current pending mutations matching this subscriber.
-        // Only records with pending mutations are replayed; server-only
-        // snapshots (already delivered above as part of the initial batch)
-        // are skipped to avoid double-emission.
-        for (const r of queue.viewPending(name, opts?.local)) {
-          if (topic !== "*" && topic !== r.id) continue;
-          try {
-            callback({ action: "create", record: r as RecordModel });
-          } catch (err) {
-            console.error("[wpb] subscriber replay threw", err);
-          }
-        }
-
-        return async () => {
-          state.subscribers.delete(sub);
-          recordEvent({ kind: "unsubscribe", collection: name, detail: { topic } });
-          // Tear down real subscription when the last local subscriber leaves.
-          if (state.subscribers.size === 0 && state.realUnsub) {
-            const unsub = await state.realUnsub;
-            state.realUnsub = null;
-            try { await unsub(); } catch { /* ignore */ }
-          }
-        };
-      },
     };
-  }
-
-  /**
-   * Re-fetch every active subscription's matching records and reconcile against
-   * the local queue. Emits create/update for new or changed records and delete
-   * for records that previously matched a filter but no longer exist or no
-   * longer match.
-   *
-   * Skips collections whose SSE channel has delivered an event within the
-   * last SSE_FRESH_MS — those are demonstrably alive and a refetch would
-   * be pure overhead. Skips no-op records (queue view already matches the
-   * server) so even an active focus-resync of a chatty tab is silent on
-   * the wire that matters (no notifySubscribers churn).
-   */
-  async function resync(): Promise<void> {
-    const now = Date.now();
-    // Group subscriptions by (collection, topic, filter) to avoid duplicate
-    // network calls when multiple components subscribe with the same shape.
-    const groups = new Map<string, { collection: string; topic: string; filter?: string; predicate?: (r: RawRecord) => boolean }>();
-    const skippedFresh: string[] = [];
-    for (const [colName, state] of collections) {
-      // SSE-liveness short-circuit: a recent event means the channel is up
-      // and we trust it. The 90 s window comfortably covers any focus blip
-      // while staying well under PB's 5-min idle disconnect.
-      const last = lastSseEventAt.get(colName);
-      if (last !== undefined && now - last < SSE_FRESH_MS) { skippedFresh.push(colName); continue; }
-      for (const sub of state.subscribers) {
-        const key = `${colName}|${sub.topic}|${sub.filter ?? ""}`;
-        if (groups.has(key)) continue;
-        groups.set(key, {
-          collection: colName,
-          topic: sub.topic,
-          filter: sub.filter,
-          predicate: sub.predicate,
-        });
-      }
-    }
-
-    await Promise.all(Array.from(groups.values()).map(async (g) => {
-      // Refetch via the same path subscribe() uses for initial load.
-      let records: RawRecord[] = [];
-      try {
-        if (g.topic !== "*") {
-          const r = await pb().collection(g.collection).getOne(g.topic, { $autoCancel: false });
-          records = [r as unknown as RawRecord];
-        } else if (g.filter !== undefined) {
-          const rs = await pb().collection(g.collection).getFullList({
-            filter: g.filter,
-            $autoCancel: false,
-          });
-          records = rs as unknown as RawRecord[];
-        } else {
-          // Unfiltered "*" subscribe — no canonical refetch target. Skip;
-          // the subscriber asked for raw events without a filter, so there's
-          // no defined set of records to reconcile against.
-          return;
-        }
-      } catch (err) {
-        // 404 on a single-record subscribe is a legitimate "record gone" signal.
-        if (g.topic !== "*" && (err as { status?: number })?.status === 404) {
-          const before = queue.view(g.collection, g.topic);
-          if (before) {
-            queue.applyServer(g.collection, g.topic, null);
-            notifySubscribers(g.collection, "delete", before);
-          }
-          return;
-        }
-        // Network / auth blip — leave local state alone and try again next probe.
-        return;
-      }
-
-      // Apply each fetched record. applyServer returns before/after; emit a
-      // notify only when the view actually changed. Skipping no-op records
-      // keeps the focus probe from flooding subscribers with unchanged data.
-      const seen = new Set<string>();
-      for (const r of records) {
-        seen.add(r.id);
-        const { before, after } = queue.applyServer(g.collection, r.id, r);
-        if (!after) continue;
-        if (before && JSON.stringify(before) === JSON.stringify(after)) continue;
-        const action = before === null ? "create" : "update";
-        notifySubscribers(g.collection, action, after);
-      }
-
-      // For filtered subscriptions, anything previously in the queue that
-      // matched this subscriber's predicate but is missing from the refetch
-      // was deleted server-side during the disconnect window. Emit deletes
-      // so consumers' maps drop the stale entries.
-      if (g.topic === "*" && g.predicate) {
-        const stale = queue.viewCollection(g.collection, g.predicate);
-        for (const r of stale) {
-          if (seen.has(r.id)) continue;
-          // Skip records with in-flight optimistic mutations. Their absence
-          // from `records` doesn't mean the server deleted them — the server
-          // just hasn't observed our create/update yet. Synthesizing a delete
-          // here would tear down the user's own optimistic row mid-write.
-          // The pending mutation's eventual ack (or reject) will reconcile
-          // server state for real.
-          if (queue.hasPending(g.collection, r.id)) continue;
-          queue.applyServer(g.collection, r.id, null);
-          notifySubscribers(g.collection, "delete", r);
-        }
-      }
-    }));
-
-    recordEvent({
-      kind: "resync",
-      detail: {
-        groupsRefetched: Array.from(groups.values()).map((g) => g.collection),
-        skippedFresh,
-        durationMs: Date.now() - now,
-      },
-    });
   }
 
   /**
@@ -889,7 +491,6 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
 
   return {
     collection: makeCollection,
-    resync,
     retryErrored,
     async replayPending() {
       const persisted = await loadAllMutations();
@@ -897,19 +498,13 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         // Push back into in-memory queue (preserves ordering by createdAt).
         queue.pushPending(m.collection, m.recordId, m.mutation, m.id);
         recordEvent({ kind: "replay", collection: m.collection, recordId: m.recordId, detail: { mutationId: m.id, op: m.mutation.kind } });
-        // Notify subscribers (legacy wpb.subscribe path) and the mirror's
-        // mutation listener so the optimistic state from a prior session
-        // shows up immediately. Without this, the mirror's view stays
-        // empty (or stale) until the replay's dispatch ack arrives or
-        // some other event triggers an emit. The shopping dogfood bug
-        // hit exactly this seam: the user saw a ghost row whose only
-        // basis was a replayed pending mutation that hadn't yet acked.
-        const view = queue.view(m.collection, m.recordId);
-        if (view) {
-          notifySubscribers(m.collection, m.mutation.kind === "delete" ? "delete" : "update", view);
-        } else if (m.mutation.kind === "delete") {
-          notifySubscribers(m.collection, "delete", { id: m.recordId });
-        }
+        // Notify the mirror's mutation listener so the optimistic state
+        // from a prior session shows up immediately. Without this, the
+        // mirror's view stays empty (or stale) until the replay's
+        // dispatch ack arrives or some other event triggers an emit. The
+        // shopping dogfood bug hit exactly this seam: the user saw a
+        // ghost row whose only basis was a replayed pending mutation
+        // that hadn't yet acked.
         notifyMutationListeners(m.collection, m.recordId);
         // Re-fire via the shared mutation-builder. Replay swallows
         // idempotent errors (404 on already-deleted, 409 on already-
@@ -917,6 +512,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
         // normal path and get retried on next PB_CONNECT/focus.
         const kind: "create" | "update" | "delete" =
           m.mutation.kind === "set" ? "create" : m.mutation.kind === "update" ? "update" : "delete";
+        hookRealtimeLifecycle();
         void dispatchMutation(
           m.collection,
           m.recordId,
@@ -948,30 +544,22 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
           erroredIdsByCollection.set(e.collection, arr);
         }
         const perCol: Record<string, WpbCollectionSnapshot> = {};
-        // Per-collection rollup. Walk every collection we know about (either
-        // has subscribers, pending mutations, or errored entries) so the
-        // snapshot covers the full picture.
-        const known = new Set<string>(collections.keys());
+        // Per-collection rollup. Walk every collection with pending or
+        // errored entries so the snapshot covers the full picture.
+        const known = new Set<string>();
         for (const p of pending) known.add(p.collection);
         for (const e of erroredEntries) known.add(e.collection);
         for (const col of known) {
-          const state = collections.get(col);
           const colPending = pending.filter((p) => p.collection === col);
           const colErroredAts = erroredIdsByCollection.get(col) ?? [];
           perCol[col] = {
-            subscribers: state?.subscribers.size ?? 0,
             pendingMutations: colPending.length,
             erroredMutations: colErroredAts.length,
             oldestPendingAt: colPending.length > 0 ? colPending[0].createdAt : null,
             oldestErroredAt: colErroredAts.length > 0 ? Math.min(...colErroredAts) : null,
-            lastSseEventAt: lastSseEventAt.get(col) ?? null,
           };
         }
-        let realtimeConnected = false;
-        try { realtimeConnected = !!pb().realtime?.isConnected; } catch { /* pb not ready */ }
         return {
-          realtimeConnected,
-          realtimeDirty,
           totalPending: pending.length,
           totalErrored: erroredEntries.length,
           oldestPendingAt,
@@ -982,7 +570,8 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       clear: () => { debugRing.length = 0; },
     },
     // Side-channels for PBMirror (same package). Not part of the public
-    // WrappedPocketBase contract — cast to access. See mirror.ts for why.
+    // WrappedPocketBase contract — mirror.ts casts to access. Promoted to
+    // first-class properties in a follow-up commit.
     __queue: queue,
     __onMutation: (cb: (collection: string, recordId: string) => void) => {
       mutationListeners.add(cb);
