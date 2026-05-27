@@ -31,6 +31,14 @@ export interface UpkeepBackend {
 
   snoozeTask(taskId: string, until: Date): Promise<void>;
   unsnoozeTask(taskId: string): Promise<void>;
+  /**
+   * Add and/or remove tags atomically.
+   * `remove` is applied first, then `add` (deduped against the survivors).
+   * Reads the latest queue-aware tag list rather than relying on a caller-supplied
+   * snapshot, so concurrent partial edits on the same client don't clobber each
+   * other the way `updateTask({ tags: [...] })` does.
+   */
+  tagTask(taskId: string, opts: { add?: string[]; remove?: string[] }): Promise<void>;
   /** Mark a recurring task as completed (creates a task_event, updates last_completed). */
   completeTask(taskId: string, userId: string, options?: { notes?: string; completedAt?: Date }): Promise<void>;
   /** Toggle a one-shot task's completed boolean. */

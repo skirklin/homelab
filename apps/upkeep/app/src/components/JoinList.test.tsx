@@ -18,6 +18,7 @@ const mockUpkeepBackend = {
   deleteTask: vi.fn(),
   snoozeTask: vi.fn(),
   unsnoozeTask: vi.fn(),
+  tagTask: vi.fn(),
   completeTask: vi.fn(),
   toggleTaskNotification: vi.fn(),
   updateCompletion: vi.fn(),

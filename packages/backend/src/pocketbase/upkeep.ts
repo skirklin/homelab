@@ -275,6 +275,39 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
   }
 
   /**
+   * Mirror of the MCP `tag_task` route at `services/api/src/routes/data.ts`.
+   * Reads the latest tag list (queue-aware via wpb.view, falling back to PB)
+   * at call time — not from a caller-supplied snapshot — so two in-flight
+   * partial edits on the same client merge instead of one clobbering the other.
+   * Cross-client CAS is still not achieved (PB has no native conditional
+   * update), so two browsers racing concurrent edits can still lose one.
+   */
+  async tagTask(taskId: string, opts: { add?: string[]; remove?: string[] }): Promise<void> {
+    const add = opts.add ?? [];
+    const remove = opts.remove ?? [];
+    if (add.length === 0 && remove.length === 0) return;
+
+    const cached = this.wpb.collection("tasks").view<RecordModel>(taskId);
+    const record: RecordModel = cached ?? await this.pb().collection("tasks").getOne(taskId, { $autoCancel: false });
+    const current = Array.isArray(record.tags) ? (record.tags as string[]) : [];
+
+    const removeSet = new Set(remove);
+    const merged: string[] = [];
+    for (const t of current) if (!removeSet.has(t) && !merged.includes(t)) merged.push(t);
+    for (const t of add) if (!merged.includes(t)) merged.push(t);
+
+    // Skip the write if nothing actually changes — same shape as the other
+    // queue-aware ops in this file (syncLastCompleted, toggleComplete).
+    if (
+      merged.length === current.length &&
+      merged.every((t, i) => t === current[i])
+    ) {
+      return;
+    }
+    await this.wpb.collection("tasks").update(taskId, { tags: merged });
+  }
+
+  /**
    * Compute the latest event timestamp for a task from the local wpb queue.
    * Includes pending mutations (creates/updates/deletes), so the result
    * reflects the about-to-be-applied state. Returns null if no events.

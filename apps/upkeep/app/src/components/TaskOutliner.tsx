@@ -270,6 +270,20 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
     await upkeep.updateTask(selectedId, { [field]: value });
   }, [selectedId, upkeep]);
 
+  // Tag edits go through `tagTask` (atomic add/remove against the latest
+  // queue-aware tag list) instead of `updateTask({ tags })` — the latter
+  // reads from React props at render time, so a stale snapshot can wipe out
+  // a concurrent partial edit. See packages/backend/src/pocketbase/upkeep.ts.
+  const handleTagAdd = useCallback(async (tag: string) => {
+    if (!selectedId) return;
+    await upkeep.tagTask(selectedId, { add: [tag] });
+  }, [selectedId, upkeep]);
+
+  const handleTagRemove = useCallback(async (tag: string) => {
+    if (!selectedId) return;
+    await upkeep.tagTask(selectedId, { remove: [tag] });
+  }, [selectedId, upkeep]);
+
   // Get all descendant IDs of a task (including itself)
   const getSubtreeIds = useCallback((rootId: string): string[] => {
     const root = allTasks.find((t) => t.id === rootId);
@@ -393,6 +407,8 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
         <DetailPanel
           task={selectedTask}
           onUpdate={handleUpdateField}
+          onTagAdd={handleTagAdd}
+          onTagRemove={handleTagRemove}
           onClose={() => setSelectedId(null)}
         />
       )}
@@ -400,9 +416,11 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   );
 }
 
-function DetailPanel({ task, onUpdate, onClose }: {
+function DetailPanel({ task, onUpdate, onTagAdd, onTagRemove, onClose }: {
   task: Task;
   onUpdate: (field: string, value: unknown) => void;
+  onTagAdd: (tag: string) => void;
+  onTagRemove: (tag: string) => void;
   onClose: () => void;
 }) {
   const [tagInput, setTagInput] = useState("");
@@ -473,7 +491,7 @@ function DetailPanel({ task, onUpdate, onClose }: {
             <Tag
               key={tag}
               closable
-              onClose={() => onUpdate("tags", task.tags.filter((t) => t !== tag))}
+              onClose={() => onTagRemove(tag)}
               style={{ fontSize: 11 }}
             >
               {tag}
@@ -487,8 +505,11 @@ function DetailPanel({ task, onUpdate, onClose }: {
           onChange={(e) => setTagInput(e.target.value)}
           onPressEnter={() => {
             const trimmed = tagInput.trim();
-            if (trimmed && !task.tags.includes(trimmed)) {
-              onUpdate("tags", [...task.tags, trimmed]);
+            if (trimmed) {
+              // `tagTask` de-dupes against the latest queue-aware tag list,
+              // so we don't need to check `task.tags.includes(...)` here —
+              // doing so would just reintroduce the stale-snapshot race.
+              onTagAdd(trimmed);
             }
             setTagInput("");
           }}
