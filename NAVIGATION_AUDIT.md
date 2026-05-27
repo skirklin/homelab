@@ -251,14 +251,23 @@ Four commits on main:
 - Per-call mode override (`setValue(next, { mode: "push" })` or a sibling `pushValue` setter) — would unblock SessionRunner.
 - `useUrlString(name)` shorthand for identity-mapped string params (currently 4+ verbose call sites).
 
-### Deferred to Bundle 7+
+## Bundle 7 — API extensions + race fix + smell sweep ✅ shipped 2026-05-27
 
-- **Modal-URL policy** — architectural decision (~14 modal sites). URL-backed (bookmarkable, back-to-close) vs in-memory (current).
+Three commits on main:
+- `65848ce` smell sweep: `RESERVED_SLUGS` now includes `history` + module roots + `sanitizeSlug(existing)` uniqueness suffix; `InviteRedeem` now uses `AbortController` so the in-flight PB request cancels on unmount; `AppHeader` owns its top safe-area inset (`calc(var(--space-sm) + env(safe-area-inset-top))`); `#root` `100dvh` rules subtract insets in home/money/monitor; `useSnapshot` skips polling while `document.hidden`; `MODULE_ROOTS` dead re-export removed; vestigial `apps/recipes/app/public/index.html` deleted (logo192.png restored — referenced by Vite PWA manifest). Punted: `DetailPane` sticky 72px coupling (docstring added; needs `--app-header-height` CSS var, separate work).
+- `d06252f` `useUrlParam` API extensions: added per-call mode override (setter takes optional `{ mode: "replace" | "push" }`), `useUrlString` shorthand for identity-mapped params, `useUrlParams<T>` plural for multi-param atomic writes. Migrated the 3 holdout sites (money `Travel.tsx` drilldown, life `SessionRunner.tsx` step, money Transactions sort/dir + life LifeDashboard deep-link-consume). 11 new tests. Trade-off worth flagging: setter sig is `(value, opts?: UrlParamSetOptions | unknown)` because antd's `<Select onChange>` passes the matched option as 2nd arg — duck-typed extraction with a latent foot-gun if a caller's option object happens to have `.mode === "push"|"replace"`.
+- `2076959` PB transactional task-tag hook: new endpoint `POST /api/tasks/:id/tags` accepting `{add[]?, remove[]?}`, wrapped in `$app.runInTransaction()` for SQL-level atomicity. Auth pre-flight matches `tasks.updateRule` from migration 0001. 16 new test cases cover byte-array unwrap, dedupe, auth-rejected, missing task, etc. `toJsArray` helper now inlined identically across all 3 hook files with a shared drift-detection test (`to-js-array.test.ts`).
+
+### API extensions surfaced as future work
+- **`--app-header-height` CSS var** — would let `TaskOutliner`'s DetailPane sticky offset and any other sticky-below-header element reference the actual header height instead of guessing. Needs ResizeObserver wiring or a stable hard-coded value.
+- **`services/api/src/routes/data.ts:2314` admin-PB tag race** — same cross-device race shape; should call the new PB hook via admin client for consistency once `2076959` deploys.
+
+### Deferred to Bundle 8+
+
+- **Modal-URL policy** — architectural decision (~14 modal sites). User has no current opinion; deferred.
 - **SW stale-shell after deploy** — separate SW-versioning concern. Workbox `clientsClaim + skipWaiting` already on via `autoUpdate`; would need a runtime version check that triggers a hard reload on build-hash mismatch.
-- **Cross-device tag race** in DetailPanel — current `tagTask` only closes same-client race. Truly atomic would need a PB server hook with row-lock that accepts `{add[], remove[]}`.
 - **PB `trip_proposals` collection still in prod** — 3 migrations created it; a dedicated drop migration would remove the orphan schema. Low priority.
 - **Monitor app `<BrowserRouter>` not wired with ScrollRestoration** — one-line addition if needed (likely not — monitor is a charts dashboard).
-- **`useUrlParam` API extensions** — useUrlParams plural, per-call mode, useUrlString shorthand (see above).
 
 ## Notes
 
