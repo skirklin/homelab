@@ -145,10 +145,49 @@ Append-only. When a decision in the table above gets reversed, log it here.
 
 (empty)
 
+## How the cron is wired (local, not remote)
+
+The user chose local cron over the Anthropic-cloud routine path because the cron-fired session needs access to things only available locally:
+- The homelab MCP server (tailnet-only — `mcp.tail56ca88.ts.net`)
+- The k3s cluster (via `kubectl`) for inspecting PB / api state
+- The Agent tool with `isolation: "worktree"` for dispatching sub-agents per the established repo pattern
+
+### Wiring
+
+- **Schedule:** crontab entry `0 6 * * *` (6am PT, local time). DST-safe — cron uses wall-clock local time, not UTC offset.
+- **Wrapper:** [`infra/scripts/observer-pm-tick.sh`](../../infra/scripts/observer-pm-tick.sh) — runs `claude --print --max-budget-usd 5 --dangerously-skip-permissions --no-session-persistence` against the prompt file. Logs to `~/.local/share/observer-pm/tick-<utc>.log` with 30-day rotation.
+- **Prompt:** [`infra/scripts/observer-pm-prompt.md`](../../infra/scripts/observer-pm-prompt.md) — the full self-contained daily wakeup protocol that the cron-fired Claude reads (since it has no memory of prior firings).
+
+### Cron daemon lifecycle
+
+WSL2 doesn't run systemd by default, so the cron daemon must be started manually. One-time and per-boot setup:
+
+```bash
+# One-time: start cron now (will run until WSL shuts down or restarts).
+sudo service cron start
+
+# Optional but recommended: make cron auto-start on every WSL boot.
+# Edit /etc/wsl.conf (as root) and add:
+#   [boot]
+#   command="service cron start"
+# Then `wsl --shutdown` from Windows and reopen WSL to take effect.
+```
+
+If cron is not running on a given day, the tick is silently skipped. Worst case: skipped days produce gaps in the daily log; no data is lost or corrupted. Check status with `pgrep cron` or `service cron status`.
+
+### Manual fire (for testing or out-of-band ticks)
+
+```bash
+bash /home/skirklin/projects/homelab/infra/scripts/observer-pm-tick.sh
+```
+
+Same script, same prompt, same logs — just invoked by you instead of cron. Useful for debugging the wrapper or forcing an extra check-in.
+
 ## How to redirect the autonomous PM
 
 If at any time you (user) want to change direction:
-- **Edit this doc.** The next cron firing reads it. Add a `## INTERRUPT` section at the top with explicit instructions ("stop dispatching, do X instead") and the cron will see it.
-- **Reply in chat** during a foreground session — the cron's last action will be visible in the daily log.
-- **Pause the cron:** `claude schedule disable <routine-name>`. Resume later with `enable`.
-- **Cancel entirely:** `claude schedule delete <routine-name>`. Plan doc stays; cron stops firing.
+- **Edit this doc.** The next cron firing reads it. Add a `## INTERRUPT` section at the very top with explicit instructions ("stop dispatching, do X instead") and the cron will see it (the protocol step 1 explicitly checks for an INTERRUPT block).
+- **Reply in chat** during a foreground session — the cron's last action is in the Daily log.
+- **Pause the cron:** `crontab -e` and comment out the line. Save. Resume by uncommenting.
+- **Cancel entirely:** `crontab -e` and delete the line. The wrapper script and prompt file stay in the repo for future re-arm.
+- **Inspect logs:** `ls -lt ~/.local/share/observer-pm/ | head -5` for recent ticks; cat the latest to see what the cron did.
