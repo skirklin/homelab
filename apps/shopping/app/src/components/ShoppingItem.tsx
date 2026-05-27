@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Checkbox, Button, Input, Drawer } from "antd";
-import { DeleteOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
+import { DeleteOutlined, CheckOutlined, CloseOutlined, TagOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth } from "@kirkl/shared";
 import type { ShoppingItem, CategoryDef } from "../types";
@@ -19,37 +19,6 @@ const ItemRow = styled.div<{ $checked: boolean }>`
 
   &:last-child {
     border-bottom: none;
-  }
-`;
-
-// Compact, tappable category chip that sits where the drag handle used to.
-// Click target is roomy on touch; visual footprint stays small so the row
-// height matches the previous drag-handle layout.
-const CategoryBadge = styled.button`
-  appearance: none;
-  border: 1px solid var(--color-border, #d9d9d9);
-  background: var(--color-bg-muted);
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  line-height: 1.2;
-  padding: 2px 6px;
-  margin-right: var(--space-xs);
-  border-radius: 999px;
-  cursor: pointer;
-  max-width: 88px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 0;
-
-  &:hover {
-    background: var(--color-bg);
-    border-color: var(--color-primary, #1677ff);
-    color: var(--color-text);
-  }
-
-  &:active {
-    background: var(--color-primary-light, #e6f7f7);
   }
 `;
 
@@ -106,7 +75,9 @@ const ItemNote = styled.span`
   margin-left: var(--space-xs);
 `;
 
-const DeleteButton = styled(Button)`
+// Shared styling for the right-side row actions (move + delete). Half opacity
+// at rest so they recede; full opacity on hover so they feel tappable.
+const ActionButton = styled(Button)`
   opacity: 0.5;
 
   &:hover {
@@ -223,17 +194,6 @@ export function ShoppingItemRow({ item }: Props) {
   return (
     <>
     <ItemRow $checked={item.checked}>
-      <CategoryBadge
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setCategorySheetOpen(true);
-        }}
-        data-testid="category-badge"
-        title={`Category: ${currentCategory.name}`}
-      >
-        {currentCategory.name}
-      </CategoryBadge>
       <Checkbox
         checked={item.checked}
         onChange={handleToggle}
@@ -278,7 +238,18 @@ export function ShoppingItemRow({ item }: Props) {
             {item.ingredient}
             {item.note && <ItemNote>({item.note})</ItemNote>}
           </ItemName>
-          <DeleteButton
+          <ActionButton
+            type="text"
+            size="small"
+            icon={<TagOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              setCategorySheetOpen(true);
+            }}
+            data-testid="category-move-button"
+            title={`Move to category (currently ${currentCategory.name})`}
+          />
+          <ActionButton
             type="text"
             size="small"
             icon={<DeleteOutlined />}
