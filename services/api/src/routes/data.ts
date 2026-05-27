@@ -2009,6 +2009,14 @@ dataRoutes.post("/life/entries", handler(async (c) => {
   }
 
   const entries = Array.isArray(body.entries) ? body.entries : [];
+  // Mirror the LifeBackend invariant (see packages/backend/src/pocketbase/life.ts
+  // addEvent + apps/life/DATA_COLLECTION.md F1): empty-payload events
+  // poison observation aggregates and are almost always bugs. The MCP
+  // path lands here directly (it doesn't go through the frontend backend
+  // adapter), so the guard has to live in both places.
+  if (entries.length === 0) {
+    return c.json({ error: "entries[] must contain at least one entry" }, 400);
+  }
 
   const payload: Record<string, unknown> = {
     log: body.log,

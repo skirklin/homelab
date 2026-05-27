@@ -7,6 +7,7 @@ import { useAuth, useFeedback, PageContainer, useLifeBackend, AppHeader } from "
 import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { getSession, sessionSubjectId, type Session, type SessionPrompt } from "../manifest";
+import type { LogEntry } from "../types";
 import { MorningUpkeepHeader } from "./MorningUpkeepHeader";
 
 // sessionStorage holds the freeform answer text — they can be large and/or
@@ -79,6 +80,57 @@ function answersToEntries(session: Session, answers: Record<string, unknown>): L
     }
   }
   return out;
+}
+
+/**
+ * YYYY-MM-DD in the browser's local timezone. Matches LifeDashboard's
+ * `getDateString` — the app's convention is "user-local day," never UTC.
+ */
+function localDayKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Pull this morning's `intention` text out of today's `morning_session`
+ * event for use as dynamic context in the evening wizard. Returns null
+ * when there is no morning event today or the intention prompt was skipped
+ * — the caller drops any prompt whose contextKey doesn't resolve so the
+ * user never sees a "you skipped this morning" placeholder.
+ */
+function findMorningIntention(entries: Map<string, LogEntry>): string | null {
+  const today = localDayKey(new Date());
+  const subject = sessionSubjectId("morning");
+  for (const event of entries.values()) {
+    if (event.subjectId !== subject) continue;
+    if (localDayKey(event.timestamp) !== today) continue;
+    for (const e of event.entries) {
+      if (e.name === "intention" && e.type === "text" && e.value.trim()) {
+        return e.value.trim();
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve a SessionPrompt's dynamic context. Three return values, by design:
+ *   - string   → substitute this into `{context}` in the hint and render
+ *   - null     → contextKey was set but the lookup failed → drop the prompt
+ *   - undefined → no contextKey on the prompt → render as-is, no substitution
+ *
+ * Keeping the three states distinct lets the runner branch cleanly: filter
+ * on `=== null`, substitute on `typeof === "string"`, default otherwise.
+ */
+function resolveContext(prompt: SessionPrompt, ctx: SessionContext): string | null | undefined {
+  if (prompt.contextKey === "morning_intention") return ctx.morningIntention;
+  return undefined;
+}
+
+interface SessionContext {
+  morningIntention: string | null;
 }
 
 const Greeting = styled.p`
@@ -165,7 +217,27 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
   // round-trip the wizard position; refresh mid-wizard no longer warps back
   // to step 0.
   const [searchParams, setSearchParams] = useSearchParams();
-  const promptCount = session?.prompts.length ?? 0;
+
+  // Resolve dynamic context once per render — today the only entry is the
+  // morning intention pulled into the evening wizard (DATA_COLLECTION.md
+  // A1). Prompts whose `contextKey` doesn't resolve are filtered out, so
+  // the wizard collapses from N+1 → N prompts on days the user didn't
+  // journal in the morning.
+  const sessionContext = useMemo<SessionContext>(() => ({
+    morningIntention: findMorningIntention(state.entries),
+  }), [state.entries]);
+
+  const prompts = useMemo<SessionPrompt[]>(() => {
+    if (!session) return [];
+    return session.prompts.filter((p) => {
+      const ctx = resolveContext(p, sessionContext);
+      // undefined === "no contextKey → always render"; null === "contextKey
+      // failed to resolve → drop"; string === "resolved, render with sub".
+      return ctx !== null;
+    });
+  }, [session, sessionContext]);
+
+  const promptCount = prompts.length;
   const stepIndex = useMemo(() => {
     const raw = searchParams.get("step");
     if (!raw) return 0;
@@ -215,8 +287,17 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     [setSearchParams],
   );
 
-  const prompt = session?.prompts[stepIndex];
-  const isLast = useMemo(() => session ? stepIndex === session.prompts.length - 1 : false, [session, stepIndex]);
+  const prompt = prompts[stepIndex];
+  const isLast = useMemo(() => promptCount > 0 && stepIndex === promptCount - 1, [promptCount, stepIndex]);
+  // Hint rendering: substitute `{context}` for the resolved context string
+  // when a prompt has a contextKey. Done at render time (not in the
+  // manifest) so the static schema stays declarative.
+  const resolvedHint = useMemo(() => {
+    if (!prompt?.hint) return undefined;
+    const ctx = resolveContext(prompt, sessionContext);
+    if (typeof ctx === "string") return prompt.hint.replace("{context}", ctx);
+    return prompt.hint;
+  }, [prompt, sessionContext]);
 
   if (!session) {
     return (
@@ -254,9 +335,21 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
 
   const submit = async () => {
     if (!user?.uid || !state.log?.id) return;
+    // Walk the filtered prompt list rather than session.prompts: a prompt
+    // whose contextKey didn't resolve was never shown, so any stale answer
+    // sitting in the draft for it (from a separate wizard run earlier
+    // today) must not get written out.
+    const entries = answersToEntries({ ...session, prompts }, answers);
+    if (entries.length === 0) {
+      // UI-level guard for F1 — no-op the submit instead of writing an
+      // empty-payload event. The backend will also throw if this slips
+      // through, but the friendly path catches the common case (user
+      // tapped through every prompt without typing anything).
+      message.info("Nothing to save — add a value before finishing.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const entries = answersToEntries(session, answers);
       await life.addEvent(
         state.log.id,
         sessionSubjectId(session.id),
@@ -293,7 +386,7 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
         {stepIndex === 0 && <Greeting>{session.greeting}</Greeting>}
         {sessionId === "morning" && <MorningUpkeepHeader />}
         <Progress>
-          {session.prompts.map((_, i) => (
+          {prompts.map((_, i) => (
             <ProgressDot key={i} $active={i === stepIndex} $done={i < stepIndex} />
           ))}
         </Progress>
@@ -301,7 +394,7 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
         {prompt && (
           <PromptCard>
             <PromptLabel htmlFor={prompt.id}>{prompt.label}</PromptLabel>
-            {prompt.hint && <PromptHint>{prompt.hint}</PromptHint>}
+            {resolvedHint && <PromptHint>{resolvedHint}</PromptHint>}
             <PromptInput
               prompt={prompt}
               value={answers[prompt.id]}
