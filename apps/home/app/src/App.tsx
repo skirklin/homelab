@@ -7,7 +7,7 @@ import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } fro
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
 import { UpkeepProvider, UpkeepRoutes, TasksRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
-import { Shell } from "./shared/Shell";
+import { Shell, MODULE_ROOTS, isModulePath } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
 import { Settings } from "./shared/Settings";
 import { ShoppingIntegrationProvider } from "./shared/ShoppingIntegrationProvider";
@@ -18,12 +18,25 @@ initializeBackend();
 const LAST_PATH_KEY = "home:lastPath";
 const DEFAULT_APP = "/recipes";
 
-// Redirect to last used sub-app or default
+// Redirect to last used sub-app or default. The stored value is validated
+// against MODULE_ROOTS so a stale entry from a removed module (e.g. /life/...
+// after the May 20 extraction) or malformed input falls back to DEFAULT_APP
+// instead of cold-launching into a dead route.
 function RedirectToLastApp() {
-  const lastPath = localStorage.getItem(LAST_PATH_KEY);
-  const target = lastPath && lastPath !== "/" ? lastPath : DEFAULT_APP;
+  let target = DEFAULT_APP;
+  try {
+    const lastPath = localStorage.getItem(LAST_PATH_KEY);
+    if (lastPath && lastPath !== "/" && isModulePath(lastPath)) {
+      target = lastPath;
+    }
+  } catch {
+    // localStorage unavailable (private mode / SSR) — DEFAULT_APP is fine.
+  }
   return <Navigate to={target} replace />;
 }
+
+// Re-export so other call sites can stay in lockstep with the shell.
+export { MODULE_ROOTS };
 
 // Invite links work against either the per-app subdomains (standalone) or
 // the home app (embedded). When they land at /invite/:code here, look up the

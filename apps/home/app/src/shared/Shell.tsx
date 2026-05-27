@@ -16,6 +16,18 @@ import { getBackend } from "@kirkl/shared";
 
 const LAST_PATH_KEY = "home:lastPath";
 
+/**
+ * Canonical module-root prefixes mounted under the home shell. Used both as a
+ * lastPath write allow-list (anything not under a module — `/invite/*`,
+ * `/settings`, `/timeline`, etc. — should not become the cold-launch target)
+ * and as a validation allow-list for the stored value on restore.
+ */
+export const MODULE_ROOTS = ["/shopping", "/recipes", "/travel", "/upkeep", "/tasks"] as const;
+
+export function isModulePath(pathname: string): boolean {
+  return MODULE_ROOTS.some((m) => pathname === m || pathname.startsWith(`${m}/`));
+}
+
 const Container = styled.div`
   min-height: 100vh;
   min-height: 100dvh;
@@ -125,11 +137,13 @@ export function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Save current path per module so we can restore it when switching back
+  // Save current path per module so we can restore it when switching back.
+  // Only write when inside a known module — transient routes like
+  // /invite/:code, /settings, /timeline, or the root redirect must not become
+  // the cold-launch target for the next PWA session.
   useEffect(() => {
-    const subApps = ["/shopping", "/recipes", "/travel", "/upkeep", "/tasks"];
-    for (const app of subApps) {
-      if (location.pathname.startsWith(app)) {
+    for (const app of MODULE_ROOTS) {
+      if (location.pathname === app || location.pathname.startsWith(`${app}/`)) {
         localStorage.setItem(LAST_PATH_KEY, location.pathname);
         localStorage.setItem(`home:lastPath:${app}`, location.pathname);
         break;
@@ -137,10 +151,18 @@ export function Shell() {
     }
   }, [location.pathname]);
 
-  const isActive = (path: string) => location.pathname.startsWith(path);
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(`${path}/`);
 
-  /** Navigate to a module, restoring the last visited path within it. */
+  /**
+   * Navigate to a module, restoring the last visited path within it.
+   * - Re-clicking the already-active module is a no-op (prevents history
+   *   pollution from repeated nav-bar taps).
+   * - Switching modules pushes a new entry so browser-back returns to the
+   *   prior module's deep route, matching expected web behavior.
+   */
   const goTo = (basePath: string) => {
+    if (isActive(basePath)) return;
     const last = localStorage.getItem(`home:lastPath:${basePath}`);
     navigate(last && last !== basePath ? last : basePath);
   };
@@ -191,7 +213,7 @@ export function Shell() {
           </NavButton>
           <NavButton
             $active={isActive("/timeline")}
-            onClick={() => navigate("/timeline")}
+            onClick={() => { if (!isActive("/timeline")) navigate("/timeline"); }}
           >
             <NavIcon $active={isActive("/timeline")}><HistoryOutlined /></NavIcon>
             <span className="nav-label">Timeline</span>
@@ -199,7 +221,7 @@ export function Shell() {
         </Nav>
         <HeaderActions>
           <Tooltip title="Settings">
-            <IconButton onClick={() => navigate("/settings")}>
+            <IconButton onClick={() => { if (!isActive("/settings")) navigate("/settings"); }}>
               <SettingOutlined />
             </IconButton>
           </Tooltip>
