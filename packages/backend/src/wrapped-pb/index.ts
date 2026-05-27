@@ -220,16 +220,35 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
    * realtime reconnects — they likely failed because the network was down,
    * and now isn't. Hooked lazily on the first write so test stubs that
    * never touch realtime aren't forced to define a PB_CONNECT handler.
+   *
+   * Wrapped in try/catch because the PB SDK's RealtimeService.subscribe
+   * synchronously constructs `new EventSource(...)`, which throws a
+   * ReferenceError in Node-side e2e tests that drive writes without
+   * subscribing. retryErrored stays callable directly; production browsers
+   * always have EventSource, so the guard is free in prod and a no-op for
+   * tests.
    */
   function hookRealtimeLifecycle() {
     if (realtimeHooked) return;
     const client = pb();
     if (!client.realtime) return;
     realtimeHooked = true;
-    void client.realtime.subscribe("PB_CONNECT", () => {
-      // Cheap when the errored map is empty (early return inside).
-      void retryErrored();
-    });
+    try {
+      const sub = client.realtime.subscribe("PB_CONNECT", () => {
+        // Cheap when the errored map is empty (early return inside).
+        void retryErrored();
+      });
+      // The PB SDK's subscribe returns a Promise; catch both the sync
+      // construction failure (handled above) and any async open failure
+      // (CORS preflight, auth blip, etc.).
+      if (sub && typeof (sub as Promise<unknown>).catch === "function") {
+        (sub as Promise<unknown>).catch(() => { realtimeHooked = false; });
+      }
+    } catch {
+      // EventSource unavailable (Node) — stay un-hooked. Production code
+      // can still call retryErrored() directly on focus/visibility.
+      realtimeHooked = false;
+    }
   }
 
   function synthesizeRecord(
