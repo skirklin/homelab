@@ -50,6 +50,11 @@
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+
+  /* Sticky offset for elements that sit below AppHeader. AppHeader is
+     min-height 52px + var(--space-sm) top+bottom padding + safe-area-inset
+     (iOS PWA: the header bridges the status-bar region). */
+  --app-header-height: calc(68px + env(safe-area-inset-top));
 }
 
 body {

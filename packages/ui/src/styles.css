@@ -53,6 +53,13 @@
   --color-gym: #ef4444;
   --color-stretch: #10b981;
   --color-work: #3b82f6;
+
+  /* Height of the app-level sticky chrome above sticky-below-header elements.
+     Default matches AppHeader: min-height 52px + var(--space-sm) top+bottom
+     padding + iOS safe-area-inset-top (the header bridges into the status-bar
+     region). Apps without AppHeader override this in their own index.css —
+     home Shell sets ~60px, travel standalone sets 0. */
+  --app-header-height: calc(68px + env(safe-area-inset-top));
 }
 
 * {

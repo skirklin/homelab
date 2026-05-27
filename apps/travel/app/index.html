@@ -20,6 +20,13 @@
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
       }
+      /* Standalone travel.kirkl.in has no app-level sticky chrome; sticky
+         children (DayView/TripDetail maps) should sit flush at the top.
+         When travel is embedded under kirkl.in/travel, home's index.css sets
+         a non-zero value and that wins. */
+      :root {
+        --app-header-height: 0px;
+      }
     </style>
   </head>
   <body>

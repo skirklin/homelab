@@ -53,7 +53,7 @@ const TwoColumn = styled.div`
 
 const StickyMap = styled.div`
   position: sticky;
-  top: 72px;
+  top: var(--app-header-height);
 
   @media (max-width: 1000px) {
     position: static;

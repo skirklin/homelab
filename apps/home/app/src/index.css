@@ -47,6 +47,12 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-full: 9999px;
+
+  /* Sticky offset for elements that sit below the home Shell header. Shell
+     header is NavButton min-height 44px + var(--space-sm) top+bottom
+     padding = 60px. Body already absorbs safe-area-inset-top, so no inset
+     here. Modules embedded under home (travel, upkeep, …) inherit this. */
+  --app-header-height: 60px;
 }
 
 * {
