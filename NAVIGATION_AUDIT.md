@@ -18,16 +18,31 @@ Notes from the work:
 - Fix 2 adds a new public unauthenticated endpoint. Returns only `target_type`, `target_module`, `redeemed` — no invite contents or target IDs. Symmetric with the existing public `list-info` endpoint. Worth a security re-glance if anything else gets layered on it.
 - `apps/recipes/app/src/routes/InviteRedeem.tsx:100` has a `setTimeout(redirectToTarget, 1000)` — race between auto-redirect and user pressing back. Bundle 3 will pick it up.
 
-## Bundle 2 — URL-back tab/filter state (structural)
+## Bundle 2 — URL-back tab/filter state ✅ shipped 2026-05-26
 
-Choose-one-policy work. Pattern to standardize on: URL search params with `setSearchParams(..., { replace: true })` for cheap toggles (existing pattern at [apps/travel/app/src/components/ItinerarySection.tsx:283](apps/travel/app/src/components/ItinerarySection.tsx#L283)).
+Four per-app commits on main: `d971ca8` travel, `b574ca0` shopping, `2455aae` money, `a80a4f9` life. Pattern standardized: URL search params with `setSearchParams(..., { replace: true })` for cheap toggles, push for drilldowns. Defaults aren't written (clean URLs).
 
-- [ ] **#9 surprising — travel trip-detail tabs** are React state at [apps/travel/app/src/components/TripDetail.tsx:189](apps/travel/app/src/components/TripDetail.tsx#L189). Prep tab unshareable. Move to `?tab=`.
-- [ ] **#9 surprising — shopping view** (`list | history | settings`) at [apps/shopping/app/src/components/ShoppingList.tsx:134](apps/shopping/app/src/components/ShoppingList.tsx#L134). Android back exits the module. Move to sub-route or `?view=`.
-- [ ] **#9 surprising — money chart toggles**: time-range / view-mode in `useState` across [Investments.tsx:74-75](apps/money/src/pages/Investments.tsx#L74), [NetWorthChart.tsx:28-29](apps/money/src/components/NetWorthChart.tsx#L28), [AllocationChart.tsx:26](apps/money/src/components/AllocationChart.tsx#L26), [AllocationOverTime.tsx:28-29](apps/money/src/components/AllocationOverTime.tsx#L28), [AccountDetail.tsx:34](apps/money/src/pages/AccountDetail.tsx#L34), [PerformanceVsBenchmark.tsx:22](apps/money/src/components/PerformanceVsBenchmark.tsx#L22) (also has dual source of truth bug with parent).
-- [ ] **#10 surprising — money filter state inconsistency**. Spending/Transactions are URL-backed but `setSearchParams` defaults to push, polluting history per filter click. Sites: [Spending.tsx:24-78](apps/money/src/pages/Spending.tsx#L24-L78), [Transactions.tsx:103](apps/money/src/pages/Transactions.tsx#L103). Use `{ replace: true }`. Also extend URL-backing to `search`/`sort` at [Transactions.tsx:28-30](apps/money/src/pages/Transactions.tsx#L28-L30).
-- [ ] **#6 broken — money Travel drilldown** is React state at [apps/money/src/pages/Travel.tsx:9-10](apps/money/src/pages/Travel.tsx#L9-L10). Back exits the route.
-- [ ] **#8 broken — life wizard state** is `useState` at [apps/life/app/src/components/SessionRunner.tsx:119,151](apps/life/app/src/components/SessionRunner.tsx#L119). Refresh mid-wizard loses progress. Move step + answers to URL or sessionStorage.
+### Travel (`d971ca8`)
+- [x] Trip-detail tabs → `?tab=`. Validates against `tabItems` keys, defaults to `"itinerary"`. Interop with existing `?view=`/`?itin=` preserved via callback-form `setSearchParams`.
+- [x] TripList filters → `?q=` (250ms debounce on search), `?status=`, `?region=`, `?view=`. Enum-typed params validated against `ALL_STATUSES` / `VIEW_MODES` const tuples.
+- Out-of-scope flag: search-debounce pattern could be promoted to `useDebouncedSearchParam` in `@kirkl/shared` once a second caller appears.
+
+### Shopping (`b574ca0`)
+- [x] View state (list/history/settings) → sub-routes via Option A. `/<slug>/*` splat handles all three views. Browser back works naturally; `goBackToList` falls back to absolute `listPath` with `replace: true` for deep-link refresh; slug rename in Settings keeps user in Settings on new slug.
+- Splat-strip from `location.pathname` handles both standalone and embedded mounts uniformly (avoids react-router v6 splat `..` quirks).
+- Removed the Bundle 3 `TODO(nav-bundle-2):` marker.
+
+### Money (`2455aae`)
+- [x] Chart toggles → URL params with `replace: true` across 5 files (Investments, NetWorthChart, AllocationChart, AllocationOverTime, AccountDetail). Prefixed params to avoid collisions: `?nwRange=`/`?nwView=` (NetWorth), `?alloc=` (Allocation), `?allocGroup=`/`?allocMode=` (AllocationOverTime).
+- [x] Spending/Transactions filter pushes → replaces. Extended URL-backing to Transactions `search` (`?q=`), `sortKey` (`?sort=`), `sortDir` (`?dir=`).
+- [x] **#6** Travel drilldown → `?trip=`/`?subcat=`. Uses **push** (not replace) for drilldown — back unwinds one level at a time. Breadcrumb-up uses replace.
+- [x] Typecheck build gate — already wired (`tsc -b && vite build` in `apps/money/package.json`, run by `infra/docker/app.Dockerfile`). No infra change needed.
+
+### Life (`a80a4f9`)
+- [x] **#8** SessionRunner wizard → `?step=N` (URL) + sessionStorage for answers, keyed `life:wizard:<sessionKind>`. Lazy-init at mount restores in-progress work on refresh; Submit clears the draft slot; Back leaves it for re-entry. Defaults not written.
+- [x] LifeDashboard `?date` interop — built `dateQuerySuffix` from current `?date` and applied to all 4 nav callsites (mobile menu + desktop buttons for Journal/Insights), since relative `navigate()` drops query strings.
+- [x] Journal filters → `?filter=` (whitelist via `parseFilter`), `?q=` for search, `replace: true`. Preserves inherited `?date=`.
+- [x] Visualizations: `selectedId` → `?trackable=` (whitelist against `TRACKABLES`); `viewDate` → `?month=YYYY-MM` (regex-validated). Lifted `viewDate` out of `CalendarHeatMap` to make URL the source of truth.
 
 ## Bundle 3 — remaining broken ✅ shipped 2026-05-26
 
