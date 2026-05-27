@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import styled from "styled-components";
 import { Input, Empty } from "antd";
@@ -16,6 +16,7 @@ import {
   PageContainer,
   Section,
   SectionTitle,
+  useUrlParam,
 } from "@kirkl/shared";
 import { useLifeContext } from "../life-context";
 import { useEntriesSubscription } from "../subscription";
@@ -253,7 +254,22 @@ export function Journal() {
   // (`/journal?filter=morning&q=foo`) round-trips. Defaults aren't written.
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = parseFilter(searchParams.get("filter"));
-  const search = searchParams.get("q") ?? "";
+
+  // Search: instant local state for typing feedback; URL lags by 250ms.
+  const [urlSearch, setUrlSearch] = useUrlParam<string>("q", {
+    parse: (raw) => raw ?? "",
+    serialize: (v) => v || null,
+    default: "",
+    debounce: 250,
+  });
+  const [search, setSearchLocal] = useState(urlSearch);
+  const setSearch = useCallback(
+    (next: string) => {
+      setSearchLocal(next);
+      setUrlSearch(next);
+    },
+    [setUrlSearch],
+  );
 
   const setFilter = useCallback(
     (next: FilterKey) => {
@@ -264,24 +280,6 @@ export function Journal() {
             params.delete("filter");
           } else {
             params.set("filter", next);
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
-
-  const setSearch = useCallback(
-    (next: string) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next === "") {
-            params.delete("q");
-          } else {
-            params.set("q", next);
           }
           return params;
         },

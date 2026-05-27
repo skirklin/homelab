@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useUrlParam } from '@kirkl/shared'
 import type { Transaction } from '../api'
 import { fetchTransactions, reclassifyTransaction } from '../api'
 
@@ -28,14 +29,28 @@ const DEFAULT_SORT_DIR: SortDir = 'desc'
 
 export function Transactions() {
   const [allTxns, setAllTxns] = useState<Transaction[]>([])
-  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [reclassifyingId, setReclassifyingId] = useState<number | null>(null)
   const [reclassifyFeedback, setReclassifyFeedback] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
 
+  // Search input: instant local state for typing feedback; URL lags by 250ms.
+  const [urlSearch, setUrlSearch] = useUrlParam<string>('q', {
+    parse: (raw) => raw ?? '',
+    serialize: (v) => v || null,
+    default: '',
+    debounce: 250,
+  })
+  const [search, setSearchLocal] = useState(urlSearch)
+  const setSearch = useCallback(
+    (value: string) => {
+      setSearchLocal(value)
+      setUrlSearch(value)
+    },
+    [setUrlSearch],
+  )
+
   const timeKey = searchParams.get('time') || '1w'
   const preset = TIME_PRESETS.find((p) => p.key === timeKey) ?? TIME_PRESETS[0]
-  const search = searchParams.get('q') ?? ''
   const rawSortKey = searchParams.get('sort')
   const sortKey: SortKey = SORT_KEYS.includes(rawSortKey as SortKey)
     ? (rawSortKey as SortKey)
@@ -52,18 +67,9 @@ export function Transactions() {
     }, { replace: true })
   }, [setSearchParams])
 
-  const setSearch = useCallback((value: string) => {
-    setParam('q', value || null)
-  }, [setParam])
-
   useEffect(() => {
     fetchTransactions({ limit: 10000 }).then(setAllTxns)
   }, [])
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300)
-    return () => clearTimeout(timer)
-  }, [search])
 
   const handleSort = (key: SortKey) => {
     let nextKey: SortKey
@@ -105,8 +111,8 @@ export function Transactions() {
     })
 
     // Text search
-    if (debouncedSearch) {
-      const q = debouncedSearch.toLowerCase()
+    if (search) {
+      const q = search.toLowerCase()
       txns = txns.filter(
         (t) =>
           (t.description ?? '').toLowerCase().includes(q) ||
@@ -129,7 +135,7 @@ export function Transactions() {
     })
 
     return sorted
-  }, [allTxns, preset, debouncedSearch, sortKey, sortDir])
+  }, [allTxns, preset, search, sortKey, sortDir])
 
   const setTimeKey = useCallback((key: string) => {
     setParam('time', key === '1w' ? null : key)
