@@ -22,18 +22,39 @@ const TIME_PRESETS = [
 type SortKey = 'date' | 'amount' | 'description' | 'category' | 'account'
 type SortDir = 'asc' | 'desc'
 
+const SORT_KEYS: SortKey[] = ['date', 'amount', 'description', 'category', 'account']
+const DEFAULT_SORT_KEY: SortKey = 'date'
+const DEFAULT_SORT_DIR: SortDir = 'desc'
+
 export function Transactions() {
   const [allTxns, setAllTxns] = useState<Transaction[]>([])
-  const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('date')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [reclassifyingId, setReclassifyingId] = useState<number | null>(null)
   const [reclassifyFeedback, setReclassifyFeedback] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
 
   const timeKey = searchParams.get('time') || '1w'
   const preset = TIME_PRESETS.find((p) => p.key === timeKey) ?? TIME_PRESETS[0]
+  const search = searchParams.get('q') ?? ''
+  const rawSortKey = searchParams.get('sort')
+  const sortKey: SortKey = SORT_KEYS.includes(rawSortKey as SortKey)
+    ? (rawSortKey as SortKey)
+    : DEFAULT_SORT_KEY
+  const rawSortDir = searchParams.get('dir')
+  const sortDir: SortDir = rawSortDir === 'asc' ? 'asc' : DEFAULT_SORT_DIR
+
+  const setParam = useCallback((key: string, value: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (value) next.set(key, value)
+      else next.delete(key)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
+
+  const setSearch = useCallback((value: string) => {
+    setParam('q', value || null)
+  }, [setParam])
 
   useEffect(() => {
     fetchTransactions({ limit: 10000 }).then(setAllTxns)
@@ -45,12 +66,23 @@ export function Transactions() {
   }, [search])
 
   const handleSort = (key: SortKey) => {
+    let nextKey: SortKey
+    let nextDir: SortDir
     if (sortKey === key) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+      nextKey = key
+      nextDir = sortDir === 'asc' ? 'desc' : 'asc'
     } else {
-      setSortKey(key)
-      setSortDir(key === 'amount' ? 'desc' : key === 'date' ? 'desc' : 'asc')
+      nextKey = key
+      nextDir = key === 'amount' ? 'desc' : key === 'date' ? 'desc' : 'asc'
     }
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (nextKey === DEFAULT_SORT_KEY) next.delete('sort')
+      else next.set('sort', nextKey)
+      if (nextDir === DEFAULT_SORT_DIR) next.delete('dir')
+      else next.set('dir', nextDir)
+      return next
+    }, { replace: true })
   }
 
   const sortIndicator = (key: SortKey) => {
@@ -100,13 +132,8 @@ export function Transactions() {
   }, [allTxns, preset, debouncedSearch, sortKey, sortDir])
 
   const setTimeKey = useCallback((key: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (key === '1w') next.delete('time')
-      else next.set('time', key)
-      return next
-    })
-  }, [setSearchParams])
+    setParam('time', key === '1w' ? null : key)
+  }, [setParam])
 
   return (
     <>

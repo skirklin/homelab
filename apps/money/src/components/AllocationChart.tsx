@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Plot from 'react-plotly.js'
 import type { AllocationItem } from '../api'
 import { fetchAllocation } from '../api'
@@ -21,9 +22,24 @@ const BROAD_COLORS: Record<string, string> = {
   'Commodities': '#f472b6',
 }
 
+type AllocationView = 'broad' | 'detailed'
+const DEFAULT_ALLOC_VIEW: AllocationView = 'broad'
+
 export function AllocationChart() {
   const [data, setData] = useState<AllocationItem[]>([])
-  const [view, setView] = useState<'broad' | 'detailed'>('broad')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const view: AllocationView =
+    searchParams.get('alloc') === 'detailed' ? 'detailed' : DEFAULT_ALLOC_VIEW
+
+  const setView = useCallback((next: AllocationView) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_ALLOC_VIEW) params.delete('alloc')
+      else params.set('alloc', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
 
   useEffect(() => {
     fetchAllocation().then(setData)

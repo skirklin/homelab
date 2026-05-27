@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Plot from 'react-plotly.js'
 import type { Data as PlotlyData } from 'plotly.js'
 import type { AllocationItem, PerformancePoint } from '../api'
@@ -13,6 +14,10 @@ const COLORS = [
 type GroupBy = 'account' | 'institution' | 'asset_class'
 type ValueMode = 'absolute' | 'percent'
 
+const DEFAULT_GROUP_BY: GroupBy = 'institution'
+const DEFAULT_VALUE_MODE: ValueMode = 'percent'
+const GROUP_BY_VALUES: GroupBy[] = ['account', 'institution', 'asset_class']
+
 function shortAccountName(name: string): string {
   const parts = name.split(' — ')
   if (parts.length === 2) {
@@ -25,8 +30,32 @@ function shortAccountName(name: string): string {
 export function AllocationOverTime() {
   const [perfData, setPerfData] = useState<PerformancePoint[]>([])
   const [allocation, setAllocation] = useState<AllocationItem[]>([])
-  const [groupBy, setGroupBy] = useState<GroupBy>('institution')
-  const [valueMode, setValueMode] = useState<ValueMode>('percent')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const rawGroup = searchParams.get('allocGroup')
+  const groupBy: GroupBy = GROUP_BY_VALUES.includes(rawGroup as GroupBy)
+    ? (rawGroup as GroupBy)
+    : DEFAULT_GROUP_BY
+  const valueMode: ValueMode =
+    searchParams.get('allocMode') === 'absolute' ? 'absolute' : DEFAULT_VALUE_MODE
+
+  const setGroupBy = useCallback((next: GroupBy) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_GROUP_BY) params.delete('allocGroup')
+      else params.set('allocGroup', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
+
+  const setValueMode = useCallback((next: ValueMode) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_VALUE_MODE) params.delete('allocMode')
+      else params.set('allocMode', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
 
   useEffect(() => {
     fetchPerformance().then(setPerfData)

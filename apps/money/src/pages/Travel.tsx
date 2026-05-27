@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { Transaction, TripSummary } from '../api'
 import { fetchTransactions, fetchTravelTrips } from '../api'
 import { CategoryChart } from '../components/CategoryChart'
@@ -6,8 +7,12 @@ import { CategoryChart } from '../components/CategoryChart'
 export function Travel() {
   const [allTxns, setAllTxns] = useState<Transaction[]>([])
   const [trips, setTrips] = useState<TripSummary[]>([])
-  const [selectedTrip, setSelectedTrip] = useState<string | null>(null)
-  const [selectedSubcat, setSelectedSubcat] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Drilldown state lives in the URL so back button steps out one level
+  // (overview ← trip ← subcategory) instead of exiting /travel entirely.
+  const selectedTrip = searchParams.get('trip')
+  const selectedSubcat = searchParams.get('subcat')
 
   useEffect(() => {
     fetchTransactions({ limit: 10000, hideTransfers: true }).then(setAllTxns)
@@ -67,30 +72,52 @@ export function Travel() {
     return assignTrip(t)
   }, [selectedTrip, selectedSubcat, assignTrip, getSubcat])
 
+  // Breadcrumb-up: replace (don't push a new history entry just for going back up).
+  const goToOverview = useCallback(() => {
+    setSearchParams({}, { replace: true })
+  }, [setSearchParams])
+
+  const goToTrip = useCallback((trip: string) => {
+    setSearchParams({ trip }, { replace: true })
+  }, [setSearchParams])
+
+  // Drilldown: push so the browser back button steps out one level.
+  const drillToTrip = useCallback((trip: string) => {
+    setSearchParams({ trip })
+  }, [setSearchParams])
+
+  const drillToSubcat = useCallback((subcat: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('subcat', subcat)
+      return next
+    })
+  }, [setSearchParams])
+
   const breadcrumbs = useMemo(() => {
     const crumbs = [{
       label: 'travel by trip',
-      onClick: () => { setSelectedTrip(null); setSelectedSubcat(null) },
+      onClick: goToOverview,
     }]
     if (selectedTrip) {
       crumbs.push({
         label: selectedTrip,
-        onClick: () => { setSelectedSubcat(null) },
+        onClick: () => goToTrip(selectedTrip),
       })
     }
     if (selectedSubcat) {
       crumbs.push({ label: selectedSubcat, onClick: () => {} })
     }
     return crumbs
-  }, [selectedTrip, selectedSubcat])
+  }, [selectedTrip, selectedSubcat, goToOverview, goToTrip])
 
   const handleCategoryClick = useCallback((category: string) => {
     if (!selectedTrip) {
-      setSelectedTrip(category)
+      drillToTrip(category)
     } else if (!selectedSubcat) {
-      setSelectedSubcat(category)
+      drillToSubcat(category)
     }
-  }, [selectedTrip, selectedSubcat])
+  }, [selectedTrip, selectedSubcat, drillToTrip, drillToSubcat])
 
   if (allTxns.length === 0) return null
 

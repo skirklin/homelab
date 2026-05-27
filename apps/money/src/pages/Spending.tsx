@@ -62,7 +62,7 @@ export function Spending() {
       if (value) next.set(key, value)
       else next.delete(key)
       return next
-    })
+    }, { replace: true })
   }, [setSearchParams])
 
   const setPrefix = useCallback((newPrefix: string | null) => {

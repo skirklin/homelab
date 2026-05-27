@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { Account, PerformancePoint } from '../api'
 import { fetchAccounts, fetchGrants, fetchPerformance } from '../api'
 import { AllocationChart } from '../components/AllocationChart'
@@ -68,11 +69,40 @@ function periodReturn(
   return { earned, invested, returnPct }
 }
 
+type InvestmentsView = 'institution' | 'type'
+type InvestmentsRange = '1Y' | '3Y' | '5Y' | 'ALL'
+
+const DEFAULT_VIEW: InvestmentsView = 'institution'
+const DEFAULT_RANGE: InvestmentsRange = '3Y'
+
 export function Investments() {
   const [accounts, setAccounts] = useState<AccountWithPerf[]>([])
   const [perfData, setPerfData] = useState<PerformancePoint[]>([])
-  const [view, setView] = useState<'institution' | 'type'>('institution')
-  const [timeRange, setTimeRange] = useState<'1Y' | '3Y' | '5Y' | 'ALL'>('3Y')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const view: InvestmentsView =
+    searchParams.get('view') === 'type' ? 'type' : DEFAULT_VIEW
+  const rawRange = searchParams.get('range')
+  const timeRange: InvestmentsRange =
+    rawRange === '1Y' || rawRange === '5Y' || rawRange === 'ALL' ? rawRange : DEFAULT_RANGE
+
+  const setView = useCallback((next: InvestmentsView) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_VIEW) params.delete('view')
+      else params.set('view', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
+
+  const setTimeRange = useCallback((next: InvestmentsRange) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_RANGE) params.delete('range')
+      else params.set('range', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
 
   useEffect(() => {
     Promise.all([fetchAccounts(), fetchGrants()]).then(([accts, grants]) => {

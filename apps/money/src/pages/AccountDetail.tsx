@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import Plot from 'react-plotly.js'
 import type { Account, BalancePoint, PerformancePoint, Transaction, Holding } from '../api'
 import { fetchAccounts, fetchBalances, fetchPerformance, fetchTransactions, fetchHoldings, updateManualBalance, renameAccount, deleteAccount } from '../api'
@@ -13,6 +13,9 @@ const fmtDollar = (v: number) => {
   if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
   return `${sign}$${abs.toFixed(2)}`
 }
+
+const RANGE_VALUES: TimeRange[] = ['1M', '3M', '6M', '1Y', '5Y', 'ALL']
+const DEFAULT_RANGE: TimeRange = '1Y'
 
 export default function AccountDetail() {
   const { id } = useParams<{ id: string }>()
@@ -31,8 +34,20 @@ export default function AccountDetail() {
   const [updateDate, setUpdateDate] = useState('')
   const [updating, setUpdating] = useState(false)
 
-  // Time range
-  const [range, setRange] = useState<TimeRange>('1Y')
+  // Time range (URL-backed so refresh + share preserves it)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawRange = searchParams.get('range')
+  const range: TimeRange = RANGE_VALUES.includes(rawRange as TimeRange)
+    ? (rawRange as TimeRange)
+    : DEFAULT_RANGE
+  const setRange = useCallback((next: TimeRange) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_RANGE) params.delete('range')
+      else params.set('range', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
 
   // Rename
   const [editing, setEditing] = useState(false)

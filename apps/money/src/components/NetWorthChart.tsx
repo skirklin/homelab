@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -23,10 +24,42 @@ const fmtFull = (v: number) =>
 
 type ViewMode = 'liquid' | 'with_equity' | 'breakdown'
 
+const DEFAULT_RANGE: TimeRange = '1Y'
+const DEFAULT_VIEW: ViewMode = 'liquid'
+
+const RANGE_VALUES: TimeRange[] = ['1M', '3M', '6M', '1Y', '5Y', 'ALL']
+const VIEW_VALUES: ViewMode[] = ['liquid', 'with_equity', 'breakdown']
+
 export function NetWorthChart() {
   const [data, setData] = useState<NetWorthPoint[]>([])
-  const [range, setRange] = useState<TimeRange>('1Y')
-  const [view, setView] = useState<ViewMode>('liquid')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const rawRange = searchParams.get('nwRange')
+  const range: TimeRange = RANGE_VALUES.includes(rawRange as TimeRange)
+    ? (rawRange as TimeRange)
+    : DEFAULT_RANGE
+  const rawView = searchParams.get('nwView')
+  const view: ViewMode = VIEW_VALUES.includes(rawView as ViewMode)
+    ? (rawView as ViewMode)
+    : DEFAULT_VIEW
+
+  const setRange = useCallback((next: TimeRange) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_RANGE) params.delete('nwRange')
+      else params.set('nwRange', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
+
+  const setView = useCallback((next: ViewMode) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev)
+      if (next === DEFAULT_VIEW) params.delete('nwView')
+      else params.set('nwView', next)
+      return params
+    }, { replace: true })
+  }, [setSearchParams])
 
   useEffect(() => {
     const start = getStartDate(range)
