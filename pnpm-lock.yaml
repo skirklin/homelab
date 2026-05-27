@@ -373,6 +373,9 @@ importers:
         specifier: ^2.1.2
         version: 2.1.4
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.57.0
+        version: 1.59.1
       '@testing-library/jest-dom':
         specifier: ^6.0.0
         version: 6.9.1
@@ -388,6 +391,9 @@ importers:
       '@types/lodash':
         specifier: ^4.14.178
         version: 4.17.24
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.12.2
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.14
@@ -408,7 +414,7 @@ importers:
         version: 2020.9.8
       '@vitejs/plugin-react':
         specifier: ^5.1.2
-        version: 5.2.0(vite@7.3.2(@types/node@25.5.2)(terser@5.46.2)(tsx@4.21.0))
+        version: 5.2.0(vite@7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0))
       eslint:
         specifier: ^8.6.0
         version: 8.57.1
@@ -426,13 +432,13 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^7.3.0
-        version: 7.3.2(@types/node@25.5.2)(terser@5.46.2)(tsx@4.21.0)
+        version: 7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0)
       vite-tsconfig-paths:
         specifier: ^6.0.3
-        version: 6.1.1(typescript@5.9.3)(vite@7.3.2(@types/node@25.5.2)(terser@5.46.2)(tsx@4.21.0))
+        version: 6.1.1(typescript@5.9.3)(vite@7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0))
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
 
   apps/shopping/app:
     dependencies:
@@ -16650,12 +16656,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  vite-tsconfig-paths@6.1.1(typescript@5.9.3)(vite@7.3.2(@types/node@25.5.2)(terser@5.46.2)(tsx@4.21.0)):
+  vite-tsconfig-paths@6.1.1(typescript@5.9.3)(vite@7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0)):
     dependencies:
       debug: 4.4.3
       globrex: 0.1.2
       tsconfck: 3.1.6(typescript@5.9.3)
-      vite: 7.3.2(@types/node@25.5.2)(terser@5.46.2)(tsx@4.21.0)
+      vite: 7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0)
     transitivePeerDependencies:
       - supports-color
       - typescript

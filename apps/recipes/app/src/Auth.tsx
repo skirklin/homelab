@@ -92,6 +92,7 @@ function Auth(props: { children: React.ReactNode }) {
               prefix={<MailOutlined />}
               placeholder="Email"
               size="large"
+              data-testid="email-input"
             />
           </Form.Item>
 
@@ -105,6 +106,7 @@ function Auth(props: { children: React.ReactNode }) {
             <Input.Password
               placeholder="Password"
               size="large"
+              data-testid="password-input"
             />
           </Form.Item>
 
@@ -115,13 +117,14 @@ function Auth(props: { children: React.ReactNode }) {
               loading={submitting}
               block
               size="large"
+              data-testid="email-sign-in"
             >
               {isSignUp ? 'Sign Up' : 'Sign In'}
             </Button>
           </Form.Item>
         </Form>
 
-        <Button type="link" onClick={() => setIsSignUp(!isSignUp)} block>
+        <Button type="link" onClick={() => setIsSignUp(!isSignUp)} block data-testid="toggle-signup">
           {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
         </Button>
       </SignInCard>

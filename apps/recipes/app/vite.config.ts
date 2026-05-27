@@ -1,6 +1,6 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
-import { kirklPlugins, resolveDevVitePort } from '@kirkl/vite-preset'
+import { kirklPlugins, resolveDevApiTarget, resolveDevVitePort } from '@kirkl/vite-preset'
 
 export default defineConfig({
   plugins: kirklPlugins({
@@ -13,6 +13,16 @@ export default defineConfig({
   }),
   server: {
     port: resolveDevVitePort(3000),
+    // Proxy /fn → API service so createShareInvite, AI enrich, owner-info
+    // round-trips work in `pnpm dev` (and Playwright). resolveDevApiTarget
+    // discovers the per-worktree API port from infra/test-env.sh.
+    proxy: {
+      '/fn': {
+        target: resolveDevApiTarget(),
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/fn/, ''),
+      },
+    },
   },
   build: {
     outDir: 'build',
