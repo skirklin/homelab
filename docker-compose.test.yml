@@ -4,7 +4,8 @@ services:
       context: .
       dockerfile: infra/docker/pocketbase.Dockerfile
     ports:
-      - "8091:8090"
+      # Per-worktree port; defaults to 8091 for main checkout. See infra/test-env.sh.
+      - "${TEST_PB_PORT:-8091}:8090"
     command:
       - sh
       - -c
@@ -24,7 +25,8 @@ services:
       context: .
       dockerfile: infra/docker/api-test.Dockerfile
     ports:
-      - "3001:3000"
+      # Per-worktree port; defaults to 3001 for main checkout.
+      - "${TEST_API_PORT:-3001}:3000"
     environment:
       PORT: "3000"
       PB_URL: http://pocketbase:8090

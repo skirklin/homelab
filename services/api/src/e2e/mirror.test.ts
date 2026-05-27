@@ -27,7 +27,7 @@ import type { PBMirror } from "../../../../packages/backend/src/wrapped-pb/mirro
 
 (globalThis as unknown as { EventSource: typeof EventSource }).EventSource = EventSource;
 
-const PB_URL = "http://127.0.0.1:8091";
+const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
 
 let adminPb: PocketBase;
 let aliceId: string;

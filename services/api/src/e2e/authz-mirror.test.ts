@@ -35,7 +35,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import PocketBase from "pocketbase";
 import { randomBytes } from "crypto";
 
-process.env.PB_URL = "http://127.0.0.1:8091";
+process.env.PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
 process.env.PB_ADMIN_PASSWORD = "testpassword1234";
 
@@ -50,7 +50,7 @@ const {
   userCanReadRecipe,
 } = await import("../lib/authz");
 
-const PB_URL = "http://127.0.0.1:8091";
+const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
 
 interface User {
   id: string;

@@ -107,21 +107,23 @@ elif [ "$PUSH_ONLY" = false ]; then
         exit 1
     fi
 
-    # Test PB must be up for the e2e suites that hit http://127.0.0.1:8091.
-    # We probe directly rather than calling `test-env.sh check` because the
-    # `check` subcommand also requires the test API at :3001, which is only
-    # used by Playwright (not by `pnpm test`). PB alone is sufficient.
-    # Skipping `test-env.sh up` when PB already responds also avoids spurious
-    # port-collision failures from parallel worktree sessions (sibling may
-    # already have :8091 bound but no API).
-    echo "→ Ensuring test PocketBase at 127.0.0.1:8091 is up..."
-    if ! curl -fs --max-time 3 http://127.0.0.1:8091/api/health >/dev/null 2>&1; then
+    # Test PB must be up for the e2e suites that hit it. Port is derived from
+    # the worktree basename so parallel agent sessions don't collide on :8091;
+    # see infra/test-env.sh for the algorithm. We probe directly rather than
+    # calling `test-env.sh check` because `check` also requires the test API,
+    # which is only used by Playwright (not by `pnpm test`). PB alone suffices.
+    TEST_PB_URL=$(infra/test-env.sh url --pb)
+    # Export both env vars: apps/* tests key off PB_TEST_URL, services/api/* off PB_URL.
+    export PB_TEST_URL="$TEST_PB_URL"
+    export PB_URL="$TEST_PB_URL"
+    echo "→ Ensuring test PocketBase at ${TEST_PB_URL} is up..."
+    if ! curl -fs --max-time 3 "${TEST_PB_URL}/api/health" >/dev/null 2>&1; then
         if ! infra/test-env.sh up; then
             {
                 echo ""
                 echo "${RED}[deploy.sh] Test environment failed to start. Common causes:${NC}"
                 echo "${RED}  • Docker daemon not running (start Docker Desktop)${NC}"
-                echo "${RED}  • Port 8091/3001 already in use by another process${NC}"
+                echo "${RED}  • Port already in use by another process${NC}"
                 echo "${RED}    (check \`docker ps\` for sibling worktree containers)${NC}"
                 echo "${RED}  • First-run image build failure — run \`infra/test-env.sh up\` manually to see logs${NC}"
                 echo ""

@@ -8,13 +8,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import PocketBase from "pocketbase";
 
 // Set env before dynamic import
-process.env.PB_URL = "http://127.0.0.1:8091";
+process.env.PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
 process.env.PB_ADMIN_PASSWORD = "testpassword1234";
 
 const { default: { app } } = await import("../test-app");
 
-const PB_URL = "http://127.0.0.1:8091";
+const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
 
 let adminPb: PocketBase;
 let userId: string;

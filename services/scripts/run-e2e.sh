@@ -10,13 +10,18 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 APP="${1:-all}"
-PB_TEST_URL="${PB_TEST_URL:-http://127.0.0.1:8091}"
+
+# Per-worktree port discovery — infra/test-env.sh picks a deterministic port
+# based on the worktree basename so parallel agent sessions don't collide.
+PB_TEST_URL="${PB_TEST_URL:-$(infra/test-env.sh url --pb)}"
 export PB_TEST_URL
+# Mirror to PB_URL for tests that key off that name (api e2e suites).
+export PB_URL="$PB_TEST_URL"
 
 # Start PocketBase if not already running
 if ! curl -sf "${PB_TEST_URL}/api/health" > /dev/null 2>&1; then
-  echo "=== Starting PocketBase test instance ==="
-  docker compose -f docker-compose.test.yml up -d --build --wait
+  echo "=== Starting PocketBase test instance at ${PB_TEST_URL} ==="
+  infra/test-env.sh up
   echo "PocketBase ready at ${PB_TEST_URL}"
 else
   echo "PocketBase already running at ${PB_TEST_URL}"

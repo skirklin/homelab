@@ -27,7 +27,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import PocketBase from "pocketbase";
 import { createHash, randomBytes } from "crypto";
 
-const PB_URL = "http://127.0.0.1:8091";
+const PB_URL = process.env.PB_URL ?? "http://127.0.0.1:8091";
 
 /** Assert that a PB SDK call rejects with a 4xx status. PocketBase throws
  *  errors carrying `.status` (number) and a generic message like
