@@ -21,6 +21,7 @@ export type UserOwnedCollection =
   | "recipe_events"
   | "life_logs"
   | "life_events"
+  | "claude_observations"
   | "task_lists"
   | "tasks"
   | "task_events"
