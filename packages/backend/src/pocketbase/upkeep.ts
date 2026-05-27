@@ -275,36 +275,32 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
   }
 
   /**
-   * Mirror of the MCP `tag_task` route at `services/api/src/routes/data.ts`.
-   * Reads the latest tag list (queue-aware via wpb.view, falling back to PB)
-   * at call time — not from a caller-supplied snapshot — so two in-flight
-   * partial edits on the same client merge instead of one clobbering the other.
-   * Cross-client CAS is still not achieved (PB has no native conditional
-   * update), so two browsers racing concurrent edits can still lose one.
+   * Routes through the transactional PB hook at
+   * `infra/pocketbase/pb_hooks/task_tags.pb.js` (POST /api/tasks/:id/tags).
+   * The hook reads + merges + writes the tags column inside a single SQL
+   * transaction via `$app.runInTransaction`, which closes the cross-device
+   * race that the previous read-then-write impl couldn't: two devices
+   * adding different tags at the same instant now both land instead of
+   * one stomping the other.
+   *
+   * No optimistic local update here — the wpb queue can't safely model
+   * "merge what the server has" without already knowing the server state,
+   * and a `wpb.update({ tags: predicted })` would fire its own PATCH that
+   * races the hook's transactional write. The realtime echo from the
+   * hook's save arrives over the existing subscription within ~100ms and
+   * settles the UI; the brief same-client latency is the cost of the
+   * cross-device correctness gain.
    */
   async tagTask(taskId: string, opts: { add?: string[]; remove?: string[] }): Promise<void> {
     const add = opts.add ?? [];
     const remove = opts.remove ?? [];
     if (add.length === 0 && remove.length === 0) return;
 
-    const cached = this.wpb.collection("tasks").view<RecordModel>(taskId);
-    const record: RecordModel = cached ?? await this.pb().collection("tasks").getOne(taskId, { $autoCancel: false });
-    const current = Array.isArray(record.tags) ? (record.tags as string[]) : [];
-
-    const removeSet = new Set(remove);
-    const merged: string[] = [];
-    for (const t of current) if (!removeSet.has(t) && !merged.includes(t)) merged.push(t);
-    for (const t of add) if (!merged.includes(t)) merged.push(t);
-
-    // Skip the write if nothing actually changes — same shape as the other
-    // queue-aware ops in this file (syncLastCompleted, toggleComplete).
-    if (
-      merged.length === current.length &&
-      merged.every((t, i) => t === current[i])
-    ) {
-      return;
-    }
-    await this.wpb.collection("tasks").update(taskId, { tags: merged });
+    await this.pb().send(`/api/tasks/${encodeURIComponent(taskId)}/tags`, {
+      method: "POST",
+      body: JSON.stringify({ add, remove }),
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   /**

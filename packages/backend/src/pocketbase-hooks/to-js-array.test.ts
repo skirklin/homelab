@@ -33,6 +33,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..", "..", "..");
 const sharingHookPath = path.join(repoRoot, "infra/pocketbase/pb_hooks/sharing.pb.js");
 const cleanupHookPath = path.join(repoRoot, "infra/pocketbase/pb_hooks/recipe-box-cleanup.pb.js");
+const taskTagsHookPath = path.join(repoRoot, "infra/pocketbase/pb_hooks/task_tags.pb.js");
 
 type ToJsArray = (raw: unknown) => unknown[];
 
@@ -60,6 +61,11 @@ function extractToJsArrayFromSharing(): ToJsArray {
 
 function extractToJsArrayFromCleanup(): ToJsArray {
   const source = readFileSync(cleanupHookPath, "utf8");
+  return extractFunction(source, "toJsArray");
+}
+
+function extractToJsArrayFromTaskTags(): ToJsArray {
+  const source = readFileSync(taskTagsHookPath, "utf8");
   return extractFunction(source, "toJsArray");
 }
 
@@ -110,6 +116,7 @@ function asByteArray(value: unknown): number[] {
 const VARIANTS: Array<{ name: string; load: () => ToJsArray }> = [
   { name: "sharing.pb.js", load: extractToJsArrayFromSharing },
   { name: "recipe-box-cleanup.pb.js", load: extractToJsArrayFromCleanup },
+  { name: "task_tags.pb.js", load: extractToJsArrayFromTaskTags },
 ];
 
 for (const variant of VARIANTS) {
