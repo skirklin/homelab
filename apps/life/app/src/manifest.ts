@@ -107,9 +107,9 @@ export const SESSIONS: Session[] = [
         // morning (no nudge, no "you skipped").
         id: "intention_followup",
         type: "text",
-        label: "Did you move on this morning's intention?",
-        hint: "This morning you wrote: “{context}”",
-        placeholder: "Anything from nothing to a full update.",
+        label: "How did that go?",
+        hint: "This morning you wanted to do well at: “{context}”",
+        placeholder: "How did it turn out? Honest beats tidy.",
         optional: true,
         contextKey: "morning_intention",
       },
