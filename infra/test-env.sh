@@ -14,9 +14,11 @@
 # Port allocation (so parallel worktrees don't collide on a shared PB):
 #   - If $TEST_PB_PORT is set, use it (manual override).
 #   - Else if cwd is inside `.claude/worktrees/agent-*/`, derive a stable port
-#     from the worktree's `agent-XXXX` basename: 8091 + (cksum(basename) % 1000).
-#     The API port follows the same offset on top of 3001.
-#   - Else (main checkout) → 8091 / 3001 (legacy default).
+#     from the worktree's `agent-XXXX` basename: 8091 + (cksum(basename) % 999 + 1).
+#     The offset is in 1..999 — never 0 — so an agent worktree can never land on
+#     8091/3001 and collide with the main checkout. The API port follows the
+#     same offset on top of 3001.
+#   - Else (main checkout) → 8091 / 3001 (legacy default; offset 0, reserved).
 # Once `up` succeeds the chosen URLs are written to `.test-env-port` at the
 # repo root so downstream callers can read them without recomputing.
 #
@@ -48,7 +50,9 @@ WORKTREES_DIR="$MAIN_ROOT/.claude/worktrees"
 # ─── Port derivation ─────────────────────────────────────────────────────────
 # Pick a deterministic per-worktree port so concurrent agent sessions don't
 # trample each other's PB. `cksum` is POSIX and gives a stable 32-bit hash;
-# mod 1000 keeps us inside 8091..9090 / 3001..4000.
+# `(hash % 999) + 1` maps to offset 1..999 — non-zero by construction — keeping
+# us inside 8092..9090 / 3002..4000. Offset 0 (8091/3001) is reserved for the
+# main checkout, so an agent worktree can never collide with main.
 derive_port_offset() {
     if [ -n "${TEST_PB_PORT:-}" ]; then
         # Manual override — preserve the exact PB port the caller picked,
@@ -65,7 +69,9 @@ derive_port_offset() {
         # checksum. printf+cksum keeps it pure-stdin so no temp file.
         local hash
         hash=$(printf '%s' "$cwd_basename" | cksum | awk '{print $1}')
-        echo $((hash % 1000))
+        # (hash % 999) + 1 → 1..999, never 0. Offset 0 (8091/3001) is reserved
+        # for the main checkout; an agent worktree must never land there.
+        echo $(((hash % 999) + 1))
     else
         echo "0"
     fi
@@ -255,13 +261,32 @@ our_container_owns_port() {
     [ "$owner" = "$container" ]
 }
 
+# A service is "ok" only when its host port answers health AND the container
+# publishing that port is OURS — a squatter answering on the same port must not
+# count as healthy (that masquerade is the exact bug this rework kills). We
+# report three states so `status`/`check` callers can tell "my env is up" from
+# "something else is on my port":
+#   ok        — our container owns the port and answers health
+#   no        — nothing answers the port (our env is down)
+#   squatter  — something answers, but it's not our container
+classify_service() {
+    local container="$1" url="$2" path="$3"
+    if ! host_port_answers "$url" "$path"; then
+        echo "no"
+    elif our_container_owns_port "$container" "${url##*:}"; then
+        echo "ok"
+    else
+        echo "squatter"
+    fi
+}
+
 check() {
-    local pb_ok api_ok
-    pb_ok=$(host_port_answers "$PB_URL" "/api/health" && echo yes || echo no)
-    api_ok=$(host_port_answers "$API_URL" "/health" && echo yes || echo no)
-    echo "PocketBase ($PB_URL): $pb_ok"
-    echo "API        ($API_URL): $api_ok"
-    [[ "$pb_ok" == "yes" && "$api_ok" == "yes" ]]
+    local pb_state api_state
+    pb_state=$(classify_service "$PB_CONTAINER" "$PB_URL" "/api/health")
+    api_state=$(classify_service "$API_CONTAINER" "$API_URL" "/health")
+    echo "PocketBase ($PB_URL): $pb_state"
+    echo "API        ($API_URL): $api_state"
+    [[ "$pb_state" == "ok" && "$api_state" == "ok" ]]
 }
 
 write_port_file() {

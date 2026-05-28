@@ -107,31 +107,43 @@ elif [ "$PUSH_ONLY" = false ]; then
         exit 1
     fi
 
-    # Test PB must be up for the e2e suites that hit it. Port is derived from
-    # the worktree basename so parallel agent sessions don't collide on :8091;
-    # see infra/test-env.sh for the algorithm. We probe directly rather than
-    # calling `test-env.sh check` because `check` also requires the test API,
-    # which is only used by Playwright (not by `pnpm test`). PB alone suffices.
+    # Bring up (or verify) this worktree's test env via `test-env.sh up` —
+    # NOT a raw curl probe. A bare health check trusts whatever answers the
+    # port, so a FOREIGN container squatting our port would sail through and the
+    # whole gate would run against the wrong PB/API (the 2026-05 spurious-failure
+    # bug). `up` is idempotent: when our containers are already healthy AND we
+    # own the host ports it returns "Ready." in well under a second; when a
+    # squatter holds a port it FAILS LOUD naming the container + a reap/triage
+    # hint. Either way the gate never runs tests against a container it doesn't
+    # own. `up` ensures both PB (needed by `pnpm test`) and the API container
+    # (additionally needed by Playwright) in one call.
+    #
+    # Note: `up` may exit 0 with PB-only ready if the API genuinely failed to
+    # start (most suites don't need it); we re-verify the API through
+    # `test-env.sh check` just before Playwright below.
     TEST_PB_URL=$(infra/test-env.sh url --pb)
-    # Export both env vars: apps/* tests key off PB_TEST_URL, services/api/* off PB_URL.
+    TEST_API_URL=$(infra/test-env.sh url --api)
+    # Export the URLs so child processes inherit them: apps/* tests key off
+    # PB_TEST_URL, services/api/* off PB_URL, and the Playwright-spawned Vite
+    # dev server resolves its `/fn` proxy target from TEST_API_URL.
     export PB_TEST_URL="$TEST_PB_URL"
     export PB_URL="$TEST_PB_URL"
-    echo "→ Ensuring test PocketBase at ${TEST_PB_URL} is up..."
-    if ! curl -fs --max-time 3 "${TEST_PB_URL}/api/health" >/dev/null 2>&1; then
-        if ! infra/test-env.sh up; then
-            {
-                echo ""
-                echo "${RED}[deploy.sh] Test environment failed to start. Common causes:${NC}"
-                echo "${RED}  • Docker daemon not running (start Docker Desktop)${NC}"
-                echo "${RED}  • Port already in use by another process${NC}"
-                echo "${RED}    (check \`docker ps\` for sibling worktree containers)${NC}"
-                echo "${RED}  • First-run image build failure — run \`infra/test-env.sh up\` manually to see logs${NC}"
-                echo ""
-                echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
-                echo ""
-            } >&2
-            exit 1
-        fi
+    export TEST_API_URL
+    echo "→ Ensuring test env (PocketBase ${TEST_PB_URL} + API ${TEST_API_URL}) is up..."
+    if ! infra/test-env.sh up; then
+        {
+            echo ""
+            echo "${RED}[deploy.sh] Test environment failed to start (or a foreign container is${NC}"
+            echo "${RED}            squatting this worktree's port — see the message above). Common causes:${NC}"
+            echo "${RED}  • Docker daemon not running (start Docker Desktop)${NC}"
+            echo "${RED}  • Port held by a sibling/dead worktree's container${NC}"
+            echo "${RED}    (triage: \`docker ps\`; reap dead ones: \`infra/test-env.sh reap\`)${NC}"
+            echo "${RED}  • First-run image build failure — run \`infra/test-env.sh up\` manually to see logs${NC}"
+            echo ""
+            echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
+            echo ""
+        } >&2
+        exit 1
     fi
 
     echo "→ Running \`pnpm typecheck\`..."
@@ -158,28 +170,22 @@ elif [ "$PUSH_ONLY" = false ]; then
         exit 1
     fi
 
-    # Playwright suites need the test API container too (not just PB). Probe
-    # it now and bring the test env up if missing — `test-env.sh up` is
-    # idempotent so re-running it when PB is already healthy is cheap.
-    TEST_API_URL=$(infra/test-env.sh url --api)
-    echo "→ Ensuring test API at ${TEST_API_URL} is up (for Playwright)..."
-    if ! curl -fs --max-time 3 "${TEST_API_URL}/health" >/dev/null 2>&1; then
-        if ! infra/test-env.sh up; then
+    # Playwright suites need the test API container too (not just PB). The
+    # upfront `up` already ensured it, but `up` exits 0 with PB-only ready when
+    # the API genuinely failed (most suites don't need it). Verify the FULL env
+    # via `test-env.sh check` — which now requires that OUR container owns both
+    # host ports, not just that something answers — and run `up` once more to
+    # recover a transient API miss before failing loud.
+    echo "→ Verifying test API at ${TEST_API_URL} is up + owned (for Playwright)..."
+    if ! infra/test-env.sh check; then
+        infra/test-env.sh up || true
+        if ! infra/test-env.sh check; then
             {
                 echo ""
-                echo "${RED}[deploy.sh] Test API failed to start. Playwright suite can't run.${NC}"
-                echo "${RED}  Run \`infra/test-env.sh up\` manually to see logs.${NC}"
-                echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
-                echo ""
-            } >&2
-            exit 1
-        fi
-        # Re-probe — `up` may have exited 0 with PB-only ready if api genuinely failed.
-        if ! curl -fs --max-time 3 "${TEST_API_URL}/health" >/dev/null 2>&1; then
-            {
-                echo ""
-                echo "${RED}[deploy.sh] Test API still not healthy at ${TEST_API_URL} after \`up\`.${NC}"
-                echo "${RED}  Check \`docker compose -f docker-compose.test.yml logs api\`.${NC}"
+                echo "${RED}[deploy.sh] Test API not healthy/owned at ${TEST_API_URL} after \`up\`.${NC}"
+                echo "${RED}  Playwright suite can't run against a container we don't own.${NC}"
+                echo "${RED}  Status: \`infra/test-env.sh status\`${NC}"
+                echo "${RED}  Logs:   \`docker compose -f docker-compose.test.yml logs api\`${NC}"
                 echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
                 echo ""
             } >&2
