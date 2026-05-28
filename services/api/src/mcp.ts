@@ -543,6 +543,25 @@ server.tool(
   },
 );
 
+// --- Observer tools ---
+
+server.tool(
+  "generate_observation",
+  "Generate an AI observation from life-tracker data for a given time window. Assembles a cross-source narrative (journal entries, habits, cooking, tasks, travel) and sends it to Claude for reflection. Persists the result to claude_observations.",
+  {
+    period: z.enum(["weekly", "monthly", "adhoc"]).describe("Observation cadence"),
+    window_start: z.string().describe("Start of data window (ISO datetime)"),
+    window_end: z.string().describe("End of data window (ISO datetime)"),
+  },
+  async ({ period, window_start, window_end }) => {
+    const data = await apiRaw("/observer/generate", {
+      method: "POST",
+      body: JSON.stringify({ period, window_start, window_end }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Shopping write tools ---
 
 server.tool(
