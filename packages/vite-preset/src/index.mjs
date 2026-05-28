@@ -114,6 +114,43 @@ function findRepoRoot() {
 }
 
 /**
+ * Bring the per-worktree test environment up before a Playwright run.
+ *
+ * Shells out to `infra/test-env.sh up`, which is idempotent — a no-op when
+ * the worktree's PB + API containers are already healthy, and a full
+ * (re)start otherwise. This is what makes
+ * `pnpm --filter <app> test:playwright` work from a cold machine without a
+ * separate `test-env.sh up` step: each app's globalSetup calls this first.
+ *
+ * The repo root is resolved by walking up from THIS module (not
+ * `process.cwd()`, which is the app dir under Playwright). If the script
+ * can't be found, or `up` exits non-zero (the sibling worktree hardened it
+ * to be fail-loud), we throw with a clear message so the run aborts instead
+ * of proceeding to a half-up / wrong PB.
+ *
+ * `up`'s output is inherited so its progress/errors stream to the test log.
+ */
+export function ensureTestEnvUp() {
+  const root = findRepoRoot();
+  if (!root) {
+    throw new Error(
+      "ensureTestEnvUp: could not locate infra/test-env.sh by walking up from " +
+        `${dirname(fileURLToPath(import.meta.url))}. Are we inside the homelab repo?`
+    );
+  }
+  const script = resolve(root, "infra", "test-env.sh");
+  try {
+    execFileSync(script, ["up"], { stdio: "inherit" });
+  } catch (e) {
+    throw new Error(
+      `ensureTestEnvUp: \`${script} up\` failed (${(e && e.message) || e}). ` +
+        "The test PB/API containers are not healthy; aborting the run rather " +
+        "than testing against a broken environment."
+    );
+  }
+}
+
+/**
  * Derive a stable per-worktree port offset from the repo-root basename.
  *
  * Mirrors `derive_port_offset` in `infra/test-env.sh`: `cksum(basename) %

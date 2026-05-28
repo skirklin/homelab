@@ -263,6 +263,16 @@ test.describe("Shopping Module - Full Workflow", () => {
     await expect(page.getByRole("combobox")).toBeVisible({ timeout: 5000 });
     await expect(page.getByRole("textbox", { name: "Note" })).toBeVisible();
     await expect(page.getByRole("button", { name: /add/i })).toBeVisible();
+
+    // The "Uncategorized" pseudo-category is intentionally hidden while the
+    // list is empty (ShoppingList.tsx hides it when it has no items), so add
+    // an item before asserting the grouping renders. The test previously
+    // passed only because the shared test PB carried items leaked from prior
+    // runs — globalSetup now wipes the data, so the empty-list state is real.
+    await page.getByRole("combobox").pressSequentially("Milk", { delay: 50 });
+    await page.getByRole("textbox", { name: "Note" }).click(); // close dropdown
+    await page.getByRole("button", { name: /add/i }).click();
+    await expect(page.getByText("Milk")).toBeVisible({ timeout: 5000 });
     await expect(page.getByText("Uncategorized")).toBeVisible();
   });
 

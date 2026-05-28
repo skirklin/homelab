@@ -170,6 +170,82 @@ export class TestCleanup {
 }
 
 /**
+ * Hard-wipe every record in the given collections, using an admin-authed
+ * PB client. Used by Playwright globalSetup to give each run a known-clean
+ * slate (the test PB is exclusively for tests, so deleting all records is
+ * safe). Delete order matters when foreign-key/cascade hooks fire, so pass
+ * children before parents (e.g. `shopping_items` before `shopping_lists`).
+ *
+ * Each collection is drained page-by-page; missing collections and
+ * already-gone records are ignored so the wipe is robust to schema drift
+ * and partially-cleaned state.
+ */
+export async function wipeCollections(
+  adminPb: PocketBase,
+  collections: string[]
+): Promise<void> {
+  for (const name of collections) {
+    try {
+      // getFullList walks all pages; batch=500 keeps it to one request for
+      // the volumes a test PB ever accumulates.
+      const records = await adminPb
+        .collection(name)
+        .getFullList({ batch: 500, $autoCancel: false });
+      for (const rec of records) {
+        try {
+          await adminPb.collection(name).delete(rec.id, { $autoCancel: false });
+        } catch {
+          // already gone / cascade-deleted by a hook — fine.
+        }
+      }
+    } catch {
+      // collection doesn't exist in this schema — skip it.
+    }
+  }
+}
+
+/**
+ * Reset per-user pointer fields (slug maps, the `recipe_boxes` array) to
+ * empty for every test user, so a wiped collection doesn't leave dangling
+ * references behind. Without this, e.g. `shopping_slugs` keeps a stale
+ * `{"weekly-groceries": "<deleted-list-id>"}`, and the next run's
+ * "create a list called Weekly Groceries" trips the "you already have a
+ * list with that name" slug guard — the exact non-idempotency bug the
+ * shopping RUN_ID hack was working around.
+ *
+ * Scopes to test users (`email ~ "test.local"` OR the app's own
+ * `@example.com` / `@test.local` fixtures) by accepting an explicit filter;
+ * the caller passes whatever matches its fixture emails. `fields` is the
+ * set of JSON columns to clear; objects → `{}`, arrays → `[]` based on the
+ * passed shape.
+ */
+export async function clearUserFields(
+  adminPb: PocketBase,
+  fields: Record<string, unknown>,
+  opts?: { filter?: string }
+): Promise<void> {
+  let users;
+  try {
+    users = await adminPb.collection("users").getFullList({
+      batch: 500,
+      $autoCancel: false,
+      ...(opts?.filter ? { filter: opts.filter } : {}),
+    });
+  } catch {
+    return;
+  }
+  for (const user of users) {
+    try {
+      await adminPb
+        .collection("users")
+        .update(user.id, fields, { $autoCancel: false });
+    } catch {
+      // user gone mid-wipe — fine.
+    }
+  }
+}
+
+/**
  * Clean up the test context. Deletes all test users created during the session.
  */
 export async function cleanupTestPocketBase(ctx: TestContext): Promise<void> {
