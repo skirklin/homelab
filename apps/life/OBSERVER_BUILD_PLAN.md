@@ -48,7 +48,7 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - New env var `ANTHROPIC_API_KEY` (add to `infra/k8s/api-secrets.yaml` as a placeholder + document the manual `kubectl create secret` step in `infra/k8s/README.md` if not already there).
 - Add `@anthropic-ai/sdk` to `services/api/package.json`.
 - **Dependencies:** P0-1 (collection must exist) + P0-2 (bundle to feed it).
-- **Status:** pending dispatch.
+- **Status:** ✓ BUILT 2026-05-28 (worktree `agent-a27ee4d1`, commit `ceca60b`). Critically reviewed — zero blockers, 3 should-fixes deferred (timezone pass-through, MCP timezone param, 401 test). Ready to merge.
 
 #### P0-4. Weekly cron
 
@@ -131,6 +131,11 @@ Logged here so tomorrow's tick (or later) can pick them up rather than letting t
 - Replace silent `try { ... } catch { return [] }` in fetchers with logged + surfaced errors — a PB 500 currently produces an "empty week" observation, the worst possible outcome
 - Stale `shopping_history` entry in `0026_authz_strings_source_of_truth.js` (drift from `lib/authz-rules.js` which dropped it post-retire) — invisible to the drift test today; worth a sweep next time someone's in that file
 
+**From P0-3 review:**
+- Pass `timezone` through the generate endpoint (read from user record, fall back to `America/Los_Angeles`) — currently the bundle always uses the fallback TZ. Latent bug if timezone ever varies.
+- Add `timezone` as optional param to the `generate_observation` MCP tool schema (mirrors above).
+- Add a test for the `!userId → 401` branch in `observer.test.ts` — the guard exists but is untested.
+
 **Test infra papercut surfaced today:**
 - `infra/test-env.sh` derives port `8091 + cksum(basename) % 1000` for worktrees, so a worktree whose basename hashes to offset 0 lands on 8091 — the same port the main-checkout test env claims by default. Effect: that worktree's PB becomes the "main" test PB for any other process talking to 8091, including drift tests that don't have `PB_URL`/`PB_TEST_URL` set. P0-1's authz-mirror test failed against main exactly because of this (worktree `abe77d3ae76ebb63f` is holding 8091 with a stale PB that lacks the new migration). Possible fixes: skip offset 0 in the worktree port derivation, or make `getPbTestUrl()` fail loudly when neither env var is set rather than silently falling back to 8091.
 
@@ -157,6 +162,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-05-27 | DISPATCH P0-1 + P0-2 (first firing, parallel) | P0-1 (agent-a12b2f0c): PB migration + ObserverBackend + BackendProvider wiring. P0-2 (agent-a0fa66fa): bundle.ts + 4 unit tests. Both awaiting critical review. |
 | 2026-05-27 | OOB tick (manual): critically-reviewed + addressed top should-fixes + MERGED P0-1 + P0-2 | P0-1 merge `30569e5` (added authz mirror entries, idempotency guard, period enum). P0-2 merge `10f05c6` (restructured to V4 per-day cross-source shape + tz fallback + ISO day keys + N+1 batched). Deferred items queued under Phase 1+. Test-infra papercut surfaced (worktree on port 8091 → main's drift test runs against stale PB). |
 | 2026-05-27 | DISPATCH P0-1 + P0-2 (first firing, parallel) | P0-1 (`worktree-agent-a12b2f0c`): PB migration + ObserverBackend + BackendProvider wiring, typecheck clean. P0-2 (`worktree-agent-a0fa66fa`): bundle.ts + 4 unit tests, typecheck clean. Both need critical review before merge. |
+| 2026-05-28 | DISPATCH P0-3 + critical review | P0-3 built in worktree `agent-a27ee4d1` (commit `ceca60b`): generate endpoint + prompt.ts + MCP tool + 9 tests. Review: 0 blockers, 3 should-fixes deferred. Ready to merge. |
 
 ## Decision log
 
