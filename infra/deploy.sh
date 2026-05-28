@@ -210,6 +210,13 @@ elif [ "$PUSH_ONLY" = false ]; then
     echo ""
 fi
 
+# The gate exported test-env URLs (PB_TEST_URL/PB_URL/TEST_API_URL) so the test
+# suites talked to the dockerized test PB. They must NOT leak past the gate:
+# pre_deploy_backup reads ${PB_URL:-<prod>} and would otherwise back up the
+# *test* PB instead of prod (failing soft → silently no pre-deploy backup).
+# Nothing downstream of the gate legitimately needs them. Unset now.
+unset PB_URL PB_TEST_URL TEST_API_URL TEST_PB_PORT TEST_API_PORT
+
 # Fail fast on SSH/1Password breakage so we don't waste a 5-minute build
 # cycle just to die at the manifest-apply step. The common failure mode
 # is "sign_and_send_pubkey: signing failed ... communication with agent
