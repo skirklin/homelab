@@ -180,6 +180,30 @@ export async function userOwnsObservation(
 }
 
 /**
+ * Verify `coach_messages[messageId].owner === userId`. Returns `false` if
+ * the message doesn't exist OR the user is not the owner. Mirrors
+ * `userOwnsObservation` — admin-PB bypasses PB collection rules, so the
+ * route layer is the only ownership gate for `hlk_`/`mcpat_` callers
+ * touching another user's coach messages.
+ *
+ * coach_messages is single-owner (migration 20260529_190700). Mirrors
+ * `PB_RULES.coach_messages.updateRule` (`owner = @request.auth.id`).
+ */
+export async function userOwnsCoachMessage(
+  pb: PocketBase,
+  messageId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!messageId || !userId) return false;
+  try {
+    const msg = await pb.collection("coach_messages").getOne(messageId);
+    return msg.owner === userId;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Verify `userId` is in `shopping_lists[listId].owners`. Returns `false` if
  * the list doesn't exist OR the user isn't an owner. Mirrors the PB rule
  * `@request.auth.id ?= owners.id` on shopping_lists (migration 0001).

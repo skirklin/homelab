@@ -28,6 +28,11 @@ export type {
 } from "./types/travel";
 export type { LifeLog, LifeEvent, LifeEntry, SampleSchedule } from "./types/life";
 export type { ClaudeObservation } from "./types/observer";
+export type {
+  CoachMessage,
+  CoachMessageRole,
+  CoachMessageKind,
+} from "./types/coach";
 export type { LifeSampleQuestion, LifeRandomSamplesConfig } from "./types/life-config";
 export { RANDOM_SAMPLES } from "./types/life-config";
 
@@ -61,3 +66,8 @@ export type { UpkeepBackend } from "./interfaces/upkeep";
 export type { TravelBackend } from "./interfaces/travel";
 export type { LifeBackend } from "./interfaces/life";
 export type { ObserverBackend } from "./interfaces/observer";
+export type {
+  CoachBackend,
+  ListCoachMessagesOptions,
+  PostCoachMessageInput,
+} from "./interfaces/coach";

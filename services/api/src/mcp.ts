@@ -562,6 +562,66 @@ server.tool(
   },
 );
 
+// --- Coach tools ---
+// PM ↔ user chat channel (Phase C). The "assistant" is the daily PM cron
+// for now; a future realtime Claude Code SDK responder will swap in and
+// reuse these tools as-is. Owner is always the caller — `role` is who is
+// speaking, not who the channel belongs to.
+
+server.tool(
+  "list_coach_messages",
+  "List the caller's coach messages, newest first. Use `since` to fetch only messages created after a given ISO datetime (the cron passes its last-tick timestamp). Use `resolved` to filter open vs closed questions.",
+  {
+    since: z.string().optional().describe("Only return messages created strictly after this ISO datetime"),
+    limit: z.number().int().positive().max(500).optional().describe("Page size cap (default 50, max 500)"),
+    resolved: z.boolean().optional().describe("Filter by resolved state; omit to include both"),
+  },
+  async ({ since, limit, resolved }) => {
+    const params = new URLSearchParams();
+    if (since) params.set("since", since);
+    if (typeof limit === "number") params.set("limit", String(limit));
+    if (typeof resolved === "boolean") params.set("resolved", String(resolved));
+    const qs = params.toString();
+    const data = await apiRaw(`/coach/messages${qs ? `?${qs}` : ""}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "post_coach_message",
+  "Post a coach message on the caller's behalf. The cron passes `role: \"assistant\"` to speak as the PM; user-driven Claude sessions pass `role: \"user\"`. `kind` defaults to \"chat\"; use \"question\" for things needing a reply, \"deploy_request\" for ship-this-now items (with structured `meta`), \"feedback\" / \"note\" for FYI.",
+  {
+    role: z.enum(["assistant", "user"]).describe("Who is speaking — assistant=PM cron, user=Scott"),
+    body: z.string().min(1).max(20000).describe("Markdown body"),
+    kind: z.enum(["chat", "question", "deploy_request", "feedback", "note"]).optional().describe("Message kind (default \"chat\")"),
+    meta: z.unknown().optional().describe("Optional structured payload (e.g. deploy_request: { sha, files })"),
+  },
+  async ({ role, body, kind, meta }) => {
+    const payload: Record<string, unknown> = { role, body };
+    if (kind) payload.kind = kind;
+    if (meta !== undefined) payload.meta = meta;
+    const data = await apiRaw("/coach/messages", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "resolve_coach_message",
+  "Mark a coach message as resolved. The user calls this when they've replied to a question; the cron calls this when it has acted on a user message.",
+  {
+    id: z.string().describe("The coach message ID"),
+  },
+  async ({ id }) => {
+    const data = await apiRaw(`/coach/messages/${id}/resolve`, {
+      method: "POST",
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Shopping write tools ---
 
 server.tool(
