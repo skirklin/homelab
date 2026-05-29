@@ -180,23 +180,23 @@ export async function userOwnsObservation(
 }
 
 /**
- * Verify `coach_messages[messageId].owner === userId`. Returns `false` if
+ * Verify `chat_messages[messageId].owner === userId`. Returns `false` if
  * the message doesn't exist OR the user is not the owner. Mirrors
  * `userOwnsObservation` — admin-PB bypasses PB collection rules, so the
  * route layer is the only ownership gate for `hlk_`/`mcpat_` callers
- * touching another user's coach messages.
+ * touching another user's chat messages.
  *
- * coach_messages is single-owner (migration 20260529_190700). Mirrors
- * `PB_RULES.coach_messages.updateRule` (`owner = @request.auth.id`).
+ * chat_messages is single-owner (migration 20260529_190700). Mirrors
+ * `PB_RULES.chat_messages.updateRule` (`owner = @request.auth.id`).
  */
-export async function userOwnsCoachMessage(
+export async function userOwnsChatMessage(
   pb: PocketBase,
   messageId: string,
   userId: string,
 ): Promise<boolean> {
   if (!messageId || !userId) return false;
   try {
-    const msg = await pb.collection("coach_messages").getOne(messageId);
+    const msg = await pb.collection("chat_messages").getOne(messageId);
     return msg.owner === userId;
   } catch {
     return false;

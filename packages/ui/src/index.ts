@@ -11,7 +11,7 @@ export {
   useLifeBackend,
   useUserBackend,
   useObserverBackend,
-  useCoachBackend,
+  useChatBackend,
   useWpbDebug,
 } from "./backend-provider";
 

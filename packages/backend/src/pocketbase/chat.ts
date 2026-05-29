@@ -1,24 +1,25 @@
 /**
- * PocketBase implementation of CoachBackend.
+ * PocketBase implementation of ChatBackend. Renamed from `coach` before any
+ * deploy; user-facing name is "Chat".
  *
- * No optimistic wrapper or mirror — coach messages are infrequent (a
+ * No optimistic wrapper or mirror — chat messages are infrequent (a
  * handful per day), the UI reads via plain list, and the cron / SDK
  * responder writes server-side. Plain PB SDK calls suffice.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type {
-  CoachBackend,
-  ListCoachMessagesOptions,
-  PostCoachMessageInput,
-} from "../interfaces/coach";
+  ChatBackend,
+  ListChatMessagesOptions,
+  PostChatMessageInput,
+} from "../interfaces/chat";
 import type {
-  CoachMessage,
-  CoachMessageKind,
-  CoachMessageRole,
-} from "../types/coach";
+  ChatMessage,
+  ChatMessageKind,
+  ChatMessageRole,
+} from "../types/chat";
 
-const VALID_KINDS: ReadonlySet<CoachMessageKind> = new Set([
+const VALID_KINDS: ReadonlySet<ChatMessageKind> = new Set([
   "chat",
   "question",
   "deploy_request",
@@ -26,7 +27,7 @@ const VALID_KINDS: ReadonlySet<CoachMessageKind> = new Set([
   "note",
 ]);
 
-function messageFromRecord(r: RecordModel): CoachMessage {
+function messageFromRecord(r: RecordModel): ChatMessage {
   const x = r as Record<string, unknown>;
   // `meta` may be a plain object (SDK-parsed JSON), null, or undefined for
   // pre-existing rows where the field wasn't set. Coerce defensively;
@@ -42,9 +43,9 @@ function messageFromRecord(r: RecordModel): CoachMessage {
   return {
     id: r.id,
     owner: x.owner as string,
-    role: x.role as CoachMessageRole,
+    role: x.role as ChatMessageRole,
     body: (x.body as string) ?? "",
-    kind: x.kind as CoachMessageKind,
+    kind: x.kind as ChatMessageKind,
     resolved: !!x.resolved,
     meta,
     created: new Date(x.created as string),
@@ -52,13 +53,13 @@ function messageFromRecord(r: RecordModel): CoachMessage {
   };
 }
 
-export class PocketBaseCoachBackend implements CoachBackend {
+export class PocketBaseChatBackend implements ChatBackend {
   constructor(private pb: () => PocketBase) {}
 
   async listMessages(
     userId: string,
-    opts: ListCoachMessagesOptions = {},
-  ): Promise<CoachMessage[]> {
+    opts: ListChatMessagesOptions = {},
+  ): Promise<ChatMessage[]> {
     const limit = opts.limit ?? 50;
     const pb = this.pb();
     const clauses = ["owner = {:uid}"];
@@ -73,14 +74,14 @@ export class PocketBaseCoachBackend implements CoachBackend {
     }
     const filter = pb.filter(clauses.join(" && "), params);
     const result = await pb
-      .collection("coach_messages")
+      .collection("chat_messages")
       .getList(1, limit, { filter, sort: "-created" });
     return result.items.map(messageFromRecord);
   }
 
-  async getMessage(id: string): Promise<CoachMessage | null> {
+  async getMessage(id: string): Promise<ChatMessage | null> {
     try {
-      const r = await this.pb().collection("coach_messages").getOne(id);
+      const r = await this.pb().collection("chat_messages").getOne(id);
       return messageFromRecord(r);
     } catch {
       // 404 (and any transient error) → null. Callers express "missing"
@@ -90,10 +91,10 @@ export class PocketBaseCoachBackend implements CoachBackend {
     }
   }
 
-  async postMessage(input: PostCoachMessageInput): Promise<CoachMessage> {
-    const kind: CoachMessageKind = input.kind ?? "chat";
+  async postMessage(input: PostChatMessageInput): Promise<ChatMessage> {
+    const kind: ChatMessageKind = input.kind ?? "chat";
     if (!VALID_KINDS.has(kind)) {
-      throw new Error(`Invalid coach message kind: ${kind}`);
+      throw new Error(`Invalid chat message kind: ${kind}`);
     }
     const payload: Record<string, unknown> = {
       owner: input.owner,
@@ -105,13 +106,13 @@ export class PocketBaseCoachBackend implements CoachBackend {
     if (input.meta !== undefined && input.meta !== null) {
       payload.meta = input.meta;
     }
-    const r = await this.pb().collection("coach_messages").create(payload);
+    const r = await this.pb().collection("chat_messages").create(payload);
     return messageFromRecord(r);
   }
 
-  async resolveMessage(id: string): Promise<CoachMessage> {
+  async resolveMessage(id: string): Promise<ChatMessage> {
     const r = await this.pb()
-      .collection("coach_messages")
+      .collection("chat_messages")
       .update(id, { resolved: true });
     return messageFromRecord(r);
   }

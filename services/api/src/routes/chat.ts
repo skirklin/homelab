@@ -1,17 +1,19 @@
 /**
- * Coach route — PM ↔ user chat channel (Phase C, see
+ * Chat route — PM ↔ user chat channel (Phase C, see
  * apps/life/OBSERVER_BUILD_PLAN.md §"Phase C — PM ↔ user channel").
  *
- * Backs the MCP tools (`list_coach_messages`, `post_coach_message`,
- * `resolve_coach_message`) so the daily PM cron and future Claude Code SDK
- * responder have a stable surface. The frontend `/coach` UI talks to PB
+ * Renamed from `coach` before any deploy; the user-facing name is "Chat".
+ *
+ * Backs the MCP tools (`list_chat_messages`, `post_chat_message`,
+ * `resolve_chat_message`) so the daily PM cron and future Claude Code SDK
+ * responder have a stable surface. The frontend `/chat` UI talks to PB
  * directly via the backend abstraction (no REST roundtrip there).
  *
  * All three endpoints are owner-scoped:
  *   - `userId` comes from auth context (set by authMiddleware).
  *   - Reads filter by `owner = userId`.
  *   - `post` stamps `owner = userId` regardless of payload.
- *   - `resolve` verifies ownership via `userOwnsCoachMessage` before
+ *   - `resolve` verifies ownership via `userOwnsChatMessage` before
  *     mutating; admin-PB callers (`hlk_`/`mcpat_` tokens) bypass PB
  *     collection rules so this gate is the only ownership check.
  *
@@ -21,9 +23,9 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
-import { userOwnsCoachMessage } from "../lib/authz";
+import { userOwnsChatMessage } from "../lib/authz";
 
-export const coachRoutes = new Hono<AppEnv>();
+export const chatRoutes = new Hono<AppEnv>();
 
 const VALID_ROLES = ["assistant", "user"] as const;
 type Role = (typeof VALID_ROLES)[number];
@@ -50,8 +52,8 @@ function parseSince(raw: string | undefined): string | null {
   return d.toISOString();
 }
 
-// GET /coach/messages?since=…&limit=…&resolved=true|false
-coachRoutes.get("/messages", handler(async (c) => {
+// GET /chat/messages?since=…&limit=…&resolved=true|false
+chatRoutes.get("/messages", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId");
   if (!userId) return c.json({ error: "Not authenticated" }, 401);
@@ -81,15 +83,15 @@ coachRoutes.get("/messages", handler(async (c) => {
   }
   const filter = pb.filter(clauses.join(" && "), params);
 
-  const result = await pb.collection("coach_messages").getList(1, limit, {
+  const result = await pb.collection("chat_messages").getList(1, limit, {
     filter,
     sort: "-created",
   });
   return c.json({ items: result.items });
 }));
 
-// POST /coach/messages — body: { role, body, kind?, meta? }
-coachRoutes.post("/messages", handler(async (c) => {
+// POST /chat/messages — body: { role, body, kind?, meta? }
+chatRoutes.post("/messages", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId");
   if (!userId) return c.json({ error: "Not authenticated" }, 401);
@@ -131,12 +133,12 @@ coachRoutes.post("/messages", handler(async (c) => {
   if (body.meta !== undefined && body.meta !== null) {
     payload.meta = body.meta;
   }
-  const record = await pb.collection("coach_messages").create(payload);
+  const record = await pb.collection("chat_messages").create(payload);
   return c.json(record);
 }));
 
-// POST /coach/messages/:id/resolve
-coachRoutes.post("/messages/:id/resolve", handler(async (c) => {
+// POST /chat/messages/:id/resolve
+chatRoutes.post("/messages/:id/resolve", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId");
   if (!userId) return c.json({ error: "Not authenticated" }, 401);
@@ -147,9 +149,9 @@ coachRoutes.post("/messages/:id/resolve", handler(async (c) => {
   // admin-PB bypasses PB collection rules; the only ownership gate for
   // hlk_/mcpat_ callers is this helper. Mirror's PB rule string is
   // checked by the authz-mirror property test.
-  if (!(await userOwnsCoachMessage(pb, id, userId))) {
+  if (!(await userOwnsChatMessage(pb, id, userId))) {
     return c.json({ error: "Forbidden" }, 403);
   }
-  const record = await pb.collection("coach_messages").update(id, { resolved: true });
+  const record = await pb.collection("chat_messages").update(id, { resolved: true });
   return c.json(record);
 }));

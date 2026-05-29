@@ -14,7 +14,7 @@ import { PocketBaseUpkeepBackend } from "./upkeep";
 import { PocketBaseTravelBackend } from "./travel";
 import { PocketBaseLifeBackend } from "./life";
 import { PocketBaseObserverBackend } from "./observer";
-import { PocketBaseCoachBackend } from "./coach";
+import { PocketBaseChatBackend } from "./chat";
 import { wrapPocketBase, type WrappedPocketBase } from "../wrapped-pb";
 import { createMirror, type PBMirror } from "../wrapped-pb/mirror";
 
@@ -29,7 +29,7 @@ export function createPocketBaseBackends(getPb: () => PocketBase) {
     travel: new PocketBaseTravelBackend(getPb, wpb, mirror) as import("../interfaces/travel").TravelBackend,
     life: new PocketBaseLifeBackend(getPb, wpb, mirror) as import("../interfaces/life").LifeBackend,
     observer: new PocketBaseObserverBackend(getPb) as import("../interfaces/observer").ObserverBackend,
-    coach: new PocketBaseCoachBackend(getPb) as import("../interfaces/coach").CoachBackend,
+    chat: new PocketBaseChatBackend(getPb) as import("../interfaces/chat").ChatBackend,
     /** Shared optimistic-write wrapper. Call replayPending() once after auth ready. */
     wpb,
     /** Shared realtime mirror. Domain backends adopt it incrementally. */
@@ -44,4 +44,4 @@ export { PocketBaseUpkeepBackend } from "./upkeep";
 export { PocketBaseTravelBackend } from "./travel";
 export { PocketBaseLifeBackend } from "./life";
 export { PocketBaseObserverBackend } from "./observer";
-export { PocketBaseCoachBackend } from "./coach";
+export { PocketBaseChatBackend } from "./chat";
