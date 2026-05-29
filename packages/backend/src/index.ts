@@ -2,7 +2,7 @@
  * @homelab/backend — Backend abstraction layer.
  *
  * Defines interfaces for all app backends (auth, shopping, recipes, upkeep, travel, life).
- * Implementations live in separate files (pocketbase/, firebase/).
+ * Implementations live in separate files (pocketbase/).
  * Apps import interfaces + factory functions, never backend-specific code.
  *
  * Usage:

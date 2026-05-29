@@ -12,7 +12,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useNavigate, useLocation, Outlet } from "react-router-dom";
 import type { ReactNode } from "react";
 
-// Mock Firebase and shared auth to avoid real Firebase calls
+// Mock @kirkl/shared (PocketBase auth) to avoid real backend calls
 vi.mock("@kirkl/shared", () => ({
   useAuth: () => ({ user: { uid: "test-user" }, loading: false }),
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
