@@ -229,6 +229,95 @@ const TokenCopyRow = styled.div`
   margin-top: var(--space-sm);
 `;
 
+// --- Claude MCP setup subsection styled components ---
+
+const ClaudeIntro = styled.div`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-md);
+`;
+
+const ClaudeCardStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+`;
+
+const ClaudeCard = styled.div`
+  padding: var(--space-md);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-md);
+`;
+
+const ClaudeCardTitle = styled.h3`
+  font-size: var(--font-size-md);
+  margin: 0 0 var(--space-xs) 0;
+`;
+
+const ClaudeCardLede = styled.div`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-sm);
+`;
+
+const ClaudeSteps = styled.ol`
+  margin: 0 0 var(--space-sm) 0;
+  padding-left: var(--space-lg);
+  font-size: var(--font-size-sm);
+  li + li {
+    margin-top: var(--space-xs);
+  }
+`;
+
+const ClaudeUrlRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+`;
+
+const ClaudeUrlValue = styled.code`
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg-muted, #f5f5f5);
+  border-radius: var(--radius-sm, 4px);
+  font-family: monospace;
+  font-size: var(--font-size-sm);
+  overflow-x: auto;
+  white-space: nowrap;
+`;
+
+const ClaudeCodeBlockWrap = styled.div`
+  position: relative;
+  margin-top: var(--space-sm);
+`;
+
+const ClaudeCodeBlock = styled.pre`
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-muted, #f5f5f5);
+  border-radius: var(--radius-sm, 4px);
+  font-family: monospace;
+  font-size: var(--font-size-sm);
+  overflow-x: auto;
+  white-space: pre;
+`;
+
+const ClaudeCodeCopyRow = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-xs);
+`;
+
+const ClaudeNote = styled.div`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-sm);
+`;
+
 const VALID_NOTIFICATION_MODES: NotificationMode[] = ["all", "subscribed", "off"];
 
 function isValidNotificationMode(value: unknown): value is NotificationMode {
@@ -504,6 +593,19 @@ export function Settings() {
 
 // --- API Tokens Section Component ---
 
+const MCP_URL = "https://mcp.kirkl.in/mcp";
+const MCP_JSON_SNIPPET = `{
+  "mcpServers": {
+    "homelab": {
+      "type": "http",
+      "url": "https://mcp.kirkl.in/mcp",
+      "headers": {
+        "Authorization": "Bearer hlk_..."
+      }
+    }
+  }
+}`;
+
 function ApiTokensSection() {
   const { message } = useFeedback();
   const [tokens, setTokens] = useState<ApiToken[]>([]);
@@ -601,6 +703,63 @@ function ApiTokensSection() {
           Create Token
         </Button>
       </SettingRow>
+
+      {/* Connect Claude subsection */}
+      <div style={{ marginTop: "var(--space-md)", marginBottom: "var(--space-md)" }}>
+        <SettingLabel style={{ marginBottom: "var(--space-xs)" }}>Connect Claude</SettingLabel>
+        <ClaudeIntro>
+          Connect Claude to your homelab data (recipes, shopping, tasks, travel). Choose the path that matches your client.
+        </ClaudeIntro>
+        <ClaudeCardStack>
+          <ClaudeCard>
+            <ClaudeCardTitle>Claude mobile or desktop (OAuth)</ClaudeCardTitle>
+            <ClaudeCardLede>
+              Add as a custom MCP connector. No token needed; OAuth handles auth.
+            </ClaudeCardLede>
+            <ClaudeSteps>
+              <li>In Claude, go to Connectors and tap Add custom connector.</li>
+              <li>
+                Use this URL:
+                <ClaudeUrlRow>
+                  <ClaudeUrlValue>{MCP_URL}</ClaudeUrlValue>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    aria-label="Copy MCP URL"
+                    onClick={() => handleCopy(MCP_URL)}
+                  >
+                    Copy
+                  </Button>
+                </ClaudeUrlRow>
+              </li>
+              <li>Sign in (Google or email/password) and tap Approve.</li>
+            </ClaudeSteps>
+          </ClaudeCard>
+
+          <ClaudeCard>
+            <ClaudeCardTitle>Claude Code (CLI / IDE)</ClaudeCardTitle>
+            <ClaudeCardLede>
+              Mint a Personal Access Token above, then add this to your project's <code>.mcp.json</code>:
+            </ClaudeCardLede>
+            <ClaudeCodeBlockWrap>
+              <ClaudeCodeBlock>{MCP_JSON_SNIPPET}</ClaudeCodeBlock>
+              <ClaudeCodeCopyRow>
+                <Button
+                  size="small"
+                  icon={<CopyOutlined />}
+                  aria-label="Copy .mcp.json snippet"
+                  onClick={() => handleCopy(MCP_JSON_SNIPPET)}
+                >
+                  Copy
+                </Button>
+              </ClaudeCodeCopyRow>
+            </ClaudeCodeBlockWrap>
+            <ClaudeNote>
+              Replace <code>hlk_...</code> with the token shown when you create one above. The full token is shown only once at creation time.
+            </ClaudeNote>
+          </ClaudeCard>
+        </ClaudeCardStack>
+      </div>
 
       {loadingTokens ? (
         <LoadingState><Spin /></LoadingState>
