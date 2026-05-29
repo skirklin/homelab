@@ -24,19 +24,22 @@ import {
   waitFor,
   type TestContext,
 } from "@kirkl/shared/test-utils";
-import { PocketBaseRecipesBackend } from "@homelab/backend/pocketbase";
+import { PocketBaseRecipesBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
 import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
 import type { CookingLogEvent } from "@homelab/backend";
 import { EnrichmentStatus, Visibility } from "../types";
 
 let ctx: TestContext;
 let recipes: PocketBaseRecipesBackend;
+let users: PocketBaseUserBackend;
 
 beforeAll(async () => {
   ctx = await initTestPocketBase();
   const pb = () => ctx.userPb;
   const wpb = wrapPocketBase(pb);
-  recipes = new PocketBaseRecipesBackend(pb, wpb, createMirror(pb, wpb));
+  const mirror = createMirror(pb, wpb);
+  recipes = new PocketBaseRecipesBackend(pb, wpb, mirror);
+  users = new PocketBaseUserBackend(pb, wpb, mirror);
 });
 
 afterAll(async () => {
@@ -130,6 +133,49 @@ describe("getUser", () => {
   it("returns null for a non-existent user", async () => {
     const result = await recipes.getUser("nonexistentid0000000");
     expect(result).toBeNull();
+  });
+});
+
+// ─── resolveNames (user_names view) ─────────────────────────────────────────────
+
+describe("resolveNames", () => {
+  it("resolves display names via the user_names view, omits unknown ids, and leaks no PII", async () => {
+    // Cross-app shared infra (Bug: cooking log says "Someone made this",
+    // box co-owners render as "Anonymous"). resolveNames reads the read-only
+    // `user_names` VIEW collection (id + name only) so any authenticated user
+    // can resolve another user's display name without owner-only `users` access.
+    //
+    // This test fails without the 20260529_*_user_names_view.js migration:
+    // querying a non-existent `user_names` collection throws.
+    const userA = await createTestUser(ctx, { name: "Alice Resolver" });
+    // Sign back in as userA so resolveNames runs as an authenticated user
+    // (the view's listRule is `@request.auth.id != ""`).
+    const userB = await createUserWithoutSignIn(ctx);
+    await signInAsUser(ctx, userA);
+    // Give userB a distinct, non-default name via admin so the assertion is
+    // meaningful (createUserWithoutSignIn defaults to "Test User 2").
+    await ctx.pb.collection("users").update(userB.id, { name: "Bob Resolver" });
+
+    const rows = await users.resolveNames([userA.id, userB.id, "nonexistent000000"]);
+
+    const byId = new Map(rows.map((r) => [r.id, r.name]));
+    expect(byId.get(userA.id)).toBe("Alice Resolver");
+    expect(byId.get(userB.id)).toBe("Bob Resolver");
+    // Unknown ids are simply omitted, never present with an empty name.
+    expect(byId.has("nonexistent000000")).toBe(false);
+    expect(rows.length).toBe(2);
+
+    // The view must expose ONLY id + name — never email or other PII.
+    for (const r of rows) {
+      expect(Object.keys(r).sort()).toEqual(["id", "name"]);
+      expect((r as Record<string, unknown>).email).toBeUndefined();
+    }
+  });
+
+  it("returns an empty array for an empty id list (no network call)", async () => {
+    const user = await createTestUser(ctx, { name: "Solo" });
+    await signInAsUser(ctx, user);
+    expect(await users.resolveNames([])).toEqual([]);
   });
 });
 

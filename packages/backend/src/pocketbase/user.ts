@@ -194,4 +194,15 @@ export class PocketBaseUserBackend implements UserBackend {
   async getProfile(userId: string): Promise<Record<string, unknown>> {
     return this.readUser(userId);
   }
+
+  async resolveNames(ids: string[]): Promise<Array<{ id: string; name: string }>> {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (unique.length === 0) return [];
+    const pb = this.pb();
+    const filter = unique.map((id) => pb.filter("id = {:id}", { id })).join(" || ");
+    const records = await pb
+      .collection("user_names")
+      .getFullList({ filter, fields: "id,name", $autoCancel: false });
+    return records.map((r) => ({ id: r.id, name: (r as { name?: string }).name || "" }));
+  }
 }

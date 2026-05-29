@@ -40,6 +40,7 @@ const mockUserBackend = {
   setNotificationMode: vi.fn(),
   updateProfile: vi.fn(),
   getProfile: vi.fn().mockResolvedValue({}),
+  resolveNames: vi.fn().mockResolvedValue([]),
 };
 
 const mockGetListInfo = vi.fn();
