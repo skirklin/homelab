@@ -56,7 +56,7 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - Curls `POST /api/observations/generate` with `period: "weekly"` and a window of the past 7 days.
 - Same retention policy thinking as backups: keep all observations (low volume, high reflective value).
 - **Dependencies:** P0-3.
-- **Status:** IN PROGRESS — dispatched 2026-05-29, worktree agent running.
+- **Status:** ✓ MERGED 2026-05-29 (merge commit `a1d3adf`). Worktree `agent-a9f8783a` (`e9d6596` + `51d7205`). Critically reviewed; one blocker fixed before merge (in-cluster URL had a stale `/fn` prefix → would 404 on first fire). Activates on next `kubectl apply` / deploy.
 
 #### P0-5. `/observations` view in life app
 
@@ -65,7 +65,9 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - Pull data via the new `ObserverBackend`.
 - Plus a single "Ask Claude about now" button on the dashboard that calls `POST /api/observations/generate` with `period: "adhoc"` and the past 14 days. (This is the "on-demand" half from ROADMAP Phase 2.)
 - **Dependencies:** P0-1 (backend interface) + P0-3 (endpoint for adhoc).
-- **Status:** IN PROGRESS — dispatched 2026-05-29, worktree agent running.
+- **Status:** ✓ MERGED 2026-05-29 (merge commit `8a0e066`). Worktree `agent-ad5e5fc4` (`4c809f3`). Critically reviewed: 0 blockers. Deferred to Phase 0.5: component tests, post-generate refetch error is swallowed, markdown rendering (acceptable for v0 — prompt is prose-only).
+
+**🎉 Phase 0 complete (2026-05-29): all five items merged. The observer loop is closed end-to-end — pending a deploy of `life` + `api` + the CronJob, plus a `claude_observations` PB migration apply.**
 
 ### V0 system prompt (draft)
 
@@ -164,6 +166,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-05-27 | DISPATCH P0-1 + P0-2 (first firing, parallel) | P0-1 (`worktree-agent-a12b2f0c`): PB migration + ObserverBackend + BackendProvider wiring, typecheck clean. P0-2 (`worktree-agent-a0fa66fa`): bundle.ts + 4 unit tests, typecheck clean. Both need critical review before merge. |
 | 2026-05-28 | DISPATCH P0-3 + critical review | P0-3 built in worktree `agent-a27ee4d1` (commit `ceca60b`): generate endpoint + prompt.ts + MCP tool + 9 tests. Review: 0 blockers, 3 should-fixes deferred. Ready to merge. |
 | 2026-05-29 | MERGE P0-3 + DISPATCH P0-4 + P0-5 | Merged P0-3 to main. Dispatched P0-4 (weekly CronJob) and P0-5 (observations UI) in parallel — both agents running. |
+| 2026-05-29 | OOB (in-conversation): critical-review + MERGE P0-4 + P0-5 → Phase 0 COMPLETE | Reviewed both deferred from the cron's budget edge. P0-4 had a blocker (stale `/fn` in-cluster URL) fixed before merge (`a1d3adf`). P0-5 clean, merged (`8a0e066`). All five Phase 0 items now on main; loop closed pending deploy. Should-fixes queued in Phase 1+. |
 
 ## Decision log
 
