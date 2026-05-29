@@ -5,9 +5,8 @@ Usage:
     pb-schema-summary.py <path-to-pb-data.db>           # all collections
     pb-schema-summary.py <path-to-pb-data.db> <name>    # one collection
 
-Reads the `_collections` system table directly. Used during the Supabase
-migration to inventory exactly what PB has today so the SQL translation
-doesn't lean on stale migration files.
+Reads the `_collections` system table directly to inventory exactly what
+PB has today, without leaning on potentially-stale migration files.
 """
 
 import json

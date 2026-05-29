@@ -9,8 +9,7 @@
  * with the recent-events ring buffer that can be screenshot or copied.
  *
  * Reads from wpb.debug.snapshot() and wpb.debug.events() — the same surface
- * the console handle uses, so the future Supabase realtime wrapper just
- * needs to provide compatible shapes for this UI to keep working.
+ * the console handle uses.
  */
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { WpbDebug, WpbEvent, WpbSnapshot, WpbCollectionSnapshot } from "@homelab/backend/wrapped-pb";

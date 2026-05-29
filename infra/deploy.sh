@@ -673,11 +673,13 @@ echo "Push: ${PUSH_TOTAL} images ($(elapsed $((SECONDS - PUSH_START))))"
 echo ""
 echo "=== Applying manifests ==="
 # Clear the remote manifest dir before re-syncing. The previous additive
-# tar-only flow left orphans whenever a manifest was deleted from the repo
-# (caused supabase to keep coming back for months after `0860dd6` removed it).
-# Scoped to top-level .yaml/.yml only — preserves any other files dropped in
-# the dir, doesn't recurse, and won't go anywhere weird if the path expands
-# unexpectedly (no `rm -rf` of a variable).
+# tar-only flow left orphans whenever a manifest was deleted from the repo —
+# historically a removed deploy's resources would resurrect themselves for
+# months (a manifest deleted in `0860dd6` kept reappearing because the stale
+# copy lingered on the VPS), so this prevents that class of stale-resource
+# regression. Scoped to top-level .yaml/.yml only — preserves any other files
+# dropped in the dir, doesn't recurse, and won't go anywhere weird if the path
+# expands unexpectedly (no `rm -rf` of a variable).
 ssh "${VPS}" 'set -e
   mkdir -p ~/homelab-manifests
   find ~/homelab-manifests -maxdepth 1 -type f \( -name "*.yaml" -o -name "*.yml" \) -delete'

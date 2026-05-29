@@ -89,7 +89,7 @@ For wiring a brand-new app/service end-to-end (build map, k8s manifest, Caddy bl
 - [`apps/life/ROADMAP.md`](apps/life/ROADMAP.md) — life-app phasing plan
 - [`MONEY_IMPROVEMENTS.md`](MONEY_IMPROVEMENTS.md) — money ingest punch list
 - [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md) — plan for moving money onto PocketBase
-- Forward-looking sync/storage explorations (not yet executed): [`SUPABASE-MIGRATION.md`](SUPABASE-MIGRATION.md), [`ELECTRIC-SQL-MIGRATION.md`](ELECTRIC-SQL-MIGRATION.md), [`SYNC-ENGINE-DESIGN.md`](SYNC-ENGINE-DESIGN.md)
+- [`SYNC-ENGINE-DESIGN.md`](SYNC-ENGINE-DESIGN.md) — the live design for the custom cursor-based sync layer on top of PocketBase (see `packages/backend/src/wrapped-pb/`)
 
 ## License
 

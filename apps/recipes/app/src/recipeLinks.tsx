@@ -29,8 +29,7 @@ import { decodeStr } from "./converters";
  * Matches `[[recipe:<id>]]` or `[[recipe:<id>|label]]`.
  *
  * - `<id>` is one or more characters that aren't `|` or `]`, so the marker is
- *   resilient to whatever shape backend IDs take (PB uses 15-char alphanumeric,
- *   Supabase uses UUIDs).
+ *   resilient to whatever shape backend IDs take (PB uses 15-char alphanumeric).
  * - `<label>` is one or more characters that aren't `]`, allowing labels with
  *   spaces, punctuation, etc.
  *
