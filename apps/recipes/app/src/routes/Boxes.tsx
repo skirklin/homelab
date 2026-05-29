@@ -2,7 +2,7 @@ import { useContext } from "react"
 import styled from "styled-components"
 import { Context } from "../context"
 import { BoxTable, type RowType } from '../BoxTable/BoxTable'
-import { getUserFromState } from "../state";
+import { useUserNames } from "@kirkl/shared";
 import { type PlainUser } from "../storage";
 import { Visibility } from "../types";
 
@@ -34,6 +34,7 @@ const BoxCount = styled.span`
 function Boxes() {
   const { state } = useContext(Context)
   const { boxes } = state;
+  const ownerNames = useUserNames(Array.from(boxes).flatMap(([, v]) => v.owners));
 
   const anonUser = (uid: string): PlainUser => ({
     id: uid,
@@ -47,7 +48,10 @@ function Boxes() {
 
   const rows: RowType[] = Array.from(boxes).map(([key, value]) => ({
     name: value.data.name,
-    owners: value.owners.map(uid => getUserFromState(state, uid) || anonUser(uid)),
+    owners: value.owners.map(uid => {
+      const name = ownerNames.get(uid);
+      return name ? { ...anonUser(uid), name } : anonUser(uid);
+    }),
     numRecipes: value.recipes.size,
     boxId: key,
     key: key,

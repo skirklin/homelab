@@ -53,6 +53,13 @@ export interface UserBackend {
 
   /** Read the full user profile. */
   getProfile(userId: string): Promise<Record<string, unknown>>;
+
+  /**
+   * Resolve public display names for a set of user IDs. Returns only
+   * { id, name } sourced from the `user_names` view (no email / tokens /
+   * other PII). IDs that don't resolve are simply omitted from the result.
+   */
+  resolveNames(ids: string[]): Promise<Array<{ id: string; name: string }>>;
 }
 
 export type SlugNamespace = "shopping" | "household" | "travel";

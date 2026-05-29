@@ -104,6 +104,9 @@ export {
 // Ant Design feedback hook
 export { useFeedback } from "./useFeedback";
 
+// Cross-app user display-name resolver (backed by the `user_names` view)
+export { useUserNames } from "./useUserNames";
+
 // URL param hook
 export { useUrlParam, useUrlString, useUrlParams } from "./useUrlParam";
 export type {
