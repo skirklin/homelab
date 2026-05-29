@@ -16,7 +16,12 @@ WORKDIR /workspace
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
 COPY services/api/package.json services/api/package.json
 COPY packages/backend/package.json packages/backend/package.json
-RUN pnpm install --frozen-lockfile || pnpm install
+# --frozen-lockfile with NO fallback: a stale lockfile must fail loud here.
+# The old `|| pnpm install` silently mutated the lockfile inside the image,
+# so the test API could run different deps than prod ships — defeating the
+# whole point of testing against the locked set. If this fails, regenerate the
+# lockfile locally (`pnpm install`) and commit it.
+RUN pnpm install --frozen-lockfile
 
 # Source. Backend is a `"main": "src/index.ts"` package — tsx runs the .ts
 # directly, so we need the whole tree (not just dist/).

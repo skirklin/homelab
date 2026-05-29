@@ -245,10 +245,19 @@ fi
 # pb-backup-daily CronJob. A migration shipped on a Wednesday and the
 # nightly only ran Tuesday is exactly the gap that bit us on 2026-05-22.
 # Tags the backup key with the git SHA so it's recoverable by deploy.
-# Failure does NOT abort the deploy — backups are insurance, not the
-# critical path, and a 5xx on the PB backup endpoint shouldn't block
-# pushing a hotfix. Warning goes to stderr so it's visible in the deploy
-# log if it ever silently degrades.
+#
+# PB's POST /api/backups returns 204 on *enqueue* — a 2xx does NOT mean a
+# usable zip exists. So after the POST we GET /api/backups and assert the
+# just-created key is present with non-zero size; only then is the restore
+# point real. (GET returns [{key, size, modified}, ...].)
+#
+# Failure handling depends on the deploy mode. For a normal deploy the whole
+# point of this hook is a restore point before a potentially-destructive
+# migration, so a failed/unverifiable backup ABORTS (return 1 → set -e exits,
+# exit trap records failure). The escape hatches that already say "I accept
+# risk" — --skip-tests / SKIP_TESTS=1 (hotfix) and --push-only (no new code) —
+# downgrade to a loud warning so a 5xx on the backup endpoint can't wedge a
+# hotfix.
 pre_deploy_backup() {
     local api_url="${HOMELAB_API_URL:-https://api.${DOMAIN:-kirkl.in}}"
     local pb_url="${PB_URL:-${api_url}}"
@@ -256,12 +265,32 @@ pre_deploy_backup() {
     # too (services/scripts/*.ts). Only PB_ADMIN_PASSWORD must come from .env.
     local email="${PB_ADMIN_EMAIL:-scott.kirklin@gmail.com}"
     local password="${PB_ADMIN_PASSWORD:-}"
+
+    # Whether an unverifiable backup is fatal. Hotfix (--skip-tests) and
+    # --push-only deploys accept the risk; a normal deploy must not proceed
+    # without a real restore point.
+    local fatal=true
+    if [ "$PUSH_ONLY" = true ] || [ "$SKIP_TESTS" = 1 ]; then
+        fatal=false
+    fi
+    # Centralized failure path: abort (fatal) or warn-and-continue.
+    fail_backup() {
+        if [ "$fatal" = true ]; then
+            echo "${RED}[deploy.sh] pre-deploy backup failed: $1${NC}" >&2
+            echo "${RED}  Refusing to deploy without a verified restore point.${NC}" >&2
+            echo "${RED}  Override (accepts risk): --skip-tests or --push-only.${NC}" >&2
+            return 1
+        fi
+        echo "[deploy.sh] WARNING: pre-deploy backup failed: $1 (continuing — risk accepted)" >&2
+        return 0
+    }
+
     if [ -z "$password" ]; then
-        echo "[deploy.sh] (pre-deploy-backup) skipped: PB_ADMIN_PASSWORD not in .env" >&2
+        fail_backup "PB_ADMIN_PASSWORD not in .env" || return 1
         return 0
     fi
     command -v jq >/dev/null 2>&1 || {
-        echo "[deploy.sh] (pre-deploy-backup) skipped: jq not installed locally" >&2
+        fail_backup "jq not installed locally" || return 1
         return 0
     }
 
@@ -275,25 +304,51 @@ pre_deploy_backup() {
     auth_resp=$(curl -fsS --max-time 15 -X POST "${pb_url}/api/collections/_superusers/auth-with-password" \
         -H "Content-Type: application/json" \
         -d "$(jq -nc --arg id "$email" --arg pw "$password" '{identity:$id, password:$pw}')" 2>/dev/null) || {
-        echo "[deploy.sh] WARNING: pre-deploy backup auth failed (continuing deploy)" >&2
+        fail_backup "auth request to ${pb_url} failed" || return 1
         return 0
     }
     token=$(printf '%s' "$auth_resp" | jq -er .token 2>/dev/null) || {
-        echo "[deploy.sh] WARNING: pre-deploy backup auth response had no token (continuing)" >&2
+        fail_backup "auth response had no token" || return 1
         return 0
     }
 
-    # PB session token: no `Bearer ` prefix.
-    if curl -fsS --max-time 60 -X POST "${pb_url}/api/backups" \
+    # PB session token: no `Bearer ` prefix. 204 here means "enqueued", not
+    # "done" — we verify with a GET below before trusting it.
+    if ! curl -fsS --max-time 120 -X POST "${pb_url}/api/backups" \
             -H "Authorization: ${token}" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg name "$key" '{name:$name}')" > /dev/null 2>&1; then
-        echo "[deploy.sh] pre-deploy backup created: ${key}"
-    else
-        echo "[deploy.sh] WARNING: pre-deploy backup POST failed (continuing deploy)" >&2
+        fail_backup "POST /api/backups failed" || return 1
+        return 0
     fi
+
+    # Verify the zip actually landed: GET the list and assert our key is
+    # present with non-zero size. PB writes the backup synchronously before
+    # returning the enqueue 204 in current versions, but a single GET can race
+    # a slow flush, so retry a few times before giving up.
+    local listing entry size attempt
+    for attempt in 1 2 3 4 5; do
+        listing=$(curl -fsS --max-time 30 "${pb_url}/api/backups" \
+            -H "Authorization: ${token}" 2>/dev/null) || listing=""
+        if [ -n "$listing" ]; then
+            entry=$(printf '%s' "$listing" | jq -c --arg k "$key" '.[] | select(.key == $k)' 2>/dev/null || echo "")
+            if [ -n "$entry" ]; then
+                size=$(printf '%s' "$entry" | jq -r '.size // 0' 2>/dev/null || echo 0)
+                if [ "${size:-0}" -gt 0 ] 2>/dev/null; then
+                    echo "[deploy.sh] pre-deploy backup verified: ${key} (${size} bytes)"
+                    return 0
+                fi
+            fi
+        fi
+        [ "$attempt" -lt 5 ] && sleep 2
+    done
+
+    fail_backup "backup ${key} not found with non-zero size after POST (enqueue may have failed)" || return 1
+    return 0
 }
-pre_deploy_backup
+# NOTE: pre_deploy_backup is INVOKED below, after the EXIT trap is installed,
+# so a backup-abort (normal deploy, unverifiable backup) is still recorded as a
+# failed deployment instead of dying before the recorder exists.
 
 # Deployment recording — POSTs a row to the monitor's deployments collection
 # via api.kirkl.in. Tracks success/failure via DEPLOY_STATUS, set just before
@@ -301,11 +356,15 @@ pre_deploy_backup
 DEPLOY_START=$SECONDS
 DEPLOY_STATUS="failure"
 FAILED_APPS=()
+# Set by the build phase to its scratch dir; cleaned up by on_exit. Declared
+# here (before the trap is installed) so the trap can reference it even if we
+# exit before the build phase runs.
+BUILD_TMP=""
 
 record_deployment() {
-    local exit_code=$?
-    [ -z "${HOMELAB_API_TOKEN:-}" ] && return 0
-    command -v jq >/dev/null 2>&1 || return 0
+    local exit_code="$1"
+    [ -z "${HOMELAB_API_TOKEN:-}" ] && return "$exit_code"
+    command -v jq >/dev/null 2>&1 || return "$exit_code"
 
     local api_url="${HOMELAB_API_URL:-https://api.${DOMAIN:-kirkl.in}/fn}"
     local git_sha git_branch git_subject deployer host duration apps_json failed_json
@@ -357,15 +416,31 @@ record_deployment() {
                 -H "Authorization: Bearer ${HOMELAB_API_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "$payload" > /dev/null 2>&1; then
-            return $exit_code
+            return "$exit_code"
         fi
-        [ $attempt -lt 3 ] && sleep 10
+        [ "$attempt" -lt 3 ] && sleep 10
     done
     echo "[deploy.sh] failed to record deployment after 3 attempts (status=${DEPLOY_STATUS})" >&2
 
-    return $exit_code
+    return "$exit_code"
 }
-trap record_deployment EXIT
+
+# Single EXIT trap: capture the real exit code FIRST (before any cleanup
+# command can clobber $?), tear down the build scratch dir, then record the
+# deployment with the preserved code. Folding temp-cleanup in here (rather than
+# re-installing the trap inside the build block) keeps record_deployment seeing
+# the script's actual exit status, not `rm`'s.
+on_exit() {
+    local code=$?
+    [ -n "$BUILD_TMP" ] && rm -rf "$BUILD_TMP"
+    record_deployment "$code"
+}
+trap on_exit EXIT
+
+# Now that the recorder + trap are live, take the pre-deploy backup. On a
+# normal deploy an unverifiable backup aborts here (set -e), and on_exit
+# records the failed deployment.
+pre_deploy_backup
 
 # ─── Build registry ──────────────────────────────────────────────────────────
 # Two flavors of buildable thing:
@@ -403,6 +478,10 @@ declare -A SERVICE_BUILDS=(
 # Usage: run_docker_build <app> <progress_prefix> <docker_build_args...>
 # Honors $IMAGE_TAG (default "latest"; --beta sets it to "beta") so a beta
 # build doesn't overwrite the prod :latest tag in the registry.
+#
+# Overridable for testing: set DEPLOY_BUILD_CMD to a function/command name and
+# it's called instead of `docker build` (used by the test harness to simulate
+# a per-app failure and prove cross-subshell exit-code collection).
 run_docker_build() {
     local app="$1"
     local prefix="$2"
@@ -411,13 +490,41 @@ run_docker_build() {
     local k8s_tag="${K8S_REGISTRY}/${app}:${IMAGE_TAG}"
     local app_start=$SECONDS
     echo "${prefix} Building ${app}..."
-    if docker build -q "$@" -t "${push_tag}" -t "${k8s_tag}" . > /dev/null 2>&1; then
+    if "${DEPLOY_BUILD_CMD:-docker}" build -q "$@" -t "${push_tag}" -t "${k8s_tag}" . > /dev/null 2>&1; then
         echo "${prefix} ✓ ${app} ($(elapsed $((SECONDS - app_start))))"
         return 0
     else
         echo "${prefix} ✗ ${app} FAILED"
         return 1
     fi
+}
+
+# Build the docker-build argument vector for a single app. Echoes the args
+# (newline-separated, since none contain newlines) and returns non-zero for an
+# unknown app. Shared by the serial and parallel build paths so there's exactly
+# one place that knows APP_BUILDS vs SERVICE_BUILDS.
+build_args_for() {
+    local app="$1"
+    if [ -n "${APP_BUILDS[$app]+x}" ]; then
+        # Vite frontend → shared app.Dockerfile with build args
+        local app_dir dist_dir nginx_conf nginx_conf_dest
+        IFS=: read -r app_dir dist_dir nginx_conf nginx_conf_dest <<< "${APP_BUILDS[$app]}"
+        printf '%s\n' \
+            -f infra/docker/app.Dockerfile \
+            --build-arg "APP=${app}" \
+            --build-arg "APP_DIR=${app_dir}" \
+            --build-arg "DIST_DIR=${dist_dir}" \
+            --build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" \
+            --build-arg "VITE_DOMAIN=${DOMAIN:-kirkl.in}"
+        [ -n "$nginx_conf" ] && printf '%s\n' --build-arg "NGINX_CONF=${nginx_conf}"
+        [ -n "$nginx_conf_dest" ] && printf '%s\n' --build-arg "NGINX_CONF_DEST=${nginx_conf_dest}"
+        return 0
+    elif [ -n "${SERVICE_BUILDS[$app]+x}" ]; then
+        # Service with its own Dockerfile, no app-level build args
+        printf '%s\n' -f "${SERVICE_BUILDS[$app]}"
+        return 0
+    fi
+    return 1
 }
 
 # Build phase
@@ -428,41 +535,10 @@ if [ "$PUSH_ONLY" = false ]; then
         BUILD_LIST=("${APPS[@]}")
     fi
 
-    TOTAL=${#BUILD_LIST[@]}
-    BUILT=0
-    FAILED=0
-    BUILD_START=$SECONDS
-
-    echo "=== Building ${TOTAL} images ==="
-    echo ""
+    # Validate the whole list up front so an unknown app fails before we kick
+    # off any (possibly-backgrounded) builds.
     for app in "${BUILD_LIST[@]}"; do
-        BUILT=$((BUILT + 1))
-        PROGRESS="[${BUILT}/${TOTAL}]"
-
-        if [ -n "${APP_BUILDS[$app]+x}" ]; then
-            # Vite frontend → shared app.Dockerfile with build args
-            IFS=: read -r app_dir dist_dir nginx_conf nginx_conf_dest <<< "${APP_BUILDS[$app]}"
-            BUILD_ARGS=(
-                -f infra/docker/app.Dockerfile
-                --build-arg "APP=${app}"
-                --build-arg "APP_DIR=${app_dir}"
-                --build-arg "DIST_DIR=${dist_dir}"
-                --build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}"
-                --build-arg "VITE_DOMAIN=${DOMAIN:-kirkl.in}"
-            )
-            [ -n "$nginx_conf" ] && BUILD_ARGS+=(--build-arg "NGINX_CONF=${nginx_conf}")
-            [ -n "$nginx_conf_dest" ] && BUILD_ARGS+=(--build-arg "NGINX_CONF_DEST=${nginx_conf_dest}")
-            if ! run_docker_build "$app" "$PROGRESS" "${BUILD_ARGS[@]}"; then
-                FAILED=$((FAILED + 1))
-                FAILED_APPS+=("$app")
-            fi
-        elif [ -n "${SERVICE_BUILDS[$app]+x}" ]; then
-            # Service with its own Dockerfile, no app-level build args
-            if ! run_docker_build "$app" "$PROGRESS" -f "${SERVICE_BUILDS[$app]}"; then
-                FAILED=$((FAILED + 1))
-                FAILED_APPS+=("$app")
-            fi
-        else
+        if [ -z "${APP_BUILDS[$app]+x}" ] && [ -z "${SERVICE_BUILDS[$app]+x}" ]; then
             echo "Unknown app: ${app}" >&2
             echo "  Known APP_BUILDS: ${!APP_BUILDS[*]}" >&2
             echo "  Known SERVICE_BUILDS: ${!SERVICE_BUILDS[*]}" >&2
@@ -470,9 +546,80 @@ if [ "$PUSH_ONLY" = false ]; then
         fi
     done
 
+    TOTAL=${#BUILD_LIST[@]}
+    BUILD_START=$SECONDS
+
+    # Bounded fan-out. The 8 Vite frontends share app.Dockerfile and are
+    # independent, so a serial loop wastes wall-clock on a 16-core laptop.
+    # Cap concurrency so we don't thrash the docker daemon / RAM: default to
+    # nproc/2 (min 1), clamped to 4, overridable via DEPLOY_BUILD_JOBS.
+    #
+    # The footgun: you CANNOT collect exit codes by appending to a bash array
+    # from `&`-backgrounded subshells — the appends happen in the subshell and
+    # vanish when it exits. Each background job instead writes its result to a
+    # per-app status file ("$tmpdir/<app>.status": "ok" or "fail"); after
+    # `wait` we read those files back in the parent to build FAILED_APPS.
+    if [ -n "${DEPLOY_BUILD_JOBS:-}" ]; then
+        MAX_JOBS="$DEPLOY_BUILD_JOBS"
+    else
+        MAX_JOBS=$(( $(nproc 2>/dev/null || echo 2) / 2 ))
+        [ "$MAX_JOBS" -lt 1 ] && MAX_JOBS=1
+        [ "$MAX_JOBS" -gt 4 ] && MAX_JOBS=4
+    fi
+    # A single-app build (the common selective-deploy case) has nothing to
+    # parallelize; force serial so output isn't muddied and there's no temp dir.
+    [ "$TOTAL" -le 1 ] && MAX_JOBS=1
+
+    echo "=== Building ${TOTAL} images (up to ${MAX_JOBS} in parallel) ==="
+    echo ""
+
+    # Scratch dir for per-app status files. The EXIT trap (on_exit) cleans it
+    # up; we just point it at our dir here rather than re-installing the trap.
+    BUILD_TMP=$(mktemp -d "${TMPDIR:-/tmp}/homelab-build.XXXXXX")
+
+    build_one() {
+        # Runs (often) in a backgrounded subshell. MUST NOT mutate parent
+        # state — it communicates success/failure only via its status file.
+        local app="$1" idx="$2"
+        local prefix="[${idx}/${TOTAL}]"
+        local args=()
+        # build_args_for can't fail here — the list was validated above.
+        mapfile -t args < <(build_args_for "$app")
+        if run_docker_build "$app" "$prefix" "${args[@]}"; then
+            echo ok > "${BUILD_TMP}/${app}.status"
+        else
+            echo fail > "${BUILD_TMP}/${app}.status"
+        fi
+    }
+
+    BUILT=0
+    for app in "${BUILD_LIST[@]}"; do
+        BUILT=$((BUILT + 1))
+        if [ "$MAX_JOBS" -le 1 ]; then
+            build_one "$app" "$BUILT"
+        else
+            # Throttle: block until a slot frees up before launching the next.
+            while [ "$(jobs -rp | wc -l)" -ge "$MAX_JOBS" ]; do
+                wait -n 2>/dev/null || true
+            done
+            build_one "$app" "$BUILT" &
+        fi
+    done
+    wait
+
+    # Collect results from the per-app status files (parent process, post-wait,
+    # so the writes are all visible). A missing/non-"ok" file counts as failure.
+    FAILED=0
+    for app in "${BUILD_LIST[@]}"; do
+        if [ "$(cat "${BUILD_TMP}/${app}.status" 2>/dev/null)" != "ok" ]; then
+            FAILED=$((FAILED + 1))
+            FAILED_APPS+=("$app")
+        fi
+    done
+
     echo ""
     if [ "$FAILED" -gt 0 ]; then
-        echo "Build: ${FAILED}/${TOTAL} failed ($(elapsed $((SECONDS - BUILD_START))))"
+        echo "Build: ${FAILED}/${TOTAL} failed (${FAILED_APPS[*]}) ($(elapsed $((SECONDS - BUILD_START))))"
         exit 1
     else
         echo "Build: ${TOTAL}/${TOTAL} succeeded ($(elapsed $((SECONDS - BUILD_START))))"
@@ -497,6 +644,8 @@ echo ""
 PUSH_START=$SECONDS
 PUSH_TOTAL=${#IMAGES[@]}
 PUSHED=0
+PUSH_FAILED=0
+PUSH_FAILED_IMAGES=()
 echo "=== Pushing ${PUSH_TOTAL} images to registry ==="
 for img in "${IMAGES[@]}"; do
     PUSHED=$((PUSHED + 1))
@@ -507,9 +656,18 @@ for img in "${IMAGES[@]}"; do
         echo " ✓ ($(elapsed $((SECONDS - IMG_START))))"
     else
         echo " ✗ FAILED"
+        PUSH_FAILED=$((PUSH_FAILED + 1))
+        PUSH_FAILED_IMAGES+=("$short")
     fi
 done
 echo ""
+# A failed push means k8s would pull a stale tag (or hit ImagePullBackOff) —
+# never proceed to `kubectl apply`. Abort exactly like the build loop does.
+if [ "$PUSH_FAILED" -gt 0 ]; then
+    echo "Push: ${PUSH_FAILED}/${PUSH_TOTAL} failed (${PUSH_FAILED_IMAGES[*]}) ($(elapsed $((SECONDS - PUSH_START))))" >&2
+    echo "[deploy.sh] Aborting before manifest apply — refusing to deploy stale images." >&2
+    exit 1
+fi
 echo "Push: ${PUSH_TOTAL} images ($(elapsed $((SECONDS - PUSH_START))))"
 
 echo ""
@@ -534,8 +692,12 @@ if [ "$BETA" = true ]; then
     echo "Restarting home-beta..."
     ssh "${VPS}" "kubectl rollout restart -n homelab deployment/home-beta"
 elif [ ${#APPS[@]} -eq 0 ]; then
-    # Full deploy: restart everything
-    ssh "${VPS}" "kubectl rollout restart -n homelab deployments,statefulsets 2>/dev/null || true"
+    # Full deploy: restart everything. Do NOT swallow failures — a failed
+    # rollout restart here means images were pushed but pods never restarted,
+    # so prod silently keeps running old code while DEPLOY_STATUS flips to
+    # "success". Let the failure surface (set -e exits, the exit trap records
+    # the failed deploy).
+    ssh "${VPS}" "kubectl rollout restart -n homelab deployments,statefulsets"
 else
     # Selective deploy: only restart what was built
     for app in "${APPS[@]}"; do
