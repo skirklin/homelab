@@ -48,7 +48,7 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - New env var `ANTHROPIC_API_KEY` (add to `infra/k8s/api-secrets.yaml` as a placeholder + document the manual `kubectl create secret` step in `infra/k8s/README.md` if not already there).
 - Add `@anthropic-ai/sdk` to `services/api/package.json`.
 - **Dependencies:** P0-1 (collection must exist) + P0-2 (bundle to feed it).
-- **Status:** ✓ BUILT 2026-05-28 (worktree `agent-a27ee4d1`, commit `ceca60b`). Critically reviewed — zero blockers, 3 should-fixes deferred (timezone pass-through, MCP timezone param, 401 test). Ready to merge.
+- **Status:** ✓ MERGED 2026-05-29 (merge commit on main). Worktree `agent-a27ee4d1` (commit `ceca60b`). Critically reviewed — zero blockers, 3 should-fixes deferred (timezone pass-through, MCP timezone param, 401 test).
 
 #### P0-4. Weekly cron
 
@@ -56,7 +56,7 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - Curls `POST /api/observations/generate` with `period: "weekly"` and a window of the past 7 days.
 - Same retention policy thinking as backups: keep all observations (low volume, high reflective value).
 - **Dependencies:** P0-3.
-- **Status:** pending dispatch.
+- **Status:** IN PROGRESS — dispatched 2026-05-29, worktree agent running.
 
 #### P0-5. `/observations` view in life app
 
@@ -65,7 +65,7 @@ Ordered by dispatch sequence. Each is a worktree-agent-sized chunk.
 - Pull data via the new `ObserverBackend`.
 - Plus a single "Ask Claude about now" button on the dashboard that calls `POST /api/observations/generate` with `period: "adhoc"` and the past 14 days. (This is the "on-demand" half from ROADMAP Phase 2.)
 - **Dependencies:** P0-1 (backend interface) + P0-3 (endpoint for adhoc).
-- **Status:** pending dispatch.
+- **Status:** IN PROGRESS — dispatched 2026-05-29, worktree agent running.
 
 ### V0 system prompt (draft)
 
@@ -163,6 +163,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-05-27 | OOB tick (manual): critically-reviewed + addressed top should-fixes + MERGED P0-1 + P0-2 | P0-1 merge `30569e5` (added authz mirror entries, idempotency guard, period enum). P0-2 merge `10f05c6` (restructured to V4 per-day cross-source shape + tz fallback + ISO day keys + N+1 batched). Deferred items queued under Phase 1+. Test-infra papercut surfaced (worktree on port 8091 → main's drift test runs against stale PB). |
 | 2026-05-27 | DISPATCH P0-1 + P0-2 (first firing, parallel) | P0-1 (`worktree-agent-a12b2f0c`): PB migration + ObserverBackend + BackendProvider wiring, typecheck clean. P0-2 (`worktree-agent-a0fa66fa`): bundle.ts + 4 unit tests, typecheck clean. Both need critical review before merge. |
 | 2026-05-28 | DISPATCH P0-3 + critical review | P0-3 built in worktree `agent-a27ee4d1` (commit `ceca60b`): generate endpoint + prompt.ts + MCP tool + 9 tests. Review: 0 blockers, 3 should-fixes deferred. Ready to merge. |
+| 2026-05-29 | MERGE P0-3 + DISPATCH P0-4 + P0-5 | Merged P0-3 to main. Dispatched P0-4 (weekly CronJob) and P0-5 (observations UI) in parallel — both agents running. |
 
 ## Decision log
 
