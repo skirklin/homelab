@@ -159,6 +159,23 @@ var PB_RULES = Object.freeze({
     updateRule: LIFE_OWNER_RULE,
     deleteRule: LIFE_OWNER_RULE,
   },
+  // coach_messages — PM ↔ user chat channel (Phase C). Owner-scoped chat
+  // log, append-only. Single-relation `owner`, same shape as life_logs /
+  // claude_observations — direct equality, no `?=`.
+  //
+  // createRule is owner-equality (not "any authed") because users
+  // legitimately create messages from the UI (role: "user") and must only
+  // be able to create messages they own. The future SDK responder runs
+  // under the user's identity and writes assistant messages owned by the
+  // same user — `role` distinguishes speaker; `owner` is the conversation
+  // tenant.
+  coach_messages: {
+    listRule: LIFE_OWNER_RULE,
+    viewRule: LIFE_OWNER_RULE,
+    createRule: LIFE_OWNER_RULE,
+    updateRule: LIFE_OWNER_RULE,
+    deleteRule: LIFE_OWNER_RULE,
+  },
 
   // ===== Upkeep / Tasks =====
   task_lists: {

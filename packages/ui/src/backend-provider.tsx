@@ -28,6 +28,7 @@ import type {
   LifeBackend,
   UserBackend,
   ObserverBackend,
+  CoachBackend,
 } from "@homelab/backend";
 import type { WpbDebug } from "@homelab/backend/wrapped-pb";
 
@@ -50,6 +51,7 @@ const TravelBackendContext = createContext<TravelBackend>(backends.travel);
 const LifeBackendContext = createContext<LifeBackend>(backends.life);
 const UserBackendContext = createContext<UserBackend>(backends.user);
 const ObserverBackendContext = createContext<ObserverBackend>(backends.observer);
+const CoachBackendContext = createContext<CoachBackend>(backends.coach);
 
 /**
  * Push the browser's current IANA timezone to `users.timezone` whenever it
@@ -161,10 +163,12 @@ export function BackendProvider({ children }: { children: ReactNode }) {
             <LifeBackendContext.Provider value={backends.life}>
               <UserBackendContext.Provider value={backends.user}>
                 <ObserverBackendContext.Provider value={backends.observer}>
-                  <OfflineBanner />
-                  <UpdateAvailableBanner />
-                  <SyncStatusBanner debug={wpb.debug} />
-                  {children}
+                  <CoachBackendContext.Provider value={backends.coach}>
+                    <OfflineBanner />
+                    <UpdateAvailableBanner />
+                    <SyncStatusBanner debug={wpb.debug} />
+                    {children}
+                  </CoachBackendContext.Provider>
                 </ObserverBackendContext.Provider>
               </UserBackendContext.Provider>
             </LifeBackendContext.Provider>
@@ -201,6 +205,10 @@ export function useUserBackend(): UserBackend {
 
 export function useObserverBackend(): ObserverBackend {
   return useContext(ObserverBackendContext);
+}
+
+export function useCoachBackend(): CoachBackend {
+  return useContext(CoachBackendContext);
 }
 
 /**
