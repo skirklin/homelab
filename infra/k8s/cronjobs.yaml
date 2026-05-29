@@ -339,3 +339,48 @@ spec:
               envFrom:
                 - secretRef:
                     name: api-secrets
+---
+# Weekly observer reflection — Sunday 1 PM Pacific. Calls the observer
+# generate endpoint to produce a weekly reflection entry covering the
+# past 7 days of life log data. The endpoint is idempotent per period +
+# window, so a manual retry or overlapping run won't duplicate entries.
+#
+# Auth: uses HOMELAB_API_TOKEN from api-secrets (Bearer token, same as
+# the other CronJobs). Hits the functions service cluster-internal URL.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: observer-weekly
+  namespace: homelab
+spec:
+  schedule: "0 20 * * 0"  # Sunday 1 PM Pacific (PDT = UTC-7)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: trigger
+              image: alpine/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  # BusyBox date doesn't support `-d '7 days ago'`; install
+                  # coreutils for GNU date (same pattern as pb-backup-prune).
+                  apk add --no-cache coreutils >/dev/null
+                  WINDOW_START=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+                  WINDOW_END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                  echo "[observer-weekly] window: $WINDOW_START .. $WINDOW_END"
+                  curl -sf -X POST \
+                    -H "Content-Type: application/json" \
+                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
+                    -d "{\"period\":\"weekly\",\"window_start\":\"$WINDOW_START\",\"window_end\":\"$WINDOW_END\"}" \
+                    http://functions.homelab.svc.cluster.local:3000/fn/observer/generate
+                  echo "[observer-weekly] done"
+              envFrom:
+                - secretRef:
+                    name: api-secrets
