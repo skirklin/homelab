@@ -174,27 +174,29 @@ Append-only. When a decision in the table above gets reversed, log it here.
 
 (empty)
 
-## Phase C — PM ↔ user channel ("Coach" v1)
+## Phase C — PM ↔ user channel ("Chat" v1)
+
+> Renamed from "Coach" before any deploy; the user-facing name is "Chat". Collection / interface / hook / route / MCP tool names all use the "chat" stem.
 
 **Why:** the PM agent runs open-loop — it can't deploy (needs Scott's 1Password + judgment), and it never asks whether what it shipped actually works. It writes to this log, which Scott has to come read. Requested 2026-05-29: a real bidirectional channel so the PM can (a) flag deploys it needs, (b) ask UX questions, (c) hear what's working / not. Same irony this project exists to fix — applied to the builder.
 
 **Vision (Scott's framing):** the seed of a "personal health-coach chat" — eventually a realtime chat to a Claude agent with full access to his data ("like the Google Health coach, but mine"). v1 is async (daily cron = responder); the realtime upgrade is future-not-now (see note).
 
 **v1 design — a flat chat log:**
-- Collection `coach_messages` — owner-scoped, chat-shaped: `{owner, role: "assistant"|"user", body (markdown), kind: "chat"|"question"|"deploy_request"|"feedback"|"note" (default "chat"), resolved (bool), meta (json), created}`. MUST be added to the authz mirror (`lib/authz-rules.js` + `0026` inline copy + a `userOwnsCoachMessage` helper) — bake this in from the start; it was the should-fix we caught late on P0-1.
+- Collection `chat_messages` — owner-scoped, chat-shaped: `{owner, role: "assistant"|"user", body (markdown), kind: "chat"|"question"|"deploy_request"|"feedback"|"note" (default "chat"), resolved (bool), meta (json), created}`. MUST be added to the authz mirror (`lib/authz-rules.js` + `0026` inline copy + a `userOwnsChatMessage` helper) — bake this in from the start; it was the should-fix we caught late on P0-1.
 - The "assistant" is the **daily PM cron** for now (latency up to a day; faster if Scott triggers a tick). The chat-log shape is chosen so the future realtime responder is an additive swap, not a rewrite.
 - Scott posts; the next tick reads recent messages, answers open ones, posts deploy-requests + 1–2 UX questions about recently shipped features.
 
 **Work items:**
-- **C1 — collection + backend + MCP tools** (foundation; everything depends on it). `coach_messages` migration (+ authz mirror), `CoachBackend` interface + PB impl + `useCoachBackend()`, and MCP tools `list_coach_messages` / `post_coach_message` / `resolve_coach_message`. Mirror P0-1's structure + the observer MCP tool. **Status: dispatched 2026-05-29.**
-- **C2 — `/coach` chat UI in the life app.** Timeline (assistant/user), compose box, resolve affordance, dashboard entry point + unread badge. Markdown render (travel app has react-markdown to crib).
+- **C1 — collection + backend + MCP tools** (foundation; everything depends on it). `chat_messages` migration (+ authz mirror), `ChatBackend` interface + PB impl + `useChatBackend()`, and MCP tools `list_chat_messages` / `post_chat_message` / `resolve_chat_message`. Mirror P0-1's structure + the observer MCP tool. **Status: dispatched 2026-05-29 (originally as "Coach"; renamed to "Chat" pre-deploy alongside C2).**
+- **C2 — `/chat` chat UI in the life app.** Timeline (assistant/user), compose box, resolve affordance, dashboard entry point + unread badge. Markdown render (react-markdown).
 - **C3 — push nudge.** When the assistant posts, fire a push (reuse VAPID infra) so Scott sees it rather than discovering it in-app.
-- **C4 — cron prompt update.** Each tick: read coach messages since last tick → answer unaddressed user messages → post deploy-requests for merged-but-undeployed work → ask 1–2 UX questions about recent ships. User-facing comms move to Coach; the daily log stays as internal cron state.
+- **C4 — cron prompt update.** Each tick: read chat messages since last tick → answer unaddressed user messages → post deploy-requests for merged-but-undeployed work → ask 1–2 UX questions about recent ships. User-facing comms move to Chat; the daily log stays as internal cron state.
 
 **Note: the channel only goes live after a deploy** (UI + collection + MCP must reach prod) — bootstrapping the deploy-nudge channel itself requires a manual deploy.
 
 ### Future work (noted 2026-05-29 — DO NOT build yet)
-- **Realtime Coach chat via a Claude Code SDK service.** Replace the daily-cron responder with a long-running Claude Code SDK service that drives the agentic loop and responds in realtime, with full access to Scott's data (life/money/recipes/travel/tasks via the homelab MCP). Turns the async PM channel into a live "personal coach with my data" chat. The `coach_messages` flat-log model in C1 is designed to make this an additive swap (new responder reads/writes the same collection). Scott flagged this explicitly as future-not-now.
+- **Realtime Chat via a Claude Code SDK service.** Replace the daily-cron responder with a long-running Claude Code SDK service that drives the agentic loop and responds in realtime, with full access to Scott's data (life/money/recipes/travel/tasks via the homelab MCP). Turns the async PM channel into a live "personal coach with my data" chat. The `chat_messages` flat-log model in C1 is designed to make this an additive swap (new responder reads/writes the same collection). Scott flagged this explicitly as future-not-now.
 
 ## How the cron is wired (local, not remote)
 

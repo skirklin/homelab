@@ -33,7 +33,7 @@ import { pushRoutes } from "./routes/push";
 import { authRoutes } from "./routes/auth";
 import { notificationRoutes } from "./routes/notifications";
 import { observerRoutes } from "./routes/observer";
-import { coachRoutes } from "./routes/coach";
+import { chatRoutes } from "./routes/chat";
 import { oauthRoutes } from "./routes/oauth";
 import { startScheduler } from "./lib/notifications/scheduler";
 import { SUPPORTED_SCOPES } from "./lib/oauth";
@@ -204,7 +204,7 @@ app.route("/push", pushRoutes);
 app.route("/auth", authRoutes);
 app.route("/notifications", notificationRoutes);
 app.route("/observer", observerRoutes);
-app.route("/coach", coachRoutes);
+app.route("/chat", chatRoutes);
 
 // MCP Streamable HTTP endpoint. Host allowlist enforced by mcpHostGate (mounted
 // above before authMiddleware so requests on a non-allowlisted Host get 404

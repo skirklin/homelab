@@ -1,28 +1,28 @@
 /**
- * Coach domain types — PM ↔ user chat channel (Phase C, see
- * apps/life/OBSERVER_BUILD_PLAN.md).
+ * Chat domain types — PM ↔ user chat channel (Phase C, see
+ * apps/life/OBSERVER_BUILD_PLAN.md). Renamed from `coach` before any deploy.
  *
  * Chat-shaped, owner-scoped, append-only. The "assistant" is the daily PM
  * cron in v1; a future realtime Claude Code SDK responder reads/writes the
  * same collection.
  */
 
-export type CoachMessageRole = "assistant" | "user";
+export type ChatMessageRole = "assistant" | "user";
 
-export type CoachMessageKind =
+export type ChatMessageKind =
   | "chat"
   | "question"
   | "deploy_request"
   | "feedback"
   | "note";
 
-export interface CoachMessage {
+export interface ChatMessage {
   id: string;
   owner: string;
-  role: CoachMessageRole;
+  role: ChatMessageRole;
   /** Markdown. */
   body: string;
-  kind: CoachMessageKind;
+  kind: ChatMessageKind;
   resolved: boolean;
   /** Optional structured payload (e.g. deploy_request: { sha, files[] }). `null` when absent. */
   meta: Record<string, unknown> | null;

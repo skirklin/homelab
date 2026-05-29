@@ -1,6 +1,7 @@
 /**
- * Coach backend interface — PM ↔ user chat channel (Phase C, see
+ * Chat backend interface — PM ↔ user chat channel (Phase C, see
  * apps/life/OBSERVER_BUILD_PLAN.md §"Phase C — PM ↔ user channel").
+ * Renamed from `coach` before any deploy; user-facing name is "Chat".
  *
  * Flat chat log, owner-scoped, append-only. The v1 "assistant" is the daily
  * PM cron; a future realtime Claude Code SDK responder reads/writes the
@@ -11,12 +12,12 @@
  * conversation tenant (the user), regardless of speaker.
  */
 import type {
-  CoachMessage,
-  CoachMessageKind,
-  CoachMessageRole,
-} from "../types/coach";
+  ChatMessage,
+  ChatMessageKind,
+  ChatMessageRole,
+} from "../types/chat";
 
-export interface ListCoachMessagesOptions {
+export interface ListChatMessagesOptions {
   /** Only return messages created strictly after this instant. */
   since?: Date;
   /** Page size cap. Default 50. */
@@ -25,34 +26,34 @@ export interface ListCoachMessagesOptions {
   resolved?: boolean;
 }
 
-export interface PostCoachMessageInput {
+export interface PostChatMessageInput {
   /** Conversation tenant (the user the channel belongs to). */
   owner: string;
-  role: CoachMessageRole;
+  role: ChatMessageRole;
   /** Markdown. */
   body: string;
   /** Defaults to `"chat"` if omitted. */
-  kind?: CoachMessageKind;
+  kind?: ChatMessageKind;
   /** Optional structured payload. */
   meta?: unknown;
 }
 
-export interface CoachBackend {
+export interface ChatBackend {
   /**
    * List messages for `userId`, newest-first. Supports `since` (created > since)
    * for "messages since my last tick" and `resolved` for "still-open questions."
    */
   listMessages(
     userId: string,
-    opts?: ListCoachMessagesOptions,
-  ): Promise<CoachMessage[]>;
+    opts?: ListChatMessagesOptions,
+  ): Promise<ChatMessage[]>;
 
   /** Get a single message by id, or `null` if not found. */
-  getMessage(id: string): Promise<CoachMessage | null>;
+  getMessage(id: string): Promise<ChatMessage | null>;
 
   /** Post a new message. Returns the created record. */
-  postMessage(input: PostCoachMessageInput): Promise<CoachMessage>;
+  postMessage(input: PostChatMessageInput): Promise<ChatMessage>;
 
   /** Flip `resolved = true`. Returns the updated record. */
-  resolveMessage(id: string): Promise<CoachMessage>;
+  resolveMessage(id: string): Promise<ChatMessage>;
 }

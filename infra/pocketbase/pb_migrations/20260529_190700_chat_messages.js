@@ -1,7 +1,10 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 /**
- * Create the `coach_messages` collection for the PM ↔ user "Coach" channel.
+ * Create the `chat_messages` collection for the PM ↔ user Chat channel.
+ *
+ * Renamed from `coach_messages` before any deploy; the user-facing name is
+ * "Chat".
  *
  * Chat-shaped, owner-scoped, append-only. The "assistant" is the daily PM
  * cron in v1; the chat-log model is chosen deliberately so a future realtime
@@ -29,8 +32,8 @@
 migrate(
   (app) => {
     try {
-      app.findCollectionByNameOrId("coach_messages");
-      console.log("  coach_messages: already exists, skipping");
+      app.findCollectionByNameOrId("chat_messages");
+      console.log("  chat_messages: already exists, skipping");
       return;
     } catch {
       // Collection doesn't exist, create it
@@ -42,7 +45,7 @@ migrate(
 
     const col = new Collection({
       type: "base",
-      name: "coach_messages",
+      name: "chat_messages",
       listRule: OWNER_RULE,
       viewRule: OWNER_RULE,
       createRule: OWNER_RULE,
@@ -95,20 +98,20 @@ migrate(
       indexes: [
         // Every read filters by owner and orders by created DESC. Compound
         // index makes that one B-tree lookup instead of two passes.
-        "CREATE INDEX idx_coach_messages_owner_created ON coach_messages (owner, created DESC)",
+        "CREATE INDEX idx_chat_messages_owner_created ON chat_messages (owner, created DESC)",
       ],
     });
 
     app.save(col);
-    console.log("  coach_messages: created");
+    console.log("  chat_messages: created");
   },
   (app) => {
     try {
-      const col = app.findCollectionByNameOrId("coach_messages");
+      const col = app.findCollectionByNameOrId("chat_messages");
       app.delete(col);
-      console.log("  coach_messages: deleted");
+      console.log("  chat_messages: deleted");
     } catch {
-      console.log("  coach_messages: already absent, skipping delete");
+      console.log("  chat_messages: already absent, skipping delete");
     }
   },
 );

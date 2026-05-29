@@ -22,7 +22,7 @@ export type UserOwnedCollection =
   | "life_logs"
   | "life_events"
   | "claude_observations"
-  | "coach_messages"
+  | "chat_messages"
   | "task_lists"
   | "tasks"
   | "task_events"
