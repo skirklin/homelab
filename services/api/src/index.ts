@@ -53,9 +53,10 @@ app.use("*", cors({
 }));
 
 // MCP-related endpoints (oauth + discovery + the /mcp route itself) live behind a
-// host allowlist so they're tailnet-only. Empty list = unrestricted (dev). Set
-// MCP_ALLOWED_HOSTS=mcp.tail56ca88.ts.net in k8s. The middleware short-circuits
-// non-allowed hosts with a 404 to avoid leaking the endpoint's existence.
+// host allowlist. Prod allows both the public host and the tailnet host:
+// MCP_ALLOWED_HOSTS=mcp.kirkl.in,mcp.tail56ca88.ts.net (see infra/k8s/api.yaml).
+// Empty list = unrestricted (dev). The middleware short-circuits non-allowed hosts
+// with a 404 to avoid leaking the endpoint's existence.
 const mcpAllowedHosts = (process.env.MCP_ALLOWED_HOSTS || "")
   .split(",")
   .map((s) => s.trim().toLowerCase())
@@ -72,7 +73,8 @@ const mcpHostGate = async (c: import("hono").Context, next: import("hono").Next)
 const MCP_ISSUER = process.env.MCP_ISSUER || "https://mcp.tail56ca88.ts.net";
 const MCP_RESOURCE = `${MCP_ISSUER}/mcp`;
 
-// OAuth discovery + endpoints (public, tailnet-only). Mounted before authMiddleware
+// OAuth discovery + endpoints (public — reachable at mcp.kirkl.in, also on tailnet).
+// Mounted before authMiddleware
 // so unauthenticated clients can complete the OAuth flow that issues the access
 // tokens authMiddleware will then validate.
 app.get("/.well-known/oauth-authorization-server", mcpHostGate, (c) => c.json({

@@ -174,7 +174,7 @@ Append-only. When a decision in the table above gets reversed, log it here.
 ## How the cron is wired (local, not remote)
 
 The user chose local cron over the Anthropic-cloud routine path because the cron-fired session needs access to things only available locally:
-- The homelab MCP server (tailnet-only — `mcp.tail56ca88.ts.net`)
+- The homelab MCP server (`mcp.kirkl.in` public, also `mcp.tail56ca88.ts.net` on tailnet)
 - The k3s cluster (via `kubectl`) for inspecting PB / api state
 - The Agent tool with `isolation: "worktree"` for dispatching sub-agents per the established repo pattern
 

@@ -53,6 +53,7 @@ k3s single-node cluster. Caddy pod handles TLS (Let's Encrypt) and reverse proxi
 | `me.kirkl.in` | homepage |
 | `api.kirkl.in` | pocketbase (direct) + functions (under `/fn/`) |
 | `registry.kirkl.in` | private Docker registry (auth required) |
+| `mcp.kirkl.in` | MCP server (Streamable HTTP + OAuth, public) |
 
 Home app also serves `/tasks/*` (unified task outliner).
 Money app is tailnet-only via Tailscale Serve (`https://homelab-0.tail56ca88.ts.net`).
@@ -198,8 +199,8 @@ Uses `HOMELAB_API_TOKEN` env var (an `hlk_`-prefixed API token). Tokens are crea
 ### MCP config
 `.mcp.json` at project root (gitignored) configures the MCP server for Claude Code. Uses the project's local `tsx` binary to run `services/api/src/mcp.ts` over stdio.
 
-### Remote MCP (tailnet)
-Same tools also exposed over Streamable HTTP at `https://mcp.tail56ca88.ts.net/mcp` for the Claude mobile app and other remote clients. Mounted on the Hono API service ([services/api/src/index.ts](services/api/src/index.ts)) behind `authMiddleware`, gated by `MCP_ALLOWED_HOSTS` to refuse requests on any other Host header. Each connection's caller-supplied token becomes the MCP server's identity for that session, so multi-user works without code changes.
+### Remote MCP (public + tailnet)
+Same tools also exposed over Streamable HTTP at `https://mcp.kirkl.in/mcp` (public) and `https://mcp.tail56ca88.ts.net/mcp` (tailnet) for the Claude mobile app and other remote clients. Mounted on the Hono API service ([services/api/src/index.ts](services/api/src/index.ts)) behind `authMiddleware`, gated by `MCP_ALLOWED_HOSTS` to refuse requests on any other Host header. Each connection's caller-supplied token becomes the MCP server's identity for that session, so multi-user works without code changes.
 
 Two ways to authenticate:
 - **Static `hlk_` API tokens** — used by Claude Code's `.mcp.json` (`type: "http"`, `headers.Authorization: "Bearer hlk_..."`). Tokens are minted in Settings → API Tokens.
