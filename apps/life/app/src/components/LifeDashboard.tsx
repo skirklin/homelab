@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Switch, Tooltip, DatePicker } from "antd";
-import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
+import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined, RobotOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -695,6 +695,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const menuItems = [
     { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate(journalTarget) },
     { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate(insightsTarget) },
+    { key: "observations", icon: <RobotOutlined />, label: "Observations", onClick: () => navigate("/observations") },
     { key: "display", icon: <ControlOutlined />, label: "Display Settings", onClick: () => setShowSettings(true) },
     { type: "divider" as const },
     { key: "export-csv", icon: <DownloadOutlined />, label: "Export CSV", onClick: () => handleExport("csv") },
@@ -718,6 +719,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         onClick={() => navigate(insightsTarget)}
       >
         Insights
+      </Button>
+      <Button
+        icon={<RobotOutlined />}
+        onClick={() => navigate("/observations")}
+      >
+        Observations
       </Button>
       <Button
         icon={<ControlOutlined />}
