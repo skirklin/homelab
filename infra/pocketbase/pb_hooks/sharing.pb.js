@@ -133,17 +133,73 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
     return e.json(400, { error: "Must provide invite code" });
   }
 
-  // Find the invite
+  // Find the invite by code — DELIBERATELY without `redeemed = false` so we
+  // can distinguish "never existed" (404) from "already redeemed" (which may
+  // be an idempotent retry by the same user — see below).
+  //
+  // Why this matters: the client's redemption effect fires under React 18
+  // StrictMode, where the effect cleanup runs `AbortController.abort()` and
+  // the effect re-runs. POST #1's client fetch is aborted but the server may
+  // have already started processing and marked the invite redeemed. POST #2
+  // then arrives, finds the invite redeemed, and previously got a 404 — even
+  // though the user is now an owner of the target. The fix: when the
+  // already-redeemed invite's target lists the caller as an owner, return
+  // success (the redeem already happened on their behalf). When it doesn't,
+  // someone else got there first — keep the existing 4xx (Playwright's
+  // "already-redeemed" test asserts this path).
   let invite;
   try {
-    invite = $app.findFirstRecordByFilter("sharing_invites", `code = {:code} && redeemed = false`, {
+    invite = $app.findFirstRecordByFilter("sharing_invites", `code = {:code}`, {
       code: code,
     });
   } catch {
     return e.json(404, { error: "Invalid or already redeemed invite" });
   }
 
-  // Check expiry
+  const targetType = invite.get("target_type");
+  const targetId = invite.get("target_id");
+  const userId = authRecord.id;
+  const alreadyRedeemed = invite.get("redeemed") === true;
+
+  // Resolve the target collection up front — needed for both the idempotent
+  // success check below and the normal redemption path.
+  let collection;
+  if (targetType === "box") {
+    collection = "recipe_boxes";
+  } else if (targetType === "recipe") {
+    collection = "recipes";
+  } else if (targetType === "travel_log") {
+    collection = "travel_logs";
+  } else {
+    return e.json(400, { error: "Unknown target type" });
+  }
+
+  // Idempotent retry: invite was already redeemed; if the authed user is
+  // already an owner of the target, the prior redeem was theirs — return
+  // success with the same payload as a fresh redemption would. We do NOT
+  // check expiry here: a successful past redemption shouldn't retroactively
+  // fail just because the invite has since expired.
+  if (alreadyRedeemed) {
+    try {
+      const target = $app.findRecordById(collection, targetId);
+      const owners = toJsArray(target.get("owners"));
+      if (owners.indexOf(userId) !== -1) {
+        return e.json(200, {
+          success: true,
+          target_type: targetType,
+          target_id: targetId,
+        });
+      }
+    } catch (_) {
+      // Target lookup failed — fall through to the 404 below. Either the
+      // target was deleted or the collection is wrong; surfacing the
+      // generic message matches the old behavior.
+    }
+    return e.json(404, { error: "Invalid or already redeemed invite" });
+  }
+
+  // Check expiry (only for not-yet-redeemed invites — an expired invite
+  // that hasn't been redeemed must not turn into a successful redemption).
   const expiresAt = invite.get("expires_at");
   if (expiresAt) {
     const expiry = new Date(expiresAt);
@@ -152,23 +208,8 @@ routerAdd("POST", "/api/sharing/redeem", (e) => {
     }
   }
 
-  const targetType = invite.get("target_type");
-  const targetId = invite.get("target_id");
-  const userId = authRecord.id;
-
   // Add user to owners of the target
   try {
-    let collection;
-    if (targetType === "box") {
-      collection = "recipe_boxes";
-    } else if (targetType === "recipe") {
-      collection = "recipes";
-    } else if (targetType === "travel_log") {
-      collection = "travel_logs";
-    } else {
-      return e.json(400, { error: "Unknown target type" });
-    }
-
     const target = $app.findRecordById(collection, targetId);
     const owners = toJsArray(target.get("owners"));
 

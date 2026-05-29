@@ -77,12 +77,14 @@ function loadSharingHook(): LoadedHooks {
 
   const $app = {
     findFirstRecordByFilter: (collection: string, filter: string, params: Record<string, unknown>) => {
-      // sharing.pb.js calls this for `sharing_invites` with `code = {:code} && redeemed = false`.
-      // We honor that exact shape.
+      // sharing.pb.js calls this for `sharing_invites` with `code = {:code}`
+      // (no `redeemed = false` filter — the hook now does that check itself
+      // so it can return idempotent success for a same-user retry against an
+      // already-redeemed invite).
       void filter;
       const code = String(params.code);
       for (const r of records.values()) {
-        if (r._fields.__collection === collection && r._fields.code === code && r._fields.redeemed === false) {
+        if (r._fields.__collection === collection && r._fields.code === code) {
           return r;
         }
       }
@@ -229,6 +231,81 @@ describe("sharing.pb.js POST /api/sharing/redeem — travel_slugs goja []byte de
     expect(final["old"]).toBe("PREVLOG0000001");
     expect(final["family-trips"]).toBe(travelLog.id);
     expect(invite._fields.redeemed).toBe(true);
+  });
+
+  it("returns idempotent success when the same user retries an already-redeemed invite", () => {
+    // Race scenario: client fires POST #1 → effect cleanup aborts the fetch
+    // → server completes the redeem anyway → effect re-runs and POST #2 hits
+    // the already-redeemed invite. The user IS already in the target's
+    // owners (POST #1 put them there); the hook must surface success so the
+    // client redirects to the box instead of rendering "could not redeem".
+    hooks.records.clear();
+    hooks.saved.length = 0;
+
+    const userId = "USER0000000001";
+    const box = makeRecord("BOX00000000001", {
+      __collection: "recipe_boxes",
+      name: "Already Joined",
+      owners: [userId, "ORIGINALOWNER0"],
+    });
+    const invite = makeRecord("INVITE00000003", {
+      __collection: "sharing_invites",
+      code: "RETRY123",
+      redeemed: true,
+      redeemed_by: userId,
+      target_type: "box",
+      target_id: box.id,
+      expires_at: "",
+    });
+    hooks.records.set(box.id, box);
+    hooks.records.set(invite.id, invite);
+
+    const { e, responses } = makeEvent(userId, "RETRY123");
+    hooks.postRedeem(e);
+
+    expect(responses.length).toBe(1);
+    expect(responses[0].status).toBe(200);
+    expect(responses[0].body).toEqual({
+      success: true,
+      target_type: "box",
+      target_id: box.id,
+    });
+    // No writes — this is purely an idempotent confirmation.
+    expect(hooks.saved.length).toBe(0);
+  });
+
+  it("rejects a different user trying to redeem an already-redeemed invite", () => {
+    // The "single-use" guarantee still holds for OTHER users. The Playwright
+    // already-redeemed test asserts this 4xx path.
+    hooks.records.clear();
+    hooks.saved.length = 0;
+
+    const firstUserId = "FIRSTUSER00001";
+    const secondUserId = "SECONDUSER0001";
+    const box = makeRecord("BOX00000000002", {
+      __collection: "recipe_boxes",
+      name: "Single Use",
+      owners: [firstUserId],
+    });
+    const invite = makeRecord("INVITE00000004", {
+      __collection: "sharing_invites",
+      code: "ONCEONLY",
+      redeemed: true,
+      redeemed_by: firstUserId,
+      target_type: "box",
+      target_id: box.id,
+      expires_at: "",
+    });
+    hooks.records.set(box.id, box);
+    hooks.records.set(invite.id, invite);
+
+    const { e, responses } = makeEvent(secondUserId, "ONCEONLY");
+    hooks.postRedeem(e);
+
+    expect(responses.length).toBe(1);
+    expect(responses[0].status).toBe(404);
+    // Same generic error message as before — clients key off the status.
+    expect(hooks.saved.length).toBe(0);
   });
 
   it("does not double-map an already-redeemed target (hook short-circuits)", () => {
