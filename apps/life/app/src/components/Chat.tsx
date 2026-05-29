@@ -65,18 +65,61 @@ function KindBadge({ kind }: { kind: ChatMessageKind }) {
 }
 
 // ---------------------------------------------------------------------------
+// Mapper
+// ---------------------------------------------------------------------------
+
+// POST /chat/messages returns the raw PB record (no field renames; PB JSON
+// columns parse to plain objects at the SDK layer). Mirror what the backend's
+// `messageFromRecord` does so the swapped-in record is type-identical to what
+// `useChatBackend().listMessages()` yields — same shape Timeline renders.
+function messageFromApiRecord(raw: unknown): ChatMessage {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const rawMeta = r.meta;
+  const meta =
+    rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+      ? (rawMeta as Record<string, unknown>)
+      : null;
+  return {
+    id: String(r.id ?? ""),
+    owner: String(r.owner ?? ""),
+    role: r.role as ChatMessage["role"],
+    body: (r.body as string) ?? "",
+    kind: (r.kind as ChatMessageKind) ?? "chat",
+    resolved: !!r.resolved,
+    meta,
+    created: new Date((r.created as string) ?? Date.now()),
+    updated: new Date((r.updated as string) ?? Date.now()),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Styled
 // ---------------------------------------------------------------------------
+
+// Wrap header + container in a flex column pinned to the dynamic viewport
+// height so the composer reliably hugs the bottom on iOS PWAs (where the
+// home-bar / address-bar dance makes 100vh wrong) and notched devices
+// (where AppHeader expands to cover env(safe-area-inset-top), making any
+// hardcoded header offset wrong). `100dvh` was designed for exactly this
+// case; the previous `calc(100vh - 64px)` clipped the composer below the
+// visible viewport on iOS PWA with a notch (real header ≈ 52px + space-sm +
+// safe-area-inset-top, not 64px).
+const ChatShell = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+`;
 
 // The page itself becomes a flex column so the timeline scrolls and the
 // composer sits flush at the bottom. PageContainer adds its own padding;
 // we override the bottom padding to 0 so the sticky composer hugs the edge.
+// `min-height: 0` is required so the inner flex children (Timeline) can
+// actually overflow + scroll instead of forcing the parent to grow.
 const ChatPageContainer = styled(PageContainer)`
   display: flex;
   flex-direction: column;
-  /* Leave room for AppHeader. 64px is the desktop header; mobile may be smaller
-     but this is a safe upper bound — flex layout reflows fine. */
-  height: calc(100vh - 64px);
+  flex: 1;
+  min-height: 0;
   padding-bottom: 0;
 `;
 
@@ -268,9 +311,13 @@ export function Chat() {
         throw new Error(errBody.error || `HTTP ${res.status}`);
       }
 
-      // Re-pull the canonical list so we drop the optimistic placeholder and
-      // pick up server-assigned id + timestamps. listLimit = 100 keeps it cheap.
-      await loadMessages();
+      // Server accepted the POST and returned the canonical record. Swap the
+      // optimistic placeholder in place — do NOT refetch. A refetch that
+      // failed (network blip *after* the server already wrote the row) would
+      // revert the optimistic insert and prompt the user to retry, producing
+      // a duplicate on the server. Inline swap closes that window.
+      const created = messageFromApiRecord(await res.json());
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? created : m)));
     } catch (e) {
       // Revert the optimistic insert; surface inline error so the user can retry.
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -280,7 +327,7 @@ export function Chat() {
     } finally {
       setSending(false);
     }
-  }, [draft, sending, user?.uid, loadMessages]);
+  }, [draft, sending, user?.uid]);
 
   const handleResolve = useCallback(async (id: string) => {
     // Optimistic flip.
@@ -322,7 +369,7 @@ export function Chat() {
   ];
 
   return (
-    <>
+    <ChatShell>
       <AppHeader title="Chat" onBack={() => navigate("/")} menuItems={menuItems} />
 
       <ChatPageContainer>
@@ -409,7 +456,7 @@ export function Chat() {
         </Composer>
         {sendError && <ErrorText role="alert">{sendError}</ErrorText>}
       </ChatPageContainer>
-    </>
+    </ChatShell>
   );
 }
 

@@ -135,18 +135,27 @@ describe("Chat", () => {
     expect(screen.getByRole("button", { name: /Mark resolved/i })).toBeInTheDocument();
   });
 
-  it("send flow: posts the message and refetches the list", async () => {
+  it("send flow: posts the message and swaps in the canonical server record", async () => {
     const user = userEvent.setup();
-    // First call: initial empty list. Second call: post-send refetch returns
-    // the canonical server record.
-    mockChatBackend.listMessages
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        makeMessage({ id: "server1", role: "user", body: "hello from test" }),
-      ]);
+    // Initial list is empty. The POST response (the raw PB record shape) is
+    // mapped client-side and swapped in over the optimistic placeholder —
+    // there is intentionally NO refetch (a refetch failure after a successful
+    // POST would prompt the user to retry, duplicating the message server-side).
+    mockChatBackend.listMessages.mockResolvedValueOnce([]);
     (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ id: "server1" }),
+      json: () =>
+        Promise.resolve({
+          id: "server1",
+          owner: "user123",
+          role: "user",
+          body: "hello from test",
+          kind: "chat",
+          resolved: false,
+          meta: null,
+          created: "2026-05-29T12:00:01.000Z",
+          updated: "2026-05-29T12:00:01.000Z",
+        }),
     });
 
     renderChat();
@@ -160,9 +169,9 @@ describe("Chat", () => {
     const sendBtn = screen.getByRole("button", { name: /Send/i });
     await user.click(sendBtn);
 
-    // The optimistic insert appears immediately; then the refetch swaps in the
-    // canonical record. Asserting the body is visible covers both cases since
-    // they share the text.
+    // The optimistic insert appears immediately; then the inline swap
+    // replaces it with the canonical server record. Asserting the body is
+    // visible covers both cases since they share the text.
     await screen.findByText("hello from test");
 
     // POST hit the chat endpoint with the right payload.
@@ -176,8 +185,12 @@ describe("Chat", () => {
       );
     });
 
-    // After the refetch, the textarea is cleared.
+    // After the send, the textarea is cleared.
     expect((textarea as HTMLTextAreaElement).value).toBe("");
+
+    // Crucially: listMessages was called exactly once (the initial mount
+    // load). No post-send refetch — that's the whole point of fix #3.
+    expect(mockChatBackend.listMessages).toHaveBeenCalledTimes(1);
   });
 
   it("resolve flow: clicking Mark resolved POSTs to /resolve and flips the badge", async () => {
