@@ -3,11 +3,11 @@ import { useContext, useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Button, Input, Popconfirm, Spin, Tooltip } from 'antd';
 import { Context } from '../context';
-import { getAppUserFromState, getRecipeFromState, getUserFromState } from '../state';
+import { getAppUserFromState, getRecipeFromState } from '../state';
 import { getRecipeData } from '../storage';
 import type { RecipeCardProps } from './RecipeCard';
 import { useRecipesBackend } from '@kirkl/shared';
-import { useAuth, useFeedback } from '@kirkl/shared';
+import { useAuth, useFeedback, useUserNames } from '@kirkl/shared';
 import type { CookingLogEvent, LifeEntry } from '@homelab/backend';
 import { CookingLogDiffModal } from './CookingLogDiffModal';
 
@@ -164,10 +164,9 @@ function CookingLog(props: RecipeCardProps) {
     };
   }, [boxId, recipeId, recipesBackend]);
 
-  const getUserName = (userId: string): string => {
-    const logUser = getUserFromState(state, userId);
-    return logUser?.name || 'Someone';
-  };
+  const userNames = useUserNames(events.map((e) => e.createdBy));
+
+  const getUserName = (userId: string): string => userNames.get(userId) || 'Someone';
 
   const canEdit = (event: CookingLogEvent): boolean => {
     return currentUser?.id === event.createdBy;
