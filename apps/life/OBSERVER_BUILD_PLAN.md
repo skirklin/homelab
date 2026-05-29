@@ -167,6 +167,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-05-28 | DISPATCH P0-3 + critical review | P0-3 built in worktree `agent-a27ee4d1` (commit `ceca60b`): generate endpoint + prompt.ts + MCP tool + 9 tests. Review: 0 blockers, 3 should-fixes deferred. Ready to merge. |
 | 2026-05-29 | MERGE P0-3 + DISPATCH P0-4 + P0-5 | Merged P0-3 to main. Dispatched P0-4 (weekly CronJob) and P0-5 (observations UI) in parallel — both agents running. |
 | 2026-05-29 | OOB (in-conversation): critical-review + MERGE P0-4 + P0-5 → Phase 0 COMPLETE | Reviewed both deferred from the cron's budget edge. P0-4 had a blocker (stale `/fn` in-cluster URL) fixed before merge (`a1d3adf`). P0-5 clean, merged (`8a0e066`). All five Phase 0 items now on main; loop closed pending deploy. Should-fixes queued in Phase 1+. |
+| 2026-05-29 | Scott asked for better PM↔user channel → designed + built Phase C v1 (C1+C2) | Diagnosed PM-runs-open-loop gap. Designed "Chat" v1 (flat chat-log, daily cron = responder, chat-shaped for additive realtime-SDK swap later). C1 (`8053f61`) + rename Coach→Chat + C2 `/chat` UI + dashboard entry (`7358525`) merged. Three should-fixes folded in pre-merge. Phase C is 2/4 done; C3 (push) + C4 (cron prompt — Scott to shape voice/questions/cadence) pending. |
 
 ## Decision log
 
@@ -188,10 +189,10 @@ Append-only. When a decision in the table above gets reversed, log it here.
 - Scott posts; the next tick reads recent messages, answers open ones, posts deploy-requests + 1–2 UX questions about recently shipped features.
 
 **Work items:**
-- **C1 — collection + backend + MCP tools** (foundation; everything depends on it). `chat_messages` migration (+ authz mirror), `ChatBackend` interface + PB impl + `useChatBackend()`, and MCP tools `list_chat_messages` / `post_chat_message` / `resolve_chat_message`. Mirror P0-1's structure + the observer MCP tool. **Status: dispatched 2026-05-29 (originally as "Coach"; renamed to "Chat" pre-deploy alongside C2).**
-- **C2 — `/chat` chat UI in the life app.** Timeline (assistant/user), compose box, resolve affordance, dashboard entry point + unread badge. Markdown render (react-markdown).
-- **C3 — push nudge.** When the assistant posts, fire a push (reuse VAPID infra) so Scott sees it rather than discovering it in-app.
-- **C4 — cron prompt update.** Each tick: read chat messages since last tick → answer unaddressed user messages → post deploy-requests for merged-but-undeployed work → ask 1–2 UX questions about recent ships. User-facing comms move to Chat; the daily log stays as internal cron state.
+- **C1 — collection + backend + MCP tools** (foundation; everything depends on it). `chat_messages` migration (+ authz mirror), `ChatBackend` interface + PB impl + `useChatBackend()`, and MCP tools `list_chat_messages` / `post_chat_message` / `resolve_chat_message`. **Status: ✓ MERGED 2026-05-29 (merge commit `8053f61`).** Worktree `agent-ae65f76c601a0b61d` (commit `b40f572`). Critically reviewed clean. Authz mirror baked in from start.
+- **C2 — `/chat` chat UI in the life app.** Timeline (assistant/user), compose box, resolve affordance, dashboard entry point + unread badge. Markdown render (react-markdown). **Status: ✓ MERGED 2026-05-29 (merge commit `7358525`).** Worktree `agent-adc78f2fede7f1d82` (commits `8d786f6` rename + `dbf71ff` UI + `1991be2` should-fixes). Renamed "Coach" → "Chat" pre-deploy in the same branch. Critically reviewed; 3 should-fixes applied before merge (iOS PWA viewport via `100dvh`, unread badge cap 100→500, phantom-duplicate on refetch-failure → POST-response inline swap).
+- **C3 — push nudge.** When the assistant posts, fire a push (reuse VAPID infra) so Scott sees it rather than discovering it in-app. **Status: pending.**
+- **C4 — cron prompt update.** Each tick: read chat messages since last tick → answer unaddressed user messages → post deploy-requests for merged-but-undeployed work → ask 1–2 UX questions about recent ships. User-facing comms move to Chat; the daily log stays as internal cron state. **Status: pending — Scott should shape the prompt (assistant's voice / what UX questions to ask / cadence) before this is dispatched.**
 
 **Note: the channel only goes live after a deploy** (UI + collection + MCP must reach prod) — bootstrapping the deploy-nudge channel itself requires a manual deploy.
 
