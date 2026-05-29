@@ -379,7 +379,7 @@ spec:
                     -H "Content-Type: application/json" \
                     -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
                     -d "{\"period\":\"weekly\",\"window_start\":\"$WINDOW_START\",\"window_end\":\"$WINDOW_END\"}" \
-                    http://functions.homelab.svc.cluster.local:3000/fn/observer/generate
+                    http://functions.homelab.svc.cluster.local:3000/observer/generate
                   echo "[observer-weekly] done"
               envFrom:
                 - secretRef:
