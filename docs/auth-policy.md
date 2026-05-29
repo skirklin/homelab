@@ -19,7 +19,7 @@
 | **Account takeover via PB direct write** | An authed user POSTing directly to PB (not the API service) to forge an `api_tokens` row pointing at a victim. | Permanent token foothold under the victim's identity. (Fixed in migration 0024: `api_tokens.createRule` now requires `user = @request.auth.id`.) |
 | **Privilege escalation via forged role** | A user-minted `hlk_` token that the operator did not intend to grant infra access to, but the holder edits PB or POSTs with `roles: ["infra"]`. | Write access to global infra state — falsify deployment history, inject pod events, retention-delete real events. |
 | **OAuth code/token reuse and refresh-token replay** | Network attacker who captures a single authz code or refresh token. | Persistent foothold via reissued access tokens. (Mitigated: codes are single-use via DELETE in `oauth.ts:519`; refresh-token reuse triggers family revoke per `oauth.ts:555-559,587-601`.) |
-| **MCP server exposure to the open internet** | Public traffic hitting the OAuth issuer + `/mcp` at `mcp.kirkl.in` (publicly reachable by design so Claude mobile/desktop can connect off-tailnet). | Discovery endpoints are intentionally public; the `/mcp` resource requires a valid `hlk_`/`mcpat_` token, so issuer discovery alone grants nothing. The `mcpHostGate` in `index.ts:64-70` 404s any host outside `MCP_ALLOWED_HOSTS` (`mcp.kirkl.in` + the tailnet host), so the endpoint isn't reachable via arbitrary Host headers. |
+| **MCP server exposure to the open internet** | Public traffic hitting the OAuth issuer + `/mcp` at `mcp.kirkl.in` (publicly reachable by design so Claude mobile/desktop can connect off-tailnet). | Discovery endpoints are intentionally public; the `/mcp` resource requires a valid `hlk_`/`mcpat_` token, so issuer discovery alone grants nothing. The `mcpHostGate` in `index.ts:65-71` 404s any host outside `MCP_ALLOWED_HOSTS` (`mcp.kirkl.in` + the tailnet host), so the endpoint isn't reachable via arbitrary Host headers. |
 | **PII in committed fixtures or logs** | Future contributor pushes a money fixture that wasn't scrubbed. | Bank account numbers, transaction details visible in git history. (Mitigated by `services/ingest/scripts/scrub_fixture.py` with `--check`.) |
 
 ### 1.2 What we explicitly do **not** defend against
@@ -222,7 +222,7 @@ requireAnyRole(c, ...roles: string[]): Response | null  // future, if needed
 requireAllRoles(c, ...roles: string[]): Response | null // future
 ```
 
-**Opinion: `requireInfraRole` should be generalized to `requireRole(c, "infra")` now, not later.** It's a four-line function whose name encodes the role at call-site. Inlining the role name as a string lowers the cost of adding a second role from "edit two files and rename a function" to "change one literal." File:line where this lives today: `data.ts:2636-2642`.
+**Done: `requireInfraRole` has been generalized to `requireRole(c, "infra")`.** It's a short function whose role is passed as a string at the call-site. Inlining the role name keeps the cost of adding a second role to "change one literal." File:line where this lives today: `requireRole` is defined in `lib/authz.ts:271`; the infra call-sites are in `data.ts` (e.g. `data.ts:2640`).
 
 ```ts
 // proposed shape, lib/authz.ts
@@ -573,8 +573,8 @@ Token storage         SHA-256 hex on disk; raw shown once
 Admin PB client       services/api/src/lib/pb.ts → getAdminPb()
 Auth context keys     userId, userEmail, userToken, isApiKey, tokenRoles, pb
 Cache TTL             30s, keyed by hashToken(raw)
-Issuer                process.env.MCP_ISSUER (prod: https://mcp.tail56ca88.ts.net)
-MCP host gate         services/api/src/index.ts:55-61
+Issuer                process.env.MCP_ISSUER (prod: https://mcp.kirkl.in)
+MCP host gate         services/api/src/index.ts:65-71
 ```
 
 ### 9.4 When in doubt

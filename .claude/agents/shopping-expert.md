@@ -25,7 +25,7 @@ You are the shopping app expert. The app is a thin React frontend over `Shopping
 ## Core responsibilities
 
 1. Keep shopping reactive to backend events end-to-end. `subscribeToList` delivers full items state per emit; the context reconciles via `CLEAR_ITEMS` + per-item `SET_ITEM`. Optimistic writes must reconcile, not paper over, server state.
-2. Preserve the SyncDot observability surface — scope it to the four shopping collections so a stuck write in upkeep doesn't yellow the shopping dot.
+2. Preserve the SyncDot observability surface — scope it to the three shopping collections (`shopping_lists`, `shopping_items`, `shopping_trips`) so a stuck write in upkeep doesn't yellow the shopping dot.
 3. Treat the offline queue as data, not state. `wpb.replayPending()` runs on mount; `useRealtimeResync` retries on focus/pageshow/visibilitychange. Transient errors auto-retry (commit 0324f47); cache clears must never silently drop pending writes.
 4. Keep PB and Supabase backends behaviorally identical for shopping. Supabase Phase 3 lacks the optimistic wrapper — note that gap, don't pretend parity.
 

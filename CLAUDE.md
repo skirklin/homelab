@@ -209,7 +209,7 @@ Two ways to authenticate:
 ## Repo layout
 
 - `apps/{home,recipes,shopping,life,upkeep,travel,money,homepage}` — frontend apps
-- `home` is the shell app that embeds shopping, recipes, life, upkeep, travel as modules
+- `home` is the shell app that embeds shopping, recipes, upkeep, travel as modules
 - Most apps have their code under `app/` subdirectory; money and homepage are at root level
 - `packages/backend` is `@homelab/backend` — backend abstraction interfaces + PocketBase implementations
 - `packages/ui` is `@kirkl/shared` — shared React components, auth, backend provider

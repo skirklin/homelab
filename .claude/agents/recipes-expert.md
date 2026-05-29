@@ -10,9 +10,9 @@ You are the recipes app expert. Data is nested (box → recipes → `recipeIngre
 
 ## When to invoke
 
-- **Data shape change.** Touch PB migrations under `infra/pocketbase/pb_migrations/`, Supabase DDL+RLS, both mappers (pocketbase/recipes.ts:41 `recipeFromRecord`, supabase/recipes.ts:92 `recipeFromRow`), `recipeDataSchema` in mcp.ts:499, and the surgical ops at mcp.ts:540-700.
+- **Data shape change.** Touch PB migrations under `infra/pocketbase/pb_migrations/`, Supabase DDL+RLS, both mappers (pocketbase/recipes.ts:41 `recipeFromRecord`, supabase/recipes.ts:92 `recipeFromRow`), `recipeDataSchema` in mcp.ts:646, and the surgical ops at mcp.ts:540-700.
 - **Scraper regression.** `scrapeRecipesFromUrl` in scraper.ts:73 extracts `script[type="application/ld+json"]`, unwraps `@graph`, filters `@type === "Recipe"`, handles Cloudflare "Just a moment" titles. No per-site selectors — return empty if no JSON-LD.
-- **AI generation.** `generate_recipe` at mcp.ts:462; output validates against `recipeDataSchema`.
+- **AI enrichment.** No `generate_recipe` MCP tool exists. The AI path is recipe *enrichment*: `POST /ai/enrich` (`aiRoutes.post("/enrich")` in `services/api/src/routes/ai.ts`, public under `/fn/ai/enrich`) sends an existing recipe to Claude and writes the result to `recipes.pending_changes` (`{description, suggestedTags, stepIngredients}` via `parseAIResponse`) with `enrichment_status = "pending"` — it does *not* validate against `recipeDataSchema` and has no MCP equivalent.
 - **Sharing.** Invite redemption in `pb_hooks/sharing.pb.js:13` (route `POST /api/sharing/redeem`, migration `0002_sharing_invites.js`); hook wires `recipe_boxes` onto the redeemer, recipe-level shares add the parent box too.
 - **Backend parity (Phase 3).** PB is authoritative; Supabase `RecipesBackend` shipped 2026-05-16 (`8e4471d`) without optimistic writes. Visibility cascades enforced by Supabase RLS. PB uses `wrapPocketBase` from `packages/backend/src/wrapped-pb/` for optimistic writes + cache reads.
 

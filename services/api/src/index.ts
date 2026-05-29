@@ -205,8 +205,8 @@ app.route("/notifications", notificationRoutes);
 app.route("/observer", observerRoutes);
 
 // MCP Streamable HTTP endpoint. Host allowlist enforced by mcpHostGate (mounted
-// above before authMiddleware so non-tailnet probes get 404 without revealing
-// the auth challenge); the global authMiddleware then validates the token.
+// above before authMiddleware so requests on a non-allowlisted Host get 404
+// without revealing the auth challenge); the global authMiddleware then validates the token.
 app.all("/mcp", async (c) => {
   const userToken = c.get("userToken");
   const server = buildMcpServer(userToken);

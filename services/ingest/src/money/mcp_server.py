@@ -1,4 +1,10 @@
-"""MCP server exposing the money database to Claude Code and Claude Desktop."""
+"""Legacy standalone MCP server over the money database.
+
+Not currently wired into any Claude client: Claude Code/mobile/desktop reach the
+money tools through the TypeScript HTTP MCP in services/api (which proxies to this
+ingest service's read API). This module is not a registered script entry point and
+is slated for retirement once money migrates to PocketBase (see MIGRATION.md).
+"""
 
 import json
 import sqlite3
