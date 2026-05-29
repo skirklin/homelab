@@ -135,6 +135,9 @@ importers:
       react-dom:
         specifier: ^18.0.0 || ^19.0.0
         version: 19.2.4(react@19.2.4)
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.14)(react@19.2.4)
       react-router-dom:
         specifier: ^6.0.0
         version: 6.30.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

@@ -25,6 +25,7 @@
     "antd": "^5.29.3",
     "dayjs": "^1.11.10",
     "pocketbase": "^0.25.0",
+    "react-markdown": "^10.1.0",
     "recharts": "^3.6.0",
     "styled-components": "^6.1.19"
   },

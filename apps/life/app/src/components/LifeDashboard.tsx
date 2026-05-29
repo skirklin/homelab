@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Button, Switch, Tooltip, DatePicker } from "antd";
-import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined, RobotOutlined } from "@ant-design/icons";
+import { Button, Switch, Tooltip, DatePicker, Badge } from "antd";
+import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined, RobotOutlined, MessageOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   useAuth,
@@ -43,7 +43,7 @@ import {
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
 } from "../messaging";
-import { useLifeBackend } from "@kirkl/shared";
+import { useLifeBackend, useChatBackend } from "@kirkl/shared";
 
 // Helper to get date string for comparison (YYYY-MM-DD) in local timezone
 function getDateString(date: Date): string {
@@ -273,7 +273,13 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const { state } = useLifeContext();
   const navigate = useNavigate();
   const life = useLifeBackend();
+  const chat = useChatBackend();
   const wpbDebug = useWpbDebug();
+  // Count of *unresolved* assistant messages whose kind needs a reply
+  // (question / deploy_request). Refetched on mount + tab re-engagement so
+  // the user sees an updated count after returning from /chat. v1 polls; a
+  // realtime subscription is future work alongside C3 (push nudge).
+  const [chatUnread, setChatUnread] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -544,6 +550,36 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     setNotificationsEnabled(status === "granted");
   }, []);
 
+  // Chat unread badge — count unresolved assistant messages of kind
+  // {question, deploy_request}. Fetched on mount + each visibility flip so a
+  // returning user sees a current count without a hard refresh. Failures are
+  // swallowed (the badge just shows 0).
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    const fetchUnread = async () => {
+      try {
+        const list = await chat.listMessages(user.uid, { resolved: false, limit: 100 });
+        if (cancelled) return;
+        const n = list.filter(
+          (m) => m.role === "assistant" && (m.kind === "question" || m.kind === "deploy_request"),
+        ).length;
+        setChatUnread(n);
+      } catch {
+        // Quiet failure — the badge stays at the previous value (or 0 on first mount).
+      }
+    };
+    fetchUnread();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchUnread();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user?.uid, chat]);
+
   // Handle quick response submission (from notification action buttons).
   // questionId is the trackable id (all sample questions point at ratings).
   const handleQuickResponse = useCallback(async (questionId: string, value: number) => {
@@ -696,6 +732,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate(journalTarget) },
     { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate(insightsTarget) },
     { key: "observations", icon: <RobotOutlined />, label: "Observations", onClick: () => navigate("/observations") },
+    {
+      key: "chat",
+      icon: <MessageOutlined />,
+      label: chatUnread > 0 ? `Chat (${chatUnread})` : "Chat",
+      onClick: () => navigate("/chat"),
+    },
     { key: "display", icon: <ControlOutlined />, label: "Display Settings", onClick: () => setShowSettings(true) },
     { type: "divider" as const },
     { key: "export-csv", icon: <DownloadOutlined />, label: "Export CSV", onClick: () => handleExport("csv") },
@@ -726,6 +768,14 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
       >
         Observations
       </Button>
+      <Badge count={chatUnread} size="small" offset={[-4, 4]}>
+        <Button
+          icon={<MessageOutlined />}
+          onClick={() => navigate("/chat")}
+        >
+          Chat
+        </Button>
+      </Badge>
       <Button
         icon={<ControlOutlined />}
         onClick={() => setShowSettings(true)}
