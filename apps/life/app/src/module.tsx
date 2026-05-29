@@ -17,6 +17,7 @@ import { useEntriesSubscription } from "./subscription";
 
 const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
 const Journal = lazy(() => import("./components/Journal").then(m => ({ default: m.Journal })));
+const Observations = lazy(() => import("./components/Observations").then(m => ({ default: m.Observations })));
 
 const LoadingContainer = styled.div`
   display: flex;
@@ -84,6 +85,11 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
         <Route path="/journal" element={
           <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
             <Journal />
+          </Suspense>
+        } />
+        <Route path="/observations" element={
+          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+            <Observations />
           </Suspense>
         } />
         <Route path="*" element={<NotFound homePath="/" />} />
