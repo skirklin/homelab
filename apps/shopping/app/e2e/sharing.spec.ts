@@ -11,8 +11,8 @@ import { createList, itemInput } from "./helpers";
 
 test.describe("List sharing", () => {
   test("user A creates a list, user B joins via share link", async ({ authedPage: page }) => {
-    // User A creates a list. createList() adds a per-run suffix so we
-    // don't collide with leftover lists from prior runs.
+    // User A creates a list. globalSetup wipes lists + clears slug maps before
+    // each run, so a stable name can't collide with leftovers.
     const listName = await createList(page, "Share Test");
 
     // Open the share modal and grab the join URL

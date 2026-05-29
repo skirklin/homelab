@@ -1,37 +1,27 @@
 /**
  * Shared Playwright helpers for the shopping app.
  *
- * The test PB instance accumulates data across runs (no teardown). Tests
- * that hard-code list names collide on the second run because the slug
- * already exists in the user's slug map and ListPicker.handleCreateList
- * silently refuses to create a duplicate. Every list name passed through
- * `createList` is suffixed with a per-process run id so re-running an
- * isolated spec stays green without manual PB wipes.
+ * List names are used verbatim — no per-run suffix. globalSetup
+ * (`setupTestEnv`) wipes shopping_items / shopping_lists / shopping_trips AND
+ * clears every user's `shopping_slugs` map before each run, so the
+ * cross-run slug collision that the old RUN_ID suffix worked around can't
+ * happen: the next run starts with no lists and an empty slug map. (Inside a
+ * run, workers:1 means no concurrent list creation, and every spec uses the
+ * value `createList` returns rather than re-deriving the name, so a stable
+ * label is safe.)
  */
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
-
-/** Per-process suffix so re-running an isolated spec doesn't collide
- *  with leftover lists from a prior run. Combine with the caller-supplied
- *  name to keep test intent legible in failure screenshots. */
-export const RUN_ID = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4).toString(36)}`;
-
-/** Build a unique-per-run list name from a stable test-readable label. */
-export function uniqueListName(label: string): string {
-  return `${label} ${RUN_ID}`;
-}
 
 /** The add-item ingredient input is an Ant Design AutoComplete, which
  *  exposes the inner element as role=combobox. */
 export const itemInput = (page: Page) => page.getByRole("combobox");
 
 /**
- * Click "New List", fill the create modal, and wait for the list view.
- * The supplied `label` is wrapped with a per-run suffix so multiple test
- * runs against the same PB don't fight for the same slug.
+ * Click "New List", fill the create modal with `name`, and wait for the list
+ * view. Returns `name` so callers can reference the created list.
  */
-export async function createList(page: Page, label: string): Promise<string> {
-  const name = uniqueListName(label);
+export async function createList(page: Page, name: string): Promise<string> {
   await page.getByRole("button", { name: /New List/ }).click();
   await expect(page.getByText("Create New List")).toBeVisible();
   await page.locator(".ant-modal input").fill(name);

@@ -15,46 +15,19 @@
 import { test as base, expect, type Page, type BrowserContext, type Browser } from "@playwright/test";
 import PocketBase from "pocketbase";
 import { resolveTestPbUrl } from "@kirkl/vite-preset";
+import { newAdminPb } from "@kirkl/shared/test-utils";
 
 // playwright.config.ts sets PB_TEST_URL at config load — but fall back to
 // the helper anyway so manual invocations / one-off tsx runs still hit
 // the per-worktree PB instead of silently landing on :8091 (which on a
 // parallel-sessions machine is some other worktree's database).
 const PB_URL = process.env.PB_TEST_URL || resolveTestPbUrl();
-const ADMIN_EMAIL = "test-admin@test.local";
-const ADMIN_PASSWORD = "testpassword1234";
 const USER_PASSWORD = "testpassword123";
 
 export interface TestUser {
   id: string;
   email: string;
   name: string;
-}
-
-/**
- * Create a superuser-authed PB client. Idempotent — if no superuser exists,
- * creates the canonical test admin; otherwise just signs in.
- */
-export async function newAdminPb(): Promise<PocketBase> {
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
-  } catch {
-    try {
-      await pb.collection("_superusers").create({
-        email: ADMIN_EMAIL,
-        password: ADMIN_PASSWORD,
-        passwordConfirm: ADMIN_PASSWORD,
-      });
-      await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
-    } catch (e) {
-      throw new Error(
-        `Failed to auth as PB admin at ${PB_URL}: ${(e as Error).message}`
-      );
-    }
-  }
-  return pb;
 }
 
 /** Mint a new user via admin client. */
@@ -116,7 +89,10 @@ type Fixtures = {
 
 export const test = base.extend<Fixtures>({
   adminPb: async ({}, use) => {
-    const pb = await newAdminPb();
+    // Pass the per-worktree URL explicitly — playwright.config.ts sets
+    // PB_TEST_URL, but the resolveTestPbUrl() fallback keeps manual `tsx`
+    // runs on the right PB too (see PB_URL above).
+    const pb = await newAdminPb(PB_URL);
     await use(pb);
   },
   signedInPage: async ({ browser, adminPb }, use) => {

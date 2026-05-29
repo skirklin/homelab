@@ -1,38 +1,23 @@
 /**
  * Playwright globalSetup for the home (shell) app.
  *
- * Home embeds shopping, recipes, upkeep, and travel as modules, so its
- * specs exercise all of their collections. This setup:
- *   1. `ensureTestEnvUp()` — idempotently brings the per-worktree test PB +
- *      API containers up (no-op if already healthy), so a cold
- *      `pnpm --filter @kirkl/home test:playwright` just works.
- *   2. Probes PB + API health and aborts with a clear message if either's down.
- *   3. WIPEs every collection home's modules touch so each run starts clean,
- *      plus clears the per-user slug maps / recipe_boxes array that point at
- *      the wiped records.
+ * Home embeds shopping, recipes, upkeep, and travel as modules, so its specs
+ * exercise all of their collections. The shared `setupTestEnv` helper does the
+ * work (bring env up → probe PB + API → admin auth-or-create → wipe → clear
+ * per-user pointers); we just hand it home's collection list + the per-user
+ * pointer fields its modules write.
  *
  * Wipe-before, not teardown-after: a crashed run must never poison the next.
- *
- * Home mints a fresh user per test (home.spec.ts signs UP a unique email),
- * so tests are already user-isolated; the wipe keeps the shared test PB from
- * accumulating orphan records run over run.
+ * Home mints a fresh user per test (home.spec.ts signs UP a unique email), so
+ * tests are already user-isolated — the wipe just keeps the shared test PB
+ * from accumulating orphan records run over run, so no `seedUsers` here.
  */
-import PocketBase from "pocketbase";
 import {
   resolveTestPbUrl,
   resolveDevApiTarget,
   ensureTestEnvUp,
 } from "@kirkl/vite-preset";
-import { wipeCollections, clearUserFields } from "@kirkl/shared/test-utils";
-
-// playwright.config.ts sets PB_TEST_URL via resolveTestPbUrl(); fall back to
-// the helper for a manual `tsx global-setup.ts` invocation.
-const PB_URL = process.env.PB_TEST_URL || resolveTestPbUrl();
-const API_URL =
-  process.env.VITE_API_URL || process.env.TEST_API_URL || resolveDevApiTarget();
-
-const ADMIN_EMAIL = "test-admin@test.local";
-const ADMIN_PASSWORD = "testpassword1234";
+import { setupTestEnv } from "@kirkl/shared/test-utils";
 
 // Every collection home's embedded modules write to. Children before parents
 // so cleanup hooks never trip over orphans:
@@ -57,55 +42,17 @@ const HOME_COLLECTIONS = [
   "travel_logs",
 ];
 
-async function globalSetup() {
-  // 1. Bring the env up (idempotent). Throws + aborts the run if it can't.
-  ensureTestEnvUp();
-
-  console.log(`Verifying test env (PB=${PB_URL}, API=${API_URL})...`);
-
-  const pb = new PocketBase(PB_URL);
-  pb.autoCancellation(false);
-  try {
-    await pb.health.check();
-  } catch {
-    throw new Error(
-      `PocketBase not running at ${PB_URL}. Start the test env with: pnpm test:env:up`
-    );
-  }
-
-  try {
-    const resp = await fetch(`${API_URL}/health`);
-    if (!resp.ok) throw new Error(`status ${resp.status}`);
-  } catch (e) {
-    throw new Error(
-      `API service not running at ${API_URL}. Start the test env with: pnpm test:env:up\n${e}`
-    );
-  }
-
-  // Auth as admin (create the canonical test superuser if absent) so the
-  // wipe can delete records that user-scoped API rules would otherwise hide.
-  try {
-    await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
-  } catch {
-    await pb.collection("_superusers").create({
-      email: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
-      passwordConfirm: ADMIN_PASSWORD,
-    });
-    await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
-  }
-
-  // Wipe every module's collections + clear the per-user pointer fields that
-  // reference them, so the next run sees a truly clean slate.
-  await wipeCollections(pb, HOME_COLLECTIONS);
-  await clearUserFields(pb, {
-    shopping_slugs: {},
-    household_slugs: {},
-    travel_slugs: {},
-    recipe_boxes: [],
+export default () =>
+  setupTestEnv({
+    pbUrl: process.env.PB_TEST_URL || resolveTestPbUrl(),
+    apiUrl:
+      process.env.VITE_API_URL || process.env.TEST_API_URL || resolveDevApiTarget(),
+    ensureUp: ensureTestEnvUp,
+    collections: HOME_COLLECTIONS,
+    userFields: {
+      shopping_slugs: {},
+      household_slugs: {},
+      travel_slugs: {},
+      recipe_boxes: [],
+    },
   });
-
-  console.log("✓ Test environment ready (home module data wiped)\n");
-}
-
-export default globalSetup;

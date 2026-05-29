@@ -13,6 +13,20 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 /**
+ * Cold-start fallback PB URL — the main checkout's legacy test PB port.
+ *
+ * Used when `infra/test-env.sh` can't be located/run (e.g. the package is
+ * consumed outside the monorepo) and no explicit override env var is set.
+ * Kept here, in the lowest-level package, so the two `resolveTest*Url`
+ * callers below don't each re-spell the literal. (test-utils + the per-app
+ * vitest configs keep their own copy in `@kirkl/shared/test-utils` —
+ * vite-preset can't import that without dragging the whole UI lib into every
+ * `vite.config.ts` evaluation, and `@kirkl/shared` can't import this `.mjs`
+ * without breaking its `tsc` typecheck. Two homes, one per dependency layer.)
+ */
+export const PB_TEST_URL_FALLBACK = "http://127.0.0.1:8091";
+
+/**
  * Resolve the dev-server proxy target for `/fn` and friends.
  *
  * Priority:
@@ -59,40 +73,7 @@ export function resolveDevApiTarget() {
  */
 export function resolveTestPbUrl() {
   if (process.env.PB_TEST_URL) return process.env.PB_TEST_URL;
-  return resolveTestEnvUrl("--pb") || "http://127.0.0.1:8091";
-}
-
-/**
- * Shell out to `infra/test-env.sh url <flag>` to discover a per-worktree
- * port. Walks up from this preset's location to find the repo root —
- * `process.cwd()` is unreliable because callers vary (vite from app dir,
- * playwright from app dir, tests from arbitrary cwd).
- *
- * Returns the trimmed URL string on success, or `null` if the script is
- * missing/broken — the caller decides the fallback.
- */
-function resolveTestEnvUrl(flag) {
-  const here = dirname(fileURLToPath(import.meta.url));
-  let dir = here;
-  for (let i = 0; i < 8; i++) {
-    const candidate = resolve(dir, "infra", "test-env.sh");
-    if (existsSync(candidate)) {
-      try {
-        const out = execFileSync(candidate, ["url", flag], {
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        if (out.startsWith("http://")) return out;
-      } catch {
-        // test-env.sh missing/broken — fall through.
-      }
-      break;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
+  return resolveTestEnvUrl("--pb") || PB_TEST_URL_FALLBACK;
 }
 
 /**
@@ -100,6 +81,14 @@ function resolveTestEnvUrl(flag) {
  * see `infra/test-env.sh`. Returns `null` if not found within 8 levels —
  * the package may be consumed outside the monorepo (unlikely, but cheap
  * to be defensive).
+ *
+ * We anchor on this module's path (not `process.cwd()`) because callers
+ * vary: vite runs from the app dir, playwright from the app dir, tests from
+ * an arbitrary cwd. The module path is stable regardless.
+ *
+ * This is the ONLY walk-up loop in the file — every consumer that needs the
+ * repo root (`resolveTestEnvUrl`, `ensureTestEnvUp`, `deriveWorktreeOffset`)
+ * routes through here.
  */
 function findRepoRoot() {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -109,6 +98,29 @@ function findRepoRoot() {
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Shell out to `infra/test-env.sh url <flag>` to discover a per-worktree
+ * port. Resolves the repo root via `findRepoRoot()`, then execs the script.
+ *
+ * Returns the trimmed URL string on success, or `null` if the repo root /
+ * script can't be found or the script is broken — the caller decides the
+ * fallback.
+ */
+function resolveTestEnvUrl(flag) {
+  const root = findRepoRoot();
+  if (!root) return null;
+  try {
+    const out = execFileSync(resolve(root, "infra", "test-env.sh"), ["url", flag], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (out.startsWith("http://")) return out;
+  } catch {
+    // test-env.sh missing/broken — fall through.
   }
   return null;
 }
@@ -153,9 +165,16 @@ export function ensureTestEnvUp() {
 /**
  * Derive a stable per-worktree port offset from the repo-root basename.
  *
- * Mirrors `derive_port_offset` in `infra/test-env.sh`: `cksum(basename) %
- * 1000` for `.claude/worktrees/agent-X` checkouts, 0 for everything else
- * (main, plain clones). Returns an integer in [0, 999].
+ * Mirrors `derive_port_offset` in `infra/test-env.sh` EXACTLY: for an
+ * `.claude/worktrees/agent-X` checkout, `(cksum(basename) % 999) + 1` —
+ * an offset in 1..999, never 0. Everything else (main, plain clones) → 0.
+ *
+ * The `+ 1` is load-bearing: offset 0 (dev/vite base, and 8091/3001 on the
+ * shell side) is RESERVED for the main checkout. If an agent worktree could
+ * land on offset 0 (the old `% 1000` could, when the hash was a multiple of
+ * 1000), its JS-derived vite/dev port would collide with main's reserved
+ * port. Keeping the formula byte-for-byte identical to the shell guarantees
+ * the JS and shell derivations agree on every port for a given worktree.
  *
  * Pure JS (no shell-out) so it's safe to call from vite/playwright config
  * load. The shell version stays canonical for test ports; this mirrors
@@ -169,7 +188,7 @@ function deriveWorktreeOffset() {
   // POSIX cksum CRC-32 (with length appended) — reproduce in JS so we
   // don't shell out. Polynomial 0x04C11DB7, init 0, no inversion, then
   // fold the byte-length tail in MSB-first.
-  return cksumPosix(basename) % 1000;
+  return (cksumPosix(basename) % 999) + 1;
 }
 
 /**

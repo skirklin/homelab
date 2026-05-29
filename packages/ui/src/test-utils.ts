@@ -14,9 +14,68 @@
 import PocketBase, { LocalAuthStore } from "pocketbase";
 import { initializeBackend } from "./backend";
 
-const PB_TEST_URL = process.env.PB_TEST_URL || "http://127.0.0.1:8091";
+/**
+ * Cold-start fallback PB URL — the main checkout's legacy test PB port.
+ *
+ * The single source of truth for the `:8091` literal on the TS side: this
+ * module's own `PB_TEST_URL` below AND every app's `vitest.e2e.config.ts`
+ * (via `e2eTestConfig()`) read it from here, so the port lives in exactly
+ * one place per dependency layer. (`@kirkl/vite-preset` keeps its own copy —
+ * it's a lower-level package that can't import this `.ts` without breaking
+ * its `tsc` typecheck, and this package can't import the preset's `.mjs`
+ * for the same reason; the two are kept in sync by hand, both documented.)
+ */
+export const PB_TEST_URL_FALLBACK = "http://127.0.0.1:8091";
+
+const PB_TEST_URL = process.env.PB_TEST_URL || PB_TEST_URL_FALLBACK;
 const ADMIN_EMAIL = "test-admin@test.local";
 const ADMIN_PASSWORD = "testpassword1234";
+
+/**
+ * Create a superuser-authed PocketBase client, idempotently. Signs in as the
+ * canonical test admin; if no superuser exists yet (a fresh test PB), creates
+ * it first. Throws with a clear message if neither works — almost always
+ * "the test env isn't running."
+ *
+ * This is THE admin-auth-or-create primitive. `initTestPocketBase` (the
+ * vitest TestContext factory), `setupTestEnv` (the Playwright globalSetup
+ * helper), and the recipes Playwright fixtures all route through it instead
+ * of each re-spelling the try/auth-catch/create dance.
+ *
+ * @param url Defaults to the resolved per-worktree `PB_TEST_URL`.
+ * @param authStore Optional auth store. `initTestPocketBase` passes a NAMED
+ *   `LocalAuthStore` to keep the admin client's auth isolated from the test
+ *   user / shared `getBackend()` singleton — without it, `signInAsUser`
+ *   clobbers the admin token via a shared default store and subsequent
+ *   admin-scoped operations (e.g. sharing-invite cleanup) 404. (See the
+ *   2026-04-18 "signInAsUser overwrites ctx.pb admin auth" incident.) Most
+ *   callers only ever have one client and can omit it.
+ */
+export async function newAdminPb(
+  url: string = PB_TEST_URL,
+  authStore?: ConstructorParameters<typeof PocketBase>[1]
+): Promise<PocketBase> {
+  const pb = new PocketBase(url, authStore);
+  pb.autoCancellation(false);
+  try {
+    await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
+  } catch {
+    try {
+      await pb.collection("_superusers").create({
+        email: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD,
+        passwordConfirm: ADMIN_PASSWORD,
+      });
+      await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
+    } catch (e) {
+      throw new Error(
+        `Failed to initialize PocketBase test admin at ${url}. ` +
+          `Is the test environment running? (pnpm test:env:up)\n${e}`
+      );
+    }
+  }
+  return pb;
+}
 
 export interface TestContext {
   /** Admin-authenticated PocketBase client — bypasses API rules */
@@ -39,28 +98,13 @@ export interface TestUser {
  * Creates the first superuser if none exists, then authenticates as admin.
  */
 export async function initTestPocketBase(): Promise<TestContext> {
-  const pb = new PocketBase(PB_TEST_URL, new LocalAuthStore("pb_test_admin"));
-  pb.autoCancellation(false);
-
-  // Try to auth as existing superuser first
-  try {
-    await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
-  } catch {
-    // First run — create the superuser
-    try {
-      await pb.collection("_superusers").create({
-        email: ADMIN_EMAIL,
-        password: ADMIN_PASSWORD,
-        passwordConfirm: ADMIN_PASSWORD,
-      });
-      await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASSWORD);
-    } catch (e) {
-      throw new Error(
-        `Failed to initialize PocketBase test admin at ${PB_TEST_URL}. ` +
-        `Is the test environment running? (pnpm test:env:up)\n${e}`
-      );
-    }
-  }
+  // Admin client — auth-or-create via the shared primitive. The NAMED
+  // `pb_test_admin` LocalAuthStore is load-bearing, not decorative: it
+  // isolates the admin token from the test user / shared getBackend()
+  // singleton. Without it, `signInAsUser` clobbers the admin auth (shared
+  // default in-memory store) and later admin-scoped cleanup 404s — exactly
+  // the 4 sharing-invite failures this restores. (2026-04-18 incident.)
+  const pb = await newAdminPb(PB_TEST_URL, new LocalAuthStore("pb_test_admin"));
 
   const userPb = new PocketBase(PB_TEST_URL, new LocalAuthStore("pb_test_user"));
   userPb.autoCancellation(false);
@@ -195,13 +239,40 @@ export async function wipeCollections(
         try {
           await adminPb.collection(name).delete(rec.id, { $autoCancel: false });
         } catch {
-          // already gone / cascade-deleted by a hook — fine.
+          // already gone / cascade-deleted by a hook — fine. (This inner
+          // catch is correctly narrow: by the time we're deleting a known
+          // record id, the only expected failure is "it's already gone.")
         }
       }
-    } catch {
-      // collection doesn't exist in this schema — skip it.
+    } catch (e) {
+      // ONLY the benign "this collection doesn't exist in this schema" is
+      // safe to swallow — that's a 404. Anything else (auth expired, network
+      // down, a 500) means the wipe silently didn't happen, leaving dirty
+      // state that masks regressions in the next run. Fail loud instead.
+      if (isMissingCollectionError(e)) continue;
+      throw e;
     }
   }
+}
+
+/**
+ * True for the one error `wipeCollections` may safely ignore: the target
+ * collection doesn't exist in this PB's schema (PB answers 404 on
+ * getFullList for an unknown collection name). Everything else — expired
+ * admin auth, a connection refused, a 500 — must propagate so a failed wipe
+ * can't masquerade as a clean slate.
+ *
+ * PocketBase throws `ClientResponseError` carrying a numeric `.status`; a
+ * raw network failure (no response) surfaces as `.status === 0`, which we
+ * deliberately do NOT treat as "missing" — that's a real failure to wipe.
+ */
+function isMissingCollectionError(e: unknown): boolean {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    "status" in e &&
+    (e as { status?: unknown }).status === 404
+  );
 }
 
 /**
@@ -242,6 +313,142 @@ export async function clearUserFields(
     } catch {
       // user gone mid-wipe — fine.
     }
+  }
+}
+
+/**
+ * Options for {@link setupTestEnv}.
+ *
+ * The URL resolution + env-bring-up are passed IN rather than imported here,
+ * deliberately: those live in `@kirkl/vite-preset`, and `@kirkl/shared`
+ * (this package) must not depend on the preset (it would drag the React/PWA
+ * vite plugins into every spec's import graph, and the preset's untyped
+ * `.mjs` would break this package's `tsc` typecheck). Each app's
+ * `e2e/global-setup.ts` already imports the preset, so it owns that coupling
+ * and hands us the resolved values.
+ */
+export interface SetupTestEnvOptions {
+  /** Resolved per-worktree PB URL (from `resolveTestPbUrl()`). */
+  pbUrl: string;
+  /** Resolved per-worktree API URL (from `resolveDevApiTarget()`). */
+  apiUrl: string;
+  /**
+   * Idempotent env-bring-up (`ensureTestEnvUp` from the preset). Called
+   * first; throws + aborts the run if the containers can't come up healthy.
+   */
+  ensureUp: () => void;
+  /**
+   * Collections to wipe, children before parents (so cleanup hooks never
+   * trip over orphans). Each app passes ONLY its own collections.
+   */
+  collections: string[];
+  /**
+   * Per-user pointer fields to reset (slug maps, the `recipe_boxes` array).
+   * Objects → `{}`, arrays → `[]`, matching the passed shape. See
+   * {@link clearUserFields}.
+   */
+  userFields: Record<string, unknown>;
+  /**
+   * Optional users to find-or-create (with a known password) after the wipe
+   * — for specs that sign in as fixed accounts rather than minting a fresh
+   * user per test. Each entry: `{ email, name }`.
+   */
+  seedUsers?: Array<{ email: string; name: string }>;
+}
+
+/** Password every seeded test user gets (matches the spec fixtures). */
+const TEST_USER_PASSWORD = "testpassword123";
+
+/**
+ * The one canonical Playwright globalSetup body, shared by every app.
+ *
+ * Sequence (identical for all apps — only `collections` / `userFields` /
+ * `seedUsers` differ):
+ *   1. `ensureUp()` — idempotently bring the per-worktree PB + API up.
+ *   2. Probe PB health, then API health; throw a clear message if either's down.
+ *   3. Admin auth-or-create via {@link newAdminPb}.
+ *   4. `wipeCollections(collections)` — start every run from a clean slate.
+ *   5. `clearUserFields(userFields)` — drop dangling per-user pointers.
+ *   6. (optional) find-or-create the `seedUsers`.
+ *
+ * Wipe-before, not teardown-after: a crashed run must never poison the next.
+ *
+ * Returns nothing — Playwright's globalSetup ignores the return value.
+ */
+export async function setupTestEnv(opts: SetupTestEnvOptions): Promise<void> {
+  const { pbUrl, apiUrl, ensureUp, collections, userFields, seedUsers } = opts;
+
+  // 1. Bring the env up (idempotent). Throws + aborts the run if it can't.
+  ensureUp();
+
+  console.log(`Verifying test env (PB=${pbUrl}, API=${apiUrl})...`);
+
+  // 2. Probe PB (unauthenticated), then API. Health-check first so a dead env
+  //    surfaces as "PB not running" rather than a confusing auth failure.
+  const pb = new PocketBase(pbUrl);
+  pb.autoCancellation(false);
+  try {
+    await pb.health.check();
+  } catch {
+    throw new Error(
+      `PocketBase not running at ${pbUrl}. Start the test env with: pnpm test:env:up`
+    );
+  }
+  try {
+    const resp = await fetch(`${apiUrl}/health`);
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+  } catch (e) {
+    throw new Error(
+      `API service not running at ${apiUrl}. Start the test env with: pnpm test:env:up\n${e}`
+    );
+  }
+
+  // 3. Admin auth-or-create. (A PocketBase client is a stateless HTTP wrapper,
+  //    not a held connection, so the dedicated admin client here costs
+  //    nothing over reusing the health-probe one — and it keeps the
+  //    auth-or-create logic in the single newAdminPb primitive. The default
+  //    auth store is fine: globalSetup never signs in as a user on this
+  //    client, so there's nothing to clobber the admin token.)
+  const admin = await newAdminPb(pbUrl);
+
+  // 4 + 5. Wipe this app's own collections + clear the per-user pointer fields
+  //         that reference them, so the next run sees a truly clean slate.
+  await wipeCollections(admin, collections);
+  await clearUserFields(admin, userFields);
+
+  // 6. Seed any fixed accounts the specs sign in as.
+  for (const u of seedUsers ?? []) {
+    await ensureSeedUser(admin, u.email, u.name);
+  }
+
+  console.log("✓ Test environment ready (data wiped).\n");
+}
+
+/** Find-or-create a test user and force the known password. */
+async function ensureSeedUser(
+  adminPb: PocketBase,
+  email: string,
+  name: string
+): Promise<void> {
+  try {
+    const existing = await adminPb
+      .collection("users")
+      .getFirstListItem(`email = "${email}"`, { $autoCancel: false });
+    await adminPb.collection("users").update(
+      existing.id,
+      { password: TEST_USER_PASSWORD, passwordConfirm: TEST_USER_PASSWORD },
+      { $autoCancel: false }
+    );
+  } catch {
+    await adminPb.collection("users").create(
+      {
+        email,
+        password: TEST_USER_PASSWORD,
+        passwordConfirm: TEST_USER_PASSWORD,
+        name,
+      },
+      { $autoCancel: false }
+    );
   }
 }
 
@@ -483,4 +690,34 @@ export async function waitFor(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(`Condition not met within ${timeoutMs}ms`);
+}
+
+// ─── vitest e2e config ──────────────────────────────────────
+
+/**
+ * The shared `test` block for every app's `vitest.e2e.config.ts`.
+ *
+ * All six were byte-identical 18-liners: same include glob, same node
+ * environment, same 30s timeouts, same `PB_TEST_URL` fallback. This collapses
+ * each to a one-liner — `export default defineConfig({ test: e2eTestConfig() })`
+ * — so the `:8091` fallback (and the timeouts) live in exactly one place.
+ *
+ * We return a plain object instead of calling vitest's `defineConfig` here so
+ * this module doesn't pull `vitest/config` into the (Playwright-loaded)
+ * import graph of the rest of test-utils; the per-app config file already
+ * imports `defineConfig` and wraps the result.
+ *
+ * `PB_TEST_URL` is read from `process.env` (set by `infra/test-env.sh` /
+ * `deploy.sh` for the worktree), falling back to {@link PB_TEST_URL_FALLBACK}.
+ */
+export function e2eTestConfig() {
+  return {
+    include: ["src/e2e/**/*.e2e.test.ts"],
+    environment: "node" as const,
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    env: {
+      PB_TEST_URL: process.env.PB_TEST_URL || PB_TEST_URL_FALLBACK,
+    },
+  };
 }
