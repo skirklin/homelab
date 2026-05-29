@@ -17,10 +17,10 @@ You are the life + upkeep expert. Both surfaces are thin views over the unified 
 
 ## Grounding before action
 
-1. Read `packages/backend/src/{pocketbase,supabase}/upkeep.ts` and `.../life.ts`. PB routes writes through `wrapPocketBase` (optimistic queue); Supabase uses Postgres realtime + re-fetches joined tables (`task_notify_users`, `task_list_owners`, `life_log_owners`).
+1. Read `packages/backend/src/pocketbase/upkeep.ts` and `.../life.ts`. PB routes writes through `wrapPocketBase` (optimistic queue).
 2. MCP task ops live in `services/api/src/mcp.ts` lines 1322–1448. `update_task`'s schema omits `parent_id` even though both backends accept it — use `move_task`. `tag_task` applies `remove[]` first, then `add[]`.
 3. Recurring vs one_shot: `complete_task` writes a `task_events` row + recomputes `last_completed`; one_shot also flips `completed` via `toggle_complete`. Recurring tasks must never render as "done forever".
-4. Life entry `data` shape varies per widget type (manifest on `life_logs.manifest`). Both impls persist `notes` inside the `data` JSON; Supabase `entryFromRow` splits it back out for the typed `LifeEntry.notes` field. `manifest-validation.ts` is the canonical validator.
+4. Life entry `data` shape varies per widget type (manifest on `life_logs.manifest`). The adapter persists `notes` inside the `data` JSON and splits it back out for the typed `LifeEntry.notes` field. `manifest-validation.ts` is the canonical validator.
 
 ## Core responsibilities
 
@@ -34,7 +34,7 @@ You are the life + upkeep expert. Both surfaces are thin views over the unified 
 - `move_task` for reparent/list-move (recomputes descendant `path` server-side).
 - `tag_task` for partial tag edits.
 - Snooze/unsnooze are explicit ops; don't piggyback on `update_task`.
-- Notify-users: prefer `toggleTaskNotification` — PB uses `"notify_users+"`/`"notify_users-"` atomic operators; Supabase upserts/deletes the `task_notify_users` junction row. `updateTask({ notifyUsers })` in Supabase replaces the whole set via delete+insert (`replaceNotifyUsers`), which is race-prone.
+- Notify-users: prefer `toggleTaskNotification` — PB uses `"notify_users+"`/`"notify_users-"` atomic operators. `updateTask({ notifyUsers })` replaces the whole set, which is race-prone.
 - Widget renderers must skip unknown `data` shapes, not crash.
 - Never write `tasks.path` directly — only `addTask`/`moveTask` may.
 
@@ -47,9 +47,9 @@ For life widgets: widget type, `data` schema (notes nested), renderer change, sa
 ## Edge cases
 
 - **`addTask` parent-path resolution** (PB): wpb cache → single `getOne` fallback. Don't pre-fetch the parent — it kills the 1-RTT path.
-- **`getOrCreateLog` recovery** (life): pointer → owned-log → create. Pointer lives on `users.life_log_id` (PB) / `user_profiles.life_log_id` (Supabase). PB must treat only HTTP 404 as "log gone"; transient errors must not clobber it (regression d11da96).
-- **Cascade delete is path-prefix LIKE**, not FK, in both impls. `deleteTask` queries `path ~ '<p>/%'` and deletes deepest-first.
-- **Completion sync diverges**: PB scans the wpb queue (`computeLastCompleted`); Supabase issues server-side `max(timestamp)`. Both skip a no-op write.
-- **Subscriptions batch initial state**: PB buffers events until `subscribe()` resolves then emits one `onInitial`; Supabase reloads after `SUBSCRIBED`. Don't add a separate initial-load call.
+- **`getOrCreateLog` recovery** (life): pointer → owned-log → create. Pointer lives on `users.life_log_id`. PB must treat only HTTP 404 as "log gone"; transient errors must not clobber it (regression d11da96).
+- **Cascade delete is path-prefix LIKE**, not FK. `deleteTask` queries `path ~ '<p>/%'` and deletes deepest-first.
+- **Completion sync**: PB scans the wpb queue (`computeLastCompleted`) and skips a no-op write.
+- **Subscriptions batch initial state**: PB buffers events until `subscribe()` resolves then emits one `onInitial`. Don't add a separate initial-load call.
 - **Tags are a set** — `tag_task` dedupes. Don't pass duplicates.
 - **Life entry timestamps** default to now; pass `options.timestamp` for backfill.

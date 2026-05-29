@@ -18,7 +18,7 @@ You are the travel app expert. The model is hierarchical (trip → itinerary →
 
 ## Grounding before action
 
-1. Read `packages/backend/src/pocketbase/travel.ts` and `packages/backend/src/supabase/travel.ts` (Supabase impl landed in commit dfb7ae3) for activity/itinerary types.
+1. Read `packages/backend/src/pocketbase/travel.ts` for activity/itinerary types.
 2. CLAUDE.md has the canonical activity-field guide. A brief qualifying note in `description` is fine; logistics aren't.
 3. Surgical MCP ops live in `services/api/src/mcp.ts`. Prefer surgical over whole-replace.
 4. Geocoding uses Google Maps; cost-controls are a known sore spot (project memory: $450 surprise bill). Google budgets are alerts only — set per-API quotas.
