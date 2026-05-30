@@ -1,7 +1,34 @@
 import type { Context, Next } from "hono";
 import { createHash } from "node:crypto";
-import PocketBase from "pocketbase";
+import PocketBase, { ClientResponseError } from "pocketbase";
 import { getAdminPb } from "../lib/pb";
+
+/**
+ * Classify a token-validation error as "the backend is unavailable" vs "this
+ * token is genuinely invalid".
+ *
+ * Token validation queries PocketBase. When PB is restarting/unreachable (e.g.
+ * during a rollout) the query throws, and lumping that into a 401 misreports a
+ * transient outage as an auth failure — which is what paged the operator via
+ * the event-watcher. We must answer 503, not 401, in that case.
+ *
+ * PocketBase's SDK throws `ClientResponseError` with a `.status`:
+ *   - 0      → network-level failure (connection refused / DNS / timeout)
+ *   - 4xx    → genuine "token not found / forbidden" (404 from getFirstListItem)
+ *   - 5xx    → PB itself erroring
+ * `getAdminPb()` can also throw a plain `Error` when admin auth fails because
+ * PB is down. Default unknown errors to backend-unavailable so deploy blips
+ * stay out of the 401 bucket.
+ */
+export function isBackendUnavailable(err: unknown): boolean {
+  if (err instanceof ClientResponseError) {
+    return err.status === 0 || err.status >= 500;
+  }
+  // Network errors from undici/fetch and getAdminPb admin-auth failures are
+  // plain Errors, not ClientResponseError — when PB is down these are the
+  // common case, so default-to-503 for unknown errors is correct.
+  return true;
+}
 
 function getPbUrl() {
   return process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
@@ -49,6 +76,13 @@ function unauthorized(c: Context, error: string) {
   const challenge = mcpAuthChallengeHeader(c);
   if (challenge) c.header("WWW-Authenticate", challenge);
   return c.json({ error }, 401);
+}
+
+// 503 for "we couldn't validate the token because the auth backend (PB) is
+// unreachable", as distinct from 401 "the token is invalid". No MCP
+// WWW-Authenticate challenge — that's only meaningful for a 401.
+function serviceUnavailable(c: Context, error: string) {
+  return c.json({ error }, 503);
 }
 
 export async function authMiddleware(c: Context, next: Next) {
@@ -122,6 +156,10 @@ export async function authMiddleware(c: Context, next: Next) {
       c.set("pb", adminPb);
       return next();
     } catch (err) {
+      if (isBackendUnavailable(err)) {
+        console.error("[auth] OAuth access token validation: backend unavailable:", err instanceof Error ? err.message : err);
+        return serviceUnavailable(c, "Authentication backend unavailable");
+      }
       console.error("[auth] OAuth access token validation failed:", err instanceof Error ? err.message : err);
       return unauthorized(c, "Invalid access token");
     }
@@ -186,6 +224,10 @@ export async function authMiddleware(c: Context, next: Next) {
       c.set("pb", adminPb);
       return next();
     } catch (err) {
+      if (isBackendUnavailable(err)) {
+        console.error("[auth] API token validation: backend unavailable:", err instanceof Error ? err.message : err);
+        return serviceUnavailable(c, "Authentication backend unavailable");
+      }
       console.error("[auth] API token validation failed:", err instanceof Error ? err.message : err);
       return unauthorized(c, "Invalid API token");
     }
@@ -218,6 +260,10 @@ export async function authMiddleware(c: Context, next: Next) {
     c.set("pb", userClient(token));
     return next();
   } catch (err) {
+    if (isBackendUnavailable(err)) {
+      console.error("[auth] PB token validation: backend unavailable:", err instanceof Error ? err.message : err);
+      return serviceUnavailable(c, "Authentication backend unavailable");
+    }
     console.error("[auth] PB token validation failed:", err instanceof Error ? err.message : err);
     return unauthorized(c, "Invalid or expired token");
   }
