@@ -63,6 +63,14 @@ interface LoadedHooks {
   postRedeem: Handler;
   records: Map<string, StubRecord>;
   saved: StubRecord[];
+  /**
+   * Every call the hook makes to findFirstRecordByFilter lands here so each
+   * test can assert the exact filter shape it expected. The previous stub
+   * did `void filter` and matched purely on params — so when the hook's
+   * filter dropped `redeemed = false`, no test failed. With this record we
+   * pin the contract: any drift in the filter string fails the test.
+   */
+  filterCalls: Array<{ collection: string; filter: string; params: Record<string, unknown> }>;
 }
 
 /**
@@ -73,15 +81,17 @@ interface LoadedHooks {
 function loadSharingHook(): LoadedHooks {
   const records = new Map<string, StubRecord>();
   const saved: StubRecord[] = [];
+  const filterCalls: LoadedHooks["filterCalls"] = [];
   let postRedeem: Handler | null = null;
 
   const $app = {
     findFirstRecordByFilter: (collection: string, filter: string, params: Record<string, unknown>) => {
-      // sharing.pb.js calls this for `sharing_invites` with `code = {:code}`
-      // (no `redeemed = false` filter — the hook now does that check itself
-      // so it can return idempotent success for a same-user retry against an
-      // already-redeemed invite).
-      void filter;
+      // Record the call so tests can assert the exact filter the hook
+      // emitted. We still match the record by params.code (the only field
+      // the hook narrows on today), but if the hook ever adds e.g.
+      // `redeemed = false` back, the recorded filter string is the
+      // load-bearing contract the tests pin against.
+      filterCalls.push({ collection, filter, params: { ...params } });
       const code = String(params.code);
       for (const r of records.values()) {
         if (r._fields.__collection === collection && r._fields.code === code) {
@@ -124,8 +134,17 @@ function loadSharingHook(): LoadedHooks {
   vm.runInContext(code, sandbox, { filename: "sharing.pb.js" });
 
   if (!postRedeem) throw new Error("POST /api/sharing/redeem handler was not registered");
-  return { postRedeem, records, saved };
+  return { postRedeem, records, saved, filterCalls };
 }
+
+/**
+ * Pin the exact filter shape the hook should emit when looking up an invite
+ * by code. If sharing.pb.js ever changes the filter (e.g. re-adds
+ * `redeemed = false`, or switches placeholder syntax), every test calling
+ * this fails loud — that's the regression-catcher the original `void filter`
+ * stub had no way to surface.
+ */
+const EXPECTED_INVITE_FILTER = "code = {:code}";
 
 describe("sharing.pb.js POST /api/sharing/redeem — travel_slugs goja []byte defense", () => {
   let hooks: LoadedHooks;
@@ -141,6 +160,7 @@ describe("sharing.pb.js POST /api/sharing/redeem — travel_slugs goja []byte de
   } {
     hooks.records.clear();
     hooks.saved.length = 0;
+    hooks.filterCalls.length = 0;
 
     const user = makeRecord("USER0000000001", {
       __collection: "users",
@@ -199,6 +219,12 @@ describe("sharing.pb.js POST /api/sharing/redeem — travel_slugs goja []byte de
     // Invite should be marked redeemed.
     expect(invite._fields.redeemed).toBe(true);
     expect(invite._fields.redeemed_by).toBe(user.id);
+
+    // Pin the filter contract — see EXPECTED_INVITE_FILTER docstring above.
+    expect(hooks.filterCalls).toHaveLength(1);
+    expect(hooks.filterCalls[0].collection).toBe("sharing_invites");
+    expect(hooks.filterCalls[0].filter).toBe(EXPECTED_INVITE_FILTER);
+    expect(hooks.filterCalls[0].params).toEqual({ code: "ABCDEF12" });
   });
 
   it("works when travel_slugs is already a plain object (other goja path)", () => {
@@ -241,6 +267,7 @@ describe("sharing.pb.js POST /api/sharing/redeem — travel_slugs goja []byte de
     // client redirects to the box instead of rendering "could not redeem".
     hooks.records.clear();
     hooks.saved.length = 0;
+    hooks.filterCalls.length = 0;
 
     const userId = "USER0000000001";
     const box = makeRecord("BOX00000000001", {
@@ -279,6 +306,7 @@ describe("sharing.pb.js POST /api/sharing/redeem — travel_slugs goja []byte de
     // already-redeemed test asserts this 4xx path.
     hooks.records.clear();
     hooks.saved.length = 0;
+    hooks.filterCalls.length = 0;
 
     const firstUserId = "FIRSTUSER00001";
     const secondUserId = "SECONDUSER0001";
@@ -328,5 +356,101 @@ describe("sharing.pb.js POST /api/sharing/redeem — travel_slugs goja []byte de
     expect(savedIds).toContain(invite.id);
     expect(savedIds).toContain(travelLog.id);
     expect(savedIds).not.toContain(user.id);
+  });
+});
+
+describe("sharing.pb.js POST /api/sharing/redeem — filter-string regression catcher", () => {
+  // Demonstration: load a doctored copy of sharing.pb.js where the invite
+  // lookup filter is back to the pre-866551e form (`code && redeemed = false`).
+  // The strict-equality assertion against EXPECTED_INVITE_FILTER must reject
+  // it — that's the proof the new stub catches the regression the original
+  // `void filter` stub could not.
+  it("would FAIL if the hook re-introduced `redeemed = false` to the filter", () => {
+    const records = new Map<string, StubRecord>();
+    const saved: StubRecord[] = [];
+    const filterCalls: Array<{ collection: string; filter: string; params: Record<string, unknown> }> = [];
+    let postRedeem: Handler | null = null;
+
+    const $app = {
+      findFirstRecordByFilter: (collection: string, filter: string, params: Record<string, unknown>) => {
+        filterCalls.push({ collection, filter, params: { ...params } });
+        const code = String(params.code);
+        for (const r of records.values()) {
+          if (r._fields.__collection === collection && r._fields.code === code) {
+            return r;
+          }
+        }
+        throw new Error("not found");
+      },
+      findRecordById: (collection: string, id: string) => {
+        const r = records.get(id);
+        if (!r || r._fields.__collection !== collection) throw new Error(`not found: ${collection}/${id}`);
+        return r;
+      },
+      save: (r: StubRecord) => {
+        saved.push(r);
+      },
+    };
+
+    const sandbox = {
+      routerAdd: (method: string, route: string, handler: Handler) => {
+        if (method === "POST" && route === "/api/sharing/redeem") postRedeem = handler;
+      },
+      onRecordCreateRequest: () => {},
+      $app,
+      BadRequestError: class BadRequestError extends Error {},
+      ForbiddenError: class ForbiddenError extends Error {},
+      console: { log: () => {} },
+    };
+
+    // Doctor the hook source: swap the current filter for a different one.
+    // If the test asserted only on side effects, this swap would slip past;
+    // with the new filter-string assertion it must be caught.
+    const original = readFileSync(sharingHookPath, "utf8");
+    const REGRESSED_FILTER = "code = {:code} && redeemed = false";
+    const doctored = original.replace(`code = {:code}`, REGRESSED_FILTER);
+    expect(doctored, "fixture invariant: filter substring must exist in hook source").not.toBe(original);
+
+    vm.createContext(sandbox);
+    vm.runInContext(doctored, sandbox, { filename: "sharing.pb.js (doctored)" });
+
+    if (!postRedeem) throw new Error("POST /api/sharing/redeem handler was not registered");
+    const handler: Handler = postRedeem;
+
+    const user = makeRecord("USER0000000099", {
+      __collection: "users",
+      recipe_boxes: [],
+    });
+    const box = makeRecord("BOX00000000099", {
+      __collection: "recipe_boxes",
+      name: "Filter Regression",
+      owners: ["OWNER000000099"],
+    });
+    const invite = makeRecord("INVITE00000099", {
+      __collection: "sharing_invites",
+      code: "REGRESS1",
+      redeemed: false,
+      target_type: "box",
+      target_id: box.id,
+      expires_at: "",
+    });
+    records.set(user.id, user);
+    records.set(box.id, box);
+    records.set(invite.id, invite);
+
+    const e = {
+      auth: { id: user.id },
+      requestInfo: () => ({ body: { code: "REGRESS1" } }),
+      json: (status: number, body: unknown) => ({ status, body }),
+    };
+    handler(e);
+
+    // The doctored hook produced a regressed filter; the test's contract
+    // assertion catches it. If sharing.pb.js were silently changed to use
+    // this filter, the in-suite assertion would surface the drift.
+    expect(filterCalls).toHaveLength(1);
+    expect(filterCalls[0].filter).toBe(REGRESSED_FILTER);
+    // And critically: the canonical assertion fails for this regressed form.
+    expect(filterCalls[0].filter).not.toBe(EXPECTED_INVITE_FILTER);
   });
 });
