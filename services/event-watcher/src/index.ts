@@ -30,6 +30,7 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
+import { isTransientStatus } from "./classify";
 
 const API_URL = process.env.API_URL || "http://functions.homelab.svc.cluster.local:3000";
 const API_TOKEN = process.env.API_TOKEN;
@@ -173,6 +174,16 @@ async function postEvent(ev: CoreEvent): Promise<void> {
     });
     if (!res.ok) {
       const text = await res.text();
+      // Transient backend-unavailability (502/503/504) during a deploy is
+      // expected and already covered by Gatus uptime monitoring, so it must
+      // not count toward the failure streak and must not page. This watcher's
+      // alert is scoped to genuine, human-fixable write failures — chiefly a
+      // token/permission problem (401/403). Leave consecutiveFailures
+      // untouched so a transient blip neither pages nor resets a real streak.
+      if (isTransientStatus(res.status)) {
+        console.error(`POST transient ${res.status} (not counted): ${text}`);
+        return;
+      }
       console.error(`POST failed ${res.status}: ${text}`);
       consecutiveFailures += 1;
       // Alerting is best-effort and must not break the watch loop.
@@ -190,13 +201,11 @@ async function postEvent(ev: CoreEvent): Promise<void> {
       }
     }
   } catch (err) {
-    // Network-level failure (DNS, connection refused, etc.) — count it the
-    // same as a non-2xx so a black-holed api service still pages us.
-    console.error("POST error:", err instanceof Error ? err.message : err);
-    consecutiveFailures += 1;
-    await maybeAlertOnFailure(0, err instanceof Error ? err.message : String(err)).catch((alertErr) => {
-      console.error("[alert] maybeAlertOnFailure threw:", alertErr instanceof Error ? alertErr.message : alertErr);
-    });
+    // Network-level failure (DNS, connection refused, etc.) is treated as
+    // status 0 — transient/retryable, the same bucket as 502/503/504. Gatus
+    // covers service-down; this watcher's alert is scoped to auth/permission
+    // failures, so don't count it and don't reset a real streak.
+    console.error("POST transient (network error, not counted):", err instanceof Error ? err.message : err);
   }
 }
 
