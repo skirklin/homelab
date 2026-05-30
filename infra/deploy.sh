@@ -107,19 +107,22 @@ elif [ "$PUSH_ONLY" = false ]; then
         exit 1
     fi
 
-    # Bring up (or verify) this worktree's test env via `test-env.sh up` —
-    # NOT a raw curl probe. A bare health check trusts whatever answers the
-    # port, so a FOREIGN container squatting our port would sail through and the
-    # whole gate would run against the wrong PB/API (the 2026-05 spurious-failure
-    # bug). `up` is idempotent: when our containers are already healthy AND we
-    # own the host ports it returns "Ready." in well under a second; when a
-    # squatter holds a port it FAILS LOUD naming the container + a reap/triage
-    # hint. Either way the gate never runs tests against a container it doesn't
-    # own. `up` ensures both PB (needed by `pnpm test`) and the API container
-    # (additionally needed by Playwright) in one call.
+    # Cycle this worktree's test env via `test-env.sh fresh` (NOT `up`) so each
+    # gate run starts against a freshly-rebuilt PB. `up` is idempotent and
+    # would reuse a long-lived PB whose auth/realtime/index state has drifted
+    # across runs — the root cause of the 2026-05 shopping deterministic-failure
+    # (state outside the per-collection `wipeCollections` scope). `fresh` does
+    # `down + up` under a per-worktree flock, so concurrent gates in the same
+    # worktree serialize cleanly. Image stays cached, so the cycle is ~10-20s.
     #
-    # Note: `up` may exit 0 with PB-only ready if the API genuinely failed to
-    # start (most suites don't need it); we re-verify the API through
+    # NOT a raw curl probe — a bare health check trusts whatever answers the
+    # port, so a FOREIGN container squatting our port would sail through and
+    # the whole gate would run against the wrong PB/API (the 2026-05
+    # spurious-failure bug). The `up` invoked inside `fresh` fails loud on a
+    # squatter with a reap/triage hint.
+    #
+    # Note: `fresh` may exit 0 with PB-only ready if the API genuinely failed
+    # to start (most suites don't need it); we re-verify the API through
     # `test-env.sh check` just before Playwright below.
     TEST_PB_URL=$(infra/test-env.sh url --pb)
     TEST_API_URL=$(infra/test-env.sh url --api)
@@ -129,16 +132,16 @@ elif [ "$PUSH_ONLY" = false ]; then
     export PB_TEST_URL="$TEST_PB_URL"
     export PB_URL="$TEST_PB_URL"
     export TEST_API_URL
-    echo "→ Ensuring test env (PocketBase ${TEST_PB_URL} + API ${TEST_API_URL}) is up..."
-    if ! infra/test-env.sh up; then
+    echo "→ Cycling test env (PocketBase ${TEST_PB_URL} + API ${TEST_API_URL}) — fresh PB for this gate..."
+    if ! infra/test-env.sh fresh; then
         {
             echo ""
-            echo "${RED}[deploy.sh] Test environment failed to start (or a foreign container is${NC}"
+            echo "${RED}[deploy.sh] Test environment failed to rebuild (or a foreign container is${NC}"
             echo "${RED}            squatting this worktree's port — see the message above). Common causes:${NC}"
             echo "${RED}  • Docker daemon not running (start Docker Desktop)${NC}"
             echo "${RED}  • Port held by a sibling/dead worktree's container${NC}"
             echo "${RED}    (triage: \`docker ps\`; reap dead ones: \`infra/test-env.sh reap\`)${NC}"
-            echo "${RED}  • First-run image build failure — run \`infra/test-env.sh up\` manually to see logs${NC}"
+            echo "${RED}  • First-run image build failure — run \`infra/test-env.sh fresh\` manually to see logs${NC}"
             echo ""
             echo "${RED}  Hotfix override: re-run with --skip-tests${NC}"
             echo ""

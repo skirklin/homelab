@@ -37,3 +37,6 @@ services/api/run-mcp.sh
 
 # Per-worktree test env port (written by infra/test-env.sh up)
 .test-env-port
+# Per-worktree mutex used by `infra/test-env.sh fresh` to serialize concurrent
+# pre-deploy gates within the same worktree
+.test-env.lock

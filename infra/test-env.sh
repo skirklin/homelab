@@ -5,11 +5,22 @@
 # Usage:
 #   infra/test-env.sh up                    # reap orphans, start containers, wait for health
 #   infra/test-env.sh down                  # stop containers
+#   infra/test-env.sh fresh                 # down + up under a per-worktree flock
+#                                           # (hermetic env per invocation; for pre-deploy gate)
 #   infra/test-env.sh status                # print status
 #   infra/test-env.sh check                 # exit 0 if healthy, 1 otherwise
 #   infra/test-env.sh reap [--dry-run]      # remove test containers from dead worktrees
 #   infra/test-env.sh url [--api|--pb]      # print PB/API URL for this shell
 #   infra/test-env.sh port [--api|--pb]     # print PB/API port for this shell
+#
+# `fresh` is what the pre-deploy gate (infra/deploy.sh) uses: it does
+# `down 2>/dev/null; up` while holding an exclusive flock on
+# `<worktree_root>/.test-env.lock`, so two concurrent `fresh` invocations in
+# the same worktree serialize cleanly (each one gets a freshly-cycled env that
+# is hermetic *for that invocation*). The lock path is per-worktree, so
+# parallel worktrees are unaffected (different lock files, different ports,
+# different containers — already isolated). `up`/`down`/`check`/`status`/
+# `url`/`reap` are NOT locked: they're either read-only or self-healing.
 #
 # Port allocation (so parallel worktrees don't collide on a shared PB):
 #   - If $TEST_PB_PORT is set, use it (manual override).
@@ -76,6 +87,16 @@ derive_port_offset() {
         echo "0"
     fi
 }
+
+# Remember whether the user explicitly set TEST_PB_PORT (manual override),
+# so the `fresh` re-exec can decide whether to scrub it. We overwrite
+# TEST_PB_PORT ourselves a few lines below, which would otherwise look
+# indistinguishable from a user-set value on the re-exec. Only set the flag
+# on the ORIGINAL invocation (when TEST_ENV_FRESH_LOCKED is unset) — a
+# re-exec under `fresh` is by construction not a user setting it.
+if [ -n "${TEST_PB_PORT:-}" ] && [ "${TEST_ENV_FRESH_LOCKED:-0}" != "1" ]; then
+    export TEST_PB_PORT_USER_SET=1
+fi
 
 OFFSET=$(derive_port_offset)
 if [ "$OFFSET" = "manual" ]; then
@@ -426,6 +447,50 @@ case "${1:-}" in
         compose down
         rm -f "$PORT_FILE"
         ;;
+    fresh)
+        # Cycle the env (down + up) under a per-worktree exclusive flock so
+        # concurrent `fresh` calls in the same worktree serialize cleanly
+        # instead of racing on teardown. The lock file is per-worktree
+        # (parallel worktrees don't see each other) — see header for rationale.
+        #
+        # Re-entrancy via env var: when we re-exec under flock the inner
+        # process sees TEST_ENV_FRESH_LOCKED=1 and skips the lock acquisition
+        # (otherwise flock would deadlock on its own fd).
+        if [ "${TEST_ENV_FRESH_LOCKED:-0}" != "1" ]; then
+            LOCK_FILE="$ROOT/.test-env.lock"
+            # Create the lock file if missing so flock has something to grab.
+            # The file is just a mutex; its contents are irrelevant.
+            : > "$LOCK_FILE" 2>/dev/null || true
+            export TEST_ENV_FRESH_LOCKED=1
+            # Re-invoke ourselves with the lock held. flock releases the lock
+            # when fd 9 closes (i.e., when this subshell exits).
+            exec 9>"$LOCK_FILE"
+            flock 9
+            "$0" fresh
+            exit $?
+        fi
+        echo "→ Cycling test env (fresh) for worktree '$(basename "$ROOT")'..."
+        # `down` is best-effort: a not-yet-created env has nothing to bring
+        # down, which compose reports as a no-op (exit 0) but we don't want
+        # any stderr noise either way.
+        compose down >/dev/null 2>&1 || true
+        rm -f "$PORT_FILE"
+        # Hand off to `up`, which handles reap + bind + health + fail-loud.
+        # IMPORTANT: scrub the test-env env vars we exported at the top of THIS
+        # invocation before re-execing — otherwise the next process sees
+        # TEST_PB_PORT set and `derive_port_offset` flips to "manual" mode,
+        # picking a different (wrong) API_PORT. We want the re-exec to derive
+        # ports from scratch exactly as the user's first invocation did.
+        # Preserve TEST_PB_PORT only if the user explicitly set it (i.e., the
+        # caller wanted the manual override).
+        if [ "${TEST_PB_PORT_USER_SET:-0}" != "1" ]; then
+            unset TEST_PB_PORT
+        fi
+        unset TEST_API_PORT PB_TEST_URL TEST_API_URL
+        # `exec` keeps the exit code clean — what `up` returns is what `fresh`
+        # returns.
+        exec "$0" up
+        ;;
     reap)
         case "${2:-}" in
             ""|--reap) reap 0 ;;
@@ -456,7 +521,7 @@ case "${1:-}" in
         esac
         ;;
     *)
-        echo "Usage: $0 {up|down|status|check|reap|url|port}" >&2
+        echo "Usage: $0 {up|down|fresh|status|check|reap|url|port}" >&2
         exit 1
         ;;
 esac
