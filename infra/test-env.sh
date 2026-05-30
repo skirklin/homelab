@@ -59,20 +59,20 @@ fi
 WORKTREES_DIR="$MAIN_ROOT/.claude/worktrees"
 
 # ─── Port derivation ─────────────────────────────────────────────────────────
-# Pick a deterministic per-worktree port so concurrent agent sessions don't
-# trample each other's PB. `cksum` is POSIX and gives a stable 32-bit hash;
-# `(hash % 999) + 1` maps to offset 1..999 — non-zero by construction — keeping
-# us inside 8092..9090 / 3002..4000. Offset 0 (8091/3001) is reserved for the
-# main checkout, so an agent worktree can never collide with main.
+# Pick a deterministic per-worktree port offset so concurrent agent sessions
+# don't trample each other's PB. `cksum` is POSIX and gives a stable 32-bit
+# hash; `(hash % 999) + 1` maps to offset 1..999 — non-zero by construction —
+# keeping us inside 8092..9090 / 3002..4000. Offset 0 (8091/3001) is reserved
+# for the main checkout, so an agent worktree can never collide with main.
+#
+# There is exactly ONE formula. Both PB and API derive from the same offset.
+# `TEST_PB_PORT` is a narrow escape hatch that overrides ONLY the PB host
+# port; the API port still uses the canonical offset. Historically there were
+# two divergent formulas (% 999 + 1 vs % 1000) which produced different API
+# offsets depending on whether TEST_PB_PORT happened to be set — that drift
+# is what forced the `fresh` re-exec to scrub TEST_PB_PORT, and it's why
+# this consolidation matters.
 derive_port_offset() {
-    if [ -n "${TEST_PB_PORT:-}" ]; then
-        # Manual override — preserve the exact PB port the caller picked,
-        # but still derive an API offset from the worktree basename so
-        # parallel worktrees with the same TEST_PB_PORT (unlikely) still
-        # don't collide on :3001. Hash whatever basename we have.
-        echo "manual"
-        return
-    fi
     local cwd_basename
     cwd_basename=$(basename "$ROOT")
     if [[ "$cwd_basename" == agent-* ]]; then
@@ -88,26 +88,15 @@ derive_port_offset() {
     fi
 }
 
-# Remember whether the user explicitly set TEST_PB_PORT (manual override),
-# so the `fresh` re-exec can decide whether to scrub it. We overwrite
-# TEST_PB_PORT ourselves a few lines below, which would otherwise look
-# indistinguishable from a user-set value on the re-exec. Only set the flag
-# on the ORIGINAL invocation (when TEST_ENV_FRESH_LOCKED is unset) — a
-# re-exec under `fresh` is by construction not a user setting it.
-if [ -n "${TEST_PB_PORT:-}" ] && [ "${TEST_ENV_FRESH_LOCKED:-0}" != "1" ]; then
-    export TEST_PB_PORT_USER_SET=1
-fi
-
 OFFSET=$(derive_port_offset)
-if [ "$OFFSET" = "manual" ]; then
+API_PORT=$((3001 + OFFSET))
+if [ -n "${TEST_PB_PORT:-}" ]; then
+    # User override applies ONLY to PB. API still uses the canonical offset
+    # so it can never collide with another worktree's API port just because
+    # the caller wanted a specific PB port.
     PB_PORT="${TEST_PB_PORT}"
-    # When PB port is overridden, derive an independent API offset so the
-    # two ports don't both end up at their defaults and collide.
-    API_OFFSET=$(printf '%s' "$(basename "$ROOT")" | cksum | awk '{print $1 % 1000}')
-    API_PORT=$((3001 + API_OFFSET))
 else
     PB_PORT=$((8091 + OFFSET))
-    API_PORT=$((3001 + OFFSET))
 fi
 
 PB_URL="http://127.0.0.1:${PB_PORT}"
@@ -476,17 +465,9 @@ case "${1:-}" in
         compose down >/dev/null 2>&1 || true
         rm -f "$PORT_FILE"
         # Hand off to `up`, which handles reap + bind + health + fail-loud.
-        # IMPORTANT: scrub the test-env env vars we exported at the top of THIS
-        # invocation before re-execing — otherwise the next process sees
-        # TEST_PB_PORT set and `derive_port_offset` flips to "manual" mode,
-        # picking a different (wrong) API_PORT. We want the re-exec to derive
-        # ports from scratch exactly as the user's first invocation did.
-        # Preserve TEST_PB_PORT only if the user explicitly set it (i.e., the
-        # caller wanted the manual override).
-        if [ "${TEST_PB_PORT_USER_SET:-0}" != "1" ]; then
-            unset TEST_PB_PORT
-        fi
-        unset TEST_API_PORT PB_TEST_URL TEST_API_URL
+        # No env scrubbing needed: the port-derivation formula is canonical
+        # and basename-derived, and TEST_PB_PORT (if inherited from our own
+        # top-level export) is equal to the value `up` would re-derive anyway.
         # `exec` keeps the exit code clean — what `up` returns is what `fresh`
         # returns.
         exec "$0" up

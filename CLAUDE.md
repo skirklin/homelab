@@ -245,7 +245,7 @@ Implementations live in `packages/backend/src/pocketbase/`. Apps get backends vi
 - API tokens: `hlk_` prefix, SHA-256 hashed in PocketBase, created via Settings UI
 - `.env` at project root has secrets (gitignored): `PB_ADMIN_PASSWORD`, `HOMELAB_API_TOKEN`, `VITE_GOOGLE_MAPS_API_KEY`
 - `pnpm lint:pb` — runs `infra/scripts/lint-pb-migrations.sh`, which fails on the goja byte-array footguns (`JSON.parse(JSON.stringify(r.get(...)))` and unwrapped JSON-column field access). Wired into `deploy.sh` so a broken migration can't reach prod.
-- `pnpm test:pb-hooks` — vitest against `unwrapPbJson` + PB hook execution stubs (currently 16 tests, in `packages/backend/src/pocketbase-hooks/`).
+- `pnpm test:pb-hooks` — vitest against `unwrapPbJson` + PB hook execution stubs in `packages/backend/src/pocketbase-hooks/`.
 - New PB migrations: copy [`_TEMPLATE.js.example`](infra/pocketbase/pb_migrations/_TEMPLATE.js.example) and rename to `YYYYMMDD_HHMMSS_<slug>.js`. Always read JSON columns through `unwrapPbJson` from [`lib/pb-json.js`](infra/pocketbase/pb_migrations/lib/pb-json.js) — never `r.get("jsonField")` directly (see 2026-05-22 incident).
 
 ## Adding a new app
