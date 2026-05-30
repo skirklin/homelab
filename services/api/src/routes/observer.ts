@@ -54,7 +54,11 @@ observerRoutes.post("/generate", handler(async (c) => {
 
   const period = body.period as Period;
   const pb = c.get("pb");
-  const userId = pb.authStore.record?.id;
+  // authMiddleware's userClient(token) calls pb.authStore.save(token, null) —
+  // the record is null for PB JWT callers (every frontend request). Always
+  // read the resolved caller id from c.get("userId") instead. Matches
+  // chat.ts / sharing.ts / push.ts / data.ts.
+  const userId = c.get("userId") as string | undefined;
   if (!userId) {
     return c.json({ error: "Not authenticated" }, 401);
   }
