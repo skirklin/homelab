@@ -8,9 +8,10 @@ Multiple Claude Code sessions run against this repo at the same time. Editing fi
 
 - Dispatch an **Agent with `isolation: "worktree"`** for any substantive edit. The agent works in its own git worktree, and the user merges the result deliberately.
 - **First command to run inside your worktree: `./infra/scripts/worktree-init.sh`.** It symlinks `node_modules/` + `packages/*/dist/` from the parent repo so `pnpm exec tsc`, tests, and other workspace commands work without a fresh install. Re-running is a no-op; pass `--clean` before final review to drop the symlinks.
+- **Once an agent's branch is merged into `main`, reap its worktree.** Run `./infra/scripts/worktree-reap.sh` (use `--dry-run` first to preview). It only removes a worktree when ALL three are true: the working tree is clean, the branch is already an ancestor of `main`, and any harness lock points at a dead PID — never destructive, no override flag exists. **Letting worktrees accumulate is not free**: each one adds tens of thousands of files under `.claude/worktrees/`, and VS Code's WSL file watcher monitors every one of them. This repo once accumulated 93 stale worktrees → 3.2 GB file-watcher RSS + heavy slab pressure + swap thrash that surfaced as flaky tests. Reap eagerly.
 - The main Claude session may do read-only exploration, ask clarifying questions, plan, run tests, and produce non-file outputs without a worktree.
 - One-line / typo / trivially safe edits the user has explicitly approved in the current turn are fine inline.
-- Never `git stash`, `git reset --hard`, `git checkout --`, or `git worktree remove` without explicit per-action approval — sibling sessions probably have uncommitted work that would disappear.
+- Never `git stash`, `git reset --hard`, `git checkout --`, or unscoped `git worktree remove` without explicit per-action approval — sibling sessions probably have uncommitted work that would disappear. The reap script above is the safe path for `git worktree remove`: it checks every safety condition before acting.
 
 If you are unsure whether a change is "substantive," default to dispatching a worktree agent. The cost of an extra agent run is low; the cost of trampling a sibling session's WIP is high.
 
