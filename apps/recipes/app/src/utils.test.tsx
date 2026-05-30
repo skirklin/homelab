@@ -17,7 +17,6 @@ import {
 import {
   getRecipeFromState,
   getBoxFromState,
-  getUserFromState,
   getAppUserFromState,
 } from './state';
 import { canUpdateRecipe } from './utils';
@@ -348,20 +347,6 @@ describe('state accessor functions', () => {
     it('returns undefined for nonexistent box', () => {
       const state = createTestState();
       expect(getBoxFromState(state, "nonexistent")).toBeUndefined();
-    });
-  });
-
-  describe('getUserFromState', () => {
-    it('returns user when they exist', () => {
-      const state = createTestState();
-      const user = getUserFromState(state, "user1");
-      expect(user).toBeDefined();
-      expect(user?.name).toBe("Test");
-    });
-
-    it('returns undefined for nonexistent user', () => {
-      const state = createTestState();
-      expect(getUserFromState(state, "nonexistent")).toBeUndefined();
     });
   });
 

@@ -249,24 +249,25 @@ export async function wipeCollections(
       // safe to swallow — that's a 404. Anything else (auth expired, network
       // down, a 500) means the wipe silently didn't happen, leaving dirty
       // state that masks regressions in the next run. Fail loud instead.
-      if (isMissingCollectionError(e)) continue;
+      if (isNotFoundError(e)) continue;
       throw e;
     }
   }
 }
 
 /**
- * True for the one error `wipeCollections` may safely ignore: the target
- * collection doesn't exist in this PB's schema (PB answers 404 on
- * getFullList for an unknown collection name). Everything else — expired
- * admin auth, a connection refused, a 500 — must propagate so a failed wipe
- * can't masquerade as a clean slate.
+ * True for the one error wipe-shaped helpers may safely ignore: PB answered
+ * 404 — the collection doesn't exist in this schema (for `wipeCollections`)
+ * or a record vanished between listing and acting on it (for
+ * `clearUserFields`). Everything else — expired admin auth, a connection
+ * refused, a 500 — must propagate so a failed wipe can't masquerade as a
+ * clean slate.
  *
  * PocketBase throws `ClientResponseError` carrying a numeric `.status`; a
  * raw network failure (no response) surfaces as `.status === 0`, which we
  * deliberately do NOT treat as "missing" — that's a real failure to wipe.
  */
-function isMissingCollectionError(e: unknown): boolean {
+function isNotFoundError(e: unknown): boolean {
   return (
     typeof e === "object" &&
     e !== null &&
@@ -289,29 +290,37 @@ function isMissingCollectionError(e: unknown): boolean {
  * the caller passes whatever matches its fixture emails. `fields` is the
  * set of JSON columns to clear; objects → `{}`, arrays → `[]` based on the
  * passed shape.
+ *
+ * Fail-loud: any error from listing or updating users propagates. The
+ * `users` collection is the built-in PB auth collection (always exists), so
+ * unlike {@link wipeCollections} there is no benign "missing collection"
+ * case to swallow. A silently-no-op'd wipe must never be able to masquerade
+ * as a clean slate — that's how stale `shopping_slugs` survived into the
+ * next Playwright run and tripped the slug-uniqueness guard.
  */
 export async function clearUserFields(
   adminPb: PocketBase,
   fields: Record<string, unknown>,
   opts?: { filter?: string }
 ): Promise<void> {
-  let users;
-  try {
-    users = await adminPb.collection("users").getFullList({
-      batch: 500,
-      $autoCancel: false,
-      ...(opts?.filter ? { filter: opts.filter } : {}),
-    });
-  } catch {
-    return;
-  }
+  const users = await adminPb.collection("users").getFullList({
+    batch: 500,
+    $autoCancel: false,
+    ...(opts?.filter ? { filter: opts.filter } : {}),
+  });
   for (const user of users) {
     try {
       await adminPb
         .collection("users")
         .update(user.id, fields, { $autoCancel: false });
-    } catch {
-      // user gone mid-wipe — fine.
+    } catch (e) {
+      // ONLY benign: the user record was deleted between listing and
+      // updating (concurrent wipe / cascade-delete from a hook). That's
+      // a 404 on update — anything else (auth expired, network down, a
+      // 500) means the field-clear silently didn't happen, leaving stale
+      // pointers behind. Same fail-loud principle as the outer call.
+      if (isNotFoundError(e)) continue;
+      throw e;
     }
   }
 }
