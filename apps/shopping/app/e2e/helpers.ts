@@ -1,45 +1,32 @@
 /**
  * Shared Playwright helpers for the shopping app.
  *
- * Every list name is suffixed with a per-process RUN_ID. globalSetup
- * (`setupTestEnv`) wipes shopping collections AND clears `shopping_slugs`
- * before each run, but that wipe has been observed to silently no-op under
- * deploy.sh's gate load (e.g. `clearUserFields` swallows admin-auth errors),
- * letting a stale `shopping_slugs["share-test"] -> deleted-listId` survive
- * into the next run — at which point `ListPicker.handleCreateList` refuses
- * to create a duplicate, the share modal hands out a join URL for the
- * already-deleted list, and `sharing.spec.ts` fails with
- * `getByText('Share Test')` invisible on page B. Per-run suffixes make this
- * unreachable: a fresh RUN_ID never collides with any prior run's slug.
+ * List names are used verbatim — no per-run suffix. globalSetup
+ * (`setupTestEnv`) wipes shopping collections AND clears every user's
+ * `shopping_slugs` map before each run, and both wipes are fail-loud:
+ * `wipeCollections` and `clearUserFields` in @kirkl/shared/test-utils
+ * throw on any non-404 error rather than silently no-op'ing. So a stale
+ * `shopping_slugs["share-test"] -> deleted-listId` can't survive a run
+ * undetected — either the wipe succeeds (clean slate, stable names safe)
+ * or it throws and the gate fails loudly at globalSetup with the actual
+ * underlying error.
  *
- * The unique-name approach is also robust to in-run concurrency (workers:1
- * today, but cheap insurance).
+ * Inside a run, workers:1 means no concurrent list creation, and every
+ * spec uses the value `createList` returns rather than re-deriving the
+ * name, so a stable label is safe there too.
  */
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
-
-/** Per-process suffix so re-running an isolated spec doesn't collide
- *  with leftover slugs from a prior run. Kept legible by combining with
- *  the caller-supplied label in failure screenshots. */
-export const RUN_ID = `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4).toString(36)}`;
-
-/** Build a unique-per-run list name from a stable test-readable label. */
-export function uniqueListName(label: string): string {
-  return `${label} ${RUN_ID}`;
-}
 
 /** The add-item ingredient input is an Ant Design AutoComplete, which
  *  exposes the inner element as role=combobox. */
 export const itemInput = (page: Page) => page.getByRole("combobox");
 
 /**
- * Click "New List", fill the create modal, and wait for the list view.
- * The supplied `label` is wrapped with a per-run suffix so multiple test
- * runs against the same PB don't fight for the same slug — see file header
- * for why the globalSetup wipe is not sufficient.
+ * Click "New List", fill the create modal with `name`, and wait for the list
+ * view. Returns `name` so callers can reference the created list.
  */
-export async function createList(page: Page, label: string): Promise<string> {
-  const name = uniqueListName(label);
+export async function createList(page: Page, name: string): Promise<string> {
   await page.getByRole("button", { name: /New List/ }).click();
   await expect(page.getByText("Create New List")).toBeVisible();
   await page.locator(".ant-modal input").fill(name);
