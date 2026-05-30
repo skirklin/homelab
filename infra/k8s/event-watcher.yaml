@@ -80,12 +80,15 @@ spec:
             # in cronjobs.yaml (10-day TTL on Normals, Warnings kept forever).
             - name: IGNORE_REASONS
               value: "DNSConfigForming"
-            # Self-reporting alert path. When the api service starts rejecting
-            # /data/pod_events (e.g. token loses its `infra` role), the watcher
-            # fires a single Web Push to ALERT_USER_ID after ALERT_AFTER_FAILURES
-            # consecutive non-2xx responses, then suppresses re-fires for
-            # ALERT_COOLDOWN_MS. Unset ALERT_USER_ID disables alerting entirely;
-            # the watcher just logs (preserves pre-alert behavior).
+            # Self-reporting alert path. When the watcher can't write
+            # /data/pod_events, it fires a single Web Push to ALERT_USER_ID once
+            # the failure has been sustained for at least ALERT_AFTER_MS AND has
+            # produced at least ALERT_AFTER_FAILURES consecutive failures, then
+            # suppresses re-fires for ALERT_COOLDOWN_MS. The trigger is
+            # duration-based, not status-based: a deploy blip (failures that
+            # recover within ALERT_AFTER_MS) stays silent, while a real outage or
+            # a revoked/bad token (failures that never recover) pages. Unset
+            # ALERT_USER_ID disables alerting entirely; the watcher just logs.
             #
             # ALERT_USER_ID is the PB user record id (15-char) of whoever should
             # get woken up. Set to the operator's id; push fanout hits all
@@ -94,6 +97,8 @@ spec:
               value: "y3rp8lm6njo45t6"
             - name: ALERT_AFTER_FAILURES
               value: "10"
+            - name: ALERT_AFTER_MS
+              value: "600000"
             - name: ALERT_COOLDOWN_MS
               value: "3600000"
             - name: ALERT_ON_RECOVERY
