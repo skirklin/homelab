@@ -24,6 +24,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 import { userOwnsChatMessage } from "../lib/authz";
+import { sendPushToUser } from "../lib/push";
 
 export const chatRoutes = new Hono<AppEnv>();
 
@@ -134,6 +135,20 @@ chatRoutes.post("/messages", handler(async (c) => {
     payload.meta = body.meta;
   }
   const record = await pb.collection("chat_messages").create(payload);
+
+  if (body.role === "assistant") {
+    const truncated = body.body.length > 100
+      ? body.body.slice(0, 100) + "..."
+      : body.body;
+    sendPushToUser(pb, userId, {
+      title: "New message",
+      body: truncated,
+      url: "https://life.kirkl.in/chat",
+    }, {
+      preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"],
+    }).catch((err) => console.error("chat push failed:", err));
+  }
+
   return c.json(record);
 }));
 
