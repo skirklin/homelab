@@ -116,6 +116,35 @@ function findMorningIntention(entries: Map<string, LogEntry>): string | null {
 }
 
 /**
+ * Most recent weekly_review intention, if any, within the last 8 days
+ * (Sunday-night → following Sunday-night, with a small grace window so a
+ * Sunday late-night or Monday early-morning review still anchors the week
+ * cleanly). Used as a passive "this week:" banner above the morning prompts
+ * — anchors the weekly cadence inside the daily one without adding a prompt.
+ * Returns null when there's no recent weekly_review with an intention value.
+ */
+function findCurrentWeekIntention(entries: Map<string, LogEntry>): string | null {
+  const subject = sessionSubjectId("weekly_review");
+  const cutoffMs = Date.now() - 8 * 24 * 60 * 60 * 1000;
+  let bestText: string | null = null;
+  let bestTs = 0;
+  for (const event of entries.values()) {
+    if (event.subjectId !== subject) continue;
+    const ts = event.timestamp.getTime();
+    if (ts < cutoffMs) continue;
+    if (ts <= bestTs) continue;
+    for (const e of event.entries) {
+      if (e.name === "intention" && e.type === "text" && e.value.trim()) {
+        bestText = e.value.trim();
+        bestTs = ts;
+        break;
+      }
+    }
+  }
+  return bestText;
+}
+
+/**
  * Resolve a SessionPrompt's dynamic context. Three return values, by design:
  *   - string   → substitute this into `{context}` in the hint and render
  *   - null     → contextKey was set but the lookup failed → drop the prompt
@@ -137,6 +166,21 @@ const Greeting = styled.p`
   font-size: var(--font-size-lg);
   color: var(--color-text-secondary);
   margin: 0 0 var(--space-lg) 0;
+`;
+
+/**
+ * Passive anchor shown above the morning prompts when the user has done a
+ * recent weekly_review with an intention. Not a prompt — just a quiet line
+ * that keeps the week's stated focus visible while answering "What matters
+ * today?" Designed to fade rather than nag: italic, muted, side-rule.
+ */
+const WeeklyIntentionBanner = styled.p`
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-md) 0;
+  font-style: italic;
+  border-left: 2px solid var(--color-border);
+  padding: var(--space-xs) var(--space-md);
 `;
 
 const PromptCard = styled.div`
@@ -228,6 +272,13 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
   const sessionContext = useMemo<SessionContext>(() => ({
     morningIntention: findMorningIntention(state.entries),
   }), [state.entries]);
+
+  // Passive weekly-intention anchor for the morning session. Computed
+  // regardless of session id (cheap) and only rendered for morning below.
+  const weeklyIntention = useMemo(
+    () => findCurrentWeekIntention(state.entries),
+    [state.entries],
+  );
 
   const prompts = useMemo<SessionPrompt[]>(() => {
     if (!session) return [];
@@ -372,6 +423,9 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
       <PageContainer>
         {stepIndex === 0 && <Greeting>{session.greeting}</Greeting>}
         {sessionId === "morning" && <MorningUpkeepHeader />}
+        {sessionId === "morning" && weeklyIntention && (
+          <WeeklyIntentionBanner>This week: “{weeklyIntention}”</WeeklyIntentionBanner>
+        )}
         <Progress>
           {prompts.map((_, i) => (
             <ProgressDot key={i} $active={i === stepIndex} $done={i < stepIndex} />
