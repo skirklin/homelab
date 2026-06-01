@@ -5,6 +5,7 @@
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
+import { todayPacific } from "./tz";
 
 // Upkeep is reachable at upkeep.<domain> and as a module under <domain>/upkeep.
 // Prefer the standalone subdomain (more recent enable flow); fall back to root.
@@ -30,10 +31,6 @@ function isDueTodayOrEarlier(date: Date): boolean {
   const dueDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return dueDay <= todayDay;
-}
-
-function todayPacific(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 }
 
 export async function runUpkeepNotifications(): Promise<{ notified: number; skipped: number }> {

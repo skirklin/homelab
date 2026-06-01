@@ -38,6 +38,7 @@ import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
+import { WeatherPanel } from "./WeatherPanel";
 import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 
 const TwoColumn = styled.div`
@@ -370,6 +371,7 @@ export function TripDetail() {
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {showReadiness && (
                   <>
+                    <WeatherPanel trip={trip} />
                     <ReadinessDashboard trip={trip} activities={activities} itineraries={itineraries} />
                     <TripChecklist trip={trip} activities={activities} />
                   </>

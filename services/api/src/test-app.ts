@@ -21,6 +21,7 @@ import { recipesRoutes } from "./routes/recipes";
 import { aiRoutes } from "./routes/ai";
 import { sharingRoutes } from "./routes/sharing";
 import { dataRoutes } from "./routes/data";
+import { travelRoutes } from "./routes/travel";
 import { pushRoutes } from "./routes/push";
 import { authRoutes } from "./routes/auth";
 
@@ -38,6 +39,7 @@ app.route("/recipes", recipesRoutes);
 app.route("/ai", aiRoutes);
 app.route("/sharing", sharingRoutes);
 app.route("/data", dataRoutes);
+app.route("/travel", travelRoutes);
 app.route("/push", pushRoutes);
 app.route("/auth", authRoutes);
 
