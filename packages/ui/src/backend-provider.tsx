@@ -59,6 +59,46 @@ const ChatBackendContext = createContext<ChatBackend>(backends.chat);
  * jobs (push notifications, etc.) read this to fire at the user's actual
  * local time instead of guessing from trip data.
  */
+/**
+ * Push the browser's current IANA timezone to `users.timezone` whenever it
+ * differs from what we last pushed for this user on this device.
+ *
+ * Race-narrowing: this hook used to PATCH the user record on every mount of
+ * a fresh user (no `kirkl_tz_pushed:<uid>` cache entry, so the dedupe never
+ * matched). PB's PATCH update is a server-side read-modify-write over the
+ * FULL record — concurrent writes to other user-record fields can be
+ * silently clobbered. Two real cases hit this:
+ *
+ *   1. `/api/sharing/redeem` adds a box to `user.recipe_boxes`; the timezone
+ *      PATCH loads the record before the hook commits, then writes back the
+ *      pre-hook value → recipe_boxes silently reverts to null. The redeemer
+ *      sees "No boxes" on their /boxes page even though the hook said
+ *      success. Repro: invite-redemption Playwright spec, ~25% failure rate.
+ *   2. Any other concurrent user-record write (slug additions, FCM token,
+ *      notification mode) from the same browser tab — `wpb`'s per-record
+ *      chain doesn't apply because the timezone PATCH was not chained.
+ *
+ * Mitigations layered here:
+ *   - Prefer the in-memory mirror cache: if the user record is already in
+ *     the wpb cache AND its `timezone` field matches the browser, skip the
+ *     PATCH entirely. This is the common case for returning users — their
+ *     timezone is already correctly set server-side from a prior session.
+ *     Also seeds the localStorage cache so subsequent mounts don't even
+ *     bother checking.
+ *   - Defer the PATCH off the initial mount with `requestIdleCallback`
+ *     (or a 1s setTimeout fallback). For brand-new users with no server
+ *     timezone, this gives the redeem POST (and any other inline writes
+ *     triggered by routing) a chance to complete first. The race window
+ *     drops from ~all-mounts to "brand-new user mounts an inline-write
+ *     path within 1s of sign-in" — exceedingly rare in practice.
+ *
+ * Note: this is NOT a complete fix to PB's lost-update problem. Any two
+ * concurrent writes to the same user record can still clobber. The real fix
+ * is either (a) move `timezone` to a separate collection, or (b) decompose
+ * `user.recipe_boxes` into a membership table. Both are larger schema
+ * changes; this hook's narrow mitigation closes the failing test case and
+ * leaves a comment trail for the structural fix.
+ */
 function useTimezoneSync() {
   const { user } = useAuth();
   useEffect(() => {
@@ -70,11 +110,37 @@ function useTimezoneSync() {
     if (!tz) return;
     const cacheKey = `kirkl_tz_pushed:${user.uid}`;
     if (typeof localStorage !== "undefined" && localStorage.getItem(cacheKey) === tz) return;
-    backends.user.updateProfile(user.uid, { timezone: tz })
-      .then(() => {
+
+    // Defer off the initial mount so inline writes triggered by routing
+    // (most importantly /invite/<code> -> POST /api/sharing/redeem) get a
+    // chance to commit before our PATCH loads the user record.
+    let cancelled = false;
+    const idle: (cb: () => void) => () => void = (cb) => {
+      const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number; cancelIdleCallback?: (h: number) => void }).requestIdleCallback;
+      if (typeof ric === "function") {
+        const h = ric(cb, { timeout: 2000 });
+        return () => (globalThis as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback?.(h);
+      }
+      const h = setTimeout(cb, 1000);
+      return () => clearTimeout(h);
+    };
+
+    const cancelIdle = idle(() => {
+      if (cancelled) return;
+      // Cache-first check: if the mirror has already populated the user
+      // record and its timezone matches, no write needed.
+      const cached = wpb.collection("users").view<{ timezone?: string }>(user.uid);
+      if (cached && cached.timezone === tz) {
         if (typeof localStorage !== "undefined") localStorage.setItem(cacheKey, tz);
-      })
-      .catch(() => { /* offline / write conflict — try again on next mount */ });
+        return;
+      }
+      backends.user.updateProfile(user.uid, { timezone: tz })
+        .then(() => {
+          if (typeof localStorage !== "undefined") localStorage.setItem(cacheKey, tz);
+        })
+        .catch(() => { /* offline / write conflict — try again on next mount */ });
+    });
+    return () => { cancelled = true; cancelIdle(); };
   }, [user?.uid]);
 }
 
