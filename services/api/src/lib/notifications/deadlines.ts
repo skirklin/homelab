@@ -14,12 +14,16 @@ import { DOMAIN } from "../../config";
 // Same origins as upkeep — deadlines surface in the same app(s).
 const UPKEEP_ORIGINS = [`https://upkeep.${DOMAIN}`, `https://${DOMAIN}`];
 
-/** Whole-day diff between today (local midnight) and the deadline. Negative = overdue. */
+/**
+ * Whole-day diff between today and the deadline, both anchored to the Pacific
+ * calendar day. Negative = overdue. The pod runs in UTC, so naive local-midnight
+ * truncation would read a day off near a UTC boundary vs the browser (which
+ * computes urgency in Pacific) — normalize via the same en-CA/LA pattern as
+ * todayPacific() so the notifier and UI agree.
+ */
 function daysUntil(deadline: Date): number {
-  const today = new Date();
-  const dueDay = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
-  const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return Math.floor((dueDay.getTime() - todayDay.getTime()) / (1000 * 60 * 60 * 24));
+  const pacificDay = (d: Date) => new Date(d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }));
+  return Math.floor((pacificDay(deadline).getTime() - pacificDay(new Date()).getTime()) / (1000 * 60 * 60 * 24));
 }
 
 function todayPacific(): string {
