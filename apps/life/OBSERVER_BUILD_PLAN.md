@@ -170,6 +170,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-05-29 | Scott asked for better PM↔user channel → designed + built Phase C v1 (C1+C2) | Diagnosed PM-runs-open-loop gap. Designed "Chat" v1 (flat chat-log, daily cron = responder, chat-shaped for additive realtime-SDK swap later). C1 (`8053f61`) + rename Coach→Chat + C2 `/chat` UI + dashboard entry (`7358525`) merged. Three should-fixes folded in pre-merge. Phase C is 2/4 done; C3 (push) + C4 (cron prompt — Scott to shape voice/questions/cadence) pending. |
 | 2026-05-30 | DISPATCH C3 (push on assistant chat message) | Built in worktree `agent-ab53e515` (`a6ca8ef`). 15-line diff: fire-and-forget `sendPushToUser` after assistant POST. Reviewed inline — no blockers, ready to merge. Phase 0 + C1–C3 all built, pending deploy. |
 | 2026-05-31 | MERGE C3 + NO-OP | Merged C3 to main. All Phase 0 + C1–C3 on main, pending deploy. C4 blocked on Scott's voice/cadence input. No new dispatches — nothing actionable until deploy or C4 direction. |
+| 2026-06-01 | NO-OP | All built work (Phase 0 + C1–C3) still pending deploy; C4 still blocked on Scott's voice/cadence input; no observations to evaluate. |
 
 ## Decision log
 
