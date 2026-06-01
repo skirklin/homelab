@@ -70,11 +70,18 @@ const CollapseBtn = styled.button`
 `;
 
 const Name = styled.span<{ $completed: boolean }>`
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   font-size: 13px;
   text-decoration: ${(p) => (p.$completed ? "line-through" : "none")};
   color: ${(p) => (p.$completed ? "#8c8c8c" : "#262626")};
+`;
+
+// Grows to fill the row so trailing Meta/Actions sit at the right edge while
+// the deadline tag stays tucked right after the task name.
+const Spacer = styled.div`
+  flex: 1;
+  min-width: 8px;
 `;
 
 const NameInput = styled.input`
@@ -329,6 +336,19 @@ export function OutlinerRow({
           <Name $completed={isDone} onClick={handleNameClick}>{task.name}</Name>
         )}
 
+        {/* Deadline tag sits right after the name (not floated to the row edge). */}
+        {task.taskType === "one_shot" && task.deadline && !isSnoozed && !isDone && (() => {
+          const days = daysUntilDue(task);
+          const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";
+          return (
+            <Tag color={color} style={{ fontSize: 10, lineHeight: "16px", margin: "0 0 0 6px", flexShrink: 0 }}>
+              {formatDeadline(task)}
+            </Tag>
+          );
+        })()}
+
+        <Spacer />
+
         <Meta>
           {task.taskType === "recurring" && task.frequency && (
             <Tag color="blue" style={{ fontSize: 10, lineHeight: "16px", margin: 0 }}>
@@ -338,15 +358,6 @@ export function OutlinerRow({
           {task.taskType === "recurring" && !isSnoozed && (
             <span>{formatDueDate(task)}</span>
           )}
-          {task.taskType === "one_shot" && task.deadline && !isSnoozed && (() => {
-            const days = daysUntilDue(task);
-            const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";
-            return (
-              <Tag color={color} style={{ fontSize: 10, lineHeight: "16px", margin: 0 }}>
-                {formatDeadline(task)}
-              </Tag>
-            );
-          })()}
           {isSnoozed && (
             <Tag color="orange" style={{ fontSize: 10, lineHeight: "16px", margin: 0 }}>
               Snoozed {formatSnoozeRemaining(task)}
