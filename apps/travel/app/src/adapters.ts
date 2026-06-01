@@ -36,6 +36,7 @@ import type {
   ItineraryDay as BackendItineraryDay,
   DayEntry as BackendDayEntry,
 } from "@homelab/backend";
+import { utcYmd, localYmd } from "./types";
 import type {
   Trip,
   Activity,
@@ -59,12 +60,38 @@ import type {
  * the UTC date portion (the canonical reduction; mirrors the server's
  * `start_date.slice(0,10)`) and rebuild it as local midnight, so every
  * downstream consumer reads the correct date-only value via local getters.
+ *
+ * Symmetric with `tripDateToBackend` on the write side: a read-then-write of an
+ * unchanged trip is identity (same calendar day) in every zone. Don't let one
+ * boundary use the UTC-date reduction and the other `toISOString()` — that
+ * asymmetry drifts the day east of UTC on every save.
  */
 function tripDateFromBackend(raw: string | null | undefined): Date | null {
   if (!raw) return null;
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+  // `utcYmd` is the canonical date-only reduction of a stored instant (mirrors
+  // the server's `start_date.slice(0,10)`); rebuild it as local midnight so
+  // every downstream consumer reads the right day via local getters.
+  const [y, m, d] = utcYmd(parsed).split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/**
+ * The write counterpart to `tripDateFromBackend`. Trip dates are date-only, and
+ * the local-midnight Date the read side produces must NOT be serialized with
+ * `toISOString()`: east of UTC that rolls local-midnight back a calendar day
+ * (e.g. 2026-06-02 midnight Sydney → 2026-06-01T14:00:00Z), corrupting the
+ * stored date on every save. Reduce the local-midnight Date back to its
+ * calendar day with `localYmd` (the inverse of the read side's local-midnight
+ * rebuild) and persist it as a stable date-only UTC instant, so the round-trip
+ * is identity in every zone — west AND east of UTC. The stored `…T00:00:00.000Z`
+ * shape keeps the canonical rule "the UTC date portion IS the trip date" intact
+ * (mirrors the server gate's `start_date.slice(0,10)`).
+ */
+function tripDateToBackend(date: Date | null | undefined): string {
+  if (!date) return "";
+  return `${localYmd(date)}T00:00:00.000Z`;
 }
 
 export function tripFromBackend(bt: BackendTrip): Trip {
@@ -164,8 +191,8 @@ export function tripToBackend(trip: Omit<Trip, "id">): Omit<BackendTrip, "id" | 
   return {
     name: trip.destination,
     destination: trip.destination,
-    startDate: trip.startDate ? trip.startDate.toISOString() : "",
-    endDate: trip.endDate ? trip.endDate.toISOString() : "",
+    startDate: tripDateToBackend(trip.startDate),
+    endDate: tripDateToBackend(trip.endDate),
     notes: trip.notes || "",
     flagged: trip.flaggedForReview || false,
     flagComment: trip.reviewComment || "",
@@ -193,8 +220,8 @@ export function tripUpdatesToBackend(fields: {
   }
   if (fields.status !== undefined) updates.status = fields.status;
   if (fields.region !== undefined) updates.region = fields.region;
-  if (fields.startDate !== undefined) updates.startDate = fields.startDate ? fields.startDate.toISOString() : "";
-  if (fields.endDate !== undefined) updates.endDate = fields.endDate ? fields.endDate.toISOString() : "";
+  if (fields.startDate !== undefined) updates.startDate = tripDateToBackend(fields.startDate);
+  if (fields.endDate !== undefined) updates.endDate = tripDateToBackend(fields.endDate);
   if (fields.notes !== undefined) updates.notes = fields.notes;
   if (fields.sourceRefs !== undefined) updates.sourceRefs = fields.sourceRefs;
   if (fields.flaggedForReview !== undefined) updates.flagged = fields.flaggedForReview;

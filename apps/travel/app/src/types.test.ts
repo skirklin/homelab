@@ -13,7 +13,7 @@ import {
   type Itinerary,
   type Trip,
 } from "./types";
-import { tripFromBackend } from "./adapters";
+import { tripFromBackend, tripToBackend, tripUpdatesToBackend } from "./adapters";
 
 // Note: `validateDay` and `parseTimeOfDay` tests live in
 // `packages/backend/src/travel-validation.test.ts` — the canonical impl moved
@@ -307,6 +307,63 @@ describe("trip dates are UTC-date-only (Pacific bug regression)", () => {
     const trip = tripFromBackend(mkBackendTrip("2026-06-02T00:00:00.000Z", "2026-06-07T00:00:00.000Z"));
     expect(isTripActive(trip, local(2026, 6, 7, 16))).toBe(true); // last day
     expect(isTripActive(trip, local(2026, 6, 8, 13))).toBe(false); // ended yesterday
+  });
+});
+
+// A read-then-write of an unchanged trip must not drift the stored calendar
+// day in ANY zone. The read boundary (`tripDateFromBackend`) rebuilds the
+// stored UTC day as local-midnight; the write boundary must be symmetric and
+// re-serialize the UTC date portion — NOT `toISOString()`, which for an
+// east-of-UTC process clock rolls local-midnight back to the previous UTC day
+// (e.g. 2026-06-02 local-midnight in Sydney → 2026-06-01T14:00:00Z), corrupting
+// the date on every save. Pinned because a prior fix normalized only the read
+// side and left the write side as `toISOString()`, making the round-trip
+// asymmetric east of UTC. Run under TZ=Australia/Sydney to exercise it.
+describe("trip date read→write round-trip is identity in all zones", () => {
+  const mkBackendTrip = (start: string, end: string) => ({
+    id: "z1ns765jyrtp7l5",
+    name: "Mexico City",
+    destination: "Mexico City",
+    status: "Booked",
+    region: "",
+    startDate: start,
+    endDate: end,
+    notes: "",
+    sourceRefs: "",
+    flagged: false,
+    flagComment: "",
+    log: "log1",
+    created: "2026-05-01T00:00:00.000Z",
+    updated: "2026-05-01T00:00:00.000Z",
+  });
+
+  // Both storage shapes denote the same calendar days (2026-06-02 .. 06-07).
+  for (const start of ["2026-06-02T00:00:00.000Z", "2026-06-02T07:00:00.000Z"]) {
+    it(`tripToBackend preserves the calendar day (stored ${start})`, () => {
+      const trip = tripFromBackend(mkBackendTrip(start, "2026-06-07T00:00:00.000Z"));
+      const written = tripToBackend(trip);
+      // The UTC date portion is the canonical trip date; it must round-trip.
+      expect(written.startDate.slice(0, 10)).toBe("2026-06-02");
+      expect(written.endDate.slice(0, 10)).toBe("2026-06-07");
+      // And a second read of what we wrote must yield the same local-midnight day.
+      const reread = tripFromBackend(mkBackendTrip(written.startDate, written.endDate));
+      expect(localYmd(reread.startDate!)).toBe("2026-06-02");
+      expect(localYmd(reread.endDate!)).toBe("2026-06-07");
+    });
+
+    it(`tripUpdatesToBackend preserves the calendar day (stored ${start})`, () => {
+      const trip = tripFromBackend(mkBackendTrip(start, "2026-06-07T00:00:00.000Z"));
+      const updates = tripUpdatesToBackend({ startDate: trip.startDate, endDate: trip.endDate });
+      expect((updates.startDate as string).slice(0, 10)).toBe("2026-06-02");
+      expect((updates.endDate as string).slice(0, 10)).toBe("2026-06-07");
+    });
+  }
+
+  it("empty/null dates serialize to empty string", () => {
+    const trip = tripFromBackend(mkBackendTrip("", ""));
+    const written = tripToBackend(trip);
+    expect(written.startDate).toBe("");
+    expect(written.endDate).toBe("");
   });
 });
 
