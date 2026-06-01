@@ -89,7 +89,20 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
   const tripTag = `travel:${trip.id}`;
   const tripContainerTag = `container:trip:${trip.id}`;
   const trips = useMemo(() => allTasks, [allTasks]);
-  const tasks = useMemo(() => trips.filter((t) => t.tags?.includes(tripTag)), [trips, tripTag]);
+  const tasks = useMemo(() => {
+    const tagged = trips.filter((t) => t.tags?.includes(tripTag));
+    // Drop container nodes and cleared items so the Prep list mirrors the
+    // outliner's default view. The per-trip container ("Trips/<trip>") carries
+    // the travel tag itself in legacy data, so identify containers as any task
+    // that parents another trip task (plus anything tagged container:*). And
+    // hide tasks the user cleared in the outliner ("Clear done").
+    const parentIds = new Set(tagged.map((t) => t.parentId).filter(Boolean));
+    return tagged.filter((t) =>
+      !t.cleared &&
+      !parentIds.has(t.id) &&
+      !t.tags?.some((tag) => tag.startsWith("container:")),
+    );
+  }, [trips, tripTag]);
 
   // Get the user's first household task list
   useEffect(() => {
