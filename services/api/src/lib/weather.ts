@@ -9,12 +9,20 @@
  * Date handling: trip start/end are stored as date-only UTC instants
  * (`YYYY-MM-DDT00:00:00.000Z`). The canonical reduction to a calendar day is
  * the UTC date portion (`.slice(0,10)`) — the same rule the server gate and
- * the travel adapter use. `tripDateOnly` is the single reduction here; we do
- * NOT introduce a tz-local reduction.
+ * the travel adapter use. `tripDateOnly` is the single reduction for trip
+ * dates; we do NOT introduce a tz-local reduction there.
+ *
+ * The *reference* "today" is different: it must be the Pacific calendar day
+ * (`todayPacific`), not the pod's UTC day. The api pods run UTC, so a naive UTC
+ * "today" reads a day ahead during the ~5pm–midnight PT window and would
+ * misclassify a trip ending today as `past` / clamp away today / shift the
+ * T-16 horizon edge. This mirrors the deadline/upkeep notifier fix.
  *
  * Everything in this module except `fetchOpenMeteo` / `geocodeDestination` is
  * pure and unit-tested directly.
  */
+
+import { todayPacific } from "./notifications/tz";
 
 // Open-Meteo daily forecast horizon. Beyond this it returns no data, so we
 // surface a "not yet available" state rather than fabricate.
@@ -53,10 +61,10 @@ export function tripDateOnly(raw: string | null | undefined): string | null {
   return parsed.toISOString().slice(0, 10);
 }
 
-/** Today's calendar day in UTC, as YYYY-MM-DD. */
-export function todayUtc(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
-}
+// Re-export the canonical Pacific "today" reduction so callers (and tests) can
+// reach it from here; the default reference day below stays in lockstep with
+// the deadline/upkeep notifiers.
+export { todayPacific };
 
 /** Add `days` calendar days to a YYYY-MM-DD string, returning YYYY-MM-DD. */
 export function addDays(ymd: string, days: number): string {
@@ -79,20 +87,21 @@ export function addDays(ymd: string, days: number): string {
 export function resolveForecastWindow(
   startRaw: string | null | undefined,
   endRaw: string | null | undefined,
-  today: string = todayUtc(),
+  today: string = todayPacific(),
 ): ForecastWindow {
   const start = tripDateOnly(startRaw);
   const end = tripDateOnly(endRaw);
   if (!start && !end) return { state: "unknown_dates" };
 
-  // A trip with only one date still works: treat a missing end as equal to
-  // start (single-day) and a missing start as equal to end.
   const effStart = start ?? end!;
-  const effEnd = end ?? start!;
+  const horizonEnd = addDays(today, FORECAST_HORIZON_DAYS);
+  // Open-ended trip (start set, no end — e.g. Isle Royale): a single-day window
+  // is useless, so default the end to a ~7-day window (start + 6 days), still
+  // clamped to the forecast horizon. A trip with only an end uses that end.
+  const effEnd = end ?? (start ? addDays(start, 6) : end!);
 
   if (effEnd < today) return { state: "past" };
 
-  const horizonEnd = addDays(today, FORECAST_HORIZON_DAYS);
   if (effStart > horizonEnd) {
     return { state: "not_yet", availableFrom: addDays(effStart, -FORECAST_HORIZON_DAYS) };
   }

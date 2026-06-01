@@ -9,6 +9,7 @@ import {
   resolveForecastWindow,
   transformOpenMeteo,
   derivePackingHints,
+  todayPacific,
   type DailyForecast,
 } from "./weather";
 
@@ -79,6 +80,67 @@ describe("resolveForecastWindow", () => {
   it("returns unknown_dates when the trip has no dates", () => {
     const w = resolveForecastWindow(null, null, today);
     expect(w.state).toBe("unknown_dates");
+  });
+
+  it("extends an open-ended trip (empty end_date) to a ~7-day window", () => {
+    // A trip with a start but no end (e.g. Isle Royale) should show a useful
+    // multi-day window, not collapse to a single day.
+    const w = resolveForecastWindow("2026-06-05", "", today);
+    expect(w.state).toBe("available");
+    if (w.state !== "available") throw new Error("expected available");
+    expect(w.start).toBe("2026-06-05");
+    // start + 6 days, still inside the horizon.
+    expect(w.end).toBe("2026-06-11");
+  });
+
+  it("clamps an open-ended trip's default window down to the horizon", () => {
+    // Start is in-window but start + 6 days would exceed the 16-day horizon.
+    const w = resolveForecastWindow("2026-06-15", "", today);
+    expect(w.state).toBe("available");
+    if (w.state !== "available") throw new Error("expected available");
+    expect(w.start).toBe("2026-06-15");
+    // today + 16 = 2026-06-17, which is before start + 6 (2026-06-21).
+    expect(w.end).toBe("2026-06-17");
+  });
+});
+
+describe("todayPacific", () => {
+  it("reduces a UTC instant to the Pacific calendar day, not the UTC day", () => {
+    // 2026-06-01T05:30:00Z = 2026-05-31 22:30 PDT. Pacific day is the 31st even
+    // though the UTC day has already rolled to June 1st. This is the exact
+    // ~5pm–midnight PT window where a naive UTC reduction reads a day ahead.
+    expect(todayPacific(new Date("2026-06-01T05:30:00.000Z"))).toBe("2026-05-31");
+  });
+
+  it("agrees with the UTC day during PT daytime", () => {
+    // 2026-06-01T20:00:00Z = 2026-06-01 13:00 PDT — same calendar day both ways.
+    expect(todayPacific(new Date("2026-06-01T20:00:00.000Z"))).toBe("2026-06-01");
+  });
+});
+
+describe("resolveForecastWindow default today (Pacific-anchored)", () => {
+  // The default `today` must be the Pacific calendar day, NOT the pod's UTC
+  // day. We can't freeze the global clock cleanly, so we assert the contract
+  // directly: the default param is `todayPacific()`, and passing that same
+  // value explicitly classifies a trip ending on the Pacific-today date as
+  // active rather than past. Under the old UTC default this trip would be
+  // `past` for ~7h every evening.
+  it("treats a trip ending on the Pacific-today date as available, not past", () => {
+    const pacificToday = todayPacific(new Date("2026-06-01T05:30:00.000Z")); // 2026-05-31
+    const w = resolveForecastWindow("2026-05-31", "2026-05-31", pacificToday);
+    expect(w.state).toBe("available");
+    if (w.state !== "available") throw new Error("expected available");
+    expect(w.start).toBe("2026-05-31");
+    expect(w.end).toBe("2026-05-31");
+  });
+
+  it("uses todayPacific() as the default reference day", () => {
+    // No explicit `today` → must behave identically to passing todayPacific().
+    expect(resolveForecastWindow(null, null)).toEqual(
+      resolveForecastWindow(null, null, todayPacific()),
+    );
+    // And a trip far in the past is `past` regardless of the UTC/Pacific edge.
+    expect(resolveForecastWindow("2020-01-01", "2020-01-02").state).toBe("past");
   });
 });
 

@@ -30,3 +30,16 @@ export function safeTz(tz: unknown, fallback: string): string {
     return fallback;
   }
 }
+
+/**
+ * Today's calendar day in Pacific time as `YYYY-MM-DD`.
+ *
+ * The canonical "what day is it for the human" reduction across the server.
+ * The pods run in UTC, so a naive `new Date().toISOString().slice(0,10)` reads
+ * a day ahead during the ~5pm–midnight PT window. Anchoring to Pacific keeps
+ * day-math (deadline urgency, upkeep due-today, forecast horizons) in sync with
+ * what the user sees in the browser. `en-CA` yields the ISO `YYYY-MM-DD` shape.
+ */
+export function todayPacific(now: Date = new Date()): string {
+  return now.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+}

@@ -22,7 +22,6 @@ interface WeatherResponse {
   state: "available" | "not_yet" | "past" | "unknown_dates" | "no_location";
   availableFrom?: string;
   location?: { lat: number; lon: number; source: string; timezone: string };
-  range?: { start: string; end: string };
   forecast: DailyForecast[];
   packingHints: string[];
 }
@@ -267,6 +266,7 @@ export function WeatherPanel({ trip }: WeatherPanelProps) {
 
 function Row({ day }: { day: DailyForecast }) {
   const prob = day.precipProbabilityMax;
+  const mm = day.precipMm;
   return (
     <>
       <DateCell>{formatDay(day.date)}</DateCell>
@@ -276,6 +276,11 @@ function Row({ day }: { day: DailyForecast }) {
       <Cell>
         <CloudOutlined style={{ color: rainColor(prob), marginRight: 4 }} />
         {prob === null ? "—" : `${prob}%`}
+        {/* Show the amount too — probability alone hides a 0.5mm drizzle vs a
+            20mm soaking. Only when there's measurable rain, to stay compact. */}
+        {mm !== null && mm >= 0.5 && (
+          <span style={{ color: "#8c8c8c", marginLeft: 4 }}>{Math.round(mm)}mm</span>
+        )}
       </Cell>
       <Cell>
         {day.uvIndexMax === null ? (

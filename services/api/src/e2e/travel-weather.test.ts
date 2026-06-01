@@ -10,6 +10,7 @@
  * Requires: PocketBase running (docker-compose.test.yml / test-env.sh up).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { createHash } from "crypto";
 import PocketBase from "pocketbase";
 import { getPbTestUrl } from "./pb-test-url";
 
@@ -89,6 +90,13 @@ beforeAll(async () => {
     body: JSON.stringify({ name: "weather-other-token" }),
   });
   otherApiToken = ((await tokenResp.json()) as { token: string }).token;
+  // The create endpoint returns the raw token but not the record id; look the
+  // row up by its SHA-256 hash (how it's stored) so teardown can delete it.
+  const tokenHash = createHash("sha256").update(otherApiToken).digest("hex");
+  const tokenRec = await adminPb
+    .collection("api_tokens")
+    .getFirstListItem(`token_hash="${tokenHash}"`);
+  cleanup.push({ collection: "api_tokens", id: tokenRec.id });
 
   const log = await adminPb.collection("travel_logs").create({
     name: "Weather Test Log", owners: [userId],

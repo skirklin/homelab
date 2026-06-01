@@ -10,6 +10,7 @@
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
+import { todayPacific } from "./tz";
 
 // Same origins as upkeep — deadlines surface in the same app(s).
 const UPKEEP_ORIGINS = [`https://upkeep.${DOMAIN}`, `https://${DOMAIN}`];
@@ -24,10 +25,6 @@ const UPKEEP_ORIGINS = [`https://upkeep.${DOMAIN}`, `https://${DOMAIN}`];
 function daysUntil(deadline: Date): number {
   const pacificDay = (d: Date) => new Date(d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }));
   return Math.floor((pacificDay(deadline).getTime() - pacificDay(new Date()).getTime()) / (1000 * 60 * 60 * 24));
-}
-
-function todayPacific(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 }
 
 export async function runDeadlineNotifications(): Promise<{ notified: number; skipped: number }> {
