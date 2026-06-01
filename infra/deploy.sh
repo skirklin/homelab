@@ -13,6 +13,39 @@
 #                                  # (hotfix escape hatch; SKIP_TESTS=1 also works)
 set -euo pipefail
 
+# ─── Resource enforcement ────────────────────────────────────────────────────
+# WSL2 doesn't bound process memory by default — a runaway tsc / vite / docker
+# build can eat all the VM's RAM and freeze the host. Re-exec ourselves inside
+# a transient systemd-run scope with a hard memory cap so the kernel OOM-kills
+# inside the scope instead of taking down the whole VM.
+#
+# Conditional on systemd being available (PID 1 systemd OR systemctl --user
+# running) — if not, we run as before with a single-line warning. To opt out
+# of the wrap (e.g. CI environments that already do their own enforcement),
+# set HOMELAB_DEPLOY_UNBOUNDED=1. Override the cap with HOMELAB_DEPLOY_MEMORY=NG.
+if [ -z "${HOMELAB_DEPLOY_SCOPE:-}" ] && [ -z "${HOMELAB_DEPLOY_UNBOUNDED:-}" ]; then
+    if command -v systemd-run >/dev/null 2>&1 \
+       && systemctl --user is-system-running >/dev/null 2>&1; then
+        DEPLOY_MEM_CAP="${HOMELAB_DEPLOY_MEMORY:-8G}"
+        echo "→ entering memory-bounded scope (MemoryMax=${DEPLOY_MEM_CAP}, swap=0)" >&2
+        export HOMELAB_DEPLOY_SCOPE=1
+        exec systemd-run --user --scope --quiet \
+            --unit="homelab-deploy-$$" \
+            -p MemoryMax="${DEPLOY_MEM_CAP}" \
+            -p MemorySwapMax=0 \
+            -- "$0" "$@"
+    else
+        echo "⚠  systemd --user not available — running without memory cap" >&2
+        echo "   (enable systemd in /etc/wsl.conf to bound this deploy)" >&2
+    fi
+fi
+
+# Cap V8 heap per Node process (tsc, vite, esbuild, vitest, etc.). The default
+# is ~4 GB; compounding across the workspace this can blow past any reasonable
+# scope cap. 2 GB is plenty for our packages; override per-invocation if a
+# bigger bundle needs it.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=2048}"
+
 cd "$(git rev-parse --show-toplevel)"
 
 # Load env vars for build-time injection (e.g. VITE_GOOGLE_MAPS_API_KEY)
@@ -493,7 +526,13 @@ run_docker_build() {
     local k8s_tag="${K8S_REGISTRY}/${app}:${IMAGE_TAG}"
     local app_start=$SECONDS
     echo "${prefix} Building ${app}..."
-    if "${DEPLOY_BUILD_CMD:-docker}" build -q "$@" -t "${push_tag}" -t "${k8s_tag}" . > /dev/null 2>&1; then
+    # Docker enforces per-build memory via cgroups under the hood. Cap each
+    # BuildKit worker at 3 GB so a pathological build can't run away even if
+    # the outer scope is generous. Override with HOMELAB_BUILD_MEMORY=NG.
+    local build_mem="${HOMELAB_BUILD_MEMORY:-3g}"
+    if "${DEPLOY_BUILD_CMD:-docker}" build -q \
+            --memory="${build_mem}" --memory-swap="${build_mem}" \
+            "$@" -t "${push_tag}" -t "${k8s_tag}" . > /dev/null 2>&1; then
         echo "${prefix} ✓ ${app} ($(elapsed $((SECONDS - app_start))))"
         return 0
     else
@@ -552,23 +591,18 @@ if [ "$PUSH_ONLY" = false ]; then
     TOTAL=${#BUILD_LIST[@]}
     BUILD_START=$SECONDS
 
-    # Bounded fan-out. The 8 Vite frontends share app.Dockerfile and are
-    # independent, so a serial loop wastes wall-clock on a 16-core laptop.
-    # Cap concurrency so we don't thrash the docker daemon / RAM: default to
-    # nproc/2 (min 1), clamped to 4, overridable via DEPLOY_BUILD_JOBS.
+    # Lean by default — every parallel BuildKit job allocates ~2-3 GB peak
+    # (workspace install + tsc + vite build inside the container). Default to
+    # SERIAL; the outer systemd scope caps total memory, but serial keeps the
+    # peak predictable. Override with DEPLOY_BUILD_JOBS=N for "I have RAM,
+    # go fast" (CI environments are the canonical case).
     #
     # The footgun: you CANNOT collect exit codes by appending to a bash array
     # from `&`-backgrounded subshells — the appends happen in the subshell and
     # vanish when it exits. Each background job instead writes its result to a
     # per-app status file ("$tmpdir/<app>.status": "ok" or "fail"); after
     # `wait` we read those files back in the parent to build FAILED_APPS.
-    if [ -n "${DEPLOY_BUILD_JOBS:-}" ]; then
-        MAX_JOBS="$DEPLOY_BUILD_JOBS"
-    else
-        MAX_JOBS=$(( $(nproc 2>/dev/null || echo 2) / 2 ))
-        [ "$MAX_JOBS" -lt 1 ] && MAX_JOBS=1
-        [ "$MAX_JOBS" -gt 4 ] && MAX_JOBS=4
-    fi
+    MAX_JOBS="${DEPLOY_BUILD_JOBS:-1}"
     # A single-app build (the common selective-deploy case) has nothing to
     # parallelize; force serial so output isn't muddied and there's no temp dir.
     [ "$TOTAL" -le 1 ] && MAX_JOBS=1

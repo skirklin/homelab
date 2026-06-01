@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "description": "Personal web apps monorepo — migrating from Firebase to PocketBase + Caddy",
   "scripts": {
-    "build": "turbo run build",
+    "build": "turbo run build --concurrency=2",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "lint": "turbo run lint --concurrency=2",
     "lint:pb": "infra/scripts/lint-pb-migrations.sh",
     "test": "turbo run test --concurrency=1",
     "test:playwright": "turbo run test:playwright --concurrency=1",
@@ -15,7 +15,7 @@
     "test:env:up": "infra/test-env.sh up",
     "test:env:down": "infra/test-env.sh down",
     "test:env:status": "infra/test-env.sh status",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck --concurrency=2"
   },
   "devDependencies": {
     "turbo": "^2"
