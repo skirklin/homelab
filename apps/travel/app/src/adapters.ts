@@ -51,14 +51,30 @@ import type {
 // Backend -> App conversions (for subscriptions)
 // ==========================================
 
+/**
+ * Trip start/end are stored in PB as a `date` (a full UTC instant) but are
+ * semantically date-only. Reading them with `new Date(...)` and then local
+ * getters shifts the day west of UTC — that's what made a Pacific user see a
+ * trip as "day 2" the day before its start. Normalize at this boundary: take
+ * the UTC date portion (the canonical reduction; mirrors the server's
+ * `start_date.slice(0,10)`) and rebuild it as local midnight, so every
+ * downstream consumer reads the correct date-only value via local getters.
+ */
+function tripDateFromBackend(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+}
+
 export function tripFromBackend(bt: BackendTrip): Trip {
   return {
     id: bt.id,
     destination: decodeEntities(bt.destination || bt.name || ""),
     status: (bt.status as TripStatus) || "Idea",
     region: decodeEntities(bt.region || ""),
-    startDate: bt.startDate ? new Date(bt.startDate) : null,
-    endDate: bt.endDate ? new Date(bt.endDate) : null,
+    startDate: tripDateFromBackend(bt.startDate),
+    endDate: tripDateFromBackend(bt.endDate),
     notes: decodeEntities(bt.notes || ""),
     sourceRefs: bt.sourceRefs || "",
     flaggedForReview: bt.flagged || false,

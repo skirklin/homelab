@@ -22,7 +22,6 @@ import {
   STATUS_COLORS,
   STATUS_ORDER,
   isTripActive,
-  localYmd,
   type Trip,
   type TripStatus,
 } from "../types";
@@ -527,8 +526,10 @@ export function TripList({ embedded: _embedded = false }: { embedded?: boolean }
             const totalDays = t.startDate && t.endDate
               ? Math.round((t.endDate.getTime() - t.startDate.getTime()) / 86400000) + 1
               : 0;
+            // t.startDate is already local-midnight of the trip's UTC start day
+            // (normalized in tripFromBackend), so diff against today's local midnight.
             const dayNumber = t.startDate
-              ? Math.round((new Date().setHours(0, 0, 0, 0) - new Date(localYmd(t.startDate)).setHours(0, 0, 0, 0)) / 86400000) + 1
+              ? Math.round((new Date().setHours(0, 0, 0, 0) - t.startDate.getTime()) / 86400000) + 1
               : 0;
             return (
               <ActiveCard key={t.id} onClick={() => navigate(t.id)}>

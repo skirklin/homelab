@@ -7,11 +7,13 @@ import {
   findNextEntry,
   formatCountdown,
   localYmd,
+  utcYmd,
   type Activity,
   type ItineraryDay,
   type Itinerary,
   type Trip,
 } from "./types";
+import { tripFromBackend } from "./adapters";
 
 // Note: `validateDay` and `parseTimeOfDay` tests live in
 // `packages/backend/src/travel-validation.test.ts` — the canonical impl moved
@@ -240,5 +242,78 @@ describe("localYmd", () => {
   it("formats a Date as YYYY-MM-DD in local time", () => {
     expect(localYmd(new Date(2026, 3, 20))).toBe("2026-04-20"); // month is 0-indexed
     expect(localYmd(new Date(2026, 11, 5))).toBe("2026-12-05");
+  });
+});
+
+// Trip start/end dates are stored in PB as a `date` (a full UTC instant) but
+// are semantically date-only. The canonical rule: a trip date resolves to the
+// UTC date portion (YYYY-MM-DD) of the stored value, never a local-time
+// reduction. This test suite pins the bug where a Pacific user saw a trip as
+// already started ("day 2") the day before its start_date. It exercises the
+// real bug path — backend string → tripFromBackend → isTripActive — and must
+// be run with the process clock in a west-of-UTC zone (the gate sets
+// TZ=America/Los_Angeles). The two storage shapes below both denote 2026-06-02:
+//   - "2026-06-02T00:00:00.000Z"  (midnight UTC — picker-as-UTC writes)
+//   - "2026-06-02T07:00:00.000Z"  (midnight Pacific stored as UTC)
+describe("trip dates are UTC-date-only (Pacific bug regression)", () => {
+  // `now` is a true instant reduced on the *local* wall-clock date, so we
+  // construct it with the local-Date constructor to keep the test TZ-agnostic
+  // (a UTC ISO literal would denote a different calendar day east of UTC). The
+  // trip dates, by contrast, come through the adapter from stored ISO strings —
+  // that is the real bug path being pinned.
+  const local = (y: number, m: number, day: number, h = 0) => new Date(y, m - 1, day, h);
+  // The day BEFORE the trip starts (trip starts 2026-06-02).
+  const nowDayBefore = local(2026, 6, 1, 16);
+
+  const mkBackendTrip = (start: string, end: string) => ({
+    id: "z1ns765jyrtp7l5",
+    name: "Mexico City",
+    destination: "Mexico City",
+    status: "Booked",
+    region: "",
+    startDate: start,
+    endDate: end,
+    notes: "",
+    sourceRefs: "",
+    flagged: false,
+    flagComment: "",
+    log: "log1",
+    created: "2026-05-01T00:00:00.000Z",
+    updated: "2026-05-01T00:00:00.000Z",
+  });
+
+  for (const startShape of ["2026-06-02T00:00:00.000Z", "2026-06-02T07:00:00.000Z"]) {
+    it(`is NOT active the day before start (stored ${startShape})`, () => {
+      const trip = tripFromBackend(mkBackendTrip(startShape, "2026-06-07T07:00:00.000Z"));
+      // The trip starts 2026-06-02; "now" is 2026-06-01 Pacific. Must be inactive.
+      expect(isTripActive(trip, nowDayBefore)).toBe(false);
+      // The adapter pins the trip date to the stored UTC day (local midnight),
+      // so a display-side local reduction shows 06-02, not 06-01.
+      expect(localYmd(trip.startDate!)).toBe("2026-06-02");
+    });
+  }
+
+  it("is active on the first day", () => {
+    const trip = tripFromBackend(mkBackendTrip("2026-06-02T00:00:00.000Z", "2026-06-07T07:00:00.000Z"));
+    expect(isTripActive(trip, local(2026, 6, 2, 16))).toBe(true);
+  });
+
+  it("is active mid-range", () => {
+    const trip = tripFromBackend(mkBackendTrip("2026-06-02T00:00:00.000Z", "2026-06-07T07:00:00.000Z"));
+    expect(isTripActive(trip, local(2026, 6, 4, 13))).toBe(true);
+  });
+
+  it("is active on the last day, inactive the day after (ended yesterday)", () => {
+    const trip = tripFromBackend(mkBackendTrip("2026-06-02T00:00:00.000Z", "2026-06-07T00:00:00.000Z"));
+    expect(isTripActive(trip, local(2026, 6, 7, 16))).toBe(true); // last day
+    expect(isTripActive(trip, local(2026, 6, 8, 13))).toBe(false); // ended yesterday
+  });
+});
+
+describe("utcYmd", () => {
+  it("formats a Date as YYYY-MM-DD in UTC", () => {
+    // 2026-06-02 00:00 UTC — Pacific local would be 2026-06-01; UTC must win.
+    expect(utcYmd(new Date("2026-06-02T00:00:00.000Z"))).toBe("2026-06-02");
+    expect(utcYmd(new Date("2026-06-02T07:00:00.000Z"))).toBe("2026-06-02");
   });
 });

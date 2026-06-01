@@ -279,7 +279,33 @@ export function localYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** A trip is "active" if `now` (date portion) falls within [startDate, endDate] inclusive. */
+/**
+ * UTC-date YYYY-MM-DD string for a Date. Trip start/end are stored in PB as a
+ * full UTC instant but are semantically date-only; the canonical rule is to
+ * reduce them on their UTC date portion, never a local-time reduction (which
+ * shifts the day west of UTC and made a Pacific user see a trip as "day 2"
+ * the day before it started). Mirrors the server's `start_date.slice(0,10)`.
+ *
+ * The travel adapter applies this at the backend boundary and rebuilds trip
+ * dates as local-midnight of that UTC day (`tripDateFromBackend`), so every
+ * downstream consumer — display via `localYmd`/`toLocaleDateString`, year/month
+ * grouping, day-number arithmetic, `isTripActive` — sees one date-only value
+ * and stays consistent. Use this directly only when reducing a raw instant.
+ */
+export function utcYmd(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * A trip is "active" if today (the user's local date) falls within
+ * [startDate, endDate] inclusive. Trip dates are date-only values that the
+ * adapter has already pinned to local-midnight of their UTC day, so reducing
+ * them with `localYmd` here yields the correct UTC date in every zone — the
+ * same shape as the server gate (`todayInTz` vs `start_date.slice(0,10)`).
+ */
 export function isTripActive(trip: Trip, now: Date): boolean {
   if (!trip.startDate || !trip.endDate) return false;
   const today = localYmd(now);
