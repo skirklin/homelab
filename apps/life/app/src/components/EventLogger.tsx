@@ -29,9 +29,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import styled, { css } from "styled-components";
 import { Button, Checkbox } from "antd";
-import { PlusOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
+import { PlusOutlined, CheckOutlined, CloseOutlined, StarFilled, StarOutlined } from "@ant-design/icons";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
-import type { LifeEntry, LifeEvent, LifeManifestTrackable, TypedField } from "@homelab/backend";
+import type { LifeEntry, LifeEvent, LifeManifestTrackable, TypedField, QuickPayload } from "@homelab/backend";
 import type { LogEntry } from "../types";
 import { type WidgetSize } from "../display-settings";
 import {
@@ -39,12 +39,17 @@ import {
   formatDuration,
   formatRating,
   formatDose,
+  formatEntry,
   collectNumberValues,
 } from "../lib/format";
 import { primaryField, fieldUnit } from "../lib/trackables";
+import { frecentPayloads, payloadKey } from "../lib/frecency";
 import { EntriesPopover } from "./EntriesPopover";
 import { NumberFieldEditor, DurationFieldEditor, TextFieldEditor } from "./EntryFields";
 import { Hint } from "./Hint";
+
+/** How many quick-action chips to show on a card (pins + frecency combined). */
+const MAX_CHIPS = 4;
 
 interface EventLoggerProps {
   trackable: LifeManifestTrackable;
@@ -170,6 +175,49 @@ const Actions = styled.div`
   gap: var(--space-xs);
 `;
 
+const ChipRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-xs);
+`;
+
+const QuickChip = styled.div<{ $pinned: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid ${(p) => (p.$pinned ? "var(--color-primary)" : "var(--color-border)")};
+  background: ${(p) => (p.$pinned ? "var(--color-primary-light)" : "var(--color-bg)")};
+  border-radius: 999px;
+  overflow: hidden;
+`;
+
+/** The tap-to-log part of a chip. */
+const ChipLog = styled.button<{ $pinned: boolean }>`
+  border: none;
+  background: transparent;
+  color: ${(p) => (p.$pinned ? "var(--color-primary)" : "var(--color-text)")};
+  padding: 2px 6px 2px 10px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover { color: var(--color-primary); }
+`;
+
+/** The star (pin/unpin) part of a chip. */
+const ChipStar = styled.button<{ $pinned: boolean }>`
+  border: none;
+  background: transparent;
+  color: ${(p) => (p.$pinned ? "var(--color-primary)" : "var(--color-text-secondary)")};
+  padding: 2px 8px 2px 2px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+
+  &:hover { color: var(--color-primary); }
+`;
+
 const TapPlus = styled.button<{ $size: WidgetSize }>`
   display: inline-flex;
   align-items: center;
@@ -246,6 +294,19 @@ function formatValueDisplay(value: number | null, unit: string): string {
   if (unit === "rating") return formatRating(value, 5);
   if (unit === "min") return formatDuration(value);
   return formatDose(value, unit);
+}
+
+/**
+ * A short human label for a quick-action chip. Uses the payload's explicit
+ * `label` (pins carry one), else renders the primary number entry, appending
+ * a category if present ("30m · run").
+ */
+function chipLabel(payload: QuickPayload): string {
+  if (payload.label) return payload.label;
+  const measured = payload.entries.filter((e) => e.type === "number" || e.type === "bool");
+  const valuePart = measured.map(formatEntry).join(" ");
+  const cat = payload.labels ? Object.values(payload.labels)[0] : undefined;
+  return cat ? `${valuePart} · ${cat}` : valuePart;
 }
 
 /**
@@ -416,6 +477,72 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     writeEvent(eventEntries, Object.keys(labels).length > 0 ? labels : undefined);
   }, [trackable, numbers, texts, bools, categories, writeEvent, message]);
 
+  // ---- Quick-action chips: pins first, frecency fills the rest ----
+  const pins = useMemo(() => trackable.pinned ?? [], [trackable.pinned]);
+  const chips = useMemo<Array<{ payload: QuickPayload; pinned: boolean }>>(() => {
+    const out: Array<{ payload: QuickPayload; pinned: boolean }> = pins.map((p) => ({
+      payload: p,
+      pinned: true,
+    }));
+    const remaining = MAX_CHIPS - out.length;
+    if (remaining > 0) {
+      const frecent = frecentPayloads(entries, trackable, { limit: remaining, exclude: pins });
+      for (const p of frecent) out.push({ payload: p, pinned: false });
+    }
+    return out;
+  }, [pins, entries, trackable]);
+
+  // Tap a chip → log its exact payload (entries + category labels).
+  const logPayload = useCallback((payload: QuickPayload) => {
+    writeEvent(payload.entries, payload.labels);
+  }, [writeEvent]);
+
+  // Pin/unpin a chip's payload. Pins are presentation state on the manifest;
+  // we compute the new list and hand the whole array to the backend, which
+  // read-modify-writes just this trackable's `pinned[]` (atomic per the JSON
+  // column). Frecency payloads are stored WITHOUT a label so the chip keeps
+  // rendering its derived value label.
+  const togglePin = useCallback(async (payload: QuickPayload, currentlyPinned: boolean) => {
+    if (!logId) return;
+    const key = payloadKey(payload);
+    const next = currentlyPinned
+      ? pins.filter((p) => payloadKey(p) !== key)
+      : [...pins, payload];
+    try {
+      await life.setTrackablePins(logId, trackable.id, next);
+    } catch (err) {
+      console.error("Failed to update pins:", err);
+      message.error("Failed to update pins");
+    }
+  }, [logId, pins, trackable.id, life, message]);
+
+  const chipRow = chips.length > 0 ? (
+    <ChipRow onClick={(e) => e.stopPropagation()}>
+      {chips.map(({ payload, pinned }) => {
+        const label = chipLabel(payload);
+        return (
+          <QuickChip key={`${pinned ? "p" : "f"}:${payloadKey(payload)}`} $pinned={pinned} data-testid="quick-chip">
+            <ChipLog
+              $pinned={pinned}
+              disabled={saving || !logId}
+              aria-label={`Log ${label}`}
+              onClick={() => logPayload(payload)}
+            >
+              {label}
+            </ChipLog>
+            <ChipStar
+              $pinned={pinned}
+              aria-label={pinned ? `Unpin ${label}` : `Pin ${label}`}
+              onClick={() => togglePin(payload, pinned)}
+            >
+              {pinned ? <StarFilled /> : <StarOutlined />}
+            </ChipStar>
+          </QuickChip>
+        );
+      })}
+    </ChipRow>
+  ) : null;
+
   // Submit on Enter when in the form.
   const formRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -470,6 +597,7 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
             </TapPlus>
           )}
         </HeaderRow>
+        {chipRow}
       </Card>
     );
   }
@@ -500,6 +628,7 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
             ))}
           </RatingRow>
         )}
+        {chipRow}
       </Card>
     );
   }
@@ -552,6 +681,7 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
         </FormRow>
       )}
 
+      {!open && chipRow}
       {!open && breakdown && <Hint $muted style={{ marginTop: 4 }}>{breakdown}</Hint>}
     </Card>
   );

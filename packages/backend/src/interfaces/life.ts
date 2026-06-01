@@ -6,7 +6,7 @@
  * config.
  */
 import type { Unsubscribe } from "../types/common";
-import type { LifeLog, LifeEvent, LifeEntry } from "../types/life";
+import type { LifeLog, LifeEvent, LifeEntry, QuickPayload } from "../types/life";
 
 export interface LifeBackend {
   // --- Log ---
@@ -31,6 +31,17 @@ export interface LifeBackend {
    * disabled, no schedule is generated and no pushes fire.
    */
   setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void>;
+
+  /**
+   * Replace one trackable's `pinned[]` quick-action favorites in the log's
+   * manifest. Read-modify-write of the single `manifest` JSON column: the
+   * caller computes the complete new pin list (the per-trackable set is small),
+   * and only that trackable's `pinned` is swapped — every other trackable and
+   * field is left byte-for-byte intact. No-ops cleanly if the trackable isn't
+   * in the manifest (it may have been removed). `pinned[]` is presentation
+   * state, NOT a history join key, so it is freely mutable.
+   */
+  setTrackablePins(logId: string, trackableId: string, pins: QuickPayload[]): Promise<void>;
 
   // --- Events ---
 

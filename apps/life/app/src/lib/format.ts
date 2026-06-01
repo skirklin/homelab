@@ -136,35 +136,3 @@ export function collectNumberValues(events: LifeEvent[], name: string): number[]
 export function eventSource(ev: LifeEvent): string {
   return ev.labels?.source ?? "manual";
 }
-
-/**
- * Convention: what's the primary numeric entry name for a given trackable id?
- * The EventLogger writes one row per logged value and names that entry per
- * this table; dashboard aggregation reads the same names back out.
- *
- * Per-subject (over the unit) so the few cases that broke the "count"
- * default — alcohol stores "drinks", coffee stores "volume", medical doses
- * store "dose" — are named meaningfully on read.
- */
-export function primaryEntryName(subjectId: string): string {
-  switch (subjectId) {
-    case "vyvanse":
-    case "ibuprofin":
-    case "edibles":
-      return "dose";
-    case "alcohol":
-      return "drinks";
-    case "coffee":
-      return "volume";
-    case "sleep":
-    case "exercise":
-    case "focus":
-      return "duration";
-    case "mood":
-    case "content":
-    case "sleep_quality":
-      return "rating";
-    default:
-      return "count";
-  }
-}

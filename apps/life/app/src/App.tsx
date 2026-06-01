@@ -20,8 +20,9 @@ function AppContent() {
   if (loading) return null;
   // Auth gate sits inside BrowserRouter and intentionally does NOT navigate
   // on sign-in. The router's location is preserved while <Auth /> is shown,
-  // so a cold-launched PWA deep link like /quick/sleep?v=480 survives the
-  // gate and resumes at the original URL once `user` flips truthy.
+  // so a cold-launched deep link (e.g. a push notification landing on
+  // /evening) survives the gate and resumes at the original URL once `user`
+  // flips truthy.
   if (!user) return <Auth />;
 
   return (

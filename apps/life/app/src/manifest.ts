@@ -1,29 +1,18 @@
 /**
- * Code-driven manifest for the life app.
+ * Code-driven SESSION manifest for the life app.
  *
- * Every entry is a `life_events` row keyed by `subject_id`. A Trackable is the
- * config for one of those subjects: what to call it, what unit its primary
- * value carries, and what shape its inline log form takes.
+ * Trackables are now per-user and data-defined (persisted on
+ * `life_logs.manifest`, read through [lib/trackables.ts](./lib/trackables.ts));
+ * this file owns only the closed, code-defined set that stays in code:
+ * sessions (morning / evening / weekly review) and the random-sample config
+ * re-export.
  *
- * Aggregation behaviour is derived from `unit` (see `lib/format.ts`'s
- * `aggregationFor`): ratings average, everything else sums. The old explicit
- * `aggregation` field was dropped — it was redundant with `unit` in every
- * existing case.
- *
- * Trackable IDs are persisted in life_events.subject_id. Don't rename them in
- * place — historical events keyed on the old id will fall off the dashboard.
- *
- * The Trackable interface and the TRACKABLES array live in
- * [./trackables.ts](./trackables.ts) so they can be imported from
- * vite.config.ts at config-load time without dragging in @homelab/backend
- * (whose TS sources the vite-config loader can't transpile). This file
- * re-exports them and adds the runtime bits that *do* depend on the backend
- * (SessionPrompt/Session, RANDOM_SAMPLES re-export).
+ * Session prompt ids are persisted in `life_events.entries[].name`. Don't
+ * rename them in place — historical events keyed on the old id fall off.
  */
 import type { SampleSchedule, LifeLog } from "@homelab/backend";
 
 export type { SampleSchedule, LifeLog };
-export { TRACKABLES, GROUP_ORDER, getTrackable, type Trackable } from "./trackables";
 
 // ---------- Sessions ----------
 

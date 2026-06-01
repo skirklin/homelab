@@ -30,6 +30,7 @@ const TitleWithStatus = styled.div`
 `;
 import { useLifeContext } from "../life-context";
 import { EventLogger } from "./EventLogger";
+import { GlobalQuickRow } from "./GlobalQuickRow";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
 import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
@@ -453,7 +454,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   };
 
   // Entries subscription is mounted once in LifeRoutesInner so every route
-  // (dashboard, /morning, /evening, /weekly, /journal, /insights, /quick)
+  // (dashboard, /morning, /evening, /weekly, /journal, /insights)
   // inherits today's events from a single feed.
   const allEntries = Array.from(state.entries.values());
 
@@ -961,6 +962,13 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
+            <GlobalQuickRow
+              trackables={trackables}
+              entries={allEntries}
+              userId={user?.uid ?? ""}
+              logId={state.log?.id}
+              timestamp={getSelectedTimestamp()}
+            />
             {groupKeys.map((key) => (
               <GroupSection key={key}>
                 <GroupLabel>{key === "more" ? "" : key}</GroupLabel>

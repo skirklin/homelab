@@ -1,22 +1,12 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import { kirklPlugins, resolveDevApiTarget, resolveDevVitePort } from '@kirkl/vite-preset'
-import { TRACKABLES } from './src/trackables'
 
-/**
- * Derive PWA web-manifest `shortcuts[]` from the trackable presets. Each
- * preset on a trackable becomes one shortcut that deep-links into
- * `/quick/<trackableId>?v=<canonicalValue>`, where the React route logs the
- * event and bounces back to /. Generating here means the shortcuts can't
- * drift from the in-app preset chips.
- */
-const pwaShortcuts = TRACKABLES.flatMap((t) =>
-  (t.presets ?? []).map((p) => ({
-    name: `Log ${p.label} ${t.label.toLowerCase()}`,
-    short_name: `${p.label} ${t.label.toLowerCase()}`,
-    url: `/quick/${t.id}?v=${p.value}`,
-  })),
-)
+// PWA web-manifest `shortcuts[]` were derived from hardcoded trackable presets
+// and deep-linked into the now-removed `/quick` route. With per-user trackables
+// (manifest-driven, no build-time list) a static shortcut list can't be
+// per-user-correct, so it was dropped (P3). Quick entry now lives in-app as the
+// pins + frecency chips on each card and the global quick-log row.
 
 export default defineConfig({
   plugins: kirklPlugins({
@@ -24,7 +14,6 @@ export default defineConfig({
     shortName: 'Life',
     themeColor: '#13c2c2',
     importScripts: ['/push-sw.js'],
-    shortcuts: pwaShortcuts,
   }),
   server: {
     port: resolveDevVitePort(),

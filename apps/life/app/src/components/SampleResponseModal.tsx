@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import styled from "styled-components";
 import { Modal, Button } from "antd";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
-import { type SampleQuestion, type RandomSamplesConfig, getTrackable } from "../manifest";
+import { type SampleQuestion, type RandomSamplesConfig } from "../manifest";
 
 const QuestionContainer = styled.div`
   display: flex;
@@ -106,8 +106,9 @@ export function SampleResponseModal({
   const handleSkip = () => onClose();
 
   const renderQuestion = (question: SampleQuestion) => {
-    const trackable = getTrackable(question.trackableId);
-    const label = question.label ?? trackable?.label ?? question.trackableId;
+    // Sample questions carry their own display label; fall back to the raw id
+    // only if a future question omits it.
+    const label = question.label ?? question.trackableId;
     const max = 5;
     const currentValue = responses[question.trackableId];
 

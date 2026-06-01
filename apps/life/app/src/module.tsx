@@ -12,7 +12,6 @@ import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { DisplaySettingsProvider } from "./display-settings";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { SessionRunner } from "./components/SessionRunner";
-import { QuickLog } from "./components/QuickLog";
 import { useEntriesSubscription } from "./subscription";
 
 const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
@@ -53,8 +52,8 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   }, [user?.uid, dispatch, life]);
 
   // Subscribe to today's events at the route-tree level so every life
-  // route (dashboard, /morning, /evening, /weekly, /journal, /insights,
-  // /quick) inherits `state.entries` without each having to subscribe on
+  // route (dashboard, /morning, /evening, /weekly, /journal, /insights)
+  // inherits `state.entries` without each having to subscribe on
   // its own. Critical for the push-notification entry path: the "evening
   // session" push lands the user directly on /evening with no dashboard
   // mount, so without this the wizard's `findMorningIntention` lookup ran
@@ -77,7 +76,6 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
         <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
         <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
         <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
-        <Route path="/quick/:trackableId" element={<QuickLog />} />
         <Route path="/insights" element={
           <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
             <Visualizations />
@@ -124,4 +122,3 @@ export function LifeModule() {
 
 export { LifeProvider, useLifeContext } from "./life-context";
 export type { LogEntry, LifeLog } from "./types";
-export type { Trackable } from "./manifest";

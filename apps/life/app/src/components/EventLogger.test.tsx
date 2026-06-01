@@ -22,6 +22,7 @@ import userEvent from "@testing-library/user-event";
 import type { LifeManifestTrackable, LifeEntry } from "@homelab/backend";
 
 const addEvent = vi.fn().mockResolvedValue("evt1");
+const setTrackablePins = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@kirkl/shared", async () => {
   const actual = await vi.importActual<typeof import("@kirkl/shared")>("@kirkl/shared");
@@ -30,11 +31,12 @@ vi.mock("@kirkl/shared", async () => {
     useFeedback: () => ({
       message: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
     }),
-    useLifeBackend: () => ({ addEvent }),
+    useLifeBackend: () => ({ addEvent, setTrackablePins }),
   };
 });
 
 import { EventLogger } from "./EventLogger";
+import type { LifeEvent } from "@homelab/backend";
 
 type AddEventCall = {
   logId: string;
@@ -62,7 +64,24 @@ function renderLogger(trackable: LifeManifestTrackable) {
 
 beforeEach(() => {
   addEvent.mockClear();
+  setTrackablePins.mockClear();
 });
+
+let evCounter = 0;
+function histEvent(subjectId: string, value: number, unit: string, daysAgo: number): LifeEvent {
+  evCounter += 1;
+  const ts = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  return {
+    id: `h${evCounter}`,
+    log: "log1",
+    subjectId,
+    timestamp: ts,
+    entries: [{ name: "dose", type: "number", value, unit }],
+    createdBy: "user1",
+    created: ts.toISOString(),
+    updated: ts.toISOString(),
+  };
+}
 
 describe("EventLogger field-driven rendering + write path", () => {
   it("single count field renders a one-tap card that logs name=field.key", async () => {
@@ -232,5 +251,92 @@ describe("EventLogger day aggregation reads the primary field key", () => {
     // Aggregated value badge shows 24 oz.
     const badge = screen.getByTitle(/entries$/);
     expect(within(badge).getByText(/24/)).toBeInTheDocument();
+  });
+});
+
+describe("EventLogger quick-action chips (pins + frecency)", () => {
+  const edibles: LifeManifestTrackable = {
+    id: "edibles",
+    label: "Edibles",
+    fields: [{ key: "dose", type: "number", unit: "mg" }],
+    pinned: [{ label: "5mg", entries: [{ name: "dose", type: "number", value: 5, unit: "mg" }] }],
+  };
+
+  function renderWithHistory(trackable: LifeManifestTrackable, entries: LifeEvent[]) {
+    return render(
+      <EventLogger trackable={trackable} entries={entries} userId="user1" logId="log1" />,
+    );
+  }
+
+  it("renders pinned chips first, then frecency fills remaining slots (deduped)", async () => {
+    // History: 10mg logged 3x (frecent), 5mg logged 2x (but 5mg is pinned →
+    // must not appear twice). 2.5mg logged once.
+    const history = [
+      histEvent("edibles", 10, "mg", 1),
+      histEvent("edibles", 10, "mg", 2),
+      histEvent("edibles", 10, "mg", 3),
+      histEvent("edibles", 5, "mg", 1),
+      histEvent("edibles", 5, "mg", 2),
+      histEvent("edibles", 2.5, "mg", 4),
+    ];
+    renderWithHistory(edibles, history);
+
+    const chips = screen.getAllByTestId("quick-chip");
+    const labels = chips.map((c) => c.textContent ?? "");
+    // The pinned 5mg chip comes first.
+    expect(labels[0]).toContain("5mg");
+    // 10mg appears (frecency), 2.5mg appears (frecency).
+    expect(labels.some((l) => l.includes("10"))).toBe(true);
+    // 5mg appears exactly once (not duplicated by frecency).
+    expect(labels.filter((l) => l.includes("5mg")).length).toBe(1);
+  });
+
+  it("one-tap on a chip logs that exact payload", async () => {
+    const user = userEvent.setup();
+    renderWithHistory(edibles, [histEvent("edibles", 10, "mg", 1)]);
+
+    // The pinned 5mg chip's log button.
+    const chip = screen.getAllByTestId("quick-chip").find((c) => (c.textContent ?? "").includes("5mg"))!;
+    await user.click(within(chip).getByLabelText(/log 5mg/i));
+
+    const call = lastCall();
+    expect(call.subjectId).toBe("edibles");
+    expect(call.entries).toEqual([{ name: "dose", type: "number", value: 5, unit: "mg" }]);
+  });
+
+  it("pinning a frecency chip writes the new pins[] through the backend", async () => {
+    const user = userEvent.setup();
+    // No pins yet; 10mg is frecent.
+    const noPins: LifeManifestTrackable = { ...edibles, pinned: undefined };
+    renderWithHistory(noPins, [
+      histEvent("edibles", 10, "mg", 1),
+      histEvent("edibles", 10, "mg", 2),
+    ]);
+
+    const chip = screen.getAllByTestId("quick-chip").find((c) => (c.textContent ?? "").includes("10"))!;
+    await user.click(within(chip).getByLabelText(/pin/i));
+
+    expect(setTrackablePins).toHaveBeenCalledTimes(1);
+    const [logId, trackableId, pins] = setTrackablePins.mock.calls[0];
+    expect(logId).toBe("log1");
+    expect(trackableId).toBe("edibles");
+    expect(pins).toEqual([{ entries: [{ name: "dose", type: "number", value: 10, unit: "mg" }] }]);
+  });
+
+  it("unpinning a pinned chip removes it from pins[]", async () => {
+    const user = userEvent.setup();
+    renderWithHistory(edibles, []);
+
+    const chip = screen.getAllByTestId("quick-chip").find((c) => (c.textContent ?? "").includes("5mg"))!;
+    await user.click(within(chip).getByLabelText(/unpin/i));
+
+    expect(setTrackablePins).toHaveBeenCalledTimes(1);
+    const [, , pins] = setTrackablePins.mock.calls[0];
+    expect(pins).toEqual([]);
+  });
+
+  it("renders no chips when there are no pins and no history", () => {
+    renderWithHistory({ ...edibles, pinned: undefined }, []);
+    expect(screen.queryAllByTestId("quick-chip")).toHaveLength(0);
   });
 });
