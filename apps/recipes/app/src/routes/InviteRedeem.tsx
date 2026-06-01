@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useBasePath } from "../RecipesRoutes";
 import { Button, Spin, Result } from "antd";
@@ -49,6 +49,38 @@ export default function InviteRedeem() {
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const [result, setResult] = useState<RedeemResult | null>(null);
+  // Single-fire guard: React 18 StrictMode mounts the effect twice in dev
+  // and the AbortController cleanup races with the POST already starting on
+  // the server. The double-fire is functionally harmless (the hook is
+  // idempotent post-866551e) but masks the underlying server-side bug —
+  // pinning to one POST per code surfaces it so it can be fixed.
+  //
+  // KNOWN BUG (not yet fixed — 2026-05-31 investigation): with this guard,
+  // the playwright `owner shares a box, second user redeems` test fails ~25%
+  // of the time on a hot env. Failure: redeemer's `/boxes` page shows
+  // "Your Boxes (0)" / "No data". DB query post-failure shows the failed
+  // redeemer's `recipe_boxes` is `null`, even though the POST /api/sharing/redeem
+  // returned 200 (so the page redirected to /boxes/<boxId> per line 94 of the
+  // spec). Hook logs show `$app.save(user)` called with the correct value;
+  // post-save `findRecordById` returns the byte-array shape of the JSON. But
+  // SQLite stays at the pre-hook value. target.owners and the invite.redeemed
+  // saves in the same hook DO persist; only the user.recipe_boxes write doesn't.
+  // Verified NOT caused by:
+  //   - Mirror race: even a fresh getOne after navigation sees null.
+  //   - Timezone PATCH race: wrapping the user save in $app.runInTransaction
+  //     made things WORSE (~70% failure), so it's not last-write-wins overwrite.
+  // Likely cause: a goja write-side byte-array footgun (mirror of the read-side
+  // one in sharing.pb.js header note (b)). When .set("recipe_boxes", jsArray)
+  // is followed by $app.save on the `users` auth collection specifically, the
+  // recipe_boxes write intermittently doesn't reach SQLite — even though
+  // `updated` does bump. See git log + the brief from the parent for the
+  // diagnostic path. Next agent should focus on:
+  //   1. Why does target.owners (same shape, same hook, same txn) persist
+  //      reliably while user.recipe_boxes doesn't?
+  //   2. Try writing via raw `$app.db().newQuery(...).exec()` bypassing the
+  //      record/save layer entirely.
+  //   3. Try a different field name to rule out the field being special.
+  const firedFor = useRef<string | null>(null);
 
   useEffect(() => {
     if (!code) {
@@ -56,11 +88,12 @@ export default function InviteRedeem() {
       setStatus("error");
       return;
     }
-    // PB's SendOptions extends RequestInit, so passing `signal` aborts the
-    // underlying fetch on unmount. Redemption is idempotent server-side (a
-    // re-click on the same link either succeeds again or returns the same
-    // "already redeemed" path), so aborting is safe.
-    const ac = new AbortController();
+    if (firedFor.current === code) return;
+    firedFor.current = code;
+    // No AbortController: a single POST with no cleanup. The hook is
+    // server-side idempotent for same-user retry, so even if the user
+    // navigates away mid-flight, the server commits exactly once and the
+    // next mount sees it.
     (async () => {
       try {
         const pb = getBackend();
@@ -68,19 +101,15 @@ export default function InviteRedeem() {
           method: "POST",
           body: JSON.stringify({ code }),
           headers: { "Content-Type": "application/json" },
-          signal: ac.signal,
         });
-        if (ac.signal.aborted) return;
         setResult(res as RedeemResult);
         setStatus("success");
       } catch (err: any) {
-        if (ac.signal.aborted) return;
         const msg = err?.data?.message || err?.message || "Failed to redeem invite.";
         setErrorMsg(msg);
         setStatus("error");
       }
     })();
-    return () => ac.abort();
   }, [code]);
 
   useEffect(() => {
