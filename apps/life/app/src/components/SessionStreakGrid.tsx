@@ -29,16 +29,22 @@ const WEEKS = 8;
 const CELL_PX = 14;
 const GAP_PX = 3;
 const LOGGED_COLOR = "#13c2c2";
+// Sundays use the weekly-review color in the bottom-right triangle slot
+// instead of the evening color — weekly review subsumes evening reflection
+// on Sundays, and the distinct hue makes "weekly recap done" visually
+// readable at a glance on the year board.
+const WEEKLY_COLOR = "#722ed1";
 const MUTED_COLOR = "var(--color-bg-muted, #f0f0f0)";
 
 /**
  * `linear-gradient(135deg, A 50%, B 50%)` puts a hard split along the
  * anti-diagonal: A fills the top-left triangle, B fills the bottom-right.
+ * Colors are passed in directly so the caller can pick LOGGED_COLOR (regular
+ * morning/evening), WEEKLY_COLOR (Sunday weekly review), or MUTED_COLOR
+ * (not logged) per triangle.
  */
-function splitBg(morning: boolean, evening: boolean): string {
-  const top = morning ? LOGGED_COLOR : MUTED_COLOR;
-  const bot = evening ? LOGGED_COLOR : MUTED_COLOR;
-  return `linear-gradient(135deg, ${top} 50%, ${bot} 50%)`;
+function splitBg(topColor: string, bottomColor: string): string {
+  return `linear-gradient(135deg, ${topColor} 50%, ${bottomColor} 50%)`;
 }
 
 const Wrap = styled.div`
@@ -97,6 +103,8 @@ interface DayData {
   date: Date;
   morning: boolean;
   evening: boolean;
+  /** Sundays only — was a weekly_review logged that day? */
+  weekly: boolean;
 }
 
 interface SessionStreakGridProps {
@@ -106,6 +114,7 @@ interface SessionStreakGridProps {
 export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
   const morningSubject = sessionSubjectId("morning");
   const eveningSubject = sessionSubjectId("evening");
+  const weeklySubject = sessionSubjectId("weekly_review");
 
   // Build a rectangular 8-week × 7-day window ending on the Saturday of the
   // current week. Days past today are rendered as hidden cells so the grid
@@ -116,9 +125,11 @@ export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
 
     const morningByDay = new Set<string>();
     const eveningByDay = new Set<string>();
+    const weeklyByDay = new Set<string>();
     for (const e of entries) {
       if (e.subjectId === morningSubject) morningByDay.add(dateKey(e.timestamp));
       else if (e.subjectId === eveningSubject) eveningByDay.add(dateKey(e.timestamp));
+      else if (e.subjectId === weeklySubject) weeklyByDay.add(dateKey(e.timestamp));
     }
 
     const endDate = new Date(today);
@@ -136,10 +147,11 @@ export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
         date: d,
         morning: morningByDay.has(k),
         evening: eveningByDay.has(k),
+        weekly: weeklyByDay.has(k),
       });
     }
     return days;
-  }, [entries, morningSubject, eveningSubject]);
+  }, [entries, morningSubject, eveningSubject, weeklySubject]);
 
   const todayKey = dateKey(new Date());
 
@@ -152,22 +164,31 @@ export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
             return (
               <Cell
                 key={c.key}
-                $bg={splitBg(false, false)}
+                $bg={splitBg(MUTED_COLOR, MUTED_COLOR)}
                 $today={false}
                 $hidden
               />
             );
           }
+          // On Sundays the bottom-right triangle represents weekly_review
+          // (purple), not evening — they subsume each other on Sundays.
+          const isSun = c.date.getDay() === 0;
+          const topColor = c.morning ? LOGGED_COLOR : MUTED_COLOR;
+          const bottomColor = isSun
+            ? (c.weekly ? WEEKLY_COLOR : MUTED_COLOR)
+            : (c.evening ? LOGGED_COLOR : MUTED_COLOR);
           const labelDate = dayjs(c.date).format("ddd, MMM D, YYYY");
+          const secondLabel = isSun ? "weekly review" : "evening";
+          const secondDone = isSun ? c.weekly : c.evening;
           let tip: string;
-          if (c.morning && c.evening) tip = `${labelDate} — morning + evening`;
+          if (c.morning && secondDone) tip = `${labelDate} — morning + ${secondLabel}`;
           else if (c.morning) tip = `${labelDate} — morning only`;
-          else if (c.evening) tip = `${labelDate} — evening only`;
+          else if (secondDone) tip = `${labelDate} — ${secondLabel} only`;
           else tip = `${labelDate} — nothing logged`;
           return (
             <Tooltip key={c.key} title={tip} mouseEnterDelay={0.1}>
               <Cell
-                $bg={splitBg(c.morning, c.evening)}
+                $bg={splitBg(topColor, bottomColor)}
                 $today={c.key === todayKey}
                 $hidden={false}
               />
@@ -176,10 +197,12 @@ export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
         })}
       </Grid>
       <Legend>
-        <LegendCell $bg={splitBg(true, false)} />
+        <LegendCell $bg={splitBg(LOGGED_COLOR, MUTED_COLOR)} />
         <span>morning</span>
-        <LegendCell $bg={splitBg(false, true)} />
+        <LegendCell $bg={splitBg(MUTED_COLOR, LOGGED_COLOR)} />
         <span>evening</span>
+        <LegendCell $bg={splitBg(MUTED_COLOR, WEEKLY_COLOR)} />
+        <span>weekly</span>
       </Legend>
     </Wrap>
   );

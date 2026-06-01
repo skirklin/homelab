@@ -308,6 +308,14 @@ export async function runLifeReminderCheck(
       const currentHHmm = formatInTimeZone(now, tz, "HH:mm");
       const todayYmd = formatInTimeZone(now, tz, "yyyy-MM-dd");
 
+      // On Sundays, the weekly review subsumes the evening reflection —
+      // skip the evening reminder so the user gets one Sunday-evening
+      // nudge (weekly), not two competing ones.
+      if (kind.kind === "evening" && formatInTimeZone(now, tz, "EEEE") === "Sunday") {
+        skipped++;
+        continue;
+      }
+
       if (!withinWindow(target, currentHHmm, 1)) {
         skipped++;
         continue;

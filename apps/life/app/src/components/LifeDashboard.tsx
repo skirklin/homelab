@@ -834,6 +834,11 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
           <SectionTitle>Sessions</SectionTitle>
           <SessionRow $hasPrimary={sessionContext.primary !== null}>
             {[...SESSIONS]
+              // On Sundays the weekly review subsumes evening reflection — hide
+              // the evening card entirely so the row reads "morning + weekly"
+              // instead of "morning + evening + weekly". /evening is still
+              // reachable directly if needed.
+              .filter((s) => !(sessionContext.isSunday && s.id === "evening"))
               .sort((a, b) => sessionContext.orderOf(a.id) - sessionContext.orderOf(b.id))
               .map((session) => {
                 const size = sessionContext.sizeOf(session.id);
