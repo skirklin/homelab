@@ -16,9 +16,10 @@ import {
   Area,
 } from "recharts";
 import { useLifeContext } from "../life-context";
-import { TRACKABLES, type Trackable } from "../manifest";
+import type { LifeManifestTrackable } from "@homelab/backend";
+import { useTrackables, primaryField, fieldUnit } from "../lib/trackables";
 import type { LogEntry } from "../types";
-import { aggregationFor, primaryEntryName } from "../lib/format";
+import { aggregationFor } from "../lib/format";
 
 const Container = styled.div`
   max-width: 800px;
@@ -175,14 +176,14 @@ interface DayData {
 
 /**
  * Collect the primary numeric values for a trackable from a set of events.
- * `primaryEntryName(trackableId)` tells us which entry name carries the
- * trackable's main number; we pull every matching value across events.
+ * The trackable's primary field `key` is the entry name carrying its main
+ * number; we pull every matching value across events with that subject_id.
  */
-function collectValues(events: LogEntry[], trackableId: string): number[] {
-  const name = primaryEntryName(trackableId);
+function collectValues(events: LogEntry[], trackable: LifeManifestTrackable): number[] {
+  const name = primaryField(trackable)?.key ?? "count";
   const out: number[] = [];
   for (const ev of events) {
-    if (ev.subjectId !== trackableId) continue;
+    if (ev.subjectId !== trackable.id) continue;
     for (const entry of ev.entries) {
       if (entry.type === "number" && entry.name === name) out.push(entry.value);
     }
@@ -199,7 +200,8 @@ function aggregateValues(values: number[], unit: string): number {
   return values.reduce((a, b) => a + b, 0);
 }
 
-function getMonthData(entries: LogEntry[], trackable: Trackable, year: number, month: number): DayData[] {
+function getMonthData(entries: LogEntry[], trackable: LifeManifestTrackable, year: number, month: number): DayData[] {
+  const unit = fieldUnit(primaryField(trackable));
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
@@ -219,14 +221,15 @@ function getMonthData(entries: LogEntry[], trackable: Trackable, year: number, m
     data.push({
       date,
       count: dayEvents.length,
-      value: aggregateValues(collectValues(dayEvents, trackable.id), trackable.unit),
+      value: aggregateValues(collectValues(dayEvents, trackable), unit),
     });
   }
   return data;
 }
 
-function getLast30DaysData(entries: LogEntry[], trackable: Trackable): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: LogEntry[], trackable: LifeManifestTrackable): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
+  const unit = fieldUnit(primaryField(trackable));
   const today = new Date();
 
   for (let i = 29; i >= 0; i--) {
@@ -241,15 +244,16 @@ function getLast30DaysData(entries: LogEntry[], trackable: Trackable): { date: s
     );
     data.push({
       date: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      value: aggregateValues(collectValues(dayEvents, trackable.id), trackable.unit),
+      value: aggregateValues(collectValues(dayEvents, trackable), unit),
       count: dayEvents.length,
     });
   }
   return data;
 }
 
-function getWeeklyData(entries: LogEntry[], trackable: Trackable): { week: string; value: number; count: number }[] {
+function getWeeklyData(entries: LogEntry[], trackable: LifeManifestTrackable): { week: string; value: number; count: number }[] {
   const data: { week: string; value: number; count: number }[] = [];
+  const unit = fieldUnit(primaryField(trackable));
   const today = new Date();
 
   for (let w = 11; w >= 0; w--) {
@@ -267,7 +271,7 @@ function getWeeklyData(entries: LogEntry[], trackable: Trackable): { week: strin
 
     data.push({
       week: weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      value: aggregateValues(collectValues(weekEvents, trackable.id), trackable.unit),
+      value: aggregateValues(collectValues(weekEvents, trackable), unit),
       count: weekEvents.length,
     });
   }
@@ -281,10 +285,11 @@ function CalendarHeatMap({
   onMonthChange,
 }: {
   entries: LogEntry[];
-  trackable: Trackable;
+  trackable: LifeManifestTrackable;
   viewDate: Date;
   onMonthChange: (date: Date) => void;
 }) {
+  const unit = fieldUnit(primaryField(trackable));
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
@@ -304,7 +309,7 @@ function CalendarHeatMap({
   const validDays = monthData.filter((d) => d.count >= 0);
   const totalValue = validDays.reduce((sum, d) => sum + d.value, 0);
   const daysWithActivity = validDays.filter((d) => d.count > 0).length;
-  const isAvg = aggregationFor(trackable.unit) === "avg";
+  const isAvg = aggregationFor(unit) === "avg";
 
   let currentStreak = 0;
   const todayIndex = validDays.findIndex((d) => d.date.toDateString() === today.toDateString());
@@ -320,7 +325,7 @@ function CalendarHeatMap({
       <StatsGrid>
         <StatCard>
           <StatValue>{isAvg ? (totalValue / Math.max(daysWithActivity, 1)).toFixed(1) : totalValue}</StatValue>
-          <StatLabel>{isAvg ? "Monthly avg" : `Monthly total (${trackable.unit})`}</StatLabel>
+          <StatLabel>{isAvg ? "Monthly avg" : `Monthly total (${unit})`}</StatLabel>
         </StatCard>
         <StatCard>
           <StatValue>{daysWithActivity}</StatValue>
@@ -346,7 +351,7 @@ function CalendarHeatMap({
           const intensity = isEmpty ? 0 : Math.ceil((day.count / maxCount) * 4);
           const tooltip = isEmpty
             ? ""
-            : `${day.date.toLocaleDateString()}: ${day.value} ${trackable.unit} (${day.count})`;
+            : `${day.date.toLocaleDateString()}: ${day.value} ${unit} (${day.count})`;
           return (
             <DayCell
               key={i}
@@ -364,7 +369,8 @@ function CalendarHeatMap({
   );
 }
 
-function TrendChart({ entries, trackable }: { entries: LogEntry[]; trackable: Trackable }) {
+function TrendChart({ entries, trackable }: { entries: LogEntry[]; trackable: LifeManifestTrackable }) {
+  const unit = fieldUnit(primaryField(trackable));
   const data = useMemo(
     () => getLast30DaysData(entries, trackable),
     [entries, trackable],
@@ -376,14 +382,14 @@ function TrendChart({ entries, trackable }: { entries: LogEntry[]; trackable: Tr
   const maxVal = Math.max(...nonZero, 0);
 
   // Chart shape per aggregation: sum→bar, avg→area.
-  const ChartTag = aggregationFor(trackable.unit) === "sum" ? "bar" : "area";
+  const ChartTag = aggregationFor(unit) === "sum" ? "bar" : "area";
 
   return (
     <>
       <StatsGrid>
         <StatCard>
           <StatValue>{avgValue.toFixed(1)}</StatValue>
-          <StatLabel>30-day avg ({trackable.unit})</StatLabel>
+          <StatLabel>30-day avg ({unit})</StatLabel>
         </StatCard>
         <StatCard>
           <StatValue>{daysWithData}</StatValue>
@@ -420,7 +426,7 @@ function TrendChart({ entries, trackable }: { entries: LogEntry[]; trackable: Tr
   );
 }
 
-function WeeklyChart({ entries, trackable }: { entries: LogEntry[]; trackable: Trackable }) {
+function WeeklyChart({ entries, trackable }: { entries: LogEntry[]; trackable: LifeManifestTrackable }) {
   const data = useMemo(
     () => getWeeklyData(entries, trackable),
     [entries, trackable],
@@ -471,14 +477,15 @@ function isCurrentMonth(d: Date): boolean {
 export function Visualizations() {
   const { state } = useLifeContext();
   const navigate = useNavigate();
+  const trackables = useTrackables();
   // Both the selected trackable and the calendar month live in the URL so
   // refresh + share-link round-trip the exact view. Defaults (first trackable,
-  // current month) aren't written to keep the URL clean.
+  // current month) aren't written to keep the URL clean. The raw param is kept
+  // verbatim; membership is validated against the manifest in the body below
+  // (the parse closure can't read the per-render manifest).
   const [selectedId, setSelectedId] = useUrlParam<string | null>("trackable", {
-    parse: (raw) =>
-      raw && TRACKABLES.some((t) => t.id === raw) ? raw : null,
-    // First trackable is the default; don't write it.
-    serialize: (v) => (!v || v === TRACKABLES[0]?.id ? null : v),
+    parse: (raw) => raw,
+    serialize: (v) => v,
     default: null,
   });
   const [viewDate, setViewDate] = useUrlParam<Date>("month", {
@@ -504,8 +511,9 @@ export function Visualizations() {
   // 20260522 migration rewrote every legacy row in place.
   const allEntries: LogEntry[] = useMemo(() => Array.from(state.entries.values()), [state.entries]);
 
-  const currentId = selectedId || TRACKABLES[0]?.id;
-  const trackable = TRACKABLES.find((t) => t.id === currentId);
+  const selectedValid = selectedId && trackables.some((t) => t.id === selectedId) ? selectedId : null;
+  const currentId = selectedValid || trackables[0]?.id;
+  const trackable = trackables.find((t) => t.id === currentId);
 
   if (!trackable) {
     return (
@@ -519,7 +527,7 @@ export function Visualizations() {
     );
   }
 
-  const options = TRACKABLES.map((t) => ({
+  const options = trackables.map((t) => ({
     value: t.id,
     label: t.group ? `${t.group} › ${t.label}` : t.label,
   }));

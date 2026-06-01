@@ -34,7 +34,9 @@ import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
 import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
 import { Hint } from "./Hint";
-import { TRACKABLES, GROUP_ORDER, RANDOM_SAMPLES, SESSIONS, sessionSubjectId, sessionPath, type Trackable, type Session } from "../manifest";
+import { RANDOM_SAMPLES, SESSIONS, sessionSubjectId, sessionPath, type Session } from "../manifest";
+import { useTrackables, GROUP_ORDER } from "../lib/trackables";
+import type { LifeManifestTrackable } from "@homelab/backend";
 import {
   initializeMessaging,
   requestNotificationPermission,
@@ -455,10 +457,12 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // inherits today's events from a single feed.
   const allEntries = Array.from(state.entries.values());
 
-  // Group trackables for layout. Unknown groups (or trackables without a
-  // group) fall through to "more". `hidden` trackables are kept in the
-  // manifest (so historical events still aggregate) but skipped here.
-  const grouped = TRACKABLES.filter((t) => !t.hidden).reduce<Record<string, Trackable[]>>((acc, t) => {
+  // Trackables come from the per-user manifest (falls back to the default
+  // starter set). Group them for layout — unknown groups (or trackables
+  // without a group) fall through to "more". `hidden` trackables are kept in
+  // the manifest (so historical events still aggregate) but skipped here.
+  const trackables = useTrackables();
+  const grouped = trackables.filter((t) => !t.hidden).reduce<Record<string, LifeManifestTrackable[]>>((acc, t) => {
     const key = t.group ?? "more";
     (acc[key] ??= []).push(t);
     return acc;

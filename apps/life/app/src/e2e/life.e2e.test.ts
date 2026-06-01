@@ -23,6 +23,8 @@ import {
 } from "@kirkl/shared/test-utils";
 import { PocketBaseLifeBackend } from "@homelab/backend/pocketbase";
 import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
+import type { LifeEvent } from "@homelab/backend";
+import { collectNumberValues, aggregate } from "../lib/format";
 
 let ctx: TestContext;
 let life: PocketBaseLifeBackend;
@@ -290,6 +292,61 @@ describe("clearSampleSchedule", () => {
 
     const record = await ctx.pb.collection("life_logs").getOne(logId);
     expect(record.sample_schedule).toBeFalsy();
+
+    await cleanup.cleanup();
+  });
+});
+
+describe("P2 generic field-driven write path round-trips through aggregation", () => {
+  it("multi-field exercise: entries[] keyed by field.key + labels[catKey], reads back + aggregates", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const log = await life.getOrCreateLog(user.id);
+    cleanup.track("life_logs", log.id);
+
+    // Two exercise events, shaped exactly as the generic EventLogger writes:
+    // duration (number/min) + intensity (rating) entries, category in labels.
+    const e1 = await life.addEvent(
+      log.id,
+      "exercise",
+      [
+        { name: "duration", type: "number", value: 30, unit: "min" },
+        { name: "intensity", type: "number", value: 4, unit: "rating", scale: 5 },
+      ],
+      user.id,
+      { labels: { category: "run" } },
+    );
+    cleanup.track("life_events", e1);
+    const e2 = await life.addEvent(
+      log.id,
+      "exercise",
+      [{ name: "duration", type: "number", value: 20, unit: "min" }],
+      user.id,
+      { labels: { category: "walk" } },
+    );
+    cleanup.track("life_events", e2);
+
+    // Read back from PB and aggregate with the same helpers the dashboard uses
+    // — proves the new write path stays read-compatible with history /
+    // aggregationFor. The raw `entries` array already has the LifeEvent shape
+    // collectNumberValues consumes.
+    const records = await ctx.pb.collection("life_events").getFullList({
+      filter: `log = "${log.id}" && subject_id = "exercise"`,
+    });
+    const exercise = records.map((r) => ({ entries: r.entries })) as unknown as LifeEvent[];
+    expect(exercise).toHaveLength(2);
+
+    const durations = collectNumberValues(exercise, "duration");
+    expect(aggregate(durations, "min")).toBe(50); // 30 + 20, sum
+
+    const ratings = collectNumberValues(exercise, "intensity");
+    expect(aggregate(ratings, "rating")).toBe(4); // single rating, avg
+
+    // Category lands in labels keyed by the field key, not in entries.
+    const cats = records.map((r) => (r.labels as Record<string, string>)?.category).sort();
+    expect(cats).toEqual(["run", "walk"]);
 
     await cleanup.cleanup();
   });

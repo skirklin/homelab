@@ -1,30 +1,37 @@
 /**
- * Generic event logger card. One component replaces all bespoke widget
- * renderers. Behaviour is driven by the Trackable manifest entry:
+ * Generic event logger card. One component renders every trackable by looping
+ * over its `fields[]` (P2) — no per-widget branching, no hardcoded ids.
  *
- *  - "ct" trackables with defaultValue=1 and no categories/intensity/notes
- *    are "one-tap" — clicking the card logs a single count entry. This is
- *    the old counter ergonomics for floss / poop / etc.
- *  - rating-shaped (unit: "rating") trackables show a 1-5 picker inline.
- *  - "min" duration trackables accept input as hours (sleep) or minutes
- *    (exercise/focus) based on defaultValue and convert to canonical
- *    minutes on write.
- *  - everything else expands an inline form with value (pre-filled from
- *    defaultValue), an optional category picker (written to labels),
- *    intensity rating, and a notes text entry.
+ * Each field renders an editor by `field.type`:
+ *   - number   → numeric stepper (durations get an hours/minutes toggle)
+ *   - rating   → 1..scale buttons
+ *   - text     → textarea
+ *   - category → chip group (written to labels[field.key])
+ *   - bool     → checkbox
  *
- * The card always shows the day's aggregated value (sum for non-rating
- * units, avg for rating units — see lib/format.ts `aggregationFor`) so the
- * dashboard reads at a glance. Tap the value badge to open an entries
- * popover (delete individual entries).
+ * Fast paths derived from the fields shape (not ids):
+ *   - a single number field defaulting to 1 (a count) → one-tap card: tapping
+ *     the card logs `value: 1` immediately.
+ *   - a single bool field → one-tap card: tapping logs `true`.
+ *   - a single rating field → inline 1..scale picker, logs on tap.
+ *   - everything else → an inline form opened from the "+".
+ *
+ * Write path (matches the historical life_events shape so existing data and
+ * `aggregationFor` keep working):
+ *   - number/rating/text/bool fields → one `entries[]` item, `name = field.key`.
+ *     Ratings write `{type:"number", value, unit:"rating", scale}`.
+ *   - category fields → `labels[field.key] = value`.
+ *
+ * The card shows the day's aggregated PRIMARY value (sum for non-rating units,
+ * avg for ratings — see lib/format.ts `aggregationFor`). Tap the value badge to
+ * open the entries popover (delete individual entries).
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import styled, { css } from "styled-components";
-import { Button } from "antd";
+import { Button, Checkbox } from "antd";
 import { PlusOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
-import type { LifeEntry, LifeEvent } from "@homelab/backend";
-import type { Trackable } from "../manifest";
+import type { LifeEntry, LifeEvent, LifeManifestTrackable, TypedField } from "@homelab/backend";
 import type { LogEntry } from "../types";
 import { type WidgetSize } from "../display-settings";
 import {
@@ -33,14 +40,14 @@ import {
   formatRating,
   formatDose,
   collectNumberValues,
-  primaryEntryName,
 } from "../lib/format";
+import { primaryField, fieldUnit } from "../lib/trackables";
 import { EntriesPopover } from "./EntriesPopover";
 import { NumberFieldEditor, DurationFieldEditor, TextFieldEditor } from "./EntryFields";
 import { Hint } from "./Hint";
 
 interface EventLoggerProps {
-  trackable: Trackable;
+  trackable: LifeManifestTrackable;
   /** All events for the log. */
   entries: LogEntry[];
   userId: string;
@@ -143,7 +150,7 @@ const RatingRow = styled.div`
 const RatingNum = styled.button<{ $selected: boolean }>`
   flex: 1;
   /* min-width: 0 lets flex shrink the buttons below their content width so
-     5 buttons + gaps always fit a narrow card. Height is locked; width
+     the buttons + gaps always fit a narrow card. Height is locked; width
      adapts. */
   min-width: 0;
   height: 32px;
@@ -163,38 +170,6 @@ const Actions = styled.div`
   gap: var(--space-xs);
 `;
 
-// Preset chips: a row of one-tap quick-log shortcuts shown on the collapsed
-// card (e.g. "7h / 8h / 9h" for sleep). Visually distinct from CategoryChip
-// (which is a *selection* inside the open form) and from ValueBadge (which
-// shows what's already logged today) — a dashed border + bg-muted reads as
-// "tap me to log this" without competing with the value badge for attention.
-const PresetRow = styled.div`
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: var(--space-xs);
-`;
-
-const PresetChip = styled.button`
-  border: 1px dashed var(--color-border);
-  background: var(--color-bg-muted);
-  color: var(--color-text-secondary);
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-
-  &:hover:not(:disabled) {
-    background: var(--color-primary-light);
-    color: var(--color-primary);
-    border-color: var(--color-primary);
-    border-style: solid;
-  }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
-`;
-
 const TapPlus = styled.button<{ $size: WidgetSize }>`
   display: inline-flex;
   align-items: center;
@@ -210,32 +185,37 @@ const TapPlus = styled.button<{ $size: WidgetSize }>`
   &:hover { background: var(--color-primary-light); color: var(--color-primary); }
 `;
 
-// ---------- Trackable mode detection ----------
+// ---------- Field-shape helpers (no ids) ----------
 
-function isOneTap(t: Trackable): boolean {
-  return (
-    t.unit === "ct" &&
-    t.defaultValue === 1 &&
-    !t.categories &&
-    !t.hasIntensity &&
-    !t.hasNotes
-  );
+/** A "count" number field: integer count whose natural one-tap value is 1. */
+function isCountField(f: TypedField): boolean {
+  return f.type === "number" && (f.unit === undefined || f.unit === "ct");
 }
 
-function isRatingShaped(t: Trackable): boolean {
-  return t.unit === "rating";
+/** One-tap card: a single non-category field that logs a fixed value on tap. */
+function oneTapKind(t: LifeManifestTrackable): "count" | "bool" | null {
+  const fields = t.fields.filter((f) => f.type !== "category");
+  if (fields.length !== 1) return null;
+  const f = fields[0];
+  if (f.type === "bool") return "bool";
+  if (isCountField(f) && (f.defaultValue ?? 1) === 1) return "count";
+  return null;
 }
 
-/** Duration trackables default to hours input when the default >= 60min. */
-function defaultDurationInputUnit(t: Trackable): "hours" | "minutes" {
-  if (t.unit !== "min") return "minutes";
-  return (t.defaultValue ?? 0) >= 60 ? "hours" : "minutes";
+/** Rating-shaped: a single rating field, picker inline. */
+function isRatingShaped(t: LifeManifestTrackable): boolean {
+  const fields = t.fields.filter((f) => f.type !== "category");
+  return fields.length === 1 && fields[0].type === "rating";
 }
 
-/** Phone keyboard hint for the primary input of a trackable. */
-function inputModeFor(t: Trackable): "decimal" | "numeric" {
-  // mg / oz can be fractional (e.g. 2.5mg edibles); counts are integers.
-  return t.unit === "ct" || t.unit === "drinks" ? "numeric" : "decimal";
+/** Duration fields render the hours/minutes toggle. */
+function defaultDurationInputUnit(f: TypedField): "hours" | "minutes" {
+  return (f.defaultValue ?? 0) >= 60 ? "hours" : "minutes";
+}
+
+/** Phone keyboard hint for a numeric field. */
+function inputModeFor(f: TypedField): "decimal" | "numeric" {
+  return f.unit === "ct" || f.unit === "drinks" || f.unit === undefined ? "numeric" : "decimal";
 }
 
 // ---------- Per-day filtering / aggregation ----------
@@ -261,25 +241,25 @@ function eventsForTrackable(events: LogEntry[], trackableId: string, day?: Date)
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 }
 
-function formatValueDisplay(value: number | null, trackable: Trackable): string {
+function formatValueDisplay(value: number | null, unit: string): string {
   if (value === null) return "—";
-  if (trackable.unit === "rating") return formatRating(value, 5);
-  if (trackable.unit === "min") return formatDuration(value);
-  return formatDose(value, trackable.unit);
+  if (unit === "rating") return formatRating(value, 5);
+  if (unit === "min") return formatDuration(value);
+  return formatDose(value, unit);
 }
 
-function categoryBreakdown(events: LifeEvent[]): string | null {
-  // Sum primary numeric entries per labels.category. Today this is only used
-  // for exercise / focus, which both have a `categories` array on their
-  // Trackable.
+/**
+ * Sum the primary numeric value per category, for multi-category trackables.
+ * Reads `labels[catKey]` and the primary field's numeric entry. Returns null
+ * when there's only one (or no) category bucket — nothing to break down.
+ */
+function categoryBreakdown(events: LifeEvent[], catKey: string, primaryName: string): string | null {
   const byCat: Record<string, number> = {};
   for (const ev of events) {
-    const cat = ev.labels?.category;
+    const cat = ev.labels?.[catKey];
     if (!cat) continue;
-    // Primary entry: just walk numeric entries until one matches.
-    // For combo trackables, the "duration" entry is the right one to bucket.
     for (const e of ev.entries) {
-      if (e.type === "number" && e.name === "duration") {
+      if (e.type === "number" && e.name === primaryName) {
         byCat[cat] = (byCat[cat] ?? 0) + e.value;
         break;
       }
@@ -301,35 +281,53 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     [entries, trackable.id, timestamp],
   );
 
-  const primaryName = useMemo(() => primaryEntryName(trackable.id), [trackable.id]);
+  // The headline number comes from the primary measurement field.
+  const primary = useMemo(() => primaryField(trackable), [trackable]);
+  const primaryName = primary?.key ?? "count";
+  const primaryUnit = fieldUnit(primary);
   const aggValues = useMemo(() => collectNumberValues(dayEvents, primaryName), [dayEvents, primaryName]);
-  const agg = aggregate(aggValues, trackable.unit);
+  const agg = aggregate(aggValues, primaryUnit);
 
-  const breakdown = trackable.categories ? categoryBreakdown(dayEvents) : null;
-  const oneTap = isOneTap(trackable);
+  const categoryField = useMemo(() => trackable.fields.find((f) => f.type === "category"), [trackable]);
+  const breakdown = categoryField
+    ? categoryBreakdown(dayEvents, categoryField.key, primaryName)
+    : null;
+
+  const oneTap = oneTapKind(trackable);
   const rating = isRatingShaped(trackable);
-  const durationInputUnit = defaultDurationInputUnit(trackable);
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  // `value` is always held in the trackable's canonical storage unit (minutes
-  // for durations, mg for doses, etc.) so submit is a no-op conversion. The
-  // shared DurationFieldEditor owns the hours/minutes display toggle.
-  const initialValue = trackable.defaultValue ?? null;
-  const [value, setValue] = useState<number | null>(initialValue);
-  const [category, setCategory] = useState<string | undefined>(trackable.categories?.[0]);
-  const [intensity, setIntensity] = useState<number | null>(null);
-  const [notes, setNotes] = useState("");
+  // Per-field form state. Numbers (incl. durations, in canonical units) live in
+  // `numbers`, categories in `categories`, text in `texts`, bools in `bools`,
+  // all keyed by field.key.
+  const [numbers, setNumbers] = useState<Record<string, number | null>>({});
+  const [categories, setCategories] = useState<Record<string, string | undefined>>({});
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  const [bools, setBools] = useState<Record<string, boolean>>({});
 
-  // Reset form state on open so each log starts fresh.
-  useEffect(() => {
-    if (open) {
-      setValue(initialValue);
-      setCategory(trackable.categories?.[0]);
-      setIntensity(null);
-      setNotes("");
+  // Initialize form state from field defaults whenever the form opens.
+  const resetForm = useCallback(() => {
+    const n: Record<string, number | null> = {};
+    const c: Record<string, string | undefined> = {};
+    const tx: Record<string, string> = {};
+    const b: Record<string, boolean> = {};
+    for (const f of trackable.fields) {
+      if (f.type === "number") n[f.key] = typeof f.defaultValue === "number" ? f.defaultValue : null;
+      else if (f.type === "rating") n[f.key] = null;
+      else if (f.type === "category") c[f.key] = f.options?.[0];
+      else if (f.type === "text") tx[f.key] = "";
+      else if (f.type === "bool") b[f.key] = f.defaultValue ? true : false;
     }
-  }, [open, trackable, initialValue]);
+    setNumbers(n);
+    setCategories(c);
+    setTexts(tx);
+    setBools(b);
+  }, [trackable]);
+
+  useEffect(() => {
+    if (open) resetForm();
+  }, [open, resetForm]);
 
   const cancelEdit = useCallback(() => {
     setOpen(false);
@@ -355,50 +353,68 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     }
   }, [logId, userId, trackable.id, timestamp, life, message]);
 
-  // One-tap mode: clicking the card logs a single count entry immediately.
+  // One-tap mode: clicking the card logs the single field's fixed value.
   const handleOneTap = useCallback(() => {
-    if (!oneTap) return;
-    writeEvent([
-      { name: primaryName, type: "number", value: 1, unit: trackable.unit },
-    ]);
-  }, [oneTap, writeEvent, primaryName, trackable.unit]);
+    if (!oneTap || !primary) return;
+    if (oneTap === "bool") {
+      writeEvent([{ name: primary.key, type: "bool", value: true }]);
+    } else {
+      writeEvent([{ name: primary.key, type: "number", value: 1, unit: primary.unit ?? "ct" }]);
+    }
+  }, [oneTap, primary, writeEvent]);
 
   // Rating-shaped: clicking a number logs immediately as one rating entry.
   const handleRatingClick = useCallback((n: number) => {
+    if (!primary) return;
     writeEvent([
-      { name: primaryName, type: "number", value: n, unit: "rating", scale: 5 },
+      { name: primary.key, type: "number", value: n, unit: "rating", scale: primary.scale ?? 5 },
     ]);
-  }, [writeEvent, primaryName]);
+  }, [writeEvent, primary]);
 
-  // Preset chips: one-tap log of the chip's canonical value. Intentionally
-  // skips category/intensity/notes — the whole point is a fast path. Same
-  // single-entry shape as the rating/one-tap handlers above.
-  const handlePresetClick = useCallback((presetValue: number) => {
-    writeEvent([
-      { name: primaryName, type: "number", value: presetValue, unit: trackable.unit },
-    ]);
-  }, [writeEvent, primaryName, trackable.unit]);
-
+  // Build the event from per-field form state.
   const handleSubmit = useCallback(() => {
-    if (value === null) {
-      message.warning("Enter a value");
+    const eventEntries: LifeEntry[] = [];
+    const labels: Record<string, string> = {};
+
+    for (const f of trackable.fields) {
+      if (f.type === "number") {
+        const v = numbers[f.key];
+        if (v === null || v === undefined) {
+          if (f.optional) continue;
+          message.warning(`Enter ${f.label ?? f.key}`);
+          return;
+        }
+        eventEntries.push({ name: f.key, type: "number", value: v, unit: f.unit ?? "ct" });
+      } else if (f.type === "rating") {
+        const v = numbers[f.key];
+        if (v === null || v === undefined) {
+          if (f.optional !== false) continue; // ratings default to optional in forms
+          message.warning(`Rate ${f.label ?? f.key}`);
+          return;
+        }
+        eventEntries.push({ name: f.key, type: "number", value: v, unit: "rating", scale: f.scale ?? 5 });
+      } else if (f.type === "text") {
+        const v = (texts[f.key] ?? "").trim();
+        if (!v) {
+          if (f.optional !== false) continue;
+          message.warning(`Enter ${f.label ?? f.key}`);
+          return;
+        }
+        eventEntries.push({ name: f.key, type: "text", value: v });
+      } else if (f.type === "bool") {
+        eventEntries.push({ name: f.key, type: "bool", value: !!bools[f.key] });
+      } else if (f.type === "category") {
+        const v = categories[f.key];
+        if (v) labels[f.key] = v;
+      }
+    }
+
+    if (eventEntries.length === 0 && Object.keys(labels).length === 0) {
+      message.warning("Nothing to log");
       return;
     }
-    // `value` is already in canonical storage units (minutes for durations,
-    // mg for doses, etc.).
-    const eventEntries: LifeEntry[] = [
-      { name: primaryName, type: "number", value, unit: trackable.unit },
-    ];
-    if (intensity !== null) {
-      eventEntries.push({ name: "intensity", type: "number", value: intensity, unit: "rating", scale: 5 });
-    }
-    if (notes.trim()) {
-      eventEntries.push({ name: "notes", type: "text", value: notes.trim() });
-    }
-    const labels: Record<string, string> = {};
-    if (category) labels.category = category;
     writeEvent(eventEntries, Object.keys(labels).length > 0 ? labels : undefined);
-  }, [value, category, intensity, notes, trackable.unit, primaryName, writeEvent, message]);
+  }, [trackable, numbers, texts, bools, categories, writeEvent, message]);
 
   // Submit on Enter when in the form.
   const formRef = useRef<HTMLDivElement>(null);
@@ -418,20 +434,16 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     return () => el.removeEventListener("keydown", onKey);
   }, [open, handleSubmit, cancelEdit]);
 
-  const headerLabel = (
-    <Label $size={size}>{trackable.label}</Label>
-  );
+  const headerLabel = <Label $size={size}>{trackable.label}</Label>;
 
   // Value badge — clickable for entries popover when there's logged data.
-  // The outer span swallows clicks so the popover trigger doesn't bubble up
-  // to the Card's onClick in one-tap mode (which would log another entry).
   const valueDisplay = (
     <>
       {dayEvents.length > 0 ? (
         <span onClick={(e) => e.stopPropagation()}>
           <EntriesPopover events={dayEvents} logId={logId}>
             <ValueBadge $logged={true} $size={size} title={`${dayEvents.length} ${dayEvents.length === 1 ? "entry" : "entries"}`}>
-              {formatValueDisplay(agg, trackable)}
+              {formatValueDisplay(agg, primaryUnit)}
               {dayEvents.length > 1 && <span>· {dayEvents.length}</span>}
             </ValueBadge>
           </EntriesPopover>
@@ -462,12 +474,10 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     );
   }
 
-  // Rating mode: picker is inline while no value is logged. Once logged,
-  // collapse to just the header — the value badge in the header opens the
-  // EntriesPopover, which has a 1..scale-constrained number editor for
-  // re-logging.
-  if (rating) {
-    const nums = [1, 2, 3, 4, 5];
+  // Rating mode: picker is inline while no value is logged.
+  if (rating && primary) {
+    const scale = primary.scale ?? 5;
+    const nums = Array.from({ length: scale }, (_, i) => i + 1);
     const logged = dayEvents.length > 0;
     return (
       <Card $size={size} $highlighted={logged}>
@@ -494,8 +504,8 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
     );
   }
 
-  // Default mode: card collapsed → tap to open inline form.
-  const isDuration = trackable.unit === "min";
+  // Default mode: collapsed → tap "+" to open an inline form rendering one
+  // editor per field.
   return (
     <Card $size={size} $highlighted={dayEvents.length > 0}>
       <HeaderRow>
@@ -512,67 +522,21 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
 
       {open && (
         <FormRow ref={formRef}>
-          {/* Stacked layout: label on its own line, input + unit toggle on the
-              next, so the InputNumber claims the full card width on a phone.
-              The previous one-row layout squeezed the field to ~40px wide. */}
-          {isDuration ? (
-            <DurationFieldEditor
-              label="Duration"
-              minutes={value}
-              initialUnit={durationInputUnit}
-              onChange={setValue}
-              size={size === "compact" ? "small" : "middle"}
-              autoFocus
+          {trackable.fields.map((f) => (
+            <FieldEditor
+              key={f.key}
+              field={f}
+              size={size}
+              numberValue={numbers[f.key] ?? null}
+              onNumber={(v) => setNumbers((s) => ({ ...s, [f.key]: v }))}
+              categoryValue={categories[f.key]}
+              onCategory={(v) => setCategories((s) => ({ ...s, [f.key]: v }))}
+              textValue={texts[f.key] ?? ""}
+              onText={(v) => setTexts((s) => ({ ...s, [f.key]: v }))}
+              boolValue={!!bools[f.key]}
+              onBool={(v) => setBools((s) => ({ ...s, [f.key]: v }))}
             />
-          ) : (
-            <NumberFieldEditor
-              label={trackable.unit}
-              value={value}
-              onChange={setValue}
-              min={0}
-              step={1}
-              unit={trackable.unit === "ct" ? undefined : trackable.unit}
-              inputMode={inputModeFor(trackable)}
-              size={size === "compact" ? "small" : "middle"}
-              autoFocus
-            />
-          )}
-
-          {trackable.categories && (
-            <div>
-              <FieldLabel>Category</FieldLabel>
-              <CategoryGroup>
-                {trackable.categories.map((c) => (
-                  <CategoryChip key={c} $selected={category === c} onClick={() => setCategory(c)}>
-                    {c}
-                  </CategoryChip>
-                ))}
-              </CategoryGroup>
-            </div>
-          )}
-
-          {trackable.hasIntensity && (
-            <div>
-              <FieldLabel>Intensity</FieldLabel>
-              <RatingRow>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <RatingNum key={n} $selected={intensity === n} onClick={() => setIntensity(intensity === n ? null : n)}>
-                    {n}
-                  </RatingNum>
-                ))}
-              </RatingRow>
-            </div>
-          )}
-
-          {trackable.hasNotes && (
-            <TextFieldEditor
-              label="Notes"
-              value={notes}
-              onChange={setNotes}
-              placeholder="Optional"
-              rows={2}
-            />
-          )}
+          ))}
 
           <Actions>
             <Button size="small" icon={<CloseOutlined />} onClick={cancelEdit} disabled={saving}>
@@ -588,23 +552,122 @@ export function EventLogger({ trackable, entries, userId, logId, timestamp, size
         </FormRow>
       )}
 
-      {!open && trackable.presets && trackable.presets.length > 0 && (
-        <PresetRow>
-          {trackable.presets.map((p) => (
-            <PresetChip
-              key={p.label}
-              onClick={() => handlePresetClick(p.value)}
-              disabled={saving || !logId}
-              aria-label={`Quick-log ${p.label}`}
-              title={`Quick-log ${p.label}`}
-            >
-              {p.label}
-            </PresetChip>
-          ))}
-        </PresetRow>
-      )}
-
       {!open && breakdown && <Hint $muted style={{ marginTop: 4 }}>{breakdown}</Hint>}
     </Card>
   );
+}
+
+// ---------- One field's editor ----------
+
+interface FieldEditorProps {
+  field: TypedField;
+  size: WidgetSize;
+  numberValue: number | null;
+  onNumber: (v: number | null) => void;
+  categoryValue: string | undefined;
+  onCategory: (v: string) => void;
+  textValue: string;
+  onText: (v: string) => void;
+  boolValue: boolean;
+  onBool: (v: boolean) => void;
+}
+
+function FieldEditor({
+  field,
+  size,
+  numberValue,
+  onNumber,
+  categoryValue,
+  onCategory,
+  textValue,
+  onText,
+  boolValue,
+  onBool,
+}: FieldEditorProps) {
+  const label = field.label ?? field.key;
+  switch (field.type) {
+    case "number": {
+      if (field.unit === "min") {
+        return (
+          <DurationFieldEditor
+            label={label === field.key ? "Duration" : label}
+            minutes={numberValue}
+            initialUnit={defaultDurationInputUnit(field)}
+            onChange={onNumber}
+            size={size === "compact" ? "small" : "middle"}
+            autoFocus
+          />
+        );
+      }
+      return (
+        <NumberFieldEditor
+          label={label}
+          value={numberValue}
+          onChange={onNumber}
+          min={0}
+          step={1}
+          unit={field.unit === "ct" || field.unit === undefined ? undefined : field.unit}
+          inputMode={inputModeFor(field)}
+          size={size === "compact" ? "small" : "middle"}
+          autoFocus
+        />
+      );
+    }
+    case "rating": {
+      const scale = field.scale ?? 5;
+      const nums = Array.from({ length: scale }, (_, i) => i + 1);
+      return (
+        <div>
+          <FieldLabel>{label}</FieldLabel>
+          <RatingRow>
+            {nums.map((n) => (
+              <RatingNum
+                key={n}
+                $selected={numberValue === n}
+                onClick={() => onNumber(numberValue === n ? null : n)}
+                aria-label={`${field.key} ${n}`}
+              >
+                {n}
+              </RatingNum>
+            ))}
+          </RatingRow>
+        </div>
+      );
+    }
+    case "category": {
+      return (
+        <div>
+          <FieldLabel>{label}</FieldLabel>
+          <CategoryGroup>
+            {(field.options ?? []).map((c) => (
+              <CategoryChip key={c} $selected={categoryValue === c} onClick={() => onCategory(c)}>
+                {c}
+              </CategoryChip>
+            ))}
+          </CategoryGroup>
+        </div>
+      );
+    }
+    case "text": {
+      return (
+        <TextFieldEditor
+          label={label}
+          value={textValue}
+          onChange={onText}
+          placeholder="Optional"
+          rows={2}
+        />
+      );
+    }
+    case "bool": {
+      return (
+        <Checkbox checked={boolValue} onChange={(e) => onBool(e.target.checked)}>
+          {label}
+        </Checkbox>
+      );
+    }
+    default:
+      // Unknown field type — skip rather than crash.
+      return null;
+  }
 }
