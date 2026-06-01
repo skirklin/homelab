@@ -90,6 +90,8 @@ function taskFromRecord(r: RecordModel | RawRecord): Task {
     // pass-through behavior (`r.frequency || 0`) here.
     frequency: (x.frequency || 0) as Task["frequency"],
     lastCompleted: x.last_completed ? new Date(x.last_completed as string) : null,
+    deadline: x.deadline ? new Date(x.deadline as string) : null,
+    deadlineLeadDays: (x.deadline_lead_days as number) ?? null,
     completed: !!x.completed,
     snoozedUntil: x.snoozed_until ? new Date(x.snoozed_until as string) : null,
     notifyUsers: Array.isArray(x.notify_users) ? (x.notify_users as string[]) : [],
@@ -188,6 +190,8 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       task_type: task.taskType || "recurring",
       frequency: task.frequency,
       last_completed: task.lastCompleted?.toISOString() || null,
+      deadline: task.deadline?.toISOString() || null,
+      deadline_lead_days: task.deadlineLeadDays ?? null,
       completed: task.completed || false,
       snoozed_until: null,
       notify_users: task.notifyUsers || [],
@@ -209,6 +213,8 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     if (updates.taskType !== undefined) data.task_type = updates.taskType;
     if (updates.frequency !== undefined) data.frequency = updates.frequency;
     if (updates.lastCompleted !== undefined) data.last_completed = updates.lastCompleted?.toISOString() || null;
+    if (updates.deadline !== undefined) data.deadline = updates.deadline?.toISOString() || null;
+    if (updates.deadlineLeadDays !== undefined) data.deadline_lead_days = updates.deadlineLeadDays ?? null;
     if (updates.completed !== undefined) data.completed = updates.completed;
     if (updates.snoozedUntil !== undefined) data.snoozed_until = updates.snoozedUntil?.toISOString() || null;
     if (updates.notifyUsers !== undefined) data.notify_users = updates.notifyUsers;
@@ -436,6 +442,8 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
         taskType: task.taskType,
         frequency: task.frequency,
         lastCompleted: null,
+        deadline: task.deadline,
+        deadlineLeadDays: task.deadlineLeadDays,
         completed: false,
         snoozedUntil: null,
         notifyUsers: [],

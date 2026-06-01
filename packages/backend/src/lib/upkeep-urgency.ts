@@ -20,11 +20,16 @@ export interface UrgencyTask {
   taskType: TaskType;
   frequency: Frequency;
   lastCompleted: Date | null;
+  deadline: Date | null;
   snoozedUntil: Date | null;
 }
 
-/** Next due date for a recurring task. `null` for one-shots or never-completed. */
+/**
+ * Next due date. For one-shots this is the explicit `deadline` (or null).
+ * For recurring tasks it's last_completed + frequency (null if never done).
+ */
 export function calculateDueDate(task: UrgencyTask): Date | null {
+  if (task.taskType === "one_shot") return task.deadline ?? null;
   if (task.taskType !== "recurring") return null;
   if (!task.lastCompleted) return null; // Never done = immediately due
 
@@ -43,14 +48,26 @@ export function calculateDueDate(task: UrgencyTask): Date | null {
   return due;
 }
 
-export function getUrgencyLevel(task: UrgencyTask): UrgencyLevel {
-  const now = new Date();
+/**
+ * Whole-day difference between today (local midnight) and the task's due date.
+ * Negative = overdue, 0 = due today. `null` when there is no due date — i.e. a
+ * recurring task that's never been done, or a one-shot with no deadline.
+ */
+export function daysUntilDue(task: UrgencyTask): number | null {
   const dueDate = calculateDueDate(task);
-
-  if (!dueDate) return "today"; // Never completed = due today
+  if (!dueDate) return null;
+  const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-  const diffDays = Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export function getUrgencyLevel(task: UrgencyTask): UrgencyLevel {
+  const diffDays = daysUntilDue(task);
+
+  // No due date: a never-done recurring task is due today; a one-shot without
+  // a deadline has no urgency and belongs in "later".
+  if (diffDays === null) return task.taskType === "recurring" ? "today" : "later";
 
   if (diffDays <= 0) return "today";
   if (diffDays <= 7) return "thisWeek";

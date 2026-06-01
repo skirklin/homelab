@@ -104,6 +104,8 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
           taskType: "recurring",
           frequency,
           lastCompleted: null,
+          deadline: null,
+          deadlineLeadDays: null,
           completed: false,
           snoozedUntil: null,
           notifyUsers: [],

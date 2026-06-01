@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Empty, Spin, Typography, Input, Select, InputNumber, Tag, Space, message } from "antd";
+import { Button, Empty, Spin, Typography, Input, Select, InputNumber, Tag, Space, DatePicker, message } from "antd";
 import { PlusOutlined, CloseOutlined, ClearOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
 import styled from "styled-components";
 import { useUpkeepBackend, useUrlParam } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
@@ -127,6 +128,8 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       taskType: "one_shot",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
+      deadline: null,
+      deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
       notifyUsers: [],
@@ -149,6 +152,8 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       taskType: "one_shot",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
+      deadline: null,
+      deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
       notifyUsers: [],
@@ -175,6 +180,8 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       taskType: "one_shot",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
+      deadline: null,
+      deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
       notifyUsers: [],
@@ -454,6 +461,26 @@ function DetailPanel({ task, onUpdate, onTagAdd, onTagRemove, onClose }: {
               {formatFrequency(task.frequency)}
             </div>
           )}
+        </DetailField>
+      )}
+
+      {task.taskType === "one_shot" && (
+        <DetailField>
+          <FieldLabel>Deadline</FieldLabel>
+          <DatePicker
+            value={task.deadline ? dayjs(task.deadline) : null}
+            onChange={(value) => onUpdate("deadline", value ? value.toDate() : null)}
+            style={{ width: "100%" }}
+          />
+          <div style={{ marginTop: 8 }}>
+            <FieldLabel>Remind me ___ days before</FieldLabel>
+            <InputNumber
+              min={0}
+              value={task.deadlineLeadDays ?? 0}
+              onChange={(n) => onUpdate("deadlineLeadDays", n ?? 0)}
+              style={{ width: 80 }}
+            />
+          </div>
         </DetailField>
       )}
 

@@ -28,6 +28,10 @@ export interface Task {
   taskType: TaskType;
   frequency: Frequency;
   lastCompleted: Date | null;
+  /** One-shot todos only — recurring tasks ignore deadline. */
+  deadline: Date | null;
+  /** Remind this many days before the deadline (default 0 = day-of + overdue). */
+  deadlineLeadDays: number | null;
   completed: boolean;
   snoozedUntil: Date | null;
   notifyUsers: string[];

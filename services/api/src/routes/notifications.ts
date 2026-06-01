@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 import { runUpkeepNotifications } from "../lib/notifications/upkeep";
+import { runDeadlineNotifications } from "../lib/notifications/deadlines";
 import { runLifeTrackerSampling, runLifeReminderCheck } from "../lib/notifications/life";
 import { runTravelNotificationsTick } from "../lib/notifications/travel";
 
@@ -16,7 +17,8 @@ notificationRoutes.post("/upkeep-check", handler(async (c) => {
     return c.json({ error: "Requires API key authentication" }, 403);
   }
   const result = await runUpkeepNotifications();
-  return c.json({ status: "ok", ...result });
+  const deadlines = await runDeadlineNotifications();
+  return c.json({ status: "ok", ...result, deadlines });
 }));
 
 notificationRoutes.post("/life-sample-check", handler(async (c) => {

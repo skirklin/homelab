@@ -2136,6 +2136,8 @@ dataRoutes.get("/tasks", handler(async (c) => {
     task_type: t.task_type,
     frequency: t.frequency,
     last_completed: t.last_completed,
+    deadline: t.deadline,
+    deadline_lead_days: t.deadline_lead_days,
     completed: t.completed,
     snoozed_until: t.snoozed_until,
     tags: t.tags,
@@ -2157,6 +2159,8 @@ dataRoutes.post("/tasks", handler(async (c) => {
     task_type?: string;
     frequency?: unknown;
     tags?: string[];
+    deadline?: string;
+    deadline_lead_days?: number;
   }>();
   if (!body.list || !body.name) return c.json({ error: "list and name required" }, 400);
   if (!(await userOwnsTaskList(pb, body.list, userId))) {
@@ -2172,6 +2176,8 @@ dataRoutes.post("/tasks", handler(async (c) => {
     task_type: body.task_type || "one_shot",
     frequency: body.frequency || 0,
     tags: body.tags || [],
+    deadline: body.deadline || null,
+    deadline_lead_days: body.deadline_lead_days ?? null,
   });
 
   // Set path after creation (needs the ID)
@@ -2201,7 +2207,8 @@ dataRoutes.patch("/tasks/:id", handler(async (c) => {
   }
   const body = await c.req.json<Record<string, unknown>>();
   const allowed = ["name", "description", "task_type", "frequency", "position",
-    "completed", "snoozed_until", "tags", "collapsed", "cleared", "notify_users"];
+    "completed", "snoozed_until", "tags", "collapsed", "cleared", "notify_users",
+    "deadline", "deadline_lead_days"];
   const data: Record<string, unknown> = {};
   for (const key of allowed) {
     if (body[key] !== undefined) data[key] = body[key];

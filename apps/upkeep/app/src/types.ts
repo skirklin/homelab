@@ -1,6 +1,7 @@
 import type { LifeEvent, NotificationMode } from "@kirkl/shared";
 import {
   calculateDueDate as sharedCalculateDueDate,
+  daysUntilDue as sharedDaysUntilDue,
   getUrgencyLevel as sharedGetUrgencyLevel,
   isTaskSnoozed as sharedIsTaskSnoozed,
   type UrgencyLevel as SharedUrgencyLevel,
@@ -34,6 +35,10 @@ export interface Task {
   taskType: TaskType;
   frequency: Frequency;
   lastCompleted: Date | null;
+  /** One-shot todos only — recurring tasks ignore deadline. */
+  deadline: Date | null;
+  /** Remind this many days before the deadline (default 0 = day-of + overdue). */
+  deadlineLeadDays: number | null;
   completed: boolean;
   snoozedUntil: Date | null;
   notifyUsers: string[];
@@ -83,6 +88,7 @@ export type { UserProfile, UserProfileStore } from "@kirkl/shared";
 // life's morning header can reuse the same bucketing without cross-app imports.
 export type UrgencyLevel = SharedUrgencyLevel;
 export const calculateDueDate = (task: Task): Date | null => sharedCalculateDueDate(task);
+export const daysUntilDue = (task: Task): number | null => sharedDaysUntilDue(task);
 export const getUrgencyLevel = (task: Task): UrgencyLevel => sharedGetUrgencyLevel(task);
 
 export function formatFrequency(frequency: Frequency): string {
@@ -123,6 +129,27 @@ export function formatDueDate(task: Task): string {
   if (diffDays === 1) return "Due tomorrow";
   if (diffDays <= 7) return `Due in ${diffDays} days`;
   return `Due ${dueDate.toLocaleDateString()}`;
+}
+
+/**
+ * Human-readable label for a one-shot task's deadline. Reads `task.deadline`
+ * directly (not calculateDueDate) to be explicit that this is the one-shot
+ * deadline surface. Returns "" when there is no deadline.
+ */
+export function formatDeadline(task: Task): string {
+  if (!task.deadline) return "";
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDateOnly = new Date(task.deadline.getFullYear(), task.deadline.getMonth(), task.deadline.getDate());
+  const diffDays = Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < -1) return `${Math.abs(diffDays)} days overdue`;
+  if (diffDays === -1) return "1 day overdue";
+  if (diffDays === 0) return "Due today";
+  if (diffDays === 1) return "Due tomorrow";
+  if (diffDays <= 7) return `Due in ${diffDays} days`;
+  return `Due ${task.deadline.toLocaleDateString()}`;
 }
 
 // Build a tree from flat task array

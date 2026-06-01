@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Button, Tooltip, Dropdown } from "antd";
+import { Button, Tooltip, Dropdown, Tag } from "antd";
 import type { MenuProps } from "antd";
 import { CheckOutlined, EditOutlined, BellOutlined, BellFilled, InfoCircleOutlined, DownOutlined, UpOutlined, HistoryOutlined, ClockCircleOutlined, UndoOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import type { Task } from "../types";
-import { formatDueDate, isTaskSnoozed, formatSnoozeRemaining } from "../types";
+import { formatDueDate, formatDeadline, isTaskSnoozed, formatSnoozeRemaining, daysUntilDue } from "../types";
 import { useAuth, useFeedback } from "@kirkl/shared";
 import { useUpkeepBackend } from "@kirkl/shared";
 import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "../messaging";
@@ -205,6 +205,16 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
             <SnoozeInfo>
               <ClockCircleOutlined /> Snoozed for {formatSnoozeRemaining(task)}
             </SnoozeInfo>
+          ) : task.taskType === "one_shot" && task.deadline ? (
+            (() => {
+              const days = daysUntilDue(task);
+              const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";
+              return (
+                <Tag color={color} style={{ fontSize: 10, lineHeight: "16px", margin: 0, width: "fit-content" }}>
+                  {formatDeadline(task)}
+                </Tag>
+              );
+            })()
           ) : (
             <DueInfo>{formatDueDate(task)}</DueInfo>
           )}

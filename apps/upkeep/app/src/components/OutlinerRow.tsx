@@ -9,7 +9,7 @@ import {
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepBackend } from "@kirkl/shared";
-import { formatDueDate, formatFrequency, isTaskSnoozed, formatSnoozeRemaining } from "../types";
+import { formatDueDate, formatDeadline, formatFrequency, isTaskSnoozed, formatSnoozeRemaining, daysUntilDue } from "../types";
 import type { TaskNode } from "../types";
 
 type DropZone = "before" | "inside" | "after" | null;
@@ -338,6 +338,15 @@ export function OutlinerRow({
           {task.taskType === "recurring" && !isSnoozed && (
             <span>{formatDueDate(task)}</span>
           )}
+          {task.taskType === "one_shot" && task.deadline && !isSnoozed && (() => {
+            const days = daysUntilDue(task);
+            const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";
+            return (
+              <Tag color={color} style={{ fontSize: 10, lineHeight: "16px", margin: 0 }}>
+                {formatDeadline(task)}
+              </Tag>
+            );
+          })()}
           {isSnoozed && (
             <Tag color="orange" style={{ fontSize: 10, lineHeight: "16px", margin: 0 }}>
               Snoozed {formatSnoozeRemaining(task)}

@@ -13,10 +13,28 @@ import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
 import { useAuth, useUpkeepBackend, useUserBackend } from "@kirkl/shared";
 import {
+  daysUntilDue,
   getUrgencyLevel,
   isTaskSnoozed,
   type Task as BackendTask,
 } from "@homelab/backend";
+
+/**
+ * Tiny deadline formatter. Inlined here rather than importing upkeep's
+ * formatDeadline (no life→upkeep cross-app import) or promoting it to
+ * @homelab/backend for a single extra consumer.
+ */
+function formatDeadline(deadline: Date): string {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDateOnly = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
+  const diffDays = Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < -1) return `${Math.abs(diffDays)} days overdue`;
+  if (diffDays === -1) return "1 day overdue";
+  if (diffDays === 0) return "due today";
+  if (diffDays === 1) return "due tomorrow";
+  return `due in ${diffDays} days`;
+}
 
 const Wrapper = styled.div`
   margin: 0 0 var(--space-lg) 0;
@@ -114,21 +132,60 @@ export function MorningUpkeepHeader() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [tasksByList]);
 
+  // One-shot todos with a deadline within 3 days (or overdue). Sorted by
+  // deadline ascending so the most urgent is on top.
+  const dueSoonTasks = useMemo(() => {
+    const all: BackendTask[] = [];
+    for (const tasks of tasksByList.values()) all.push(...tasks);
+    return all
+      .filter((t) => t.taskType === "one_shot")
+      .filter((t) => !isTaskSnoozed(t))
+      .filter((t) => !t.completed && !t.cleared)
+      .filter((t) => {
+        const d = daysUntilDue(t);
+        return d !== null && d <= 3;
+      })
+      .sort((a, b) => (a.deadline?.getTime() ?? 0) - (b.deadline?.getTime() ?? 0));
+  }, [tasksByList]);
+
   // Empty / loading / no-lists: render nothing.
   // Wait for every list's first onTasks callback before deciding "empty" so
   // we don't flash a partial union.
-  if (!slugs || listIds.length === 0 || tasksByList.size < listIds.length || todayTasks.length === 0) {
+  if (
+    !slugs ||
+    listIds.length === 0 ||
+    tasksByList.size < listIds.length ||
+    (todayTasks.length === 0 && dueSoonTasks.length === 0)
+  ) {
     return null;
   }
 
   return (
     <Wrapper aria-label="Today's upkeep">
-      <Label>Today&apos;s upkeep</Label>
-      <TaskList>
-        {todayTasks.map((t) => (
-          <TaskItem key={t.id}>{t.name}</TaskItem>
-        ))}
-      </TaskList>
+      {todayTasks.length > 0 && (
+        <>
+          <Label>Today&apos;s upkeep</Label>
+          <TaskList>
+            {todayTasks.map((t) => (
+              <TaskItem key={t.id}>{t.name}</TaskItem>
+            ))}
+          </TaskList>
+        </>
+      )}
+      {dueSoonTasks.length > 0 && (
+        <>
+          <Label style={{ marginTop: todayTasks.length > 0 ? "var(--space-md)" : undefined }}>
+            Due soon
+          </Label>
+          <TaskList>
+            {dueSoonTasks.map((t) => (
+              <TaskItem key={t.id}>
+                {t.name} — {t.deadline ? formatDeadline(t.deadline) : ""}
+              </TaskItem>
+            ))}
+          </TaskList>
+        </>
+      )}
     </Wrapper>
   );
 }

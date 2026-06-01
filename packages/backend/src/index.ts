@@ -39,6 +39,7 @@ export { RANDOM_SAMPLES } from "./types/life-config";
 // --- Upkeep urgency (canonical impl shared by upkeep UI + life morning header) ---
 export {
   calculateDueDate,
+  daysUntilDue,
   getUrgencyLevel,
   isTaskSnoozed,
 } from "./lib/upkeep-urgency";

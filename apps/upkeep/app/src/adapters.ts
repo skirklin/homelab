@@ -19,6 +19,8 @@ export function taskFromBackend(t: BackendTask): Task {
     taskType: t.taskType,
     frequency: t.frequency,
     lastCompleted: t.lastCompleted,
+    deadline: t.deadline,
+    deadlineLeadDays: t.deadlineLeadDays,
     completed: t.completed,
     snoozedUntil: t.snoozedUntil,
     notifyUsers: t.notifyUsers,

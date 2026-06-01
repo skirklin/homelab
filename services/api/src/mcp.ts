@@ -1537,11 +1537,13 @@ server.tool(
     frequency: taskFrequencySchema.optional().describe("Recurrence frequency (only for recurring tasks)"),
     tags: z.array(z.string()).optional().describe("Tags (e.g. ['travel:tripId123'])"),
     notify_users: z.array(z.string()).optional().describe("User IDs to notify on completion/due"),
+    deadline: z.string().optional().describe("ISO date (YYYY-MM-DD) — one-shot todos only"),
+    deadline_lead_days: z.number().optional().describe("Remind this many days before the deadline (default 0 = day-of + overdue)"),
   },
-  async ({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users }) => {
+  async ({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users, deadline, deadline_lead_days }) => {
     const data = await api("/tasks", {
       method: "POST",
-      body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users }),
+      body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users, deadline, deadline_lead_days }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
@@ -1566,8 +1568,10 @@ server.tool(
     activity_id: z.string().optional().describe(
       "Optional activity record ID. When provided, the task is also tagged `activity:<id>` so the Prep tab can group it under that activity (e.g. 'Book Frida Kahlo tickets' under the Frida Kahlo Museum activity).",
     ),
+    deadline: z.string().optional().describe("ISO date (YYYY-MM-DD) — book-by date for this prep item"),
+    deadline_lead_days: z.number().optional().describe("Remind this many days before the deadline (default 0 = day-of + overdue)"),
   },
-  async ({ trip_id, name, description, list_id, position, notify_users, activity_id }) => {
+  async ({ trip_id, name, description, list_id, position, notify_users, activity_id, deadline, deadline_lead_days }) => {
     // 1. Resolve list. If none given, fall back to the first task list owned by the
     // caller. The Travel UI uses user.household_slugs (first entry), but no API
     // endpoint exposes that map — /data/task-lists already filters to lists the
@@ -1661,6 +1665,8 @@ server.tool(
         frequency: { value: 1, unit: "days" },
         tags: leafTags,
         notify_users,
+        deadline,
+        deadline_lead_days,
       }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
@@ -1683,6 +1689,8 @@ server.tool(
     notify_users: z.array(z.string()).optional(),
     collapsed: z.boolean().optional(),
     cleared: z.boolean().optional().describe("Soft-hide flag set by clear_done_tasks. Set false to un-hide a single task."),
+    deadline: z.string().optional().describe("ISO date (YYYY-MM-DD) — one-shot todos only. Empty string clears the deadline."),
+    deadline_lead_days: z.number().optional().describe("Remind this many days before the deadline (default 0 = day-of + overdue)"),
   },
   async ({ id, ...body }) => {
     const data = await api(`/tasks/${id}`, {
