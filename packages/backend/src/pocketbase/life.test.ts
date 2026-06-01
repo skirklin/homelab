@@ -7,6 +7,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type PocketBase from "pocketbase";
 import { PocketBaseLifeBackend } from "./life";
+import { DEFAULT_LIFE_MANIFEST } from "../life-manifest-default";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror } from "../wrapped-pb/mirror";
 
@@ -26,6 +27,81 @@ function makeBackend(): {
   const pb = (() => ({})) as unknown as () => PocketBase;
   return { backend: new PocketBaseLifeBackend(pb, wpb, mirror), createSpy, updateSpy };
 }
+
+/**
+ * getOrCreateLog stub: drives the owner-filter getList (read) on a plain PB
+ * client and the create on the wpb wrapper, mirroring the real impl. `owned`
+ * controls whether an existing log is returned (seed-preservation path) or a
+ * fresh one is created (seed-on-create path).
+ */
+function makeLogBackend(opts: { owned?: Record<string, unknown> | null } = {}): {
+  backend: PocketBaseLifeBackend;
+  createSpy: ReturnType<typeof vi.fn>;
+} {
+  const owned = opts.owned ?? null;
+  const createSpy = vi.fn((payload: Record<string, unknown>) => Promise.resolve(payload));
+  const wpb = {
+    collection: () => ({ create: createSpy, update: vi.fn() }),
+  } as unknown as WrappedPocketBase;
+  const pb = (() => ({
+    filter: (s: string) => s,
+    collection: () => ({
+      getList: () =>
+        Promise.resolve({ items: owned ? [owned] : [] }),
+    }),
+  })) as unknown as () => PocketBase;
+  const mirror = {} as PBMirror;
+  return { backend: new PocketBaseLifeBackend(pb, wpb, mirror), createSpy };
+}
+
+describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () => {
+  it("seeds the default type-demo manifest on create, with the expected field types", async () => {
+    const { backend, createSpy } = makeLogBackend({ owned: null });
+    const log = await backend.getOrCreateLog("user-new");
+
+    // The create payload carries the default starter manifest.
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    const [payload] = createSpy.mock.calls[0];
+    expect((payload as { manifest: typeof DEFAULT_LIFE_MANIFEST }).manifest).toEqual(
+      DEFAULT_LIFE_MANIFEST,
+    );
+
+    // And the mapped LifeLog surfaces it.
+    expect(log.manifest).not.toBeNull();
+    const byId = Object.fromEntries(log.manifest!.trackables.map((t) => [t.id, t]));
+    // One trackable per field type.
+    expect(byId.water.fields[0]).toMatchObject({ type: "number", unit: "oz" });
+    expect(byId.mood.fields[0]).toMatchObject({ type: "rating", scale: 5 });
+    expect(byId.note.fields[0]).toMatchObject({ type: "text" });
+    expect(byId.movement.fields.map((f) => f.type)).toEqual(["category", "number"]);
+    expect(byId.floss.fields[0]).toMatchObject({ type: "bool" });
+
+    const types = new Set(
+      log.manifest!.trackables.flatMap((t) => t.fields.map((f) => f.type)),
+    );
+    expect(types).toEqual(new Set(["number", "rating", "text", "category", "bool"]));
+  });
+
+  it("preserves an existing log's manifest (does NOT re-seed or overwrite)", async () => {
+    const existingManifest = {
+      trackables: [{ id: "custom", label: "Custom", fields: [{ key: "count", type: "number" }] }],
+    };
+    const { backend, createSpy } = makeLogBackend({
+      owned: { id: "log-existing", manifest: existingManifest },
+    });
+    const log = await backend.getOrCreateLog("user-existing");
+
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(log.id).toBe("log-existing");
+    expect(log.manifest).toEqual(existingManifest);
+  });
+
+  it("surfaces a null manifest for a legacy row that predates the backfill", async () => {
+    const { backend } = makeLogBackend({ owned: { id: "log-legacy" } });
+    const log = await backend.getOrCreateLog("user-legacy");
+    expect(log.manifest).toBeNull();
+  });
+});
 
 describe("PocketBaseLifeBackend.addEvent — empty-payload invariant (F1)", () => {
   it("throws when entries[] is empty and does not touch the backend", async () => {

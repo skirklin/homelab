@@ -94,6 +94,28 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
     return { sent: 0, skipped: logs.length };
   }
 
+  // Per-owner tz resolution, mirroring runLifeReminderCheck's `tzForUser`.
+  // Each log's check-ins must fire in ITS OWNER's timezone, not a global one,
+  // so a second user's prompts land in their local active hours (P0 isolation
+  // gap — apps/life/ROADMAP.md). Owner tz wins; fall back to the system-wide
+  // config tz, then UTC.
+  const userTzCache = new Map<string, string>();
+  async function tzForOwner(ownerId: string): Promise<string> {
+    const configTz = safeTz(config.timezone, FALLBACK_TZ);
+    if (!ownerId) return configTz;
+    const hit = userTzCache.get(ownerId);
+    if (hit) return hit;
+    let tz: string;
+    try {
+      const u = await pb.collection("users").getOne(ownerId, { $autoCancel: false });
+      tz = safeTz(u.timezone, configTz);
+    } catch {
+      tz = configTz;
+    }
+    userTzCache.set(ownerId, tz);
+    return tz;
+  }
+
   for (const logDoc of logs) {
     // Per-log opt-in gate. Must come before schedule generation so disabled
     // logs don't accumulate `sample_schedule` writes either.
@@ -102,7 +124,11 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
       continue;
     }
 
-    const timezone = safeTz(config.timezone, FALLBACK_TZ);
+    // life_logs is single-owner (migration 0028) — `owner` is the user id
+    // string (empty if unset). Resolve the schedule's tz from the owner so
+    // each user's prompts fire in their own local active hours.
+    const ownerId: string = (logDoc.owner as string) || "";
+    const timezone = await tzForOwner(ownerId);
     const today = getDateStringInTimezone(nowDate, timezone);
 
     let schedule = logDoc.sample_schedule as SampleSchedule | null;
@@ -149,9 +175,6 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
       sample_schedule: schedule,
     }, { $autoCancel: false });
 
-    // life_logs is single-owner (migration 0028) — `owner` is the
-    // user id string (empty if unset).
-    const ownerId: string = (logDoc.owner as string) || "";
     const title = "Life Tracker Check-in";
     const body = config.questions.length === 1
       ? config.questions[0].label

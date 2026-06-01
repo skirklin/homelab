@@ -14,16 +14,32 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { LifeBackend } from "../interfaces/life";
-import type { LifeLog, LifeEvent, LifeEntry } from "../types/life";
+import type { LifeLog, LifeEvent, LifeEntry, LifeManifest } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
+import { defaultLifeManifest } from "../life-manifest-default";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
+
+/**
+ * Coerce a PB `manifest` JSON column into a `LifeManifest` or null. The PB JS
+ * SDK returns parsed JSON for this column; we still validate the shape so a
+ * legacy/garbage row surfaces as null rather than crashing a consumer. P2 will
+ * read this; until then the app keeps rendering from hardcoded TRACKABLES, so
+ * a null here is harmless.
+ */
+function manifestFromRecord(raw: unknown): LifeManifest | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const m = raw as Record<string, unknown>;
+  if (!Array.isArray(m.trackables)) return null;
+  return { trackables: m.trackables as LifeManifest["trackables"] };
+}
 
 function logFromRecord(r: RecordModel): LifeLog {
   return {
     id: r.id,
     sampleSchedule: r.sample_schedule || null,
+    manifest: manifestFromRecord(r.manifest),
     // Coerce defensively — pre-migration rows surface as undefined for a
     // brief window before 20260522_221130 runs on a given environment.
     randomSamplingEnabled: !!r.random_sampling_enabled,
@@ -96,11 +112,15 @@ export class PocketBaseLifeBackend implements LifeBackend {
       return logFromRecord(owned.items[0]);
     }
 
+    // Seed the minimal type-demo starter manifest on CREATE only. Existing
+    // logs (post-backfill) keep their own manifest — this path never runs for
+    // them because the owner-filter above returns first.
     const id = newId();
     const r = await this.wpb.collection("life_logs").create({
       id,
       name: "Life Log",
       owner: userId,
+      manifest: defaultLifeManifest(),
     });
     return logFromRecord(r as RecordModel);
   }

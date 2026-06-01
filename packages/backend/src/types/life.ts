@@ -14,9 +14,86 @@ export interface SampleSchedule {
   sentTimes: number[];
 }
 
+/**
+ * One field of a data-defined trackable. Maps onto the unified life_events
+ * shape per the manifest design (see apps/life/ROADMAP.md §2):
+ *
+ *   - `number` | `rating` | `text` | `bool` → a `life_events.entries[]` entry
+ *     whose `name` is this field's `key`.
+ *   - `category` → a `life_events.labels[key]` string value (NOT an entry).
+ *
+ * `key` is IMMUTABLE — it is the join key that links historical events to the
+ * trackable. Renaming it silently orphans history; the P4 MCP layer enforces
+ * this. Everything else (label, unit, options, defaults, order) is editable.
+ */
+export interface TypedField {
+  /** IMMUTABLE entry name / label key — the history join key. */
+  key: string;
+  type: "number" | "rating" | "text" | "category" | "bool";
+  label?: string;
+  /** For `number` fields — storage-canonical unit ("min", "mg", "oz", "ct", …). */
+  unit?: string;
+  /** For `rating` fields — top of the scale (default 5). */
+  scale?: number;
+  /** For `category` fields — the selectable values, written into labels[key]. */
+  options?: string[];
+  /** Pre-filled value in the log form (canonical unit for numbers). */
+  defaultValue?: number;
+  /** When true the field may be omitted from a logged event. */
+  optional?: boolean;
+}
+
+/**
+ * A replayable quick-action payload: the exact entries[]/labels{} a one-tap
+ * chip writes. `pinned[]` on a trackable holds the user's manual favorites
+ * (P3 layers runtime frecency on top). `labels` here are the categorical
+ * dimensions; `entries` are the measurement values.
+ */
+export interface QuickPayload {
+  label?: string;
+  entries: LifeEntry[];
+  labels?: Record<string, string>;
+}
+
+/**
+ * A per-user, data-defined trackable. Stored in `life_logs.manifest.trackables`.
+ * Generic over field types — no code references any specific `id`. Replaces the
+ * hardcoded `Trackable` in apps/life/app/src/trackables.ts as the runtime
+ * source (P2); that file survives only as the default-template seed.
+ *
+ * `id` is IMMUTABLE — it becomes `life_events.subject_id` and is the history
+ * join key. Removing a trackable from the manifest never deletes events; events
+ * persist and re-link if a trackable with the same id is re-added.
+ */
+export interface LifeManifestTrackable {
+  /** IMMUTABLE — becomes subject_id; the history join key. */
+  id: string;
+  label: string;
+  group?: string;
+  hidden?: boolean;
+  fields: TypedField[];
+  /** Manual quick-action favorites, shown first on the log card. */
+  pinned?: QuickPayload[];
+}
+
+/**
+ * The per-user trackable manifest persisted on `life_logs.manifest`. Sessions
+ * are NOT in here — they stay code-defined in apps/life/.../manifest.ts.
+ */
+export interface LifeManifest {
+  trackables: LifeManifestTrackable[];
+}
+
 export interface LifeLog {
   id: string;
   sampleSchedule: SampleSchedule | null;
+  /**
+   * Per-user, data-defined trackable manifest. Null on legacy logs that
+   * predate the P1 backfill; new logs are seeded with the default template on
+   * first `getOrCreateLog`. The app reads hardcoded `TRACKABLES` until P2
+   * swaps the render path to this field.
+   */
+  manifest: LifeManifest | null;
   /**
    * Per-log opt-in for the api service's per-5-minute random-sample cron in
    * `services/api/src/lib/notifications/life.ts`. When false (the default for

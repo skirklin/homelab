@@ -26,7 +26,11 @@ export type {
   ActivitySlot, FlightSlot, FlightInfo,
   DayEntry,
 } from "./types/travel";
-export type { LifeLog, LifeEvent, LifeEntry, SampleSchedule } from "./types/life";
+export type {
+  LifeLog, LifeEvent, LifeEntry, SampleSchedule,
+  LifeManifest, LifeManifestTrackable, TypedField, QuickPayload,
+} from "./types/life";
+export { DEFAULT_LIFE_MANIFEST, defaultLifeManifest } from "./life-manifest-default";
 export type { ClaudeObservation } from "./types/observer";
 export type {
   ChatMessage,
