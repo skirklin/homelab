@@ -89,20 +89,22 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
   const tripTag = `travel:${trip.id}`;
   const tripContainerTag = `container:trip:${trip.id}`;
   const trips = useMemo(() => allTasks, [allTasks]);
-  const tasks = useMemo(() => {
+  // Every real prep task for this trip — container nodes excluded, but cleared
+  // items kept. This is the set the progress fraction counts over. The per-trip
+  // container ("Trips/<trip>") carries the travel tag itself in legacy data, so
+  // identify containers as any task that parents another trip task (plus
+  // anything tagged container:*).
+  const tripTasks = useMemo(() => {
     const tagged = trips.filter((t) => t.tags?.includes(tripTag));
-    // Drop container nodes and cleared items so the Prep list mirrors the
-    // outliner's default view. The per-trip container ("Trips/<trip>") carries
-    // the travel tag itself in legacy data, so identify containers as any task
-    // that parents another trip task (plus anything tagged container:*). And
-    // hide tasks the user cleared in the outliner ("Clear done").
     const parentIds = new Set(tagged.map((t) => t.parentId).filter(Boolean));
     return tagged.filter((t) =>
-      !t.cleared &&
       !parentIds.has(t.id) &&
       !t.tags?.some((tag) => tag.startsWith("container:")),
     );
   }, [trips, tripTag]);
+  // Rendered list also hides cleared items, mirroring the outliner's default
+  // "Clear done" view — but they still count toward the fraction above.
+  const tasks = useMemo(() => tripTasks.filter((t) => !t.cleared), [tripTasks]);
 
   // Get the user's first household task list
   useEffect(() => {
@@ -133,10 +135,10 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
   }, [listId, user?.uid, upkeep, tripTag]);
 
   const { done, total, pct } = useMemo(() => {
-    const total = tasks.length;
-    const done = tasks.filter((t) => t.completed).length;
+    const total = tripTasks.length;
+    const done = tripTasks.filter((t) => t.completed).length;
     return { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
-  }, [tasks]);
+  }, [tripTasks]);
 
   // Build a map id → activity for fast lookup. Tasks with an `activity:<id>`
   // tag that doesn't match a real activity on this trip degrade to General prep —
