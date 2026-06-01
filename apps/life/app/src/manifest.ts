@@ -79,8 +79,8 @@ export const SESSIONS: Session[] = [
       {
         id: "intention",
         type: "text",
-        label: "One thing you want to do well today",
-        placeholder: "Keep it small and concrete.",
+        label: "One thing that matters today",
+        placeholder: "What feels worth your attention.",
       },
       {
         id: "energy",
@@ -94,10 +94,10 @@ export const SESSIONS: Session[] = [
   {
     id: "evening",
     title: "Evening",
-    // Tense-agnostic phrasing: the evening wizard renders 3 or 4 prompts
+    // Tense-agnostic phrasing: the evening wizard renders 2 or 3 prompts
     // depending on whether today's morning intention is available for
-    // follow-up (DATA_COLLECTION.md A1). "Three quick" was a lie on the
-    // 4-prompt days; making it dynamic is overkill — soft phrasing wins.
+    // follow-up (DATA_COLLECTION.md A1). Soft phrasing avoids hard-coding
+    // a count that depends on conditional prompts.
     greeting: "Wind-down time. A few quick reflections.",
     prompts: [
       {
@@ -108,7 +108,7 @@ export const SESSIONS: Session[] = [
         id: "intention_followup",
         type: "text",
         label: "How did that go?",
-        hint: "This morning you wanted to do well at: “{context}”",
+        hint: "This morning, what mattered to you was: “{context}”",
         placeholder: "How did it turn out? Honest beats tidy.",
         optional: true,
         contextKey: "morning_intention",
@@ -122,15 +122,9 @@ export const SESSIONS: Session[] = [
       {
         id: "lesson",
         type: "text",
-        label: "Anything to do differently tomorrow?",
-        placeholder: "Optional — skip if nothing comes to mind.",
+        label: "What did today show you?",
+        placeholder: "Optional — something surprising, something confirmed, anything.",
         optional: true,
-      },
-      {
-        id: "mood",
-        type: "rating",
-        label: "How are you feeling now?",
-        max: 5,
       },
     ],
   },
@@ -142,21 +136,21 @@ export const SESSIONS: Session[] = [
       {
         id: "highlights",
         type: "text",
-        label: "What were the highlights of the week?",
-        placeholder: "Pick a few that stood out.",
+        label: "What's worth remembering from this week?",
+        placeholder: "The moments you'd want to find later.",
       },
       {
         id: "lows",
         type: "text",
-        label: "What went poorly or felt off?",
+        label: "What was hard?",
         placeholder: "Honest, not heavy.",
         optional: true,
       },
       {
         id: "lesson",
         type: "text",
-        label: "One thing to do differently next week?",
-        placeholder: "Concrete and small beats grand.",
+        label: "What did this week teach you?",
+        placeholder: "What clicked, or what got clearer.",
         optional: true,
       },
       {
@@ -164,12 +158,6 @@ export const SESSIONS: Session[] = [
         type: "text",
         label: "One intention for the week ahead?",
         placeholder: "Where do you want your attention?",
-      },
-      {
-        id: "mood_rating",
-        type: "rating",
-        label: "Overall how do you feel about this week?",
-        max: 5,
       },
     ],
   },
