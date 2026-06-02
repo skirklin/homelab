@@ -1958,10 +1958,12 @@ dataRoutes.get("/life/log", handler(async (c) => {
   });
   if (logs.items.length === 0) return c.json({ error: "no life log configured" }, 404);
   const log = logs.items[0];
-  // Note: `manifest` used to be returned here, sourced from a JSON column on
-  // life_logs. That column was abandoned when the frontend manifest moved to
-  // code (apps/life/.../manifest.ts) and is dropped in migration 0032. The
-  // api scheduler now reads RANDOM_SAMPLES from @homelab/backend directly.
+  // Note: this route deliberately does NOT return `manifest`. The per-user
+  // trackable manifest lives on the life_logs.manifest JSON column (re-added by
+  // 20260601_191856_life_manifest_column.js and written by the P4 trackable
+  // ops) and is read/mutated via the dedicated /life/trackables routes below —
+  // do not prune that write path on the assumption the column is dead. The api
+  // scheduler reads RANDOM_SAMPLES from @homelab/backend directly.
   return c.json({
     id: log.id,
     name: log.name,

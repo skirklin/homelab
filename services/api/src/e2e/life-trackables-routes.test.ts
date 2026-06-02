@@ -311,6 +311,18 @@ describe("life trackables: pins are history-compatible + replayable", () => {
     expect(bad.status).toBe(400);
     expect(String(bad.data.error)).toMatch(/measurement field.key/);
   });
+
+  it("rejects a pin entry whose shape contradicts the field (raw-HTTP path)", async () => {
+    // `cups` is a number field; a number entry with no unit must be rejected by
+    // the pure op even though raw HTTP callers bypass the MCP zod schema.
+    const bad = await req("/data/life/trackables/coffee/pins", {
+      method: "PUT",
+      token: bob.apiToken,
+      body: { pinned: [{ entries: [{ name: "cups", type: "number", value: 1 }] }] },
+    });
+    expect(bad.status).toBe(400);
+    expect(String(bad.data.error)).toMatch(/non-empty unit/);
+  });
 });
 
 describe("life trackables: cross-user isolation", () => {

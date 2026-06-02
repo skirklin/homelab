@@ -155,6 +155,56 @@ describe("setPins / validatePins", () => {
     const cleared = setPins(withPin, "water", []);
     expect(cleared.trackables.find((t) => t.id === "water")!.pinned).toBeUndefined();
   });
+
+  describe("pin entry shape (FIX 1)", () => {
+    it("rejects an entry missing `type`", () => {
+      expect(() => setPins(base(), "water", [{ entries: [{ name: "volume", value: 8, unit: "oz" }] }]))
+        .toThrow(/must be \{type:"number"\}/);
+    });
+    it("rejects an entry whose type contradicts the field type", () => {
+      expect(() => setPins(base(), "water", [{ entries: [{ name: "volume", type: "text", value: "lots" }] }]))
+        .toThrow(/must be \{type:"number"\}/);
+    });
+    it("rejects a number entry whose value is not a number", () => {
+      expect(() => setPins(base(), "water", [{ entries: [{ name: "volume", type: "number", value: "8", unit: "oz" }] }]))
+        .toThrow(/value must be a finite number/);
+    });
+    it("rejects a number entry with no unit", () => {
+      expect(() => setPins(base(), "water", [{ entries: [{ name: "volume", type: "number", value: 8 }] }]))
+        .toThrow(/must carry a non-empty unit/);
+    });
+    it("rejects a number entry with an empty unit", () => {
+      expect(() => setPins(base(), "water", [{ entries: [{ name: "volume", type: "number", value: 8, unit: "" }] }]))
+        .toThrow(/must carry a non-empty unit/);
+    });
+    it("accepts a well-shaped number entry and returns the typed entry", () => {
+      const next = setPins(base(), "water", [{ entries: [{ name: "volume", type: "number", value: 8, unit: "oz" }] }]);
+      expect(next.trackables.find((t) => t.id === "water")!.pinned![0].entries[0])
+        .toEqual({ name: "volume", type: "number", value: 8, unit: "oz" });
+    });
+  });
+
+  describe("rating pin unit (FIX 2)", () => {
+    it("rejects a rating pin whose unit is not 'rating'", () => {
+      expect(() => setPins(base(), "mood", [{ entries: [{ name: "rating", type: "number", value: 4, unit: "oz" }] }]))
+        .toThrow(/must carry unit:"rating"/);
+    });
+    it("rejects a rating pin emitted as a non-number type", () => {
+      expect(() => setPins(base(), "mood", [{ entries: [{ name: "rating", type: "text", value: "4" }] }]))
+        .toThrow(/must be \{type:"number"\}/);
+    });
+    it("rejects a rating value outside 1..scale", () => {
+      expect(() => setPins(base(), "mood", [{ entries: [{ name: "rating", type: "number", value: 6, unit: "rating" }] }]))
+        .toThrow(/rating value must be a number in 1\.\.5/);
+      expect(() => setPins(base(), "mood", [{ entries: [{ name: "rating", type: "number", value: 0, unit: "rating" }] }]))
+        .toThrow(/rating value must be a number in 1\.\.5/);
+    });
+    it("accepts a rating pin with unit:'rating' + valid scale, forcing the canonical shape", () => {
+      const next = setPins(base(), "mood", [{ entries: [{ name: "rating", type: "number", value: 4, unit: "rating" }] }]);
+      expect(next.trackables.find((t) => t.id === "mood")!.pinned![0].entries[0])
+        .toEqual({ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 });
+    });
+  });
 });
 
 describe("emptyManifest", () => {

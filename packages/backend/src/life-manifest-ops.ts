@@ -22,6 +22,7 @@ import type {
   LifeManifestTrackable,
   TypedField,
   QuickPayload,
+  LifeEntry,
 } from "./types/life";
 
 /** Field types whose value lands in `life_events.entries[]`. */
@@ -40,6 +41,7 @@ export type ManifestErrorCode =
   | "immutable_field_key"
   | "field_removed"
   | "invalid_pin"
+  | "invalid_pin_entry"
   | "invalid_order";
 
 export class ManifestError extends Error {
@@ -147,16 +149,123 @@ function validateFields(raw: unknown): TypedField[] {
 }
 
 /**
+ * Validate ONE pin entry's full shape against the field it names, returning a
+ * typed `LifeEntry`. This is the authoritative gate for raw-HTTP callers (the
+ * data.ts pinned routes pass `pinned: unknown` straight through); the MCP layer
+ * has its own `lifeEntrySchema`, but the pure op must not rely on it. The shape
+ * mirrors the `LifeEntry` discriminated union in types/life.ts:
+ *   number → { name, type:"number", value:number, unit:non-empty string, scale? }
+ *   text   → { name, type:"text",   value:string }
+ *   bool   → { name, type:"bool",   value:boolean }
+ *
+ * A `rating` field is special: the live write path (apps/life EventLogger +
+ * aggregationFor) emits it as a NUMBER entry with `unit:"rating"` and a `scale`,
+ * so aggregation buckets by unit. A pin for a rating field MUST carry exactly
+ * that shape — any other unit would replay into the wrong aggregation bucket and
+ * fragment history. We force unit:"rating", scale:<field.scale ?? 5>, and
+ * value in 1..scale.
+ */
+function validatePinEntry(raw: unknown, field: TypedField, ctx: string): LifeEntry {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ManifestError("invalid_pin_entry", `${ctx} must be an object`);
+  }
+  const e = raw as Record<string, unknown>;
+  const name = field.key;
+
+  // rating → number entry with unit:"rating" (the live write shape).
+  if (field.type === "rating") {
+    const scale = field.scale ?? 5;
+    if (e.type !== "number") {
+      throw new ManifestError(
+        "invalid_pin_entry",
+        `${ctx} names rating field "${name}" so it must be {type:"number"}; got ${JSON.stringify(e.type)}`,
+      );
+    }
+    if (typeof e.value !== "number" || !Number.isFinite(e.value) || e.value < 1 || e.value > scale) {
+      throw new ManifestError(
+        "invalid_pin_entry",
+        `${ctx} rating value must be a number in 1..${scale}; got ${JSON.stringify(e.value)}`,
+      );
+    }
+    if (e.unit !== "rating") {
+      throw new ManifestError(
+        "invalid_pin_entry",
+        `${ctx} names rating field "${name}" so it must carry unit:"rating" (aggregation buckets by unit); got ${JSON.stringify(e.unit)}`,
+      );
+    }
+    return { name, type: "number", value: e.value, unit: "rating", scale };
+  }
+
+  // number entry.
+  if (field.type === "number") {
+    if (e.type !== "number") {
+      throw new ManifestError(
+        "invalid_pin_entry",
+        `${ctx} names number field "${name}" so it must be {type:"number"}; got ${JSON.stringify(e.type)}`,
+      );
+    }
+    if (typeof e.value !== "number" || !Number.isFinite(e.value)) {
+      throw new ManifestError("invalid_pin_entry", `${ctx} number value must be a finite number; got ${JSON.stringify(e.value)}`);
+    }
+    if (typeof e.unit !== "string" || e.unit.length === 0) {
+      throw new ManifestError("invalid_pin_entry", `${ctx} number entry must carry a non-empty unit string; got ${JSON.stringify(e.unit)}`);
+    }
+    const out: LifeEntry = { name, type: "number", value: e.value, unit: e.unit };
+    if (e.scale !== undefined) {
+      if (typeof e.scale !== "number" || !Number.isFinite(e.scale)) {
+        throw new ManifestError("invalid_pin_entry", `${ctx} scale must be a number; got ${JSON.stringify(e.scale)}`);
+      }
+      out.scale = e.scale;
+    }
+    return out;
+  }
+
+  // text entry.
+  if (field.type === "text") {
+    if (e.type !== "text") {
+      throw new ManifestError(
+        "invalid_pin_entry",
+        `${ctx} names text field "${name}" so it must be {type:"text"}; got ${JSON.stringify(e.type)}`,
+      );
+    }
+    if (typeof e.value !== "string") {
+      throw new ManifestError("invalid_pin_entry", `${ctx} text value must be a string; got ${JSON.stringify(e.value)}`);
+    }
+    return { name, type: "text", value: e.value };
+  }
+
+  // bool entry.
+  if (field.type === "bool") {
+    if (e.type !== "bool") {
+      throw new ManifestError(
+        "invalid_pin_entry",
+        `${ctx} names bool field "${name}" so it must be {type:"bool"}; got ${JSON.stringify(e.type)}`,
+      );
+    }
+    if (typeof e.value !== "boolean") {
+      throw new ManifestError("invalid_pin_entry", `${ctx} bool value must be a boolean; got ${JSON.stringify(e.value)}`);
+    }
+    return { name, type: "bool", value: e.value };
+  }
+
+  // Unreachable: only entry-typed fields reach here (callers filter by name).
+  throw new ManifestError("invalid_pin_entry", `${ctx} names a non-measurement field "${name}"`);
+}
+
+/**
  * Validate a `pinned[]` payload list against a trackable's fields. A pin is a
  * replayable quick-action; its `entries[].name` / `labels` keys MUST be real
  * field keys of the trackable so a replayed pin writes a history-compatible
- * event. We require: measurement entries name an entry-typed field; label keys
- * name a category field.
+ * event. We require: measurement entries name an entry-typed field AND carry the
+ * exact value/unit shape that field's history events use (see validatePinEntry);
+ * label keys name a category field.
  */
 export function validatePins(raw: unknown, fields: TypedField[]): QuickPayload[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) throw new ManifestError("invalid_pin", "pinned must be an array");
-  const entryKeys = new Set(fields.filter((f) => ENTRY_FIELD_TYPES.includes(f.type as never)).map((f) => f.key));
+  const entryFieldByKey = new Map(
+    fields.filter((f) => ENTRY_FIELD_TYPES.includes(f.type as never)).map((f) => [f.key, f]),
+  );
   const categoryKeys = new Set(fields.filter((f) => f.type === "category").map((f) => f.key));
 
   return raw.map((p, i) => {
@@ -167,16 +276,21 @@ export function validatePins(raw: unknown, fields: TypedField[]): QuickPayload[]
     if (!Array.isArray(pin.entries) || pin.entries.length === 0) {
       throw new ManifestError("invalid_pin", `pinned[${i}].entries must be a non-empty array`);
     }
-    for (const e of pin.entries) {
+    const entries: LifeEntry[] = pin.entries.map((e, j) => {
       if (!e || typeof e !== "object") throw new ManifestError("invalid_pin", `pinned[${i}] has a malformed entry`);
       const name = (e as Record<string, unknown>).name;
-      if (typeof name !== "string" || !entryKeys.has(name)) {
+      if (typeof name !== "string") {
+        throw new ManifestError("invalid_pin", `pinned[${i}].entries[${j}].name must be a string`);
+      }
+      const field = entryFieldByKey.get(name);
+      if (!field) {
         throw new ManifestError(
           "invalid_pin",
-          `pinned[${i}] entry name "${String(name)}" must match a measurement field.key of the trackable`,
+          `pinned[${i}] entry name "${name}" must match a measurement field.key of the trackable`,
         );
       }
-    }
+      return validatePinEntry(e, field, `pinned[${i}].entries[${j}]`);
+    });
     if (pin.labels !== undefined) {
       if (!pin.labels || typeof pin.labels !== "object" || Array.isArray(pin.labels)) {
         throw new ManifestError("invalid_pin", `pinned[${i}].labels must be an object`);
@@ -190,7 +304,7 @@ export function validatePins(raw: unknown, fields: TypedField[]): QuickPayload[]
         }
       }
     }
-    const out: QuickPayload = { entries: pin.entries as QuickPayload["entries"] };
+    const out: QuickPayload = { entries };
     if (typeof pin.label === "string") out.label = pin.label;
     if (pin.labels) out.labels = pin.labels as Record<string, string>;
     return out;
