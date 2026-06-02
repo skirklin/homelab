@@ -16,7 +16,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-plotly.js": "^2.6.0",
-    "react-router-dom": "^7.13.1",
+    "react-router-dom": "^6.30.2",
     "recharts": "^3.8.0"
   },
   "devDependencies": {
