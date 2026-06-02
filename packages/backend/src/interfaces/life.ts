@@ -6,7 +6,14 @@
  * config.
  */
 import type { Unsubscribe } from "../types/common";
-import type { LifeLog, LifeEvent, LifeEntry, QuickPayload } from "../types/life";
+import type {
+  LifeLog,
+  LifeEvent,
+  LifeEntry,
+  QuickPayload,
+  LifeManifest,
+  TypedField,
+} from "../types/life";
 
 export interface LifeBackend {
   // --- Log ---
@@ -42,6 +49,47 @@ export interface LifeBackend {
    * state, NOT a history join key, so it is freely mutable.
    */
   setTrackablePins(logId: string, trackableId: string, pins: QuickPayload[]): Promise<void>;
+
+  // --- Trackable manifest (P4) ---
+
+  /**
+   * Read-modify-write the log's `manifest` JSON column with `mutate`, which
+   * receives the current manifest (empty `{trackables:[]}` if the column is
+   * null/garbage) and returns the next one. Every trackable mutation below is
+   * built on this: it reads the freshest manifest, applies a PURE op from
+   * `life-manifest-ops`, and writes the whole manifest back, touching ONLY the
+   * targeted trackable and never clobbering the rest (mirrors `setTrackablePins`).
+   * The pure op throws `ManifestError` on invalid input; this method does not
+   * catch it. Returns the persisted manifest.
+   */
+  mutateManifest(logId: string, mutate: (current: LifeManifest) => LifeManifest): Promise<LifeManifest>;
+
+  /** Add a new trackable. Validates id slug/uniqueness, fields, and pins. */
+  addTrackable(
+    logId: string,
+    input: { id: string; label: string; group?: string; hidden?: boolean; fields: TypedField[]; pinned?: QuickPayload[] },
+  ): Promise<LifeManifest>;
+
+  /**
+   * Patch an existing trackable's label/group/hidden/fields/pinned. Rejects any
+   * `id` change and any rename/removal/retype of an existing `field.key` (the
+   * history join keys); adding new fields is allowed. Pass only the fields to change.
+   */
+  updateTrackable(
+    logId: string,
+    trackableId: string,
+    patch: { label?: string; group?: string | null; hidden?: boolean; fields?: TypedField[]; pinned?: QuickPayload[] },
+  ): Promise<LifeManifest>;
+
+  /**
+   * Remove a trackable from the manifest. Manifest-only — NEVER deletes any
+   * `life_events`; events with that subject_id persist and re-link if a
+   * trackable with the same id is re-added.
+   */
+  removeTrackable(logId: string, trackableId: string): Promise<LifeManifest>;
+
+  /** Reorder trackables. `orderedIds` must be a permutation of the current ids. */
+  reorderTrackables(logId: string, orderedIds: string[]): Promise<LifeManifest>;
 
   // --- Events ---
 

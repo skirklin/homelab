@@ -31,6 +31,18 @@ export type {
   LifeManifest, LifeManifestTrackable, TypedField, QuickPayload,
 } from "./types/life";
 export { DEFAULT_LIFE_MANIFEST, defaultLifeManifest } from "./life-manifest-default";
+export {
+  ManifestError,
+  validateField,
+  validatePins,
+  emptyManifest,
+  addTrackable,
+  updateTrackable,
+  removeTrackable,
+  reorderTrackables,
+  setPins,
+} from "./life-manifest-ops";
+export type { ManifestErrorCode } from "./life-manifest-ops";
 export type { ClaudeObservation } from "./types/observer";
 export type {
   ChatMessage,

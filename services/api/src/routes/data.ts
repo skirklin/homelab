@@ -9,6 +9,18 @@
 import { Hono } from "hono";
 import { handler } from "../lib/handler";
 import type { AppEnv } from "../index";
+import type PocketBase from "pocketbase";
+import {
+  ManifestError,
+  emptyManifest,
+  defaultLifeManifest,
+  addTrackable as addTrackableOp,
+  updateTrackable as updateTrackableOp,
+  removeTrackable as removeTrackableOp,
+  reorderTrackables as reorderTrackablesOp,
+  setPins as setPinsOp,
+  type LifeManifest,
+} from "@homelab/backend";
 import {
   userOwnsTravelLog,
   userOwnsRecipeBox,
@@ -2087,6 +2099,174 @@ dataRoutes.delete("/life/entries/:id", handler(async (c) => {
   }
   await pb.collection("life_events").delete(id);
   return c.json({ success: true });
+}));
+
+// ---- Life trackable manifest (P4) ----
+//
+// Server-side CRUD over the per-user `life_logs.manifest` JSON column. The
+// validation + mutation rules are the canonical pure ops in
+// @homelab/backend/life-manifest-ops; this layer only does identity scoping
+// (resolve the CALLER'S OWN log from userId — never a caller-supplied log id,
+// so cross-user writes are structurally impossible) and a read-modify-write of
+// the manifest column. Removal is manifest-only and never touches life_events.
+
+/** Coerce a PB `manifest` JSON value into a LifeManifest, or null. */
+function manifestFromValue(raw: unknown): LifeManifest | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const m = raw as Record<string, unknown>;
+  if (!Array.isArray(m.trackables)) return null;
+  return { trackables: m.trackables as LifeManifest["trackables"] };
+}
+
+/**
+ * Resolve the caller's OWN life log, creating it (seeded with the default
+ * starter manifest) if absent. Returns the raw PB record. This is the identity
+ * gate for every trackable op — the manifest is always the caller's own,
+ * resolved from the token's userId, so there is no caller-supplied log id to
+ * attack with.
+ */
+async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
+  const logs = await pb.collection("life_logs").getList(1, 1, {
+    filter: pb.filter("owner = {:uid}", { uid: userId }),
+    sort: "created",
+  });
+  if (logs.items.length > 0) return logs.items[0];
+  return pb.collection("life_logs").create({
+    name: "Life Log",
+    owner: userId,
+    manifest: defaultLifeManifest(),
+  });
+}
+
+/** Map a ManifestError code to an HTTP status. */
+function manifestErrorStatus(code: ManifestError["code"]): 400 | 404 | 409 {
+  if (code === "not_found") return 404;
+  if (code === "duplicate_id") return 409;
+  return 400;
+}
+
+/**
+ * Run a pure manifest mutation against the caller's own log and persist it.
+ * `mutate` throws ManifestError on invalid input → translated to a clean HTTP
+ * status. Returns the persisted manifest as the response body.
+ */
+async function applyManifestMutation(
+  pb: PocketBase,
+  userId: string,
+  mutate: (current: LifeManifest) => LifeManifest,
+): Promise<{ ok: true; manifest: LifeManifest } | { ok: false; status: 400 | 404 | 409; error: string }> {
+  const log = await getOrCreateOwnLifeLog(pb, userId);
+  const current = manifestFromValue(log.manifest) ?? emptyManifest();
+  let next: LifeManifest;
+  try {
+    next = mutate(current);
+  } catch (e) {
+    if (e instanceof ManifestError) {
+      return { ok: false, status: manifestErrorStatus(e.code), error: e.message };
+    }
+    throw e;
+  }
+  await pb.collection("life_logs").update(log.id, { manifest: next });
+  return { ok: true, manifest: next };
+}
+
+// List the caller's trackables.
+dataRoutes.get("/life/trackables", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const log = await getOrCreateOwnLifeLog(pb, userId);
+  const manifest = manifestFromValue(log.manifest) ?? emptyManifest();
+  return c.json({ log: log.id, trackables: manifest.trackables });
+}));
+
+// Add a trackable to the caller's manifest.
+dataRoutes.post("/life/trackables", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{
+    id?: string;
+    label?: string;
+    group?: string;
+    hidden?: boolean;
+    fields?: unknown;
+    pinned?: unknown;
+  }>();
+  if (typeof body.id !== "string" || typeof body.label !== "string") {
+    return c.json({ error: "id and label are required strings" }, 400);
+  }
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    addTrackableOp(cur, {
+      id: body.id as string,
+      label: body.label as string,
+      group: body.group,
+      hidden: body.hidden,
+      fields: body.fields,
+      pinned: body.pinned,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ trackables: out.manifest.trackables }, 201);
+}));
+
+// Patch a trackable. id/field.key are immutable (enforced in the pure op).
+dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const trackableId = c.req.param("id")!;
+  const body = await c.req.json<{
+    id?: string;
+    label?: string;
+    group?: string | null;
+    hidden?: boolean;
+    fields?: unknown;
+    pinned?: unknown;
+  }>();
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    // Forward `id` so the pure op enforces id-immutability — a caller passing a
+    // differing `id` must be rejected, not silently ignored.
+    updateTrackableOp(cur, trackableId, {
+      id: body.id,
+      label: body.label,
+      group: body.group,
+      hidden: body.hidden,
+      fields: body.fields,
+      pinned: body.pinned,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ trackables: out.manifest.trackables });
+}));
+
+// Remove a trackable (manifest-only — never deletes life_events).
+dataRoutes.delete("/life/trackables/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const trackableId = c.req.param("id")!;
+  const out = await applyManifestMutation(pb, userId, (cur) => removeTrackableOp(cur, trackableId));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ success: true, trackables: out.manifest.trackables });
+}));
+
+// Reorder trackables. order[] must be a permutation of the current ids.
+dataRoutes.post("/life/trackables/reorder", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{ order?: unknown }>();
+  const out = await applyManifestMutation(pb, userId, (cur) => reorderTrackablesOp(cur, body.order));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ trackables: out.manifest.trackables });
+}));
+
+// Set a trackable's pins wholesale (validated against its fields).
+dataRoutes.put("/life/trackables/:id/pins", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const trackableId = c.req.param("id")!;
+  const body = await c.req.json<{ pinned?: unknown }>();
+  const out = await applyManifestMutation(pb, userId, (cur) => setPinsOp(cur, trackableId, body.pinned ?? []));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  const t = out.manifest.trackables.find((x) => x.id === trackableId);
+  return c.json({ pinned: t?.pinned ?? [] });
 }));
 
 // ---- Upkeep ----

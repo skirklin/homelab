@@ -14,10 +14,17 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { LifeBackend } from "../interfaces/life";
-import type { LifeLog, LifeEvent, LifeEntry, LifeManifest, QuickPayload } from "../types/life";
+import type { LifeLog, LifeEvent, LifeEntry, LifeManifest, QuickPayload, TypedField } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
 import { defaultLifeManifest } from "../life-manifest-default";
+import {
+  emptyManifest,
+  addTrackable as addTrackableOp,
+  updateTrackable as updateTrackableOp,
+  removeTrackable as removeTrackableOp,
+  reorderTrackables as reorderTrackablesOp,
+} from "../life-manifest-ops";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
@@ -171,6 +178,46 @@ export class PocketBaseLifeBackend implements LifeBackend {
       ),
     };
     await this.wpb.collection("life_logs").update(logId, { manifest: next });
+  }
+
+  async mutateManifest(
+    logId: string,
+    mutate: (current: LifeManifest) => LifeManifest,
+  ): Promise<LifeManifest> {
+    // Read-modify-write the single `manifest` JSON column. We read the freshest
+    // manifest from the plain client (a config read doesn't need the wpb queue
+    // overlay), apply the pure mutation, and write the whole manifest back. The
+    // pure ops only ever touch the targeted trackable, so the rest of the
+    // manifest is preserved byte-for-byte. A null/garbage column reads as an
+    // empty manifest so `add` works on a fresh log.
+    const rec = await this.pb().collection("life_logs").getOne(logId);
+    const current = manifestFromRecord(rec.manifest) ?? emptyManifest();
+    const next = mutate(current);
+    await this.wpb.collection("life_logs").update(logId, { manifest: next });
+    return next;
+  }
+
+  addTrackable(
+    logId: string,
+    input: { id: string; label: string; group?: string; hidden?: boolean; fields: TypedField[]; pinned?: QuickPayload[] },
+  ): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => addTrackableOp(cur, input));
+  }
+
+  updateTrackable(
+    logId: string,
+    trackableId: string,
+    patch: { label?: string; group?: string | null; hidden?: boolean; fields?: TypedField[]; pinned?: QuickPayload[] },
+  ): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => updateTrackableOp(cur, trackableId, patch));
+  }
+
+  removeTrackable(logId: string, trackableId: string): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => removeTrackableOp(cur, trackableId));
+  }
+
+  reorderTrackables(logId: string, orderedIds: string[]): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => reorderTrackablesOp(cur, orderedIds));
   }
 
   async addEvent(

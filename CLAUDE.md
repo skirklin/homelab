@@ -144,11 +144,19 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 
 **Life (read):**
 - `list_life_entries` — recent entries (optional days filter)
+- `list_life_trackables` — the caller's per-user trackable manifest (id, label, group, hidden, fields, pinned)
 
 **Life (write):**
 - `add_life_entry` — log a widget event (data shape varies per widget type)
 - `update_life_entry` — change timestamp, merge data, or set notes
 - `delete_life_entry` — delete an entry
+- `add_life_trackable` — create a trackable (immutable slug `id`, `label`, optional `group`/`hidden`, typed `fields[]`; category fields need `options`)
+- `update_life_trackable` — patch label/group/hidden/fields/pinned. `id` and existing `field.key`/type are IMMUTABLE (history join keys); you may append new fields but never rename/remove/retype one
+- `remove_life_trackable` — drop a trackable from the manifest. Manifest-only — NEVER deletes `life_events`; events re-link if the same id is re-added
+- `reorder_life_trackables` — set trackable order (dashboard renders in manifest order)
+- `add_life_pin` / `remove_life_pin` — manage a trackable's pinned quick-actions; a pin's `entries[].name`/`labels` keys must match the trackable's field keys so it replays as a history-compatible event
+
+All trackable tools operate on the authenticated caller's own life log — there is no log-id parameter, so cross-user edits are impossible.
 
 **Sharing:**
 - `create_invite` — generate a sharing invite link (optional expiry)

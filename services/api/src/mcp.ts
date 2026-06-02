@@ -464,6 +464,11 @@ const lifeEntrySchema = z.discriminatedUnion("type", [
     type: z.literal("text"),
     value: z.string(),
   }),
+  z.object({
+    name: z.string(),
+    type: z.literal("bool"),
+    value: z.boolean(),
+  }),
 ]);
 
 server.tool(
@@ -539,6 +544,137 @@ server.tool(
   { id: z.string().describe("The life event ID") },
   async ({ id }) => {
     const result = await api(`/life/entries/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+// --- Life trackable manifest tools ---
+//
+// A "trackable" is a data-defined thing the user logs (e.g. Water, Mood,
+// Movement). These tools manage the caller's own per-user manifest
+// (life_logs.manifest); they always operate on the authenticated caller's log
+// — there is no log-id parameter, so cross-user edits are impossible.
+//
+// IMMUTABILITY: a trackable's `id` and each field's `key` are the join keys
+// that link historical life_events. They can NEVER be renamed/removed/retyped
+// (that would silently orphan history). add_life_trackable sets them once;
+// update_life_trackable may add NEW fields and edit cosmetic field props
+// (label/unit/options/scale/default) but rejects any id change or any change
+// to an existing field's key/type.
+
+const typedFieldSchema = z.object({
+  key: z.string().describe("IMMUTABLE entry name / label key (slug: [a-z0-9_-]). The history join key."),
+  type: z.enum(["number", "rating", "text", "category", "bool"]).describe("Field type. number|rating|text|bool → entries[]; category → labels{}."),
+  label: z.string().optional().describe("Display label (editable)"),
+  unit: z.string().optional().describe("For number fields: storage-canonical unit (min, mg, oz, ct, …)"),
+  scale: z.number().optional().describe("For rating fields: top of the scale (default 5)"),
+  options: z.array(z.string()).optional().describe("For category fields: the selectable values (REQUIRED for category)"),
+  defaultValue: z.number().optional().describe("Pre-filled value in the log form"),
+  optional: z.boolean().optional().describe("When true the field may be omitted from a logged event"),
+});
+
+const quickPayloadSchema = z.object({
+  label: z.string().optional().describe("Chip label shown on the dashboard"),
+  entries: z.array(lifeEntrySchema).describe("Replayed entries[]. Each entry's `name` MUST equal a measurement field.key of the trackable."),
+  labels: z.record(z.string()).optional().describe("Replayed labels{}. Each key MUST equal a category field.key of the trackable."),
+});
+
+server.tool(
+  "list_life_trackables",
+  "List the caller's life trackables (the per-user manifest). Each has id, label, optional group/hidden, fields[] (typed), and optional pinned[] quick-actions.",
+  {},
+  async () => {
+    const data = await api("/life/trackables");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_life_trackable",
+  "Create a new life trackable in the caller's manifest. `id` is an IMMUTABLE slug (becomes the events subject_id; the history join key) and must be unique. Each field's `key` is also immutable. category fields require options[].",
+  {
+    id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-]); becomes the events subject_id"),
+    label: z.string().describe("Display label"),
+    group: z.string().optional().describe("Dashboard group (e.g. body, mind)"),
+    hidden: z.boolean().optional().describe("Hide from the dashboard (history preserved)"),
+    fields: z.array(typedFieldSchema).describe("At least one typed field"),
+    pinned: z.array(quickPayloadSchema).optional().describe("Manual quick-action favorites"),
+  },
+  async (args) => {
+    const result = await api("/life/trackables", { method: "POST", body: JSON.stringify(args) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_life_trackable",
+  "Patch a trackable's label/group/hidden/fields/pinned (pass only what changes). The trackable `id` is IMMUTABLE and cannot change. Existing field `key`s are IMMUTABLE: you may APPEND new fields and edit cosmetic props (label/unit/options/scale/default), but removing or retyping an existing field key is rejected (it orphans history).",
+  {
+    id: z.string().describe("The trackable id to update (immutable; identifies which trackable)"),
+    label: z.string().optional(),
+    group: z.string().nullable().optional().describe("New group; null clears it"),
+    hidden: z.boolean().optional(),
+    fields: z.array(typedFieldSchema).optional().describe("Replacement fields[] — must include every existing key with an unchanged type; may add new fields"),
+    pinned: z.array(quickPayloadSchema).optional().describe("Replacement pinned[] (whole-replace; [] clears)"),
+  },
+  async ({ id, ...patch }) => {
+    const result = await api(`/life/trackables/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_life_trackable",
+  "Remove a trackable from the caller's manifest. MANIFEST-ONLY: this NEVER deletes any life_events. Events with that subject_id persist and re-link automatically if a trackable with the same id is added again.",
+  { id: z.string().describe("The trackable id to remove") },
+  async ({ id }) => {
+    const result = await api(`/life/trackables/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "reorder_life_trackables",
+  "Set the order of the caller's trackables (the dashboard renders in manifest order within groups). `order` must be a permutation of all current trackable ids.",
+  { order: z.array(z.string()).describe("All current trackable ids in the desired order") },
+  async ({ order }) => {
+    const result = await api("/life/trackables/reorder", { method: "POST", body: JSON.stringify({ order }) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_life_pin",
+  "Add a pinned quick-action to a trackable. The pin's entries[].name MUST equal the trackable's measurement field.keys and any labels{} keys MUST equal its category field.keys, so a replayed pin writes a history-compatible event. Appends to the existing pins.",
+  {
+    id: z.string().describe("The trackable id"),
+    pin: quickPayloadSchema.describe("The quick-action payload to pin"),
+  },
+  async ({ id, pin }) => {
+    const list = (await api("/life/trackables")) as { trackables: Array<{ id: string; pinned?: unknown[] }> };
+    const t = list.trackables.find((x) => x.id === id);
+    if (!t) throw new Error(`no trackable with id "${id}"`);
+    const pinned = [...(Array.isArray(t.pinned) ? t.pinned : []), pin];
+    const result = await api(`/life/trackables/${id}/pins`, { method: "PUT", body: JSON.stringify({ pinned }) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_life_pin",
+  "Remove a pinned quick-action from a trackable by its 0-based index (as listed in list_life_trackables).",
+  {
+    id: z.string().describe("The trackable id"),
+    index: z.number().int().describe("0-based index of the pin to remove"),
+  },
+  async ({ id, index }) => {
+    const list = (await api("/life/trackables")) as { trackables: Array<{ id: string; pinned?: unknown[] }> };
+    const t = list.trackables.find((x) => x.id === id);
+    if (!t) throw new Error(`no trackable with id "${id}"`);
+    const cur = Array.isArray(t.pinned) ? t.pinned : [];
+    if (index < 0 || index >= cur.length) throw new Error(`pin index ${index} out of range (0..${cur.length - 1})`);
+    const pinned = cur.filter((_, i) => i !== index);
+    const result = await api(`/life/trackables/${id}/pins`, { method: "PUT", body: JSON.stringify({ pinned }) });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
 );
