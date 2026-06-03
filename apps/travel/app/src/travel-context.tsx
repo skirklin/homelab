@@ -162,6 +162,10 @@ export function TravelProvider({ children }: { children: ReactNode }) {
           if (currentLogIdRef.current !== logId) return;
           dispatch({ type: "SET_DAY_ENTRIES", entries: entries.map(dayEntryFromBackend) });
         },
+        // Notes ride the log-level mirror (Phase 2). Phase 4 wires these into
+        // a reducer slice + UI; for now the subscription is established so the
+        // mirror SSE channel is ref-counted, but the payload is not yet stored.
+        onNotes: () => {},
         onDeleted: () => {
           if (currentLogIdRef.current !== logId) return;
           dispatch({ type: "SET_LOG", log: null });

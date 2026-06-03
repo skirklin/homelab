@@ -11,7 +11,9 @@ import type {
   Itinerary,
   ItineraryDay,
   DayEntry,
+  TravelNote,
 } from "../types/travel";
+import type { LifeEntry } from "../types/life";
 
 export interface TravelBackend {
   // --- Log ---
@@ -50,6 +52,16 @@ export interface TravelBackend {
   ): Promise<string>;
   deleteDayEntry(entryId: string): Promise<void>;
 
+  // --- Notes (per-user feedback) ---
+
+  /** Fetch notes for one subject, newest-first. */
+  getNotes(logId: string, subjectType: string, subjectId: string): Promise<TravelNote[]>;
+  /** Create a note. `userId` is stamped into `created_by` (PB does not auto-stamp it). */
+  addNote(logId: string, subjectType: string, subjectId: string, userId: string, entries: LifeEntry[]): Promise<string>;
+  /** Replace a note's entries wholesale. */
+  updateNote(noteId: string, entries: LifeEntry[]): Promise<void>;
+  deleteNote(noteId: string): Promise<void>;
+
   // --- Subscriptions ---
 
   /**
@@ -64,6 +76,7 @@ export interface TravelBackend {
       onActivities: (activities: Activity[]) => void;
       onItineraries: (itineraries: Itinerary[]) => void;
       onDayEntries: (entries: DayEntry[]) => void;
+      onNotes: (notes: TravelNote[]) => void;
       onDeleted?: () => void;
     },
   ): Unsubscribe;

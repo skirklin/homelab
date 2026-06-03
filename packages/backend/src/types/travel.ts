@@ -1,5 +1,7 @@
 /** Travel domain types */
 
+import type { LifeEntry } from "./life";
+
 export interface TravelLog {
   id: string;
   name: string;
@@ -85,6 +87,27 @@ export interface DayEntry {
   text: string;
   highlight?: string;  // optional one-line "best moment"
   mood?: number;       // 1..5 overall day rating
+  created: string;
+  updated: string;
+}
+
+/**
+ * A per-user piece of feedback attached to a subject (an activity, a whole
+ * trip, or a single day). The shared `entries[]` shape (identical to
+ * recipe_events / life_events) so the same structured-data widgets render it.
+ *
+ * `subjectType` is `activity` | `day` | `trip` (validated app-side; the PB
+ * column is plain text). `subjectId` resolves per type: activity→activity id,
+ * trip→trip id, day→composite `"${tripId}:${date}"` (split on the FIRST colon
+ * to recover tripId/date). `createdBy` may be "" on backfilled rows.
+ */
+export interface TravelNote {
+  id: string;
+  log: string;
+  subjectType: string;
+  subjectId: string;
+  createdBy: string;
+  entries: LifeEntry[];
   created: string;
   updated: string;
 }
