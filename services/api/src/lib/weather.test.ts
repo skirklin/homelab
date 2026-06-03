@@ -8,6 +8,8 @@ import {
   tripDateOnly,
   resolveForecastWindow,
   transformOpenMeteo,
+  fetchOpenMeteoArchive,
+  mergeTripForecast,
   derivePackingHints,
   todayPacific,
   type DailyForecast,
@@ -149,6 +151,7 @@ describe("transformOpenMeteo", () => {
     const raw = {
       daily: {
         time: ["2026-06-02", "2026-06-03"],
+        weathercode: [0, 61],
         temperature_2m_max: [82.4, 90.1],
         temperature_2m_min: [60.6, 64.2],
         precipitation_sum: [0, 3.4],
@@ -167,9 +170,23 @@ describe("transformOpenMeteo", () => {
       precipProbabilityMax: 10,
       windMphMax: 8,
       uvIndexMax: 6.4,
+      weatherCode: 0,
     });
     expect(days[1].precipProbabilityMax).toBe(55);
     expect(days[1].uvIndexMax).toBe(8.1);
+  });
+
+  it("carries the WMO weather code through, nulling a missing column", () => {
+    const days = transformOpenMeteo({
+      daily: {
+        time: ["2026-06-02", "2026-06-03"],
+        weathercode: [95, null],
+        temperature_2m_max: [70, 72],
+        temperature_2m_min: [55, 56],
+      },
+    });
+    expect(days[0].weatherCode).toBe(95);
+    expect(days[1].weatherCode).toBeNull();
   });
 
   it("returns an empty array when daily is missing", () => {
@@ -206,6 +223,7 @@ describe("derivePackingHints", () => {
       precipProbabilityMax: 0,
       windMphMax: 5,
       uvIndexMax: 3,
+      weatherCode: 0,
       ...over,
     };
   }
@@ -267,5 +285,113 @@ describe("derivePackingHints", () => {
 
   it("returns an empty list for an empty forecast", () => {
     expect(derivePackingHints([])).toEqual([]);
+  });
+});
+
+describe("fetchOpenMeteoArchive", () => {
+  // Archive-shaped payload: no precip-probability or UV columns, but weather
+  // code + temps + precip + wind are present.
+  const archivePayload = {
+    timezone: "America/Denver",
+    daily: {
+      time: ["2026-05-01", "2026-05-02"],
+      weathercode: [3, 80],
+      temperature_2m_max: [68.3, 71.9],
+      temperature_2m_min: [44.1, 48.6],
+      precipitation_sum: [0, 2.1],
+      windspeed_10m_max: [12.4, 9.8],
+    },
+  };
+
+  function fakeFetch(): typeof fetch {
+    return (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => archivePayload,
+        text: async () => "",
+      }) as unknown as Response) as unknown as typeof fetch;
+  }
+
+  it("transforms archive data: present code/temps, null precipProb/uv", async () => {
+    const { days, timezone } = await fetchOpenMeteoArchive(
+      { lat: 39.7, lon: -104.99 },
+      "2026-05-01",
+      "2026-05-02",
+      fakeFetch(),
+    );
+    expect(timezone).toBe("America/Denver");
+    expect(days).toHaveLength(2);
+    expect(days[0]).toEqual({
+      date: "2026-05-01",
+      tempMaxF: 68,
+      tempMinF: 44,
+      precipMm: 0,
+      precipProbabilityMax: null,
+      windMphMax: 12,
+      uvIndexMax: null,
+      weatherCode: 3,
+    });
+    expect(days[1].weatherCode).toBe(80);
+    expect(days[1].precipProbabilityMax).toBeNull();
+    expect(days[1].uvIndexMax).toBeNull();
+  });
+});
+
+describe("mergeTripForecast", () => {
+  function fc(date: string, over: Partial<DailyForecast> = {}): DailyForecast {
+    return {
+      date,
+      tempMaxF: 70,
+      tempMinF: 50,
+      precipMm: 0,
+      precipProbabilityMax: 0,
+      windMphMax: 5,
+      uvIndexMax: 3,
+      weatherCode: 0,
+      ...over,
+    };
+  }
+
+  it("prefers an actual over a forecast for the same date", () => {
+    const dates = ["2026-06-01"];
+    const actuals = new Map([["2026-06-01", fc("2026-06-01", { tempMaxF: 99 })]]);
+    const forecast = new Map([["2026-06-01", fc("2026-06-01", { tempMaxF: 70 })]]);
+    const out = mergeTripForecast(dates, actuals, forecast);
+    expect(out).toHaveLength(1);
+    expect(out[0].source).toBe("actual");
+    expect(out[0].tempMaxF).toBe(99);
+  });
+
+  it("falls back to a forecast when no actual exists", () => {
+    const out = mergeTripForecast(
+      ["2026-06-02"],
+      new Map(),
+      new Map([["2026-06-02", fc("2026-06-02")]]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].source).toBe("forecast");
+  });
+
+  it("skips dates with neither actual nor forecast (no fabrication)", () => {
+    const out = mergeTripForecast(
+      ["2026-06-01", "2026-06-02", "2026-06-03"],
+      new Map([["2026-06-01", fc("2026-06-01")]]),
+      new Map([["2026-06-03", fc("2026-06-03")]]),
+    );
+    // 06-02 has no data → dropped.
+    expect(out.map((d) => d.date)).toEqual(["2026-06-01", "2026-06-03"]);
+  });
+
+  it("preserves the input date order and tags each day's source", () => {
+    const dates = ["2026-06-01", "2026-06-02", "2026-06-03"];
+    const actuals = new Map([["2026-06-01", fc("2026-06-01")]]);
+    const forecast = new Map([
+      ["2026-06-02", fc("2026-06-02")],
+      ["2026-06-03", fc("2026-06-03")],
+    ]);
+    const out = mergeTripForecast(dates, actuals, forecast);
+    expect(out.map((d) => d.date)).toEqual(dates);
+    expect(out.map((d) => d.source)).toEqual(["actual", "forecast", "forecast"]);
   });
 });

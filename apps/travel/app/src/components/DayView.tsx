@@ -37,6 +37,8 @@ import { ActivityReflection, DayJournal, isDayReflectable } from "./InlineReflec
 import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { hikeSummary } from "./ActivityList";
 import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
+import { useTripWeather, weatherByDate as buildWeatherByDate } from "../hooks/useTripWeather";
+import { WeatherBadge } from "./WeatherBadge";
 
 // ── Layout ──────────────────────────────────────────────────────
 
@@ -253,6 +255,10 @@ export function DayView() {
 
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
 
+  // Per-day weather (shared API cache with the trip detail view).
+  const weather = useTripWeather(tripId);
+  const weatherByDate = useMemo(() => buildWeatherByDate(weather.data), [weather.data]);
+
   if (state.loading) {
     return (
       <WideContainer>
@@ -382,6 +388,9 @@ export function DayView() {
               <Title>Day {dayIndex + 1} / {totalDays}</Title>
               <SubTitle>{day.label || dateLabel}</SubTitle>
             </div>
+            {day.date && weatherByDate.get(day.date) && (
+              <WeatherBadge day={weatherByDate.get(day.date)!} />
+            )}
             <Button
               type="text"
               icon={<RightOutlined />}

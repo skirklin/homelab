@@ -2,10 +2,16 @@
  * E2E tests for GET /travel/weather (public path: /fn/travel/weather).
  *
  * Auth + window-state coverage is hermetic (no network): it exercises the
- * ownership gate and the not_yet / past / unknown-dates / no_location branches
- * against a real PocketBase, all of which short-circuit before any Open-Meteo
- * call. The single in-window case that needs live Open-Meteo data is opt-in via
- * RUN_LIVE_WEATHER=1 so CI never flakes on an external API.
+ * ownership gate and the not_yet / unknown-dates / no_location branches against
+ * a real PocketBase, all of which short-circuit before any Open-Meteo call.
+ * Cases that need live Open-Meteo data (in-window forecast, past-trip actual
+ * backfill) are opt-in via RUN_LIVE_WEATHER=1 so CI never flakes on an external
+ * API.
+ *
+ * Note: a past trip no longer returns a `past` state — the endpoint now
+ * backfills recorded actuals from Open-Meteo's archive and serves them as a
+ * complete weather record. With no network it degrades to `available` + empty
+ * forecast.
  *
  * Requires: PocketBase running (docker-compose.test.yml / test-env.sh up).
  */
@@ -194,11 +200,21 @@ describe("GET /travel/weather", () => {
     expect(data.packingHints).toEqual([]);
   });
 
-  it("returns past for a completed trip", async () => {
-    const { status, data } = await req(`/travel/weather?tripId=${pastTripId}`, userToken);
-    expect(status).toBe(200);
-    expect(data.state).toBe("past");
-  });
+  // A past trip now backfills recorded actuals from Open-Meteo's archive and
+  // serves them — it no longer short-circuits to a `past` state. Needs network
+  // (geocode + archive fetch), so opt-in like the in-window forecast case.
+  it.runIf(process.env.RUN_LIVE_WEATHER === "1")(
+    "backfills actuals for a completed trip (live Open-Meteo archive)",
+    async () => {
+      const { status, data } = await req(`/travel/weather?tripId=${pastTripId}`, userToken);
+      expect(status).toBe(200);
+      expect(data.state).toBe("available");
+      expect(Array.isArray(data.forecast)).toBe(true);
+      expect(data.forecast.length).toBeGreaterThan(0);
+      // Past days are tagged as recorded actuals.
+      expect(data.forecast.every((d: { source: string }) => d.source === "actual")).toBe(true);
+    },
+  );
 
   it("returns unknown_dates for a trip without dates", async () => {
     const { status, data } = await req(`/travel/weather?tripId=${noDatesTripId}`, userToken);
@@ -224,6 +240,8 @@ describe("GET /travel/weather", () => {
       expect(data.forecast.length).toBeGreaterThan(0);
       expect(data.forecast[0]).toHaveProperty("tempMaxF");
       expect(data.forecast[0]).toHaveProperty("precipProbabilityMax");
+      expect(data.forecast[0]).toHaveProperty("weatherCode");
+      expect(data.forecast[0].source).toBe("forecast");
       expect(Array.isArray(data.packingHints)).toBe(true);
     },
   );

@@ -36,6 +36,7 @@ export interface DailyForecast {
   precipProbabilityMax: number | null; // 0..100
   windMphMax: number | null;
   uvIndexMax: number | null;
+  weatherCode: number | null; // WMO weather code
 }
 
 export type ForecastWindow =
@@ -139,6 +140,7 @@ export function transformOpenMeteo(raw: unknown): DailyForecast[] {
   const precipProb = col("precipitation_probability_max");
   const wind = col("windspeed_10m_max");
   const uv = col("uv_index_max");
+  const code = col("weathercode");
 
   return time.map((date, i) => ({
     date: String(date),
@@ -149,7 +151,32 @@ export function transformOpenMeteo(raw: unknown): DailyForecast[] {
     windMphMax: roundOrNull(wind[i]),
     // Keep one decimal of precision for UV so the >=7 threshold is honest.
     uvIndexMax: num(uv[i]),
+    weatherCode: roundOrNull(code[i]),
   }));
+}
+
+/**
+ * Merge a trip's persisted actuals with the live forecast into one ordered
+ * span. For each date in `tripDates` (already ordered): prefer a recorded
+ * actual, else a forecast day, else skip the date entirely (no fabrication).
+ * Pure — the unit of merge logic, separate from any I/O.
+ */
+export function mergeTripForecast(
+  tripDates: string[],
+  actuals: Map<string, DailyForecast>,
+  forecastByDate: Map<string, DailyForecast>,
+): Array<DailyForecast & { source: "actual" | "forecast" }> {
+  const out: Array<DailyForecast & { source: "actual" | "forecast" }> = [];
+  for (const date of tripDates) {
+    const actual = actuals.get(date);
+    if (actual) {
+      out.push({ ...actual, source: "actual" });
+      continue;
+    }
+    const fc = forecastByDate.get(date);
+    if (fc) out.push({ ...fc, source: "forecast" });
+  }
+  return out;
 }
 
 // --- Packing hints (deterministic, threshold-based) -------------------------
@@ -215,6 +242,7 @@ export function derivePackingHints(days: DailyForecast[]): string[] {
 // --- Network: Open-Meteo fetch + free geocoding -----------------------------
 
 const OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast";
+const OPEN_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive";
 const OPEN_METEO_GEOCODE = "https://geocoding-api.open-meteo.com/v1/search";
 
 export interface Coord {
@@ -262,7 +290,7 @@ export async function fetchOpenMeteo(
     latitude: String(coord.lat),
     longitude: String(coord.lon),
     daily:
-      "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,windspeed_10m_max,uv_index_max",
+      "weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,windspeed_10m_max,uv_index_max",
     timezone: "auto",
     temperature_unit: "fahrenheit",
     windspeed_unit: "mph",
@@ -272,6 +300,38 @@ export async function fetchOpenMeteo(
   const res = await fetchImpl(`${OPEN_METEO_FORECAST}?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Open-Meteo ${res.status}: ${await res.text()}`);
+  }
+  const raw = (await res.json()) as { timezone?: string };
+  return { days: transformOpenMeteo(raw), timezone: raw.timezone || "auto" };
+}
+
+/**
+ * Fetch RECORDED daily weather for a coordinate + past date range via
+ * Open-Meteo's free archive API. Used to backfill trip days older than the
+ * forecast API serves. The archive has no precip-probability or UV columns,
+ * so those come back null; weather code + temps + precip + wind are present.
+ * Archive data lags real-time by a few days — callers should only request
+ * dates that are at least ~5 days old.
+ */
+export async function fetchOpenMeteoArchive(
+  coord: Coord,
+  start: string,
+  end: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ days: DailyForecast[]; timezone: string }> {
+  const params = new URLSearchParams({
+    latitude: String(coord.lat),
+    longitude: String(coord.lon),
+    daily: "weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max",
+    timezone: "auto",
+    temperature_unit: "fahrenheit",
+    windspeed_unit: "mph",
+    start_date: start,
+    end_date: end,
+  });
+  const res = await fetchImpl(`${OPEN_METEO_ARCHIVE}?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Open-Meteo archive ${res.status}: ${await res.text()}`);
   }
   const raw = (await res.json()) as { timezone?: string };
   return { days: transformOpenMeteo(raw), timezone: raw.timezone || "auto" };
