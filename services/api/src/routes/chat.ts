@@ -143,7 +143,11 @@ chatRoutes.post("/messages", handler(async (c) => {
     sendPushToUser(pb, userId, {
       title: "New message",
       body: truncated,
-      url: "https://life.kirkl.in/chat",
+      // Same-origin relative path: chat lives at /chat on both the standalone
+      // life.kirkl.in and the embedded kirkl.in shell, so no per-origin branch
+      // is needed — but it MUST be relative so the click stays on the origin
+      // the user is signed in on (per-origin PB auth).
+      buildUrl: () => "/chat",
     }, {
       preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"],
     }).catch((err) => console.error("chat push failed:", err));

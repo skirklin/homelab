@@ -22,6 +22,7 @@ import { DOMAIN } from "../../config";
 import { safeTz } from "./tz";
 
 const TRAVEL_ORIGINS = [`https://travel.${DOMAIN}`, `https://${DOMAIN}`];
+const TRAVEL_SUBDOMAIN = `https://travel.${DOMAIN}`;
 
 // Used when a user has no timezone field set yet (haven't visited a kirkl.in
 // app since the timezone-push feature shipped). Matches the system owner.
@@ -150,15 +151,22 @@ async function findActiveContexts(pb: PocketBase, now: Date): Promise<ActiveCont
   return out;
 }
 
-function tripUrl(tripId: string): string {
-  // Travel app routes mount tripId directly at the root (no `/trips/` prefix):
-  //   travel.kirkl.in/{tripId} → TripDetail
-  return `${TRAVEL_ORIGINS[0]}/${tripId}`;
+// Origin-aware deep-link builders. PocketBase auth is per-origin localStorage,
+// so the path must be SAME-ORIGIN relative to wherever the push is delivered:
+//   standalone (travel.kirkl.in): tripId mounts at root → `/{tripId}`
+//   embedded   (kirkl.in):        the home shell mounts travel at `/travel/*`
+//                                 → `/travel/{tripId}`
+// Passed to sendPushToUser as `buildUrl`; it's invoked with the chosen origin.
+function travelBase(origin: string): string {
+  return origin === TRAVEL_SUBDOMAIN ? "" : "/travel";
 }
 
-function dayUrl(tripId: string, date: string): string {
-  // Day route: travel.kirkl.in/{tripId}/day/{YYYY-MM-DD} → DayView
-  return `${TRAVEL_ORIGINS[0]}/${tripId}/day/${date}`;
+function tripUrl(origin: string, tripId: string): string {
+  return `${travelBase(origin)}/${tripId}`;
+}
+
+function dayUrl(origin: string, tripId: string, date: string): string {
+  return `${travelBase(origin)}/${tripId}/day/${date}`;
 }
 
 function summarizeTodayActivities(ctx: ActiveContext): string {
@@ -254,13 +262,13 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     if (isMorning) {
       const last = dedup.morning?.[ctx.tripId];
       if (last === ctx.todayInTz) { mSkipped++; continue; }
-      const url = ctx.todayDay
-        ? dayUrl(ctx.tripId, ctx.todayInTz)
-        : tripUrl(ctx.tripId);
+      const buildUrl = (origin: string) => ctx.todayDay
+        ? dayUrl(origin, ctx.tripId, ctx.todayInTz)
+        : tripUrl(origin, ctx.tripId);
       const result = await sendPushToUser(pb, ctx.userId, {
         title: `Today in ${ctx.tripDestination}`,
         body: summarizeTodayActivities(ctx),
-        url,
+        buildUrl,
         data: { type: "travel_morning", tripId: ctx.tripId, date: ctx.todayInTz },
       }, { preferredOrigins: TRAVEL_ORIGINS });
       console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);
@@ -272,13 +280,13 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
       if (journaled.has(`${ctx.tripId}|${ctx.todayInTz}`)) { eSkipped++; continue; }
       const last = dedup.evening?.[ctx.tripId];
       if (last === ctx.todayInTz) { eSkipped++; continue; }
-      const url = ctx.todayDay
-        ? dayUrl(ctx.tripId, ctx.todayInTz)
-        : tripUrl(ctx.tripId);
+      const buildUrl = (origin: string) => ctx.todayDay
+        ? dayUrl(origin, ctx.tripId, ctx.todayInTz)
+        : tripUrl(origin, ctx.tripId);
       const result = await sendPushToUser(pb, ctx.userId, {
         title: `How was today in ${ctx.tripDestination}?`,
         body: "Tap to record what you'll want to remember.",
-        url,
+        buildUrl,
         data: { type: "travel_evening", tripId: ctx.tripId, date: ctx.todayInTz },
       }, { preferredOrigins: TRAVEL_ORIGINS });
       console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);

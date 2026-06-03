@@ -23,7 +23,23 @@ function ensureVapid() {
 export interface PushPayload {
   title: string;
   body?: string;
+  /**
+   * Static deep-link URL. Prefer a SAME-ORIGIN RELATIVE path (e.g. `/travel/x`)
+   * over an absolute URL: PocketBase auth is per-origin localStorage, so an
+   * absolute cross-origin URL cold-loads an origin whose session is empty and
+   * presents as a forced sign-out. For apps reachable at multiple origins, use
+   * `buildUrl` instead so the path matches the delivery origin.
+   */
   url?: string;
+  /**
+   * Origin-aware deep link. Invoked with the origin actually chosen for
+   * delivery (see `SendOptions.preferredOrigins`); its return value overrides
+   * `url`. Return a same-origin relative path correct for that origin —
+   * e.g. `/travel/{id}` for the embedded `kirkl.in` origin vs `/{id}` for the
+   * standalone `travel.kirkl.in` origin. Legacy subs with no recorded origin
+   * receive `""`.
+   */
+  buildUrl?: (origin: string) => string;
   data?: Record<string, unknown>;
 }
 
@@ -93,7 +109,13 @@ export async function sendPushToUser(
     return { sent: 0, expired: 0, failed: 0 };
   }
 
-  const body = JSON.stringify({ ...payload.data, title: payload.title, body: payload.body, url: payload.url });
+  // All chosen subs share one origin (or are legacy with none). Resolve the
+  // deep link against THAT origin so the click stays where the user is signed
+  // in. `buildUrl` wins over a static `url` when provided.
+  const deliveryOrigin = (subs[0]?.origin as string) || "";
+  const url = payload.buildUrl ? payload.buildUrl(deliveryOrigin) : payload.url;
+
+  const body = JSON.stringify({ ...payload.data, title: payload.title, body: payload.body, url });
 
   const results = await Promise.allSettled(
     subs.map(async (sub) => {
