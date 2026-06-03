@@ -45,6 +45,19 @@ export type ForecastWindow =
   | { state: "past" }
   | { state: "unknown_dates" };
 
+/**
+ * One hourly weather record. `time` is the LOCAL hour (`HH:MM`) — Open-Meteo
+ * returns ISO local times when `timezone=auto`, which we reduce to `HH:MM`.
+ * The archive API has no precip-probability column, so it comes back null.
+ */
+export interface HourlyForecast {
+  time: string; // HH:MM (local)
+  tempF: number | null;
+  weatherCode: number | null;
+  precipMm: number | null;
+  precipProbability: number | null; // 0..100
+}
+
 // --- Date helpers -----------------------------------------------------------
 
 /**
@@ -153,6 +166,74 @@ export function transformOpenMeteo(raw: unknown): DailyForecast[] {
     uvIndexMax: num(uv[i]),
     weatherCode: roundOrNull(code[i]),
   }));
+}
+
+/**
+ * Reduce an Open-Meteo hourly `time` value (`2026-06-02T09:00`, local when
+ * `timezone=auto`) to `HH:MM`. Tolerant of bare `HH:MM` and unparseable input.
+ */
+function hourTimeOnly(raw: unknown): string {
+  const s = String(raw);
+  const m = s.match(/(\d{2}):(\d{2})/);
+  return m ? `${m[1]}:${m[2]}` : s;
+}
+
+/**
+ * Zip Open-Meteo's parallel `hourly.*` arrays into per-hour records. Temp is
+ * rounded to whole °F; `precipitation_probability` is null on archive payloads
+ * (the column doesn't exist there). Null entries are tolerated.
+ */
+export function transformOpenMeteoHourly(raw: unknown): HourlyForecast[] {
+  const hourly = (raw as { hourly?: Record<string, unknown[]> })?.hourly;
+  const time = hourly?.time;
+  if (!Array.isArray(time) || time.length === 0) return [];
+
+  const col = (k: string): unknown[] => (Array.isArray(hourly?.[k]) ? (hourly![k] as unknown[]) : []);
+  const temp = col("temperature_2m");
+  const precip = col("precipitation");
+  const precipProb = col("precipitation_probability");
+  const code = col("weathercode");
+
+  return time.map((t, i) => ({
+    time: hourTimeOnly(t),
+    tempF: roundOrNull(temp[i]),
+    weatherCode: roundOrNull(code[i]),
+    precipMm: num(precip[i]),
+    precipProbability: roundOrNull(precipProb[i]),
+  }));
+}
+
+/**
+ * Pick the hourly record nearest to `hhmm` ("HH:MM"). Rounds to the nearest
+ * whole hour ("09:30" → 09:00 or 10:00, whichever is closer; ties round DOWN).
+ * Returns null when `hours` is empty or `hhmm` is malformed.
+ */
+export function pickHour(hours: HourlyForecast[], hhmm: string): HourlyForecast | null {
+  if (hours.length === 0) return null;
+  const m = hhmm.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  // Nearest whole hour, ties round down (min === 30 → stay on h).
+  const targetHour = min > 30 ? h + 1 : h;
+  const targetHH = String(Math.min(targetHour, 23)).padStart(2, "0");
+  const exact = hours.find((x) => x.time.slice(0, 2) === targetHH);
+  if (exact) return exact;
+  // No exact hour entry — fall back to the chronologically closest entry.
+  const targetMinutes = h * 60 + min;
+  let best: HourlyForecast | null = null;
+  let bestDist = Infinity;
+  for (const x of hours) {
+    const hm = x.time.match(/^(\d{2}):(\d{2})$/);
+    if (!hm) continue;
+    const dist = Math.abs(Number(hm[1]) * 60 + Number(hm[2]) - targetMinutes);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = x;
+    }
+  }
+  return best;
 }
 
 /**
@@ -335,6 +416,42 @@ export async function fetchOpenMeteoArchive(
   }
   const raw = (await res.json()) as { timezone?: string };
   return { days: transformOpenMeteo(raw), timezone: raw.timezone || "auto" };
+}
+
+/**
+ * Fetch HOURLY weather for a single date at a coordinate. Picks the API by the
+ * date's age relative to `todayPacific()`: dates >= today-5 use the forecast
+ * API (it serves recent past + future via the same hourly endpoint); older
+ * dates use the archive API, which lacks `precipitation_probability` (nulled).
+ * Open-Meteo returns local times when `timezone=auto`.
+ */
+export async function fetchOpenMeteoHourly(
+  coord: Coord,
+  date: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ hours: HourlyForecast[]; timezone: string }> {
+  const useArchive = date < addDays(todayPacific(), -5);
+  // The archive (ERA5) API has no `precipitation_probability` column and errors
+  // on the unknown variable, so trim it there — `transformOpenMeteoHourly`
+  // already nulls the missing column. The forecast API keeps the full set.
+  const params = new URLSearchParams({
+    latitude: String(coord.lat),
+    longitude: String(coord.lon),
+    hourly: useArchive
+      ? "temperature_2m,precipitation,weathercode"
+      : "temperature_2m,precipitation,precipitation_probability,weathercode",
+    timezone: "auto",
+    temperature_unit: "fahrenheit",
+    start_date: date,
+    end_date: date,
+  });
+  const base = useArchive ? OPEN_METEO_ARCHIVE : OPEN_METEO_FORECAST;
+  const res = await fetchImpl(`${base}?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Open-Meteo hourly ${res.status}: ${await res.text()}`);
+  }
+  const raw = (await res.json()) as { timezone?: string };
+  return { hours: transformOpenMeteoHourly(raw), timezone: raw.timezone || "auto" };
 }
 
 // --- In-memory cache --------------------------------------------------------
