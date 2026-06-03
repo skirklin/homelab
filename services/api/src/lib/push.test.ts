@@ -33,6 +33,7 @@ vi.mock("web-push", () => ({
 }));
 
 import { sendPushToUser } from "./push";
+import { tripUrl, dayUrl } from "./notifications/travel";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -138,5 +139,34 @@ describe("sendPushToUser — origin-aware deep link (buildUrl)", () => {
     const pb = makeFakePb([sub("s4", "https://kirkl.in")]);
     await sendPushToUser(pb, "user1", { title: "x", url: "/static" });
     expect(pushedUrlFor("https://push.example/s4")).toBe("/static");
+  });
+});
+
+// Exercises the REAL origin-branching in travel.ts (tripUrl/dayUrl/travelBase)
+// rather than an inlined mirror, so the legacy-"" mapping can't regress silently.
+// DOMAIN defaults to kirkl.in: embedded origin = https://kirkl.in (home shell,
+// trip mounts under /travel/*); standalone = https://travel.kirkl.in (trip at
+// root). Legacy subs (no recorded origin, pre-migration-0014) were registered on
+// the standalone app, so the empty origin MUST resolve like standalone — root,
+// no /travel prefix — not embedded.
+describe("travel.ts tripUrl/dayUrl — real origin branching", () => {
+  const EMBEDDED = "https://kirkl.in";
+  const STANDALONE = "https://travel.kirkl.in";
+
+  it("embedded origin gets the /travel-prefixed path", () => {
+    expect(tripUrl(EMBEDDED, "T1")).toBe("/travel/T1");
+    expect(dayUrl(EMBEDDED, "T1", "2026-06-02")).toBe("/travel/T1/day/2026-06-02");
+  });
+
+  it("standalone travel.kirkl.in origin mounts the trip at root (no /travel prefix)", () => {
+    expect(tripUrl(STANDALONE, "T1")).toBe("/T1");
+    expect(dayUrl(STANDALONE, "T1", "2026-06-02")).toBe("/T1/day/2026-06-02");
+  });
+
+  it("legacy empty origin resolves like standalone, not embedded", () => {
+    // Pre-migration-0014 subs carry origin="" and were registered on
+    // travel.kirkl.in. They must NOT get the /travel prefix.
+    expect(tripUrl("", "T1")).toBe("/T1");
+    expect(dayUrl("", "T1", "2026-06-02")).toBe("/T1/day/2026-06-02");
   });
 });

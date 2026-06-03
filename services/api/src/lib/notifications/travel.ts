@@ -22,7 +22,10 @@ import { DOMAIN } from "../../config";
 import { safeTz } from "./tz";
 
 const TRAVEL_ORIGINS = [`https://travel.${DOMAIN}`, `https://${DOMAIN}`];
-const TRAVEL_SUBDOMAIN = `https://travel.${DOMAIN}`;
+// The home shell (kirkl.in) is the ONLY origin where travel is mounted under a
+// `/travel/*` prefix. Everywhere else — the standalone travel.kirkl.in app and
+// legacy/unknown origins — the trip mounts at root.
+const EMBEDDED_ORIGIN = `https://${DOMAIN}`;
 
 // Used when a user has no timezone field set yet (haven't visited a kirkl.in
 // app since the timezone-push feature shipped). Matches the system owner.
@@ -153,19 +156,23 @@ async function findActiveContexts(pb: PocketBase, now: Date): Promise<ActiveCont
 
 // Origin-aware deep-link builders. PocketBase auth is per-origin localStorage,
 // so the path must be SAME-ORIGIN relative to wherever the push is delivered:
-//   standalone (travel.kirkl.in): tripId mounts at root → `/{tripId}`
 //   embedded   (kirkl.in):        the home shell mounts travel at `/travel/*`
 //                                 → `/travel/{tripId}`
+//   standalone (travel.kirkl.in): tripId mounts at root → `/{tripId}`
+//   legacy ("")/unknown:          pre-migration-0014 subs carry no origin and
+//                                 were registered on the standalone app, so they
+//                                 default to root too (NOT the /travel prefix).
+// Embedded is the special case; everything else defaults to root.
 // Passed to sendPushToUser as `buildUrl`; it's invoked with the chosen origin.
 function travelBase(origin: string): string {
-  return origin === TRAVEL_SUBDOMAIN ? "" : "/travel";
+  return origin === EMBEDDED_ORIGIN ? "/travel" : "";
 }
 
-function tripUrl(origin: string, tripId: string): string {
+export function tripUrl(origin: string, tripId: string): string {
   return `${travelBase(origin)}/${tripId}`;
 }
 
-function dayUrl(origin: string, tripId: string, date: string): string {
+export function dayUrl(origin: string, tripId: string, date: string): string {
   return `${travelBase(origin)}/${tripId}/day/${date}`;
 }
 
