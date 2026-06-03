@@ -14,8 +14,26 @@ const addNote = vi.fn().mockResolvedValue("note-new");
 const updateNote = vi.fn().mockResolvedValue(undefined);
 const deleteNote = vi.fn().mockResolvedValue(undefined);
 
-// The notes the component should read from the log-scoped mirror state.
-let stateNotes: TravelNote[] = [];
+// The notes the component should read from the log-scoped mirror state. Real
+// state is a Map<string, TravelNote> (see travel-context reducer); the mock
+// mirrors that so call-time re-selection (notes.values()) behaves like prod.
+let stateNotes = new Map<string, TravelNote>();
+
+/** Replace the mock state's notes from a flat list (test ergonomics). */
+function setStateNotes(list: TravelNote[]) {
+  stateNotes = new Map(list.map((n) => [n.id, n]));
+}
+
+/**
+ * Mutate the SAME Map in place — no new reference. This reproduces the stale-
+ * render window: the component's `useMemo([state.notes])` keeps `mine` frozen
+ * (the Map ref is unchanged) while a live re-read of `state.notes.values()`
+ * sees the freshly-landed note. A correct write handler must consult the live
+ * read at call time, not the frozen `mine`.
+ */
+function injectNoteInPlace(n: TravelNote) {
+  stateNotes.set(n.id, n);
+}
 
 vi.mock("@kirkl/shared", async () => {
   const actual = await vi.importActual<typeof import("@kirkl/shared")>("@kirkl/shared");
@@ -44,7 +62,7 @@ beforeEach(() => {
   addNote.mockClear();
   updateNote.mockClear();
   deleteNote.mockClear();
-  stateNotes = [];
+  setStateNotes([]);
 });
 
 function note(
@@ -60,10 +78,10 @@ function note(
 
 describe("NotesThread — activity reflection", () => {
   it("renders one note per author with their name, both cross-visible", () => {
-    stateNotes = [
+    setStateNotes([
       note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "loved the view" }]),
       note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "too crowded" }], "2026-06-02T00:00:00Z"),
-    ];
+    ]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
     expect(screen.getByText("Scott")).toBeTruthy();
     expect(screen.getByText("Angela")).toBeTruthy();
@@ -72,10 +90,10 @@ describe("NotesThread — activity reflection", () => {
   });
 
   it("shows edit/delete affordances ONLY on the current user's own note", () => {
-    stateNotes = [
+    setStateNotes([
       note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "mine" }]),
       note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "theirs" }]),
-    ];
+    ]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
     const scottRow = screen.getByTestId("note-n1");
     const angelaRow = screen.getByTestId("note-n2");
@@ -86,9 +104,9 @@ describe("NotesThread — activity reflection", () => {
   });
 
   it("renders createdBy==='' as Imported, unattributed and non-editable", () => {
-    stateNotes = [
+    setStateNotes([
       note("n0", "", "activity", "act1", [{ name: "notes", type: "text", value: "legacy note" }]),
-    ];
+    ]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
     const row = screen.getByTestId("note-n0");
     expect(within(row).getByText(/Imported/i)).toBeTruthy();
@@ -99,12 +117,12 @@ describe("NotesThread — activity reflection", () => {
 
   it("offers an add-my-note affordance only when the caller has no note yet", () => {
     // Caller (scott) already has a note → no add affordance.
-    stateNotes = [note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "mine" }])];
+    setStateNotes([note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "mine" }])]);
     const { rerender } = render(<NotesThread subjectType="activity" subjectId="act1" />);
     expect(screen.queryByTestId("note-add")).toBeNull();
 
     // Only someone else's note → caller may add their own.
-    stateNotes = [note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "theirs" }])];
+    setStateNotes([note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "theirs" }])]);
     rerender(<NotesThread subjectType="activity" subjectId="act1" />);
     expect(screen.queryByTestId("note-add")).not.toBeNull();
   });
@@ -112,11 +130,11 @@ describe("NotesThread — activity reflection", () => {
 
 describe("NotesThread — verdict is per-caller", () => {
   it("VerdictButtons reflects the caller's own verdict, not someone else's", () => {
-    stateNotes = [
+    setStateNotes([
       // Scott (caller) loved it; Angela skipped it.
       note("n1", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
       note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }]),
-    ];
+    ]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
     const loved = screen.getByTestId("verdict-loved");
     const skip = screen.getByTestId("verdict-skip");
@@ -128,7 +146,7 @@ describe("NotesThread — verdict is per-caller", () => {
   it("clicking a verdict upserts into the caller's own note", async () => {
     const user = userEvent.setup();
     // Caller has no note yet.
-    stateNotes = [note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }])];
+    setStateNotes([note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }])]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
     await user.click(screen.getByTestId("verdict-loved"));
     expect(addNote).toHaveBeenCalledTimes(1);
@@ -141,12 +159,68 @@ describe("NotesThread — verdict is per-caller", () => {
   });
 });
 
+describe("NotesThread — no duplicate note on stale-render save", () => {
+  it("verdict tap re-checks live state and updates the note that landed since render", async () => {
+    const user = userEvent.setup();
+    // Render with no note → this render's `mine` is undefined.
+    setStateNotes([]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+
+    // Scott's note lands via the mirror, mutating the SAME Map in place — so the
+    // memoized `mine` stays frozen at undefined while live state now has a note.
+    injectNoteInPlace(
+      note("server-2", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "keep me" }]),
+    );
+
+    await user.click(screen.getByTestId("verdict-loved"));
+
+    // Broken code would addNote a SECOND row off the stale undefined; the fix
+    // re-selects live state at click time and UPDATES the landed note, keeping
+    // its text. Exactly one row for (scott, act1).
+    expect(addNote).not.toHaveBeenCalled();
+    expect(updateNote).toHaveBeenCalledTimes(1);
+    expect(updateNote.mock.calls[0][0]).toBe("server-2");
+    const entries = updateNote.mock.calls[0][1] as LifeEntry[];
+    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
+    expect(entries).toContainEqual({ name: "notes", type: "text", value: "keep me" });
+  });
+
+  it("add-editor save routes to update when a note landed mid-edit (no double-create)", async () => {
+    const user = userEvent.setup();
+    setStateNotes([]);
+    render(<NotesThread subjectType="activity" subjectId="act1" />);
+
+    // Open the add-editor while the caller has no note, and type a draft.
+    await user.click(screen.getByTestId("note-add"));
+    const editor = screen.getByTestId("note-add-editor");
+    await user.type(within(editor).getByRole("textbox"), "my new note");
+
+    // Scott's note lands via the mirror mid-edit — Map mutated in place, so the
+    // editor stays mounted (memoized `mine` still undefined) but live state now
+    // has the note. The onSave closure captured `existing=undefined` at render.
+    injectNoteInPlace(
+      note("server-3", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
+    );
+
+    await user.click(within(editor).getByText("Save"));
+
+    // The save must re-select live state and UPDATE the landed note (merging the
+    // typed text with its existing verdict), never addNote a duplicate row.
+    expect(addNote).not.toHaveBeenCalled();
+    expect(updateNote).toHaveBeenCalledTimes(1);
+    expect(updateNote.mock.calls[0][0]).toBe("server-3");
+    const entries = updateNote.mock.calls[0][1] as LifeEntry[];
+    expect(entries).toContainEqual({ name: "notes", type: "text", value: "my new note" });
+    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
+  });
+});
+
 describe("NotesThread — day subject", () => {
   it("filters notes by the composite day subjectId", () => {
-    stateNotes = [
+    setStateNotes([
       note("d1", "scott", "day", "trip1:2026-06-01", [{ name: "text", type: "text", value: "great day" }]),
       note("d2", "angela", "day", "trip1:2026-06-02", [{ name: "text", type: "text", value: "other day" }]),
-    ];
+    ]);
     render(<NotesThread subjectType="day" subjectId="trip1:2026-06-01" />);
     expect(screen.getByText(/great day/)).toBeTruthy();
     expect(screen.queryByText(/other day/)).toBeNull();

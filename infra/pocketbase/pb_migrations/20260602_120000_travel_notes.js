@@ -107,6 +107,25 @@ migrate(
         indexes: [
           // Not unique — multiple authors per subject is intended. Plain
           // indexes only, to keep the common access paths fast.
+          //
+          // TODO(deferred): a partial unique index on
+          //   (log, subject_type, subject_id, created_by) WHERE created_by != ''
+          // was evaluated as belt-and-suspenders against duplicate own-notes
+          // (the client-side call-time upsert in NotesThread is the primary
+          // fix). DECLINED for now: a PB unique-constraint violation surfaces as
+          // a permanent write error (4xx), which the wrapped-pb optimistic
+          // create path classifies as non-transient — it drains the queue,
+          // rolls back the optimistic row, and throws (NotesThread → "Couldn't
+          // save your note"). For a GENUINE concurrent create across two devices
+          // (neither has seen the other's note yet — realistic on a shared
+          // travel log), the loser's row is rejected and their typed text is
+          // gone with only a generic toast. The index would convert a rare
+          // "two rows, recoverable" race into "one row + silent data loss",
+          // which is strictly worse for the user. Reconsider only once the wpb
+          // create path can degrade a unique-conflict gracefully (e.g. fold the
+          // loser's entries into the winning row, or surface an explicit merge).
+          // Imported backfill rows are safe regardless: at most one per subject,
+          // all created_by="" (excluded by the WHERE clause).
           "CREATE INDEX idx_travel_notes_log ON travel_notes (log)",
           "CREATE INDEX idx_travel_notes_subject ON travel_notes (subject_type, subject_id)",
         ],

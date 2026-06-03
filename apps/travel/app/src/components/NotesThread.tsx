@@ -9,7 +9,7 @@
  * Data is read ONLY from `travel_notes` state (legacy columns are the Phase-5
  * safety net, never a second display source).
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button, Input, Popconfirm, Rate } from "antd";
 import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -141,6 +141,16 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
   );
   const mine = ownNote(notes, myId);
 
+  // Live mirror of state so write handlers can re-select the caller's CURRENT
+  // note at call time — never the render-time `mine`. Without this, an editor
+  // opened when the caller had no note (and a note arriving mid-edit via the
+  // mirror, or a verdict tap, or a double-tapped Save) would `addNote` a SECOND
+  // row for the same (subject, author) instead of updating the first.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const currentMine = (): TravelNote | undefined =>
+    ownNote(selectNotes(stateRef.current.notes.values(), subjectType, subjectId), myId);
+
   const names = useUserNames(notes.map((n) => n.createdBy));
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -166,9 +176,12 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
   };
 
   // Verdict writes upsert into the caller's OWN note, preserving its text.
+  // Re-select the caller's note at CLICK time so a note authored since render
+  // (mirror delivery / a just-saved editor) is updated, not duplicated.
   const setVerdict = (next: ActivityVerdict | null) => {
-    const text = activityNotesText(mine);
-    persist(activityEntries(next, text), mine);
+    const existing = currentMine();
+    const text = activityNotesText(existing);
+    persist(activityEntries(next, text), existing);
   };
 
   const remove = async (note: TravelNote) => {
@@ -247,7 +260,12 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
             autoFocus
             onCancel={() => setAdding(false)}
             onSave={async (draft) => {
-              await persist(entriesFor(null, draft), undefined);
+              // Re-select at SAVE time: if a note exists now (mirror delivery,
+              // a verdict tapped while this editor was open, or a double-tapped
+              // Save), UPDATE it — merging the existing verdict so we don't drop
+              // it — instead of adding a duplicate row.
+              const existing = currentMine();
+              await persist(entriesFor(verdictOf(existing) ?? null, draft), existing);
               setAdding(false);
             }}
           />
