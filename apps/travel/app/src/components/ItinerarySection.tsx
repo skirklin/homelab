@@ -31,6 +31,8 @@ import {
 } from "../types";
 import type { DayRouteInfo } from "./ItineraryMap";
 import { ItineraryCompare } from "./ItineraryCompare";
+import { WeatherBadge } from "./WeatherBadge";
+import type { WeatherDay } from "../hooks/useTripWeather";
 
 const Section = styled.div`
   margin-bottom: 28px;
@@ -172,11 +174,13 @@ function ItineraryTimeline({
   itinerary,
   activityMap,
   routeInfo,
+  weatherByDate,
   onDayOpen,
 }: {
   itinerary: Itinerary;
   activityMap: Map<string, Activity>;
   routeInfo?: DayRouteInfo;
+  weatherByDate?: Map<string, WeatherDay>;
   /** Called when a day card is clicked. Caller routes to the day view. */
   onDayOpen: (day: { index: number; date?: string }) => void;
 }) {
@@ -199,6 +203,7 @@ function ItineraryTimeline({
           .filter((a): a is Activity => a != null);
         const load = calculateDayLoad(dayActivities);
         const issues = validateDay(day.slots, activityMap);
+        const weather = day.date ? weatherByDate?.get(day.date) : undefined;
 
         return (
           <CompactDayCard key={i} onClick={() => onDayOpen({ index: i, date: day.date })}>
@@ -206,6 +211,7 @@ function ItineraryTimeline({
               <span>
                 Day {i + 1}{day.date ? ` — ${new Date(day.date + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : ""}
               </span>
+              {weather && <WeatherBadge day={weather} />}
               {lodgingChanged && (() => {
                 const url = mapsUrl(lodging);
                 return (
@@ -261,11 +267,13 @@ export function ItinerarySection({
   itineraries,
   activityMap,
   routeInfo,
+  weatherByDate,
   navigate,
 }: {
   itineraries: Itinerary[];
   activityMap: Map<string, Activity>;
   routeInfo?: DayRouteInfo;
+  weatherByDate?: Map<string, WeatherDay>;
   navigate: (path: string) => void;
 }) {
   const travel = useTravelBackend();
@@ -300,6 +308,7 @@ export function ItinerarySection({
       itinerary={currentItin}
       activityMap={activityMap}
       routeInfo={routeInfo}
+      weatherByDate={weatherByDate}
       onDayOpen={(d) => {
         if (d.date) navigate(`day/${d.date}`);
       }}

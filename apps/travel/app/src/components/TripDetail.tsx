@@ -39,6 +39,7 @@ import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
 import { WeatherPanel } from "./WeatherPanel";
+import { useTripWeather, weatherByDate } from "../hooks/useTripWeather";
 import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 
 const TwoColumn = styled.div`
@@ -189,6 +190,11 @@ export function TripDetail() {
   // then re-renders with the data, and a hook call after the early return
   // would change the hook count between renders → React error #310.
   const activeItin = useSelectedItinerary(itineraries);
+
+  // One weather fetch for the whole trip span, shared by the inline per-day
+  // badges (itinerary cards) and the Prep-tab packing panel.
+  const weather = useTripWeather(tripId);
+  const weatherMap = useMemo(() => weatherByDate(weather.data), [weather.data]);
 
   const [routeInfo, setRouteInfo] = useState<DayRouteInfo>({});
 
@@ -349,6 +355,7 @@ export function TripDetail() {
                 itineraries={itineraries}
                 activityMap={activityMap}
                 routeInfo={routeInfo}
+                weatherByDate={weatherMap}
                 navigate={navigate}
               />
             ) : <Empty description="No itinerary yet" />,
@@ -371,7 +378,7 @@ export function TripDetail() {
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {showReadiness && (
                   <>
-                    <WeatherPanel trip={trip} />
+                    <WeatherPanel trip={trip} weather={weather} />
                     <ReadinessDashboard trip={trip} activities={activities} itineraries={itineraries} />
                     <TripChecklist trip={trip} activities={activities} />
                   </>

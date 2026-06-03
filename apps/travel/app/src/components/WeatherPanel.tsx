@@ -1,30 +1,8 @@
-import { useEffect, useState } from "react";
-import { Spin, Empty, Typography, Tag } from "antd";
-import { CloudOutlined, SkinOutlined } from "@ant-design/icons";
+import { Spin, Empty, Typography } from "antd";
+import { SkinOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { getApiBase, getAuthHeaders } from "@kirkl/shared";
 import type { Trip } from "../types";
-
-// Mirrors the GET /fn/travel/weather response from services/api/src/routes/travel.ts.
-interface DailyForecast {
-  date: string;
-  tempMaxF: number | null;
-  tempMinF: number | null;
-  precipMm: number | null;
-  precipProbabilityMax: number | null;
-  windMphMax: number | null;
-  uvIndexMax: number | null;
-}
-
-interface WeatherResponse {
-  tripId: string;
-  destination: string;
-  state: "available" | "not_yet" | "past" | "unknown_dates" | "no_location";
-  availableFrom?: string;
-  location?: { lat: number; lon: number; source: string; timezone: string };
-  forecast: DailyForecast[];
-  packingHints: string[];
-}
+import { useTripWeather, type UseTripWeather } from "../hooks/useTripWeather";
 
 const Container = styled.div`
   display: flex;
@@ -36,33 +14,6 @@ const HeaderRow = styled.div`
   display: flex;
   align-items: center;
   gap: 8px;
-`;
-
-const Table = styled.div`
-  display: grid;
-  grid-template-columns: auto auto auto auto auto;
-  gap: 2px 12px;
-  align-items: center;
-  font-size: 12px;
-`;
-
-const HeadCell = styled.div`
-  font-size: 10px;
-  font-weight: 600;
-  color: #8c8c8c;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding-bottom: 2px;
-`;
-
-const Cell = styled.div`
-  padding: 3px 0;
-  color: #262626;
-  white-space: nowrap;
-`;
-
-const DateCell = styled(Cell)`
-  font-weight: 500;
 `;
 
 const HintList = styled.div`
@@ -79,14 +30,6 @@ const Hint = styled.div`
   color: #595959;
 `;
 
-const SectionLabel = styled.div`
-  font-size: 11px;
-  font-weight: 600;
-  color: #8c8c8c;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-`;
-
 const SubtleNote = styled.div`
   font-size: 11px;
   color: #bfbfbf;
@@ -95,14 +38,13 @@ const SubtleNote = styled.div`
 // A short, friendly message for each non-available state. The panel always
 // renders something — never a crash or an empty hole.
 const STATE_MESSAGES: Record<string, string> = {
-  past: "This trip is over — no forecast to show.",
-  unknown_dates: "Add trip dates to see a weather forecast.",
+  unknown_dates: "Add trip dates to see packing hints.",
   no_location: "Couldn't find a location for this trip — geocode an activity or set a recognizable destination.",
 };
 
 function formatDay(ymd: string): string {
-  // ymd is YYYY-MM-DD from Open-Meteo (destination tz). Render as a calendar
-  // day with no tz reduction.
+  // ymd is YYYY-MM-DD (destination tz from Open-Meteo). Render as a pure
+  // calendar day with no local-tz reduction.
   const [y, m, d] = ymd.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
   return date.toLocaleDateString(undefined, {
@@ -113,56 +55,27 @@ function formatDay(ymd: string): string {
   });
 }
 
-function tempStr(v: number | null): string {
-  return v === null ? "—" : `${v}°`;
-}
-
-function rainColor(prob: number | null): string {
-  if (prob === null) return "#bfbfbf";
-  if (prob >= 50) return "#1677ff";
-  if (prob >= 25) return "#69b1ff";
-  return "#bfbfbf";
-}
-
 interface WeatherPanelProps {
   trip: Trip;
+  /**
+   * Optional shared weather state (from useTripWeather at the parent). When
+   * omitted the panel fetches its own — but TripDetail passes it in so the
+   * per-day badges and this panel share one request.
+   */
+  weather?: UseTripWeather;
 }
 
-export function WeatherPanel({ trip }: WeatherPanelProps) {
-  const [data, setData] = useState<WeatherResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`${getApiBase()}/travel/weather?tripId=${encodeURIComponent(trip.id)}`, {
-      headers: getAuthHeaders(),
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Forecast request failed (${res.status})`);
-        return res.json() as Promise<WeatherResponse>;
-      })
-      .then((resp) => {
-        if (!cancelled) setData(resp);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load forecast");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [trip.id]);
+export function WeatherPanel({ trip, weather }: WeatherPanelProps) {
+  // Hook is always called (rules-of-hooks); the parent-supplied `weather`
+  // wins when present so we don't double-fetch.
+  const own = useTripWeather(weather ? undefined : trip.id);
+  const { data, loading, error } = weather ?? own;
 
   const header = (
     <HeaderRow>
-      <CloudOutlined style={{ color: "#1677ff" }} />
+      <SkinOutlined style={{ color: "#13c2c2" }} />
       <Typography.Text strong style={{ fontSize: 13 }}>
-        Weather &amp; packing
+        Packing
       </Typography.Text>
     </HeaderRow>
   );
@@ -195,7 +108,7 @@ export function WeatherPanel({ trip }: WeatherPanelProps) {
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
             <span style={{ fontSize: 12 }}>
-              Weather forecast available closer to departure
+              Packing hints available closer to departure
               {data.availableFrom ? ` (from ${formatDay(data.availableFrom)})` : ""}.
             </span>
           }
@@ -211,18 +124,22 @@ export function WeatherPanel({ trip }: WeatherPanelProps) {
         {header}
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={<span style={{ fontSize: 12 }}>{STATE_MESSAGES[data.state] || "No forecast available."}</span>}
+          description={<span style={{ fontSize: 12 }}>{STATE_MESSAGES[data.state] || "No packing hints available."}</span>}
           style={{ margin: "8px 0" }}
         />
       </Container>
     );
   }
 
-  if (data.forecast.length === 0) {
+  // Available but no forward-looking days (e.g. a trip that's wholly in the
+  // past, all actuals) → no packing to suggest. Render a graceful note.
+  if (data.packingHints.length === 0) {
     return (
       <Container>
         {header}
-        <SubtleNote>No daily forecast returned for this range.</SubtleNote>
+        <SubtleNote>
+          {data.forecast.length > 0 ? "Trip complete — see per-day weather on the itinerary." : "No packing hints for this trip."}
+        </SubtleNote>
       </Container>
     );
   }
@@ -230,30 +147,14 @@ export function WeatherPanel({ trip }: WeatherPanelProps) {
   return (
     <Container>
       {header}
-      <Table>
-        <HeadCell>Day</HeadCell>
-        <HeadCell>Hi / Lo</HeadCell>
-        <HeadCell>Rain</HeadCell>
-        <HeadCell>UV</HeadCell>
-        <HeadCell>Wind</HeadCell>
-        {data.forecast.map((d) => (
-          <Row key={d.date} day={d} />
+      <HintList>
+        {data.packingHints.map((h, i) => (
+          <Hint key={i}>
+            <SkinOutlined style={{ color: "#13c2c2", marginTop: 2, flexShrink: 0 }} />
+            <span>{h}</span>
+          </Hint>
         ))}
-      </Table>
-
-      {data.packingHints.length > 0 && (
-        <>
-          <SectionLabel style={{ marginTop: 4 }}>Packing hints</SectionLabel>
-          <HintList>
-            {data.packingHints.map((h, i) => (
-              <Hint key={i}>
-                <SkinOutlined style={{ color: "#13c2c2", marginTop: 2, flexShrink: 0 }} />
-                <span>{h}</span>
-              </Hint>
-            ))}
-          </HintList>
-        </>
-      )}
+      </HintList>
 
       {data.location && (
         <SubtleNote>
@@ -261,42 +162,5 @@ export function WeatherPanel({ trip }: WeatherPanelProps) {
         </SubtleNote>
       )}
     </Container>
-  );
-}
-
-function Row({ day }: { day: DailyForecast }) {
-  const prob = day.precipProbabilityMax;
-  const mm = day.precipMm;
-  return (
-    <>
-      <DateCell>{formatDay(day.date)}</DateCell>
-      <Cell>
-        {tempStr(day.tempMaxF)} / <span style={{ color: "#8c8c8c" }}>{tempStr(day.tempMinF)}</span>
-      </Cell>
-      <Cell>
-        <CloudOutlined style={{ color: rainColor(prob), marginRight: 4 }} />
-        {prob === null ? "—" : `${prob}%`}
-        {/* Show the amount too — probability alone hides a 0.5mm drizzle vs a
-            20mm soaking. Only when there's measurable rain, to stay compact. */}
-        {mm !== null && mm >= 0.5 && (
-          <span style={{ color: "#8c8c8c", marginLeft: 4 }}>{Math.round(mm)}mm</span>
-        )}
-      </Cell>
-      <Cell>
-        {day.uvIndexMax === null ? (
-          "—"
-        ) : (
-          <Tag
-            color={day.uvIndexMax >= 7 ? "volcano" : day.uvIndexMax >= 3 ? "gold" : "default"}
-            style={{ margin: 0, fontSize: 11, lineHeight: "16px", padding: "0 5px" }}
-          >
-            {day.uvIndexMax.toFixed(1)}
-          </Tag>
-        )}
-      </Cell>
-      <Cell style={{ color: "#8c8c8c" }}>
-        {day.windMphMax === null ? "—" : `${day.windMphMax} mph`}
-      </Cell>
-    </>
   );
 }
