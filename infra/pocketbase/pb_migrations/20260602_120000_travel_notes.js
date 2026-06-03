@@ -130,6 +130,16 @@ migrate(
       app.save(rec);
     }
 
+    // Re-run safety: the backfill below inserts unattributed rows with no
+    // unique index to dedupe them, so a down()→up() (or an accidental second
+    // up()) would double-insert. Gate the WHOLE backfill on the table being
+    // empty — if any travel_notes row already exists, the backfill has run (or
+    // real notes have been authored), and we must not re-seed.
+    if (app.findRecordsByFilter("travel_notes", "1=1").length > 0) {
+      console.log("  travel_notes: rows already exist, skipping backfill");
+      return;
+    }
+
     // 2a. Activities: personal_notes and/or verdict.
     let aCreated = 0;
     let aSkipped = 0;
