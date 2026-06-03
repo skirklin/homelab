@@ -38,7 +38,9 @@ import { ItineraryMap, type DayRouteInfo } from "./ItineraryMap";
 import { hikeSummary } from "./ActivityList";
 import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 import { useTripWeather, weatherByDate as buildWeatherByDate } from "../hooks/useTripWeather";
+import { useDayHourlyWeather } from "../hooks/useDayHourlyWeather";
 import { WeatherBadge } from "./WeatherBadge";
+import { HourWeather } from "./HourWeather";
 
 // ── Layout ──────────────────────────────────────────────────────
 
@@ -99,22 +101,77 @@ const SubTitle = styled.div`
   font-size: 13px;
 `;
 
-const Slot = styled.div`
-  display: flex;
+// Desktop: a 3-column grid (time gutter | content | actions) matching the old
+// flex row. Phone (<=600px): time + actions share the top row, content reflows
+// full-width beneath so the middle no longer gets crushed.
+// `$flight` slots render only time + content (no actions child), so they drop
+// the dangling `auto` actions track that would otherwise misalign flight time
+// rows against activity rows on mobile.
+const Slot = styled.div<{ $flight?: boolean }>`
+  display: grid;
+  grid-template-columns: ${(p) => (p.$flight ? "64px 1fr" : "64px 1fr auto")};
+  grid-template-areas: ${(p) => (p.$flight ? '"time content"' : '"time content actions"')};
   gap: 10px;
   padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
   align-items: flex-start;
   &:last-child { border-bottom: none; }
+
+  @media (max-width: 600px) {
+    grid-template-columns: ${(p) => (p.$flight ? "1fr" : "1fr auto")};
+    grid-template-areas: ${(p) =>
+      p.$flight
+        ? '"time" "content"'
+        : '"time actions" "content content"'};
+    column-gap: 8px;
+    row-gap: 4px;
+  }
 `;
 
+// Time gutter: the slot's start time stacked above its per-activity weather.
 const SlotTime = styled.div`
+  grid-area: time;
   color: #1677ff;
   font-size: 12px;
   font-weight: 500;
   min-width: 64px;
-  flex-shrink: 0;
   padding-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  @media (max-width: 600px) {
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+`;
+
+// Content region: photo + body sit side by side (own little flex row) so they
+// can flow full-width under the time/actions row on phones.
+const SlotContent = styled.div`
+  grid-area: content;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+`;
+
+// Action buttons (edit/delete). Visually small on desktop; padded up to a
+// comfortable touch target on phones.
+const SlotActions = styled.div`
+  grid-area: actions;
+  @media (max-width: 600px) {
+    .ant-btn {
+      min-width: 40px;
+      min-height: 40px;
+    }
+    /* 40px tap targets sit too close at the default 2px gap — destructive
+       delete is easy to mis-tap next to edit. Widen to 8px on phones only. */
+    .ant-space-item + .ant-space-item {
+      margin-inline-start: 8px !important;
+    }
+  }
 `;
 
 const SlotPhoto = styled.img`
@@ -207,6 +264,12 @@ const DriveTimeBadge = styled.div`
   font-size: 11px;
   color: #8c8c8c;
   padding: 4px 0 4px 64px;
+
+  /* The 64px indent aligns under the desktop content gutter; on phones the
+     gutter is gone, so a small indent reads better. */
+  @media (max-width: 600px) {
+    padding-left: 10px;
+  }
 `;
 
 // ── Component ───────────────────────────────────────────────────
@@ -258,6 +321,9 @@ export function DayView() {
   // Per-day weather (shared API cache with the trip detail view).
   const weather = useTripWeather(tripId);
   const weatherByDate = useMemo(() => buildWeatherByDate(weather.data), [weather.data]);
+
+  // Hourly weather for THIS day, for the per-activity time-of-day indicator.
+  const { pickHour } = useDayHourlyWeather(tripId, date);
 
   if (state.loading) {
     return (
@@ -425,22 +491,30 @@ export function DayView() {
             })()}
           </Header>
 
-          {flights.map((f, j) => (
-            <Slot key={`f-${j}`}>
-              <SlotTime>{f.startTime || ""}</SlotTime>
-              <SlotBody>
-                <SlotName style={{ color: "#1677ff" }}>{"✈"} {f.activity?.name || f.activityId}</SlotName>
-                {f.activity?.description && <SlotDesc>{f.activity.description}</SlotDesc>}
-                {f.activity?.confirmationCode && (
-                  <SlotMeta>
-                    <ConfCode onClick={() => navigator.clipboard.writeText(f.activity!.confirmationCode)} title="Click to copy">
-                      {f.activity.confirmationCode}
-                    </ConfCode>
-                  </SlotMeta>
-                )}
-              </SlotBody>
-            </Slot>
-          ))}
+          {flights.map((f, j) => {
+            const hour = f.startTime ? pickHour(f.startTime) : null;
+            return (
+              <Slot key={`f-${j}`} $flight>
+                <SlotTime>
+                  <span>{f.startTime || ""}</span>
+                  {hour && <HourWeather hour={hour} />}
+                </SlotTime>
+                <SlotContent>
+                  <SlotBody>
+                    <SlotName style={{ color: "#1677ff" }}>{"✈"} {f.activity?.name || f.activityId}</SlotName>
+                    {f.activity?.description && <SlotDesc>{f.activity.description}</SlotDesc>}
+                    {f.activity?.confirmationCode && (
+                      <SlotMeta>
+                        <ConfCode onClick={() => navigator.clipboard.writeText(f.activity!.confirmationCode)} title="Click to copy">
+                          {f.activity.confirmationCode}
+                        </ConfCode>
+                      </SlotMeta>
+                    )}
+                  </SlotBody>
+                </SlotContent>
+              </Slot>
+            );
+          })}
 
           {day.slots.flatMap((slot, j) => {
             const activity = activityMap.get(slot.activityId);
@@ -461,9 +535,14 @@ export function DayView() {
                 </DriveTimeBadge>,
               );
             }
+            const hour = slot.startTime ? pickHour(slot.startTime) : null;
             elements.push(
               <Slot key={j}>
-                <SlotTime>{slot.startTime || ""}</SlotTime>
+                <SlotTime>
+                  <span>{slot.startTime || ""}</span>
+                  {hour && <HourWeather hour={hour} />}
+                </SlotTime>
+                <SlotContent>
                 {activity?.photoRef && (
                   <SlotPhoto
                     src={`https://places.googleapis.com/v1/${activity.photoRef}/media?maxWidthPx=120&key=${apiKey}`}
@@ -501,13 +580,16 @@ export function DayView() {
                     <ActivityReflection activity={activity} variant="compact" />
                   )}
                 </SlotBody>
-                <Space size={2} style={{ flexShrink: 0, alignSelf: "flex-start", paddingTop: 2 }}>
-                  <Button type="text" size="small" icon={<EditOutlined />}
-                    onClick={() => activity && navigate(`../../activities/${activity.id}/edit`, { relative: "path" })} />
-                  <Popconfirm title="Remove from this day?" onConfirm={() => removeSlot(j)}>
-                    <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>
-                </Space>
+                </SlotContent>
+                <SlotActions>
+                  <Space size={2} style={{ alignSelf: "flex-start", paddingTop: 2 }}>
+                    <Button type="text" size="small" icon={<EditOutlined />}
+                      onClick={() => activity && navigate(`../../activities/${activity.id}/edit`, { relative: "path" })} />
+                    <Popconfirm title="Remove from this day?" onConfirm={() => removeSlot(j)}>
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </Space>
+                </SlotActions>
               </Slot>,
             );
             return elements;
