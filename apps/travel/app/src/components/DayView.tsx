@@ -577,7 +577,7 @@ export function DayView() {
                   {activity?.details && <SlotDesc style={{ whiteSpace: "pre-wrap" }}>{activity.details}</SlotDesc>}
                   {slot.notes && <SlotDesc style={{ fontStyle: "italic", color: "#8c8c8c" }}>{slot.notes}</SlotDesc>}
                   {dayReflectable && activity && activity.category !== "Flight" && (
-                    <ActivityReflection activity={activity} variant="compact" />
+                    <ActivityReflection activity={activity} />
                   )}
                 </SlotBody>
                 </SlotContent>
@@ -614,7 +614,7 @@ export function DayView() {
           })()}
 
           {dayReflectable && day.date && (
-            <DayJournal tripId={trip.id} logId={state.log?.id ?? ""} date={day.date} />
+            <DayJournal tripId={trip.id} date={day.date} />
           )}
         </div>
       </TwoColumn>

@@ -40,7 +40,6 @@ export function TripForm() {
             region: values.region as string,
             startDate,
             endDate,
-            notes: values.notes as string,
             sourceRefs: values.sourceRefs as string,
           })
         );
@@ -57,7 +56,7 @@ export function TripForm() {
             region: (values.region as string) || "",
             startDate,
             endDate,
-            notes: (values.notes as string) || "",
+            notes: "",
             sourceRefs: (values.sourceRefs as string) || "",
             flaggedForReview: false,
             reviewComment: "",
@@ -87,7 +86,6 @@ export function TripForm() {
                 region: existingTrip.region,
                 startDate: existingTrip.startDate ? dayjs(existingTrip.startDate) : null,
                 endDate: existingTrip.endDate ? dayjs(existingTrip.endDate) : null,
-                notes: existingTrip.notes,
                 sourceRefs: existingTrip.sourceRefs,
               }
             : { status: "Idea" }
@@ -112,6 +110,10 @@ export function TripForm() {
           <Input placeholder="e.g., Asia, Europe, Southwest US" />
         </Form.Item>
 
+        {/* Per-user trip notes live on the trip detail view's Prep tab (Phase 4)
+            — a brand-new trip has no id to attach a notes thread to, and notes
+            are now per-author rather than a single shared string. */}
+
         <Space size="middle">
           <Form.Item name="startDate" label="Start Date">
             <DatePicker />
@@ -120,10 +122,6 @@ export function TripForm() {
             <DatePicker />
           </Form.Item>
         </Space>
-
-        <Form.Item name="notes" label="Notes">
-          <TextArea rows={4} />
-        </Form.Item>
 
         <Form.Item name="sourceRefs" label="Source References">
           <TextArea

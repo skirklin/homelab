@@ -12,7 +12,8 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, DayEntry } from "../types/travel";
+import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, DayEntry, TravelNote } from "../types/travel";
+import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
@@ -75,6 +76,51 @@ function dayEntryFromRecord(r: RecordModel | RawRecord): DayEntry {
     created: x.created as string,
     updated: x.updated as string,
   };
+}
+
+/**
+ * Defensive parser for the travel_notes.entries column. Identical shape to
+ * recipe_events / life_events — kept local rather than imported so the travel
+ * mapper has no cross-backend coupling.
+ */
+function entriesFromRecord(r: RecordModel | RawRecord): LifeEntry[] {
+  const x = r as Record<string, unknown>;
+  const raw = Array.isArray(x.entries) ? x.entries : [];
+  const out: LifeEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const e = item as Record<string, unknown>;
+    if (typeof e.name !== "string") continue;
+    if (e.type === "text" && typeof e.value === "string") {
+      out.push({ name: e.name, type: "text", value: e.value });
+    } else if (e.type === "number" && typeof e.value === "number" && typeof e.unit === "string") {
+      const entry: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
+      if (typeof e.scale === "number") entry.scale = e.scale;
+      out.push(entry);
+    } else if (e.type === "bool" && typeof e.value === "boolean") {
+      out.push({ name: e.name, type: "bool", value: e.value });
+    }
+  }
+  return out;
+}
+
+function noteFromRecord(r: RecordModel | RawRecord): TravelNote {
+  const x = r as Record<string, unknown>;
+  return {
+    id: r.id,
+    log: x.log as string,
+    subjectType: (x.subject_type as string) || "",
+    subjectId: (x.subject_id as string) || "",
+    createdBy: (x.created_by as string) || "",
+    entries: entriesFromRecord(r),
+    created: x.created as string,
+    updated: x.updated as string,
+  };
+}
+
+/** Newest-first by `created` — matches cooking-log behavior. */
+function notesNewestFirst(notes: TravelNote[]): TravelNote[] {
+  return notes.sort((a, b) => (a.created < b.created ? 1 : a.created > b.created ? -1 : 0));
 }
 
 function itineraryFromRecord(r: RecordModel | RawRecord): Itinerary {
@@ -230,6 +276,53 @@ export class PocketBaseTravelBackend implements TravelBackend {
     await this.wpb.collection("travel_day_entries").delete(entryId);
   }
 
+  // --- Notes (per-user feedback) ---
+
+  async getNotes(logId: string, subjectType: string, subjectId: string): Promise<TravelNote[]> {
+    try {
+      const records = await this.pb().collection("travel_notes").getFullList({
+        filter: this.pb().filter(
+          "log = {:logId} && subject_type = {:subjectType} && subject_id = {:subjectId}",
+          { logId, subjectType, subjectId },
+        ),
+        sort: "-created",
+      });
+      // Sort newest-first defensively too, so the result is correctly ordered
+      // independent of transport (the server `sort` is the fast path).
+      return notesNewestFirst(records.map(noteFromRecord));
+    } catch {
+      return [];
+    }
+  }
+
+  async addNote(
+    logId: string,
+    subjectType: string,
+    subjectId: string,
+    userId: string,
+    entries: LifeEntry[],
+  ): Promise<string> {
+    const id = newId();
+    // PB does NOT auto-stamp created_by — the create path must set it.
+    await this.wpb.collection("travel_notes").create({
+      id,
+      log: logId,
+      subject_type: subjectType,
+      subject_id: subjectId,
+      created_by: userId,
+      entries,
+    });
+    return id;
+  }
+
+  async updateNote(noteId: string, entries: LifeEntry[]): Promise<void> {
+    await this.wpb.collection("travel_notes").update(noteId, { entries });
+  }
+
+  async deleteNote(noteId: string): Promise<void> {
+    await this.wpb.collection("travel_notes").delete(noteId);
+  }
+
   subscribeToLog(
     logId: string,
     handlers: {
@@ -238,6 +331,7 @@ export class PocketBaseTravelBackend implements TravelBackend {
       onActivities: (activities: Activity[]) => void;
       onItineraries: (itineraries: Itinerary[]) => void;
       onDayEntries: (entries: DayEntry[]) => void;
+      onNotes: (notes: TravelNote[]) => void;
       onDeleted?: () => void;
     },
   ): Unsubscribe {
@@ -280,12 +374,20 @@ export class PocketBaseTravelBackend implements TravelBackend {
       (records) => handlers.onDayEntries(records.map(dayEntryFromRecord)),
     );
 
+    // Notes ride the log-level mirror (the day_entries precedent) so per-user
+    // feedback loads instantly when the log opens, not on-demand per subject.
+    const notesHandle = this.mirror.watch(
+      { collection: "travel_notes", topic: "*", filter: logFilter, predicate: inLog },
+      (records) => handlers.onNotes(notesNewestFirst(records.map(noteFromRecord))),
+    );
+
     return () => {
       logHandle.unsubscribe();
       tripsHandle.unsubscribe();
       activitiesHandle.unsubscribe();
       itinerariesHandle.unsubscribe();
       dayEntriesHandle.unsubscribe();
+      notesHandle.unsubscribe();
     };
   }
 

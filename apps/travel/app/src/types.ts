@@ -14,6 +14,10 @@ export type {
   ValidationSlot,
 } from "@homelab/backend";
 
+// Per-user feedback notes (Phase 4) reuse the backend types verbatim — there's
+// no app-local enrichment, so we re-export rather than re-declare.
+export type { TravelNote, LifeEntry } from "@homelab/backend";
+
 // Trip status values
 export type TripStatus = "Completed" | "Booked" | "Researching" | "Idea" | "Ongoing";
 

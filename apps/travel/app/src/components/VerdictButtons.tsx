@@ -1,7 +1,5 @@
 import { Tooltip } from "antd";
 import styled from "styled-components";
-import { useTravelBackend } from "@kirkl/shared";
-import { activityUpdatesToBackend } from "../adapters";
 import type { ActivityVerdict } from "../types";
 
 const Row = styled.div`
@@ -15,8 +13,9 @@ const Btn = styled.button<{ $active: boolean }>`
   border: 1px solid ${(p) => (p.$active ? "#ffd591" : "transparent")};
   border-radius: 4px;
   cursor: pointer;
-  padding: 2px 4px;
-  font-size: 14px;
+  /* Touch-friendly on phones: a comfortable tap target without bloating the row. */
+  padding: 4px 6px;
+  font-size: 16px;
   line-height: 1;
   filter: ${(p) => (p.$active ? "none" : "grayscale(0.6) opacity(0.6)")};
   transition: filter 120ms, background 120ms, border-color 120ms;
@@ -35,31 +34,29 @@ const VERDICTS: { key: ActivityVerdict; emoji: string; label: string }[] = [
 ];
 
 interface Props {
-  activityId: string;
+  /** The CALLER'S own verdict (from their own note), not a shared scalar. */
   current: ActivityVerdict | undefined;
-  size?: "sm" | "md";
+  /** Tap a verdict to set it; tap the active one again to clear (null). */
+  onSet: (next: ActivityVerdict | null) => void;
 }
 
-export function VerdictButtons({ activityId, current }: Props) {
-  const travel = useTravelBackend();
-
-  const set = (next: ActivityVerdict) => {
-    // Tap the same verdict twice to clear it.
-    const value = current === next ? null : next;
-    travel.updateActivity(
-      activityId,
-      activityUpdatesToBackend({
-        verdict: value,
-        experiencedAt: value ? new Date() : null,
-      }),
-    );
-  };
-
+/**
+ * Presentational verdict picker. The owner (NotesThread / ActivityVerdictRow)
+ * sources `current` from the caller's own note and persists via `onSet` — the
+ * buttons themselves are stateless.
+ */
+export function VerdictButtons({ current, onSet }: Props) {
   return (
     <Row>
       {VERDICTS.map((v) => (
         <Tooltip key={v.key} title={v.label}>
-          <Btn type="button" $active={current === v.key} onClick={() => set(v.key)}>
+          <Btn
+            type="button"
+            data-testid={`verdict-${v.key}`}
+            data-active={current === v.key ? "true" : "false"}
+            $active={current === v.key}
+            onClick={() => onSet(current === v.key ? null : v.key)}
+          >
             {v.emoji}
           </Btn>
         </Tooltip>

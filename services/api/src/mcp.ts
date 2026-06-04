@@ -1361,6 +1361,80 @@ server.tool(
   },
 );
 
+// --- Travel notes (per-user feedback) ---
+//
+// Notes are per-author rows scoped to a travel log + subject. The author
+// (`created_by`) is stamped SERVER-SIDE from the token identity, so the MCP
+// caller cannot spoof authorship. subject_id: activity → activity ID, trip →
+// trip ID, day → composite "${tripId}:${date}". Entries follow the LifeEntry
+// shape shared with cooking-log / life events.
+const noteEntrySchema = z.object({
+  name: z.string().describe("Entry key (e.g. 'notes', 'rating')"),
+  type: z.enum(["text", "number", "bool"]).describe("Entry value type"),
+  value: z.union([z.string(), z.number(), z.boolean()]).describe("The value (string for text, number for number, boolean for bool)"),
+  unit: z.string().optional().describe("Canonical unit for type='number' (e.g. 'min', 'rating', 'ct')"),
+  scale: z.number().optional().describe("1..scale ceiling for unit='rating' (defaults to 5)"),
+}).describe("A single LifeEntry-shaped value");
+
+server.tool(
+  "list_travel_notes",
+  "List per-user feedback notes for a travel subject (activity, day, or trip), newest first. subject_id: activity→activity ID, trip→trip ID, day→'<tripId>:<date>'. Caller must own the log.",
+  {
+    log: z.string().describe("The travel log ID"),
+    subject_type: z.enum(["activity", "day", "trip"]).describe("What the note is attached to"),
+    subject_id: z.string().describe("Subject ID — activity/trip ID, or '<tripId>:<date>' for a day"),
+  },
+  async ({ log, subject_type, subject_id }) => {
+    const qs = new URLSearchParams({ log, subject_type, subject_id }).toString();
+    const data = await api(`/travel/notes?${qs}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_travel_note",
+  "Add a per-user feedback note to a travel subject (activity, day, or trip). The author is stamped automatically from your identity — you cannot set it. Caller must own the log.",
+  {
+    log: z.string().describe("The travel log ID"),
+    subject_type: z.enum(["activity", "day", "trip"]).describe("What the note is attached to"),
+    subject_id: z.string().describe("Subject ID — activity/trip ID, or '<tripId>:<date>' for a day"),
+    entries: z.array(noteEntrySchema).describe("The note's values (e.g. [{name:'notes',type:'text',value:'Loved it'}])"),
+  },
+  async ({ log, subject_type, subject_id, entries }) => {
+    const data = await api("/travel/notes", {
+      method: "POST",
+      body: JSON.stringify({ log, subject_type, subject_id, entries }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_travel_note",
+  "Replace the entries on an existing travel note (wholesale). Cannot change the author or subject. Caller must own the note's log.",
+  {
+    note_id: z.string().describe("The note record ID"),
+    entries: z.array(noteEntrySchema).describe("The full replacement entries array"),
+  },
+  async ({ note_id, entries }) => {
+    const data = await api(`/travel/notes/${note_id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ entries }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "delete_travel_note",
+  "Delete a travel note by ID. Caller must own the note's log.",
+  { note_id: z.string().describe("The note record ID to delete") },
+  async ({ note_id }) => {
+    const data = await api(`/travel/notes/${note_id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Travel itinerary update tool ---
 
 server.tool(

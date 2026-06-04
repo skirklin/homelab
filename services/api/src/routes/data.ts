@@ -90,6 +90,38 @@ function patchNotesEntries(existing: unknown, nextNotes: string | undefined): un
   return [...filtered, { name: "notes", type: "text", value: trimmed }];
 }
 
+/** travel_notes subject scopes — kept in sync with the migration's enum. */
+const NOTE_SUBJECT_TYPES = ["activity", "day", "trip"] as const;
+
+/**
+ * Validate a travel-notes `entries[]` payload against the `LifeEntry` shape
+ * (the same union recipe_events / life_events / task_events use):
+ *   { name, type:"text", value:string }
+ *   { name, type:"number", value:number, unit:string, scale?:number }
+ *   { name, type:"bool", value:boolean }
+ * Returns true only if every element is a well-formed entry. An empty array
+ * is allowed (a note with no entries is a no-op the caller can clean up).
+ */
+function validNoteEntries(entries: unknown): entries is Array<Record<string, unknown>> {
+  if (!Array.isArray(entries)) return false;
+  for (const e of entries) {
+    if (!e || typeof e !== "object" || Array.isArray(e)) return false;
+    const r = e as Record<string, unknown>;
+    if (typeof r.name !== "string" || r.name.length === 0) return false;
+    if (r.type === "text") {
+      if (typeof r.value !== "string") return false;
+    } else if (r.type === "number") {
+      if (typeof r.value !== "number" || typeof r.unit !== "string") return false;
+      if (r.scale !== undefined && typeof r.scale !== "number") return false;
+    } else if (r.type === "bool") {
+      if (typeof r.value !== "boolean") return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Re-export the authz helpers for backward compatibility. New code should
 // import directly from `../lib/authz` instead.
 export {
@@ -1942,6 +1974,139 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex/mov
   });
   if ("error" in out) return c.json({ error: out.error }, out.status as 400 | 403 | 404);
   return c.json(out.result);
+}));
+
+// ---- Travel notes (per-user feedback) ----
+//
+// Notes are append-rows under a travel_log, one per author, tied to a
+// subject (`activity | day | trip`). `created_by` is the author and is
+// ALWAYS stamped server-side from the token identity — a client cannot set
+// it. Authorization mirrors the cooking-log pattern: every op gates on
+// LOG OWNERSHIP (any co-owner can edit/delete), not on created_by match.
+
+// List notes for a subject. Read-gated on log ownership (same as the rest of
+// the travel surface — the route layer is the only gate, admin-PB bypasses
+// PB rules).
+dataRoutes.get("/travel/notes", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const logId = c.req.query("log");
+  const subjectType = c.req.query("subject_type");
+  const subjectId = c.req.query("subject_id");
+  if (!logId || !subjectType || !subjectId) {
+    return c.json({ error: "log, subject_type, and subject_id query params required" }, 400);
+  }
+  if (!(NOTE_SUBJECT_TYPES as readonly string[]).includes(subjectType)) {
+    return c.json({ error: `subject_type must be one of ${NOTE_SUBJECT_TYPES.join(", ")}` }, 400);
+  }
+  if (!(await userOwnsTravelLog(pb, logId, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  const notes = await pb.collection("travel_notes").getFullList({
+    filter: pb.filter(
+      "log = {:logId} && subject_type = {:subjectType} && subject_id = {:subjectId}",
+      { logId, subjectType, subjectId },
+    ),
+    sort: "-created",
+  });
+  return c.json(notes.map((n) => ({
+    id: n.id,
+    log: n.log,
+    subject_type: n.subject_type,
+    subject_id: n.subject_id,
+    created_by: n.created_by,
+    entries: n.entries,
+    created: n.created,
+    updated: n.updated,
+  })));
+}));
+
+// Create a note. `created_by` is stamped from the token identity — any
+// client-supplied created_by in the body is IGNORED.
+dataRoutes.post("/travel/notes", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  type PostBody = { log?: string; subject_type?: string; subject_id?: string; entries?: unknown };
+  const body = await c.req.json<PostBody>().catch(() => ({} as PostBody));
+  if (!body.log || !body.subject_type || !body.subject_id) {
+    return c.json({ error: "log, subject_type, and subject_id required" }, 400);
+  }
+  if (!(NOTE_SUBJECT_TYPES as readonly string[]).includes(body.subject_type)) {
+    return c.json({ error: `subject_type must be one of ${NOTE_SUBJECT_TYPES.join(", ")}` }, 400);
+  }
+  if (!validNoteEntries(body.entries)) {
+    return c.json({ error: "entries must be an array of {name,type,value,...} LifeEntry objects" }, 400);
+  }
+  if (!(await userOwnsTravelLog(pb, body.log, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  const record = await pb.collection("travel_notes").create({
+    log: body.log,
+    subject_type: body.subject_type,
+    subject_id: body.subject_id,
+    // Author is the authenticated caller — never the body.
+    created_by: userId,
+    entries: body.entries,
+  });
+  return c.json({
+    id: record.id,
+    log: record.log,
+    subject_type: record.subject_type,
+    subject_id: record.subject_id,
+    created_by: record.created_by,
+    entries: record.entries,
+    created: record.created,
+  }, 201);
+}));
+
+// Update a note's entries (wholesale replace). Authorization resolves the
+// note's parent log first, then gates on ownership. created_by / subject_* /
+// log are NOT mutable here — only `entries`.
+//
+// TODO(author-only): a future phase may tighten edit/delete to the note's
+// own author (created_by == caller) rather than any co-owner of the log.
+// Today it intentionally matches the cooking-log gate (log ownership).
+dataRoutes.patch("/travel/notes/:noteId", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const noteId = c.req.param("noteId")!;
+  const record = await pb.collection("travel_notes").getOne(noteId).catch(() => null);
+  if (!record) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, record.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  const body = await c.req.json<{ entries?: unknown }>().catch(() => ({} as { entries?: unknown }));
+  if (!validNoteEntries(body.entries)) {
+    return c.json({ error: "entries must be an array of {name,type,value,...} LifeEntry objects" }, 400);
+  }
+  // Only `entries` is writable — created_by / subject_* / log stay put.
+  const updated = await pb.collection("travel_notes").update(noteId, { entries: body.entries });
+  return c.json({
+    id: updated.id,
+    log: updated.log,
+    subject_type: updated.subject_type,
+    subject_id: updated.subject_id,
+    created_by: updated.created_by,
+    entries: updated.entries,
+    created: updated.created,
+    updated: updated.updated,
+  });
+}));
+
+// Delete a note. Same log-ownership gate as PATCH.
+//
+// TODO(author-only): see the PATCH note above — may tighten to author-only.
+dataRoutes.delete("/travel/notes/:noteId", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const noteId = c.req.param("noteId")!;
+  const record = await pb.collection("travel_notes").getOne(noteId).catch(() => null);
+  if (!record) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, record.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+  await pb.collection("travel_notes").delete(noteId);
+  return c.json({ success: true });
 }));
 
 // ---- Life ----

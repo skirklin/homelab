@@ -39,6 +39,7 @@ import { ActivityList } from "./ActivityList";
 import { ReadinessDashboard } from "./ReadinessDashboard";
 import { TripChecklist } from "./TripChecklist";
 import { WeatherPanel } from "./WeatherPanel";
+import { NotesThread } from "./NotesThread";
 import { useTripWeather, weatherByDate } from "../hooks/useTripWeather";
 import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 
@@ -122,17 +123,6 @@ const FlagBanner = styled.div`
   gap: 8px;
   color: #ad6800;
   font-size: 14px;
-`;
-
-const NotesCard = styled.div`
-  background: #fafafa;
-  border-radius: 8px;
-  padding: 16px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 14px;
-  line-height: 1.7;
-  color: #595959;
 `;
 
 const SourceRef = styled.div<{ $type: string }>`
@@ -383,12 +373,10 @@ export function TripDetail() {
                     <TripChecklist trip={trip} activities={activities} />
                   </>
                 )}
-                {trip.notes && (
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "#8c8c8c", marginBottom: 4 }}>NOTES</div>
-                    <NotesCard>{trip.notes}</NotesCard>
-                  </div>
-                )}
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8c8c8c", marginBottom: 4 }}>NOTES</div>
+                  <NotesThread subjectType="trip" subjectId={trip.id} />
+                </div>
                 {sourceRefLines.length > 0 && (
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 500, color: "#8c8c8c", marginBottom: 4 }}>
@@ -407,7 +395,7 @@ export function TripDetail() {
                     </div>
                   </div>
                 )}
-                {!showReadiness && !trip.notes && sourceRefLines.length === 0 && (
+                {!showReadiness && sourceRefLines.length === 0 && (
                   <Empty description="Nothing to prep yet" />
                 )}
               </div>

@@ -126,6 +126,7 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 - `get_travel_activity` — full activity details (geocoding, flight info, verdict/notes)
 - `search_travel` — search trips/activities by destination/name
 - `get_trip_issues` — per-day validation (overlap, out-of-order, drive-gap); same data the travel UI surfaces as "N issues"
+- `list_travel_notes` — per-user feedback notes for a subject (activity/day/trip), newest first. `subject_id`: activity→activity ID, trip→trip ID, day→`<tripId>:<date>`
 
 **Travel (write):**
 - `add_travel_trip` — create a trip
@@ -141,6 +142,9 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 - `delete_travel_trip` — delete a trip
 - `delete_travel_activity` — delete an activity
 - `delete_travel_itinerary` — delete an itinerary
+- `add_travel_note` — add a per-user feedback note to an activity/day/trip; author (`created_by`) is stamped server-side from your identity, never client-settable. Caller must own the log
+- `update_travel_note` — replace a note's `entries` wholesale (can't change author or subject)
+- `delete_travel_note` — delete a note by ID
 
 **Life (read):**
 - `list_life_entries` — recent entries (optional days filter)

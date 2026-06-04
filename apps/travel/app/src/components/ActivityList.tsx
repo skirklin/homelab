@@ -15,7 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { useTravelBackend } from "@kirkl/shared";
 import { mapsUrl } from "../utils";
 import type { Activity } from "../types";
-import { VerdictButtons } from "./VerdictButtons";
+import { NotesThread } from "./NotesThread";
 
 const Container = styled.div`
   display: flex;
@@ -243,12 +243,7 @@ export function ActivityList({ activities, showReflection = false, scheduledIds 
                 )}
                 {showReflection && !isFlight && (
                   <div style={{ marginTop: 4 }}>
-                    <VerdictButtons activityId={a.id} current={a.verdict} />
-                    {a.personalNotes && (
-                      <div style={{ fontSize: 11, color: "#595959", marginTop: 3 }}>
-                        {a.personalNotes}
-                      </div>
-                    )}
+                    <NotesThread subjectType="activity" subjectId={a.id} showVerdict />
                   </div>
                 )}
               </Body>
