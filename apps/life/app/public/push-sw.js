@@ -77,9 +77,12 @@ self.addEventListener("notificationclick", (event) => {
     urlToOpen = new URL("/life?sample=true", self.location.origin).href;
     messageData = { type: "SAMPLE_REQUESTED" };
   }
-  // URL provided in the notification payload
+  // URL provided in the notification payload. Resolve it against THIS SW's
+  // origin so a (now relative) deep link always opens on the origin the user
+  // is signed in on — PocketBase auth is per-origin, so an absolute
+  // cross-origin URL would cold-load an empty session (presents as sign-out).
   else if (data.url) {
-    urlToOpen = data.url;
+    urlToOpen = new URL(data.url, self.location.origin).href;
   }
   // Default
   else {
