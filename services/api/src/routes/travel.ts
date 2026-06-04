@@ -12,6 +12,12 @@
  *   geocode path uses Open-Meteo's free geocoder or a coord already stored on
  *   a trip activity). Mounted at /travel, so the public path is /fn/travel/weather.
  *
+ * GET /weather/hourly?tripId=<id>&date=YYYY-MM-DD
+ *   Hourly weather for a single trip day, used to show a per-activity
+ *   time-of-day indicator in the day view. Best-effort: no persistence, no
+ *   fabrication beyond the horizon, and a transient Open-Meteo failure
+ *   degrades to an empty `hours[]` rather than a 500.
+ *
  * Single trip-level coordinate. Persistence is superuser-only (getAdminPb);
  * clients only ever read.
  */
@@ -25,6 +31,7 @@ import {
   fetchOpenMeteo,
   fetchOpenMeteoArchive,
   fetchOpenMeteoCached,
+  fetchOpenMeteoHourly,
   geocodeDestination,
   derivePackingHints,
   mergeTripForecast,
@@ -269,4 +276,43 @@ travelRoutes.get("/weather", handler(async (c) => {
     forecast: days,
     packingHints,
   });
+}));
+
+travelRoutes.get("/weather/hourly", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const tripId = c.req.query("tripId");
+  const date = c.req.query("date");
+  if (!tripId) return c.json({ error: "tripId required" }, 400);
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return c.json({ error: "valid date (YYYY-MM-DD) required" }, 400);
+  }
+
+  const trip = await pb.collection("travel_trips").getOne(tripId).catch(() => null);
+  if (!trip) return c.json({ error: "not found" }, 404);
+  if (!(await userOwnsTravelLog(pb, trip.log as string, userId))) {
+    return c.json({ error: "access denied" }, 403);
+  }
+
+  const resolved = await resolveTripCoord(pb, {
+    id: trip.id,
+    log: trip.log as string,
+    destination: trip.destination as string,
+  });
+  if (!resolved) return c.json({ date, hours: [] });
+
+  // Beyond the forecast horizon AND in the future → no data exists yet; don't
+  // fabricate. (Past dates are always fetchable via forecast/archive.)
+  const today = todayPacific();
+  if (date > addDays(today, FORECAST_HORIZON_DAYS)) {
+    return c.json({ date, hours: [], state: "not_yet" });
+  }
+
+  try {
+    const { hours, timezone } = await fetchOpenMeteoHourly(resolved.coord, date);
+    return c.json({ date, timezone, hours });
+  } catch {
+    // Transient Open-Meteo failure — degrade gracefully, don't 500 the view.
+    return c.json({ date, hours: [] });
+  }
 }));

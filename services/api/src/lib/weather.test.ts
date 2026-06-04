@@ -8,11 +8,15 @@ import {
   tripDateOnly,
   resolveForecastWindow,
   transformOpenMeteo,
+  transformOpenMeteoHourly,
+  pickHour,
   fetchOpenMeteoArchive,
+  fetchOpenMeteoHourly,
   mergeTripForecast,
   derivePackingHints,
   todayPacific,
   type DailyForecast,
+  type HourlyForecast,
 } from "./weather";
 
 describe("tripDateOnly", () => {
@@ -213,6 +217,123 @@ describe("transformOpenMeteo", () => {
   });
 });
 
+describe("transformOpenMeteoHourly", () => {
+  it("zips forecast-shaped hourly arrays, reducing ISO time to HH:MM and rounding temp", () => {
+    const raw = {
+      hourly: {
+        time: ["2026-06-02T08:00", "2026-06-02T09:00"],
+        temperature_2m: [58.4, 61.9],
+        precipitation: [0, 0.3],
+        precipitation_probability: [10, 40],
+        weathercode: [3, 61],
+      },
+    };
+    const hours = transformOpenMeteoHourly(raw);
+    expect(hours).toHaveLength(2);
+    expect(hours[0]).toEqual({
+      time: "08:00",
+      tempF: 58,
+      weatherCode: 3,
+      precipMm: 0,
+      precipProbability: 10,
+    });
+    expect(hours[1]).toEqual({
+      time: "09:00",
+      tempF: 62,
+      weatherCode: 61,
+      precipMm: 0.3,
+      precipProbability: 40,
+    });
+  });
+
+  it("nulls precipProbability for archive-shaped hourly (no such column)", () => {
+    const raw = {
+      hourly: {
+        time: ["2026-05-01T12:00"],
+        temperature_2m: [70.2],
+        precipitation: [1.1],
+        // no precipitation_probability column on the archive API
+        weathercode: [80],
+      },
+    };
+    const hours = transformOpenMeteoHourly(raw);
+    expect(hours[0].precipProbability).toBeNull();
+    expect(hours[0].weatherCode).toBe(80);
+    expect(hours[0].tempF).toBe(70);
+    expect(hours[0].time).toBe("12:00");
+  });
+
+  it("returns an empty array when hourly is missing", () => {
+    expect(transformOpenMeteoHourly({})).toEqual([]);
+    expect(transformOpenMeteoHourly({ hourly: {} })).toEqual([]);
+  });
+
+  it("tolerates null entries (keeps the hour, nulls the field)", () => {
+    const hours = transformOpenMeteoHourly({
+      hourly: {
+        time: ["2026-06-02T00:00"],
+        temperature_2m: [null],
+        precipitation: [null],
+        precipitation_probability: [null],
+        weathercode: [null],
+      },
+    });
+    expect(hours[0]).toEqual({
+      time: "00:00",
+      tempF: null,
+      weatherCode: null,
+      precipMm: null,
+      precipProbability: null,
+    });
+  });
+});
+
+describe("pickHour", () => {
+  const hours: HourlyForecast[] = Array.from({ length: 24 }, (_, h) => ({
+    time: `${String(h).padStart(2, "0")}:00`,
+    tempF: h,
+    weatherCode: 0,
+    precipMm: 0,
+    precipProbability: 0,
+  }));
+
+  it("matches an exact hour", () => {
+    expect(pickHour(hours, "09:00")?.time).toBe("09:00");
+  });
+
+  it("rounds 09:30 down to 09:00 (ties round down)", () => {
+    expect(pickHour(hours, "09:30")?.time).toBe("09:00");
+  });
+
+  it("rounds 09:31 up to 10:00", () => {
+    expect(pickHour(hours, "09:31")?.time).toBe("10:00");
+  });
+
+  it("rounds 09:29 down to 09:00", () => {
+    expect(pickHour(hours, "09:29")?.time).toBe("09:00");
+  });
+
+  it("returns null for empty hours", () => {
+    expect(pickHour([], "09:00")).toBeNull();
+  });
+
+  it("returns null for a malformed time", () => {
+    expect(pickHour(hours, "")).toBeNull();
+    expect(pickHour(hours, "9am")).toBeNull();
+    expect(pickHour(hours, "25:00")).toBeNull();
+    expect(pickHour(hours, "12:99")).toBeNull();
+  });
+
+  it("falls back to the nearest available entry when the target hour is absent", () => {
+    const sparse: HourlyForecast[] = [
+      { time: "06:00", tempF: 50, weatherCode: 0, precipMm: 0, precipProbability: 0 },
+      { time: "12:00", tempF: 70, weatherCode: 0, precipMm: 0, precipProbability: 0 },
+    ];
+    // 10:00 has no exact entry; 12:00 (120 min away) is closer than 06:00 (240 min).
+    expect(pickHour(sparse, "10:00")?.time).toBe("12:00");
+  });
+});
+
 describe("derivePackingHints", () => {
   function day(over: Partial<DailyForecast>): DailyForecast {
     return {
@@ -335,6 +456,43 @@ describe("fetchOpenMeteoArchive", () => {
     expect(days[1].weatherCode).toBe(80);
     expect(days[1].precipProbabilityMax).toBeNull();
     expect(days[1].uvIndexMax).toBeNull();
+  });
+});
+
+describe("fetchOpenMeteoHourly", () => {
+  // Capture the URL passed to the injected fetch so we can assert which hourly
+  // variables each branch requests.
+  function capturingFetch(): { fetch: typeof fetch; urls: string[] } {
+    const urls: string[] = [];
+    const fetch: typeof globalThis.fetch = (async (url: string) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ timezone: "America/Denver", hourly: { time: [] } }),
+        text: async () => "",
+      } as unknown as Response;
+    }) as unknown as typeof globalThis.fetch;
+    return { fetch, urls };
+  }
+
+  it("omits precipitation_probability on the archive branch (unsupported there)", async () => {
+    const { fetch, urls } = capturingFetch();
+    // A date well in the past forces the archive branch (date < today-5).
+    await fetchOpenMeteoHourly({ lat: 39.7, lon: -104.99 }, "2020-01-15", fetch);
+    expect(urls).toHaveLength(1);
+    const hourly = new URL(urls[0]).searchParams.get("hourly");
+    expect(hourly).toBe("temperature_2m,precipitation,weathercode");
+    expect(hourly).not.toContain("precipitation_probability");
+  });
+
+  it("includes precipitation_probability on the forecast branch", async () => {
+    const { fetch, urls } = capturingFetch();
+    // A date far in the future forces the forecast branch (date >= today-5).
+    await fetchOpenMeteoHourly({ lat: 39.7, lon: -104.99 }, "2099-12-31", fetch);
+    expect(urls).toHaveLength(1);
+    const hourly = new URL(urls[0]).searchParams.get("hourly");
+    expect(hourly).toBe("temperature_2m,precipitation,precipitation_probability,weathercode");
   });
 });
 

@@ -171,6 +171,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-05-30 | DISPATCH C3 (push on assistant chat message) | Built in worktree `agent-ab53e515` (`a6ca8ef`). 15-line diff: fire-and-forget `sendPushToUser` after assistant POST. Reviewed inline — no blockers, ready to merge. Phase 0 + C1–C3 all built, pending deploy. |
 | 2026-05-31 | MERGE C3 + NO-OP | Merged C3 to main. All Phase 0 + C1–C3 on main, pending deploy. C4 blocked on Scott's voice/cadence input. No new dispatches — nothing actionable until deploy or C4 direction. |
 | 2026-06-01 | NO-OP | All built work (Phase 0 + C1–C3) still pending deploy; C4 still blocked on Scott's voice/cadence input; no observations to evaluate. |
+| 2026-06-03 | NO-OP | Same as 6/1: all built work pending deploy; C4 blocked on Scott's input; no observations to evaluate; 5 stale worktrees could be reaped. |
 
 ## Decision log
 
