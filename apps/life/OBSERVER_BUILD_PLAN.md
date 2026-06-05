@@ -173,6 +173,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-06-01 | NO-OP | All built work (Phase 0 + C1–C3) still pending deploy; C4 still blocked on Scott's voice/cadence input; no observations to evaluate. |
 | 2026-06-03 | NO-OP | Same as 6/1: all built work pending deploy; C4 blocked on Scott's input; no observations to evaluate; 5 stale worktrees could be reaped. |
 | 2026-06-04 | NO-OP | Unchanged: Phase 0 + C1–C3 on main awaiting deploy; C4 blocked on Scott's input; no observations yet. |
+| 2026-06-05 | NO-OP | Day 4 waiting: all built work on main awaiting deploy; C4 blocked on Scott's input; no observations to evaluate. |
 
 ## Decision log
 
