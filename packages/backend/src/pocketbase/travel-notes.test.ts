@@ -8,7 +8,7 @@
  *   - updateNote replaces the entries array wholesale
  *   - deleteNote removes the row
  *   - the log-level mirror slice surfaces a note through subscribeToLog's
- *     onNotes handler (the day_entries precedent — notes load with the log)
+ *     onNotes handler (notes load with the log)
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import type PocketBase from "pocketbase";
@@ -230,7 +230,6 @@ describe("PocketBaseTravelBackend — travel_notes", () => {
       onTrips: () => {},
       onActivities: () => {},
       onItineraries: () => {},
-      onDayEntries: () => {},
       onNotes: (notes) => seen.push(notes.map((n) => n.id)),
     });
 

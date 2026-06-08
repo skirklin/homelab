@@ -236,23 +236,45 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     return u;
   }
 
-  // For evening: prefetch today's day_entries to suppress if already journaled.
+  // For evening: prefetch today's day notes to suppress if already journaled.
+  // Day journaling now lives in travel_notes (subject_type="day",
+  // subject_id="${tripId}:${date}") — the legacy travel_day_entries collection
+  // was retired. A note counts as "journaled" if it carries non-empty text or
+  // highlight entries.
+  //
+  // travel_notes is PER-AUTHOR (one row per user per trip-day, no unique
+  // index), unlike the retired travel_day_entries which had a single shared
+  // UNIQUE(trip,date) row. So suppression must be keyed by author too — keying
+  // only by ${tripId}|${date} would let ONE co-owner's journal suppress the
+  // evening reminder for EVERY co-owner on a shared trip.
   const tripDateKeys = new Set(contexts.map((c) => `${c.tripId}|${c.todayInTz}`));
-  const tripIds = [...new Set(contexts.map((c) => c.tripId))];
-  const dateValues = [...new Set(contexts.map((c) => c.todayInTz))];
+  const subjectIds = [...new Set(contexts.map((c) => `${c.tripId}:${c.todayInTz}`))];
   const journaled = new Set<string>();
-  if (tripIds.length > 0 && dateValues.length > 0) {
+  if (subjectIds.length > 0) {
     const filter = pb.filter(
-      `(${tripIds.map((id) => pb.filter("trip = {:id}", { id })).join(" || ")})` +
-      ` && (${dateValues.map((d) => pb.filter("date = {:d}", { d })).join(" || ")})`,
+      `subject_type = "day" && (${subjectIds.map((sid) => pb.filter("subject_id = {:sid}", { sid })).join(" || ")})`,
       {},
     );
-    const rows = await pb.collection("travel_day_entries").getFullList({ filter, $autoCancel: false });
+    const rows = await pb.collection("travel_notes").getFullList({ filter, $autoCancel: false });
     for (const r of rows) {
-      const key = `${r.trip}|${r.date}`;
-      if (!tripDateKeys.has(key)) continue;
-      const filled = (r.text || "").trim().length > 0 || (r.highlight || "").trim().length > 0;
-      if (filled) journaled.add(key);
+      const author = r.created_by as string;
+      // Skip unattributed/backfilled rows so a historical day-note with no
+      // author can't suppress anyone's reminder.
+      if (!author) continue;
+      const subjectId = r.subject_id as string;
+      // subject_id is "${tripId}:${date}" — split on the FIRST colon.
+      const sep = subjectId.indexOf(":");
+      if (sep === -1) continue;
+      const tripDateKey = `${subjectId.slice(0, sep)}|${subjectId.slice(sep + 1)}`;
+      if (!tripDateKeys.has(tripDateKey)) continue;
+      const entries = Array.isArray(r.entries) ? r.entries : [];
+      const filled = entries.some(
+        (e: { name?: string; value?: unknown }) =>
+          (e.name === "text" || e.name === "highlight") &&
+          typeof e.value === "string" &&
+          e.value.trim().length > 0,
+      );
+      if (filled) journaled.add(`${author}|${tripDateKey}`);
     }
   }
 
@@ -284,7 +306,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     }
 
     if (isEvening) {
-      if (journaled.has(`${ctx.tripId}|${ctx.todayInTz}`)) { eSkipped++; continue; }
+      if (journaled.has(`${ctx.userId}|${ctx.tripId}|${ctx.todayInTz}`)) { eSkipped++; continue; }
       const last = dedup.evening?.[ctx.tripId];
       if (last === ctx.todayInTz) { eSkipped++; continue; }
       const buildUrl = (origin: string) => ctx.todayDay

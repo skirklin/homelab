@@ -17,7 +17,6 @@ export interface Trip {
   destination: string;
   startDate: string;
   endDate: string;
-  notes: string;
   flagged: boolean;
   flagComment: string;
   status: string;
@@ -68,25 +67,9 @@ export interface Activity {
   ratingCount?: number;
   photoRef?: string;
   flightInfo?: FlightInfo;
-  // Post-experience reflection. `verdict` and `personalNotes` are the user's
-  // own feedback, distinct from `rating`/`ratingCount` (Google Places aggregate).
-  verdict?: ActivityVerdict;
-  personalNotes?: string;
+  // Post-experience reflection timestamp. The verdict/notes themselves now live
+  // in travel_notes (per-user feedback); only the "when" stays on the activity.
   experiencedAt?: string;
-  created: string;
-  updated: string;
-}
-
-/** A free-form day journal, keyed by (trip, date). Lives outside itineraries
- *  so it survives itinerary regenerations. */
-export interface DayEntry {
-  id: string;
-  log: string;
-  trip: string;
-  date: string;        // YYYY-MM-DD, matches ItineraryDay.date
-  text: string;
-  highlight?: string;  // optional one-line "best moment"
-  mood?: number;       // 1..5 overall day rating
   created: string;
   updated: string;
 }

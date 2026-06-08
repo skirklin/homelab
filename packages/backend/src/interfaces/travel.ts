@@ -10,7 +10,6 @@ import type {
   Activity,
   Itinerary,
   ItineraryDay,
-  DayEntry,
   TravelNote,
 } from "../types/travel";
 import type { LifeEntry } from "../types/life";
@@ -41,17 +40,6 @@ export interface TravelBackend {
   setItineraryDays(itineraryId: string, days: ItineraryDay[]): Promise<void>;
   deleteItinerary(itineraryId: string): Promise<void>;
 
-  // --- Day journal entries ---
-
-  /** Insert if missing, otherwise update the existing entry for (trip, date). */
-  upsertDayEntry(
-    logId: string,
-    tripId: string,
-    date: string,
-    fields: { text?: string; highlight?: string; mood?: number | null },
-  ): Promise<string>;
-  deleteDayEntry(entryId: string): Promise<void>;
-
   // --- Notes (per-user feedback) ---
 
   /** Fetch notes for one subject, newest-first. */
@@ -75,7 +63,6 @@ export interface TravelBackend {
       onTrips: (trips: Trip[]) => void;
       onActivities: (activities: Activity[]) => void;
       onItineraries: (itineraries: Itinerary[]) => void;
-      onDayEntries: (entries: DayEntry[]) => void;
       onNotes: (notes: TravelNote[]) => void;
       onDeleted?: () => void;
     },

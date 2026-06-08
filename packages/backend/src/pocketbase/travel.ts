@@ -3,16 +3,15 @@
  *
  * Writes route through the optimistic wrapper. subscribeToLog rides on
  * the PBMirror with five slices (log record + trips/activities/itineraries/
- * day_entries filtered by log) — the mirror handles cancel-before-resolve,
+ * notes filtered by log) — the mirror handles cancel-before-resolve,
  * ref-counts the SSE channel per collection, and delivers full state per
- * slice. The two read-then-write spots (`getOrCreateLog`, `upsertDayEntry`)
- * keep their server lookup since the filter shape (`trip = X && date = Y`)
- * isn't expressible against the local cache without v2 query-time filtering.
+ * slice. `getOrCreateLog` keeps its server lookup since the user-slug
+ * resolution isn't expressible against the local cache.
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, ActivitySlot, DayEntry, TravelNote } from "../types/travel";
+import type { TravelLog, Trip, Activity, Itinerary, ItineraryDay, ActivitySlot, TravelNote } from "../types/travel";
 import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
@@ -34,7 +33,7 @@ function tripFromRecord(r: RecordModel | RawRecord): Trip {
   const x = r as Record<string, unknown>;
   return {
     id: r.id, log: x.log as string, name: (x.name as string) || "", destination: (x.destination as string) || "",
-    startDate: (x.start_date as string) || "", endDate: (x.end_date as string) || "", notes: (x.notes as string) || "",
+    startDate: (x.start_date as string) || "", endDate: (x.end_date as string) || "",
     flagged: !!x.flagged_for_review, flagComment: (x.review_comment as string) || "",
     status: x.status as Trip["status"], region: x.region as Trip["region"], sourceRefs: x.source_refs as Trip["sourceRefs"],
     created: x.created as string, updated: x.updated as string,
@@ -56,25 +55,8 @@ function activityFromRecord(r: RecordModel | RawRecord): Activity {
     ratingCount: x.rating_count as Activity["ratingCount"],
     photoRef: x.photo_ref as Activity["photoRef"],
     flightInfo: (x.flight_info as Activity["flightInfo"]) || undefined,
-    verdict: (x.verdict as ActivityVerdict) || undefined,
-    personalNotes: (x.personal_notes as string) || undefined,
     experiencedAt: (x.experienced_at as string) || undefined,
     created: x.created as string, updated: x.updated as string,
-  };
-}
-
-function dayEntryFromRecord(r: RecordModel | RawRecord): DayEntry {
-  const x = r as Record<string, unknown>;
-  return {
-    id: r.id,
-    log: x.log as string,
-    trip: x.trip as string,
-    date: (x.date as string) || "",
-    text: (x.text as string) || "",
-    highlight: (x.highlight as DayEntry["highlight"]) || undefined,
-    mood: typeof x.mood === "number" ? x.mood : undefined,
-    created: x.created as string,
-    updated: x.updated as string,
   };
 }
 
@@ -271,39 +253,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
     await this.wpb.collection("travel_itineraries").delete(itineraryId);
   }
 
-  // --- Day entries ---
-
-  async upsertDayEntry(
-    logId: string,
-    tripId: string,
-    date: string,
-    fields: { text?: string; highlight?: string; mood?: number | null },
-  ): Promise<string> {
-    // Filter-based lookup against (trip, date) — server fetch only, since
-    // local-cache filter evaluation is a v2 concern. After the lookup, the
-    // write goes through wpb so the UI sees the change optimistically.
-    const filter = this.pb().filter("trip = {:tripId} && date = {:date}", { tripId, date });
-    const data: Record<string, unknown> = {};
-    if (fields.text !== undefined) data.text = fields.text;
-    if (fields.highlight !== undefined) data.highlight = fields.highlight;
-    if (fields.mood !== undefined) data.mood = fields.mood ?? null;
-    try {
-      const existing = await this.pb().collection("travel_day_entries").getFirstListItem(filter, { $autoCancel: false });
-      await this.wpb.collection("travel_day_entries").update(existing.id, data);
-      return existing.id;
-    } catch {
-      const id = newId();
-      await this.wpb.collection("travel_day_entries").create({
-        id, log: logId, trip: tripId, date, ...data,
-      });
-      return id;
-    }
-  }
-
-  async deleteDayEntry(entryId: string): Promise<void> {
-    await this.wpb.collection("travel_day_entries").delete(entryId);
-  }
-
   // --- Notes (per-user feedback) ---
 
   async getNotes(logId: string, subjectType: string, subjectId: string): Promise<TravelNote[]> {
@@ -358,7 +307,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
       onTrips: (trips: Trip[]) => void;
       onActivities: (activities: Activity[]) => void;
       onItineraries: (itineraries: Itinerary[]) => void;
-      onDayEntries: (entries: DayEntry[]) => void;
       onNotes: (notes: TravelNote[]) => void;
       onDeleted?: () => void;
     },
@@ -397,13 +345,8 @@ export class PocketBaseTravelBackend implements TravelBackend {
       (records) => handlers.onItineraries(records.map(itineraryFromRecord)),
     );
 
-    const dayEntriesHandle = this.mirror.watch(
-      { collection: "travel_day_entries", topic: "*", filter: logFilter, predicate: inLog },
-      (records) => handlers.onDayEntries(records.map(dayEntryFromRecord)),
-    );
-
-    // Notes ride the log-level mirror (the day_entries precedent) so per-user
-    // feedback loads instantly when the log opens, not on-demand per subject.
+    // Notes ride the log-level mirror so per-user feedback loads instantly
+    // when the log opens, not on-demand per subject.
     const notesHandle = this.mirror.watch(
       { collection: "travel_notes", topic: "*", filter: logFilter, predicate: inLog },
       (records) => handlers.onNotes(notesNewestFirst(records.map(noteFromRecord))),
@@ -414,7 +357,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
       tripsHandle.unsubscribe();
       activitiesHandle.unsubscribe();
       itinerariesHandle.unsubscribe();
-      dayEntriesHandle.unsubscribe();
       notesHandle.unsubscribe();
     };
   }
@@ -425,12 +367,11 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (t.destination !== undefined) d.destination = t.destination;
     if (t.startDate !== undefined) d.start_date = t.startDate;
     if (t.endDate !== undefined) d.end_date = t.endDate;
-    if (t.notes !== undefined) d.notes = t.notes;
     if (t.flagged !== undefined) d.flagged_for_review = t.flagged;
     if (t.flagComment !== undefined) d.review_comment = t.flagComment;
     if (t.sourceRefs !== undefined) d.source_refs = t.sourceRefs;
     // Pass through extra fields (status, region, etc.)
-    const mapped = new Set(["id", "log", "name", "destination", "startDate", "endDate", "notes", "flagged", "flagComment", "sourceRefs", "created", "updated"]);
+    const mapped = new Set(["id", "log", "name", "destination", "startDate", "endDate", "flagged", "flagComment", "sourceRefs", "created", "updated"]);
     for (const [k, v] of Object.entries(t)) {
       if (!mapped.has(k) && v !== undefined) d[k] = v;
     }
@@ -460,8 +401,6 @@ export class PocketBaseTravelBackend implements TravelBackend {
     if (a.ratingCount !== undefined) d.rating_count = a.ratingCount;
     if (a.photoRef !== undefined) d.photo_ref = a.photoRef;
     if (a.flightInfo !== undefined) d.flight_info = a.flightInfo;
-    if (a.verdict !== undefined) d.verdict = a.verdict ?? "";
-    if (a.personalNotes !== undefined) d.personal_notes = a.personalNotes;
     if (a.experiencedAt !== undefined) d.experienced_at = a.experiencedAt;
     return d;
   }

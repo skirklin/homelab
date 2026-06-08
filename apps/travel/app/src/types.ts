@@ -81,7 +81,6 @@ export interface Trip {
   region: string;
   startDate: Date | null;
   endDate: Date | null;
-  notes: string;
   sourceRefs: string;
   flaggedForReview: boolean;
   reviewComment: string;
@@ -120,23 +119,10 @@ export interface Activity {
   ratingCount: number | null;
   photoRef: string;
   flightInfo?: FlightInfo;
-  // Post-experience reflection (kept distinct from `rating`/`ratingCount`,
-  // which are Google Places aggregates).
-  verdict?: ActivityVerdict;
-  personalNotes?: string;
+  // Post-experience reflection timestamp. The verdict/notes themselves now live
+  // in travel_notes (per-user feedback); only the "when" stays on the activity.
   experiencedAt?: Date;
   tripId: string;
-  created: Date;
-  updated: Date;
-}
-
-export interface DayEntry {
-  id: string;
-  tripId: string;
-  date: string; // YYYY-MM-DD
-  text: string;
-  highlight: string;
-  mood: number | null;
   created: Date;
   updated: Date;
 }

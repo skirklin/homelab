@@ -188,7 +188,6 @@ beforeAll(async () => {
     destination: "Tokyo",
     status: "Researching",
     region: "Asia",
-    notes: "Cherry blossom season",
   });
   travelTripId = trip.id;
 
@@ -901,7 +900,6 @@ describe("Travel", () => {
         destination: "Kyoto",
         status: "Idea",
         region: "Asia",
-        notes: "Temples and gardens",
       },
     });
     expect(status).toBe(201);
@@ -916,12 +914,12 @@ describe("Travel", () => {
       {
         method: "PATCH",
         token: userToken,
-        body: { notes: "Updated notes", status: "Booked" },
+        body: { region: "Kanto", status: "Booked" },
       },
     );
     expect(status).toBe(200);
     expect(data.id).toBe(travelTripId);
-    expect(data.notes).toBe("Updated notes");
+    expect(data.region).toBe("Kanto");
     expect(data.status).toBe("Booked");
   });
 
