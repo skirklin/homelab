@@ -1,7 +1,6 @@
 # coach — long-running Claude Agent SDK service backing the realtime
-# Coach feature. D1 ships only the health endpoint; the SDK loop and PB
-# realtime subscription land in D2. See apps/life/OBSERVER_BUILD_PLAN.md
-# §"Phase D".
+# Coach feature. D2 wires the SDK loop + PB realtime subscription on top
+# of D1's scaffolding. See apps/life/OBSERVER_BUILD_PLAN.md §"Phase D".
 #
 # Pure TS — no native deps — so a single-stage alpine image works (same
 # shape as services/event-watcher). Runs via `tsx` at startup so we don't
@@ -20,6 +19,14 @@ RUN pnpm install --frozen-lockfile || pnpm install
 
 # Copy source
 COPY services/coach/ services/coach/
+
+# Reuse the cross-source bundle assembler from the api service (warm-context
+# on session boot — see services/coach/src/agent.ts). Imported via relative
+# path; only the two files the bundle actually needs come in to keep the
+# image lean. Bumps the rebuild cost when those files change but that's
+# fine — they change roughly never.
+COPY services/api/src/lib/observer/bundle.ts services/api/src/lib/observer/bundle.ts
+COPY services/api/src/lib/notifications/tz.ts services/api/src/lib/notifications/tz.ts
 
 WORKDIR /workspace/services/coach
 EXPOSE 3030
