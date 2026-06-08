@@ -159,6 +159,88 @@ describe("NotesThread — verdict is per-caller", () => {
   });
 });
 
+describe("NotesThread — verdict lives in the caller's own reaction card", () => {
+  it("renders an editable 'your reaction' card with the picker even when the caller has no note", () => {
+    // Only someone else's note exists; the caller has none yet.
+    setStateNotes([note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }])]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    const reaction = screen.getByTestId("my-reaction");
+    // The editable picker is inside the caller's own reaction card.
+    expect(within(reaction).getByTestId("verdict-loved")).toBeTruthy();
+  });
+
+  it("one verdict tap with no prior note creates exactly ONE note with that verdict and no text", async () => {
+    const user = userEvent.setup();
+    setStateNotes([]); // caller has no note at all
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await user.click(screen.getByTestId("verdict-liked"));
+    // Exactly one create, no modal/editor opened, no second row.
+    expect(addNote).toHaveBeenCalledTimes(1);
+    expect(updateNote).not.toHaveBeenCalled();
+    const entries = addNote.mock.calls[0][4] as LifeEntry[];
+    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "liked" });
+    // No text entry — a bare rating.
+    expect(entries.some((e) => e.name === "notes")).toBe(false);
+  });
+
+  it("with an existing note, the editable picker is in the caller's own card and tapping UPDATES, preserving text", async () => {
+    const user = userEvent.setup();
+    setStateNotes([
+      note("n1", "scott", "activity", "act1", [
+        { name: "verdict", type: "text", value: "liked" },
+        { name: "notes", type: "text", value: "keep my words" },
+      ]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    // The picker sits inside the caller's own note card.
+    const ownCard = screen.getByTestId("note-n1");
+    await user.click(within(ownCard).getByTestId("verdict-loved"));
+    // Updates the existing row, never adds.
+    expect(addNote).not.toHaveBeenCalled();
+    expect(updateNote).toHaveBeenCalledTimes(1);
+    expect(updateNote.mock.calls[0][0]).toBe("n1");
+    const entries = updateNote.mock.calls[0][1] as LifeEntry[];
+    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
+    expect(entries).toContainEqual({ name: "notes", type: "text", value: "keep my words" });
+  });
+
+  it("does not render a separate top-level reaction card once the caller has a note", () => {
+    setStateNotes([
+      note("n1", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    // The standalone "your reaction" placeholder card is gone — the picker rides
+    // in the caller's own note card instead.
+    expect(screen.queryByTestId("my-reaction")).toBeNull();
+    // Exactly one editable verdict picker exists (the caller's), not two.
+    expect(screen.getAllByTestId("verdict-loved")).toHaveLength(1);
+  });
+
+  it("another author's verdict is shown read-only — no clickable picker in their card", () => {
+    setStateNotes([
+      note("n1", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
+      note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    const angelaCard = screen.getByTestId("note-n2");
+    // Their rating is visible…
+    expect(within(angelaCard).getByText(/would skip/i)).toBeTruthy();
+    // …but there is no editable verdict control in their card.
+    expect(within(angelaCard).queryByTestId("verdict-skip")).toBeNull();
+    expect(within(angelaCard).queryByTestId("verdict-loved")).toBeNull();
+  });
+
+  it("an imported note's verdict is read-only, not an editable picker", () => {
+    setStateNotes([
+      note("n0", "", "activity", "act1", [{ name: "verdict", type: "text", value: "meh" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    const importedCard = screen.getByTestId("note-n0");
+    expect(within(importedCard).getByText(/meh/i)).toBeTruthy();
+    expect(within(importedCard).queryByTestId("verdict-meh")).toBeNull();
+  });
+});
+
 describe("NotesThread — no duplicate note on stale-render save", () => {
   it("verdict tap re-checks live state and updates the note that landed since render", async () => {
     const user = userEvent.setup();
