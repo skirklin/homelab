@@ -24,8 +24,11 @@ set -euo pipefail
 # of the wrap (e.g. CI environments that already do their own enforcement),
 # set HOMELAB_DEPLOY_UNBOUNDED=1. Override the cap with HOMELAB_DEPLOY_MEMORY=NG.
 if [ -z "${HOMELAB_DEPLOY_SCOPE:-}" ] && [ -z "${HOMELAB_DEPLOY_UNBOUNDED:-}" ]; then
+    # Probe the actual capability we need (transient scope creation) instead
+    # of checking is-system-running, which returns non-zero on the common
+    # "degraded" state (e.g. pulseaudio failed — irrelevant to us).
     if command -v systemd-run >/dev/null 2>&1 \
-       && systemctl --user is-system-running >/dev/null 2>&1; then
+       && systemd-run --user --scope --quiet --no-block -- true 2>/dev/null; then
         DEPLOY_MEM_CAP="${HOMELAB_DEPLOY_MEMORY:-8G}"
         echo "→ entering memory-bounded scope (MemoryMax=${DEPLOY_MEM_CAP}, swap=0)" >&2
         export HOMELAB_DEPLOY_SCOPE=1
@@ -35,8 +38,8 @@ if [ -z "${HOMELAB_DEPLOY_SCOPE:-}" ] && [ -z "${HOMELAB_DEPLOY_UNBOUNDED:-}" ];
             -p MemorySwapMax=0 \
             -- "$0" "$@"
     else
-        echo "⚠  systemd --user not available — running without memory cap" >&2
-        echo "   (enable systemd in /etc/wsl.conf to bound this deploy)" >&2
+        echo "⚠  systemd --user scope creation unavailable — running without memory cap" >&2
+        echo "   (enable systemd in /etc/wsl.conf + restart WSL to bound this deploy)" >&2
     fi
 fi
 
