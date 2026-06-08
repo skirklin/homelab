@@ -10,10 +10,14 @@ import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { safeTz } from "./tz";
 
-// Life is unhosted from the home shell — it's standalone at life.kirkl.in ONLY.
-// (The old kirkl.in/life module was removed.) Both session wizards and the
-// sampling UI mount at root there, so deep links are root-relative paths.
-const LIFE_ORIGINS = [`https://life.${DOMAIN}`];
+// Life is now standalone at life.kirkl.in (the old kirkl.in/life module was
+// removed) — both session wizards and the sampling UI mount at root there, so
+// deep links are root-relative paths. `https://kirkl.in` is kept as a lower-
+// priority fallback so any LEGACY subscription registered back when life was
+// embedded under kirkl.in/life still receives reminders (otherwise it matches
+// neither the preferred list nor the empty-origin legacy fallback and silently
+// drops). The relative `/morning` path resolves fine on either origin.
+const LIFE_ORIGINS = [`https://life.${DOMAIN}`, `https://${DOMAIN}`];
 
 /**
  * Origin-aware deep link for the morning/evening/weekly session wizards.

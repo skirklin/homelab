@@ -194,15 +194,21 @@ describe("life.ts sessionUrl — same-origin relative path", () => {
   });
 });
 
-// task_deadline_due taps must open the unified task outliner at /tasks (served
-// by the home app at the kirkl.in origin), NOT fall through to the home root /.
-describe("deadlines.ts tasksUrl — opens the task outliner", () => {
-  it("emits the relative /tasks path", () => {
-    expect(tasksUrl()).toBe("/tasks");
+// task_deadline_due taps open the unified task outliner at /tasks — but ONLY
+// the home app (kirkl.in) serves that route. Standalone upkeep has no /tasks
+// route (it would match the `/:slug` catch-all → "list doesn't exist"), so on
+// the upkeep origin the link must fall back to `/` (the usable ListPicker).
+describe("deadlines.ts tasksUrl — origin-aware task outliner link", () => {
+  it("emits /tasks on the home origin (the outliner)", () => {
+    expect(tasksUrl("https://kirkl.in")).toBe("/tasks");
   });
 
-  it("is relative (resolves against the delivery origin), not root", () => {
-    const url = tasksUrl();
+  it("emits / on the upkeep origin (no /tasks route there → ListPicker)", () => {
+    expect(tasksUrl("https://upkeep.kirkl.in")).toBe("/");
+  });
+
+  it("is relative on the home origin, not root", () => {
+    const url = tasksUrl("https://kirkl.in");
     expect(url.startsWith("/")).toBe(true);
     expect(url).not.toBe("/");
     expect(url).not.toContain("https://");
@@ -227,16 +233,32 @@ describe("life + deadline buildUrl delivered through sendPushToUser", () => {
     expect(url).not.toContain("https://life.kirkl.in");
   });
 
-  it("task_deadline_due push lands /tasks, not /", async () => {
+  it("deadline delivered to a kirkl.in sub lands /tasks (the outliner)", async () => {
     const pb = makeFakePb([sub("d1", "https://kirkl.in")]);
     await sendPushToUser(
       pb,
       "user1",
-      { title: "Todo is due", buildUrl: () => tasksUrl() },
-      { preferredOrigins: ["https://upkeep.kirkl.in", "https://kirkl.in"] },
+      { title: "Todo is due", buildUrl: (origin) => tasksUrl(origin) },
+      { preferredOrigins: ["https://kirkl.in", "https://upkeep.kirkl.in"] },
     );
     const url = pushedUrlFor("https://push.example/d1");
     expect(url).toBe("/tasks");
     expect(url).not.toBe("/");
+  });
+
+  // The blocker: a user with ONLY an upkeep.kirkl.in sub (no home sub) must NOT
+  // get /tasks — that route doesn't exist on standalone upkeep (dead-end slug
+  // page). It must fall back to `/` (the usable ListPicker).
+  it("deadline delivered to an upkeep-only sub lands /, not the dead-end /tasks", async () => {
+    const pb = makeFakePb([sub("d2", "https://upkeep.kirkl.in")]);
+    await sendPushToUser(
+      pb,
+      "user1",
+      { title: "Todo is due", buildUrl: (origin) => tasksUrl(origin) },
+      { preferredOrigins: ["https://kirkl.in", "https://upkeep.kirkl.in"] },
+    );
+    const url = pushedUrlFor("https://push.example/d2");
+    expect(url).toBe("/");
+    expect(url).not.toBe("/tasks");
   });
 });
