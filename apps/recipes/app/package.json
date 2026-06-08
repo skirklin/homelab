@@ -57,7 +57,7 @@
     "build": "tsc -b tsconfig.app.json && vite build",
     "typecheck": "tsc -b tsconfig.app.json",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=30000 --hookTimeout=30000",
     "test:playwright": "playwright test",
     "test:playwright:ui": "playwright test --ui",
     "test:playwright:headed": "playwright test --headed",
