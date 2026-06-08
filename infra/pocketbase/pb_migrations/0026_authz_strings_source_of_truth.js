@@ -143,6 +143,15 @@ const PB_RULES = {
     updateRule: '@request.auth.id != "" && owner = @request.auth.id',
     deleteRule: '@request.auth.id != "" && owner = @request.auth.id',
   },
+  // coach_sessions — Phase D realtime Coach Agent SDK session-store mirror.
+  // Kept character-identical to lib/authz-rules.js (the drift test pins this).
+  coach_sessions: {
+    listRule: '@request.auth.id != "" && owner = @request.auth.id',
+    viewRule: '@request.auth.id != "" && owner = @request.auth.id',
+    createRule: '@request.auth.id != "" && owner = @request.auth.id',
+    updateRule: '@request.auth.id != "" && owner = @request.auth.id',
+    deleteRule: '@request.auth.id != "" && owner = @request.auth.id',
+  },
 
   // ===== Upkeep / Tasks =====
   task_lists: {

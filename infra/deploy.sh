@@ -511,6 +511,7 @@ declare -A SERVICE_BUILDS=(
     [ingest]="infra/docker/ingest.Dockerfile"
     [functions]="infra/docker/api.Dockerfile"
     [event-watcher]="infra/docker/event-watcher.Dockerfile"
+    [coach]="infra/docker/coach.Dockerfile"
 )
 
 # Run `docker build` with the given args and report success/failure.

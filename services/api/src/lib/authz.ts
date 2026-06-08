@@ -204,6 +204,35 @@ export async function userOwnsChatMessage(
 }
 
 /**
+ * Verify `coach_sessions[sessionPbId].owner === userId`. Returns `false` if
+ * the row doesn't exist OR the user is not the owner. Mirrors
+ * `userOwnsChatMessage` — admin-PB bypasses PB collection rules, so the
+ * route layer is the only ownership gate for `hlk_`/`mcpat_` callers
+ * touching another user's coach session row.
+ *
+ * Note: D1 has no HTTP routes that touch coach_sessions — the coach service
+ * writes via admin-PB through the SessionStore adapter. This helper exists
+ * for D2+ when an HTTP surface (e.g. "reset my coach context") needs to
+ * verify ownership before mutating a session row.
+ *
+ * coach_sessions is single-owner (migration 20260608_181214). Mirrors
+ * `PB_RULES.coach_sessions.updateRule` (`owner = @request.auth.id`).
+ */
+export async function userOwnsCoachSession(
+  pb: PocketBase,
+  sessionPbId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!sessionPbId || !userId) return false;
+  try {
+    const row = await pb.collection("coach_sessions").getOne(sessionPbId);
+    return row.owner === userId;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Verify `userId` is in `shopping_lists[listId].owners`. Returns `false` if
  * the list doesn't exist OR the user isn't an owner. Mirrors the PB rule
  * `@request.auth.id ?= owners.id` on shopping_lists (migration 0001).
