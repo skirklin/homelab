@@ -880,6 +880,9 @@ importers:
       date-fns-tz:
         specifier: ^3.2.0
         version: 3.2.0(date-fns@4.1.0)
+      eventsource:
+        specifier: ^3.0.5
+        version: 3.0.7
       hono:
         specifier: ^4.7.11
         version: 4.12.12

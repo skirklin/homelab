@@ -22,6 +22,14 @@
  *
  * Port: 3030 (api/functions uses 3000, ingest uses 5555).
  */
+// PB JS SDK's realtime client uses EventSource. Node 22 doesn't expose it
+// on globalThis (despite Web Platform parity claims), so polyfill from the
+// `eventsource` npm package before any PB subscribe() call. Must run before
+// any import that loads chat-subscriber → pocketbase → realtime.
+import { EventSource as EventSourcePolyfill } from "eventsource";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).EventSource = EventSourcePolyfill;
+
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import PocketBase from "pocketbase";
