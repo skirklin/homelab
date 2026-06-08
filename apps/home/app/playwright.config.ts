@@ -19,8 +19,14 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Local retry=1 absorbs a transient host-contention race during the deploy
+  // gate (parallel Claude sessions share a swap-less box). A genuinely broken
+  // spec still fails twice. Flake-absorber for resource contention, NOT a
+  // license to ship flaky code. CI keeps 2.
+  retries: process.env.CI ? 2 : 1,
+  // Cap local workers (was unbounded = one per CPU) so a gate run on a
+  // contended box doesn't spawn a worker storm against the shared test PB.
+  workers: process.env.CI ? 1 : 2,
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {

@@ -197,8 +197,18 @@ elif [ "$PUSH_ONLY" = false ]; then
         exit 1
     fi
 
-    echo "→ Running \`pnpm test\`..."
-    if ! pnpm test; then
+    # Cap each package's vitest worker pool to 2 forks for the gate run (the
+    # `-- --max-workers=2` passthrough reaches every `vitest run`). turbo is
+    # already at `--concurrency=1` so packages run one-at-a-time; this bounds
+    # the *within-package* file parallelism too. The point is peak memory:
+    # several parallel Claude sessions each run their own gate against their own
+    # PB container on a box with no swap, and an uncapped vitest pool spawns
+    # one fork per CPU — the host-contention races that flake unrelated e2e
+    # specs (shopping sharing, upkeep assertions) trace to that RSS spike, not
+    # real regressions. Invoke turbo directly (not `pnpm test`) because pnpm
+    # eats the first `--`, so the passthrough never reaches turbo otherwise.
+    echo "→ Running \`turbo run test\` (gate; --max-workers=2)..."
+    if ! pnpm exec turbo run test --concurrency=1 -- --max-workers=2; then
         {
             echo ""
             echo "${RED}[deploy.sh] Pre-deploy gate failed: \`pnpm test\`.${NC}"
