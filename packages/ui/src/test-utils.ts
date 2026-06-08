@@ -604,7 +604,7 @@ export async function createTestTask(
     intervalDays?: number;
     frequency?: { value: number; unit: string };
     lastCompleted?: string | null;
-    notifyUsers?: string[];
+    assignees?: string[];
   }
 ): Promise<{ id: string }> {
   const freq = overrides?.frequency || {
@@ -617,7 +617,7 @@ export async function createTestTask(
     room_id: overrides?.roomId || "general",
     frequency: freq,
     last_completed: overrides?.lastCompleted || null,
-    notify_users: overrides?.notifyUsers || [],
+    assignees: overrides?.assignees || [],
   });
   cleanup.track("tasks", record.id);
   return { id: record.id };

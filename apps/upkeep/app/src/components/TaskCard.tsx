@@ -130,7 +130,7 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
   const upkeep = useUpkeepBackend();
   const [expanded, setExpanded] = useState(false);
   const userId = user?.uid;
-  const isNotified = userId ? task.notifyUsers.includes(userId) : false;
+  const isNotified = userId ? task.assignees.includes(userId) : false;
   const hasNotes = !!task.description?.trim();
   const snoozed = isTaskSnoozed(task);
 

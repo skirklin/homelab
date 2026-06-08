@@ -7,13 +7,15 @@
  * woke up Angela.
  *
  * The fix is an `inherit`-strategy cascade (resolveNotifyRecipients): nearest
- * ancestor on the node's `path` chain with an explicit notify_users wins, self
- * overrides ancestors, and the terminal floor is the task's OWN created_by —
- * NOT the list owners. This test pins:
- *   - bare task, created_by = A, no notify config anywhere → [A] only (the bug)
- *   - task whose ancestor container has notify_users = [B]  → [B]
- *   - task with its own notify_users = [A]                  → [A] (override)
- *   - POST /tasks persists notify_users + stamps created_by (was dropped)
+ * ancestor on the node's `path` chain with an explicit `assignees` set wins,
+ * self overrides ancestors, and the terminal floor is the task's OWN
+ * created_by — NOT the list owners. `assignees` (formerly `notify_users`) is
+ * the sole notification driver. This test pins:
+ *   - bare task, created_by = A, no assignees anywhere    → [A] only (the bug)
+ *   - task whose ancestor container has assignees = [B]   → [B]
+ *   - task with its own assignees = [A]                   → [A] (override)
+ *   - POST /tasks defaults assignees = [creator] when omitted
+ *   - POST /tasks with explicit assignees=[B] (created by A) → resolves to [B]
  *
  * Builds real PB records so the `path` format (self-inclusive, "/"-joined ids)
  * is exercised end-to-end, then resolves via the same helper the cron uses.
@@ -88,7 +90,7 @@ async function makeTask(fields: {
   list: string;
   name: string;
   parent_id?: string;
-  notify_users?: string[];
+  assignees?: string[];
   created_by?: string;
   task_type?: string;
   deadline?: string;
@@ -98,7 +100,7 @@ async function makeTask(fields: {
     list: fields.list,
     name: fields.name,
     parent_id: fields.parent_id || "",
-    notify_users: fields.notify_users || [],
+    assignees: fields.assignees || [],
     created_by: fields.created_by || "",
     task_type: fields.task_type || "one_shot",
     deadline: fields.deadline || null,
@@ -152,12 +154,12 @@ describe("resolveNotifyRecipients — inherit cascade", () => {
     expect(recipients).not.toContain(userB.id);
   });
 
-  it("ancestor container with notify_users=[B] → child resolves to [B]", async () => {
+  it("ancestor container with assignees=[B] → child resolves to [B]", async () => {
     const container = await makeTask({
       list: sharedListId,
       name: "Trips/Paris",
       created_by: userA.id,
-      notify_users: [userB.id],
+      assignees: [userB.id],
     });
     const child = await makeTask({
       list: sharedListId,
@@ -174,19 +176,19 @@ describe("resolveNotifyRecipients — inherit cascade", () => {
     expect(recipients).toEqual([userB.id]);
   });
 
-  it("task's own notify_users=[A] overrides an ancestor's [B]", async () => {
+  it("task's own assignees=[A] overrides an ancestor's [B]", async () => {
     const container = await makeTask({
       list: sharedListId,
       name: "Trips/Tokyo",
       created_by: userA.id,
-      notify_users: [userB.id],
+      assignees: [userB.id],
     });
     const child = await makeTask({
       list: sharedListId,
       name: "Personal errand",
       parent_id: container.id,
       created_by: userB.id,
-      notify_users: [userA.id], // self overrides ancestor
+      assignees: [userA.id], // self overrides ancestor
       deadline: new Date().toISOString(),
       deadline_lead_days: 7,
     });
@@ -197,15 +199,15 @@ describe("resolveNotifyRecipients — inherit cascade", () => {
     expect(recipients).toEqual([userA.id]);
   });
 
-  it("legacy task: no notify config AND no created_by → falls back to list owners", () => {
-    const legacy: NotifyNode = { path: "legacyid", notify_users: [], created_by: "" };
+  it("legacy task: no assignees AND no created_by → falls back to list owners", () => {
+    const legacy: NotifyNode = { path: "legacyid", assignees: [], created_by: "" };
     const recipients = resolveNotifyRecipients(legacy, new Map(), [userA.id, userB.id]);
     expect(new Set(recipients)).toEqual(new Set([userA.id, userB.id]));
   });
 });
 
 describe("POST /tasks create path", () => {
-  it("persists an explicit notify_users and stamps created_by from auth", async () => {
+  it("persists an explicit assignees and stamps created_by from auth", async () => {
     const resp = await app.request("/data/tasks", {
       method: "POST",
       headers: {
@@ -215,7 +217,7 @@ describe("POST /tasks create path", () => {
       body: JSON.stringify({
         list: sharedListId,
         name: "Created via API",
-        notify_users: [userB.id],
+        assignees: [userB.id],
         deadline: new Date().toISOString(),
         deadline_lead_days: 3,
       }),
@@ -224,8 +226,69 @@ describe("POST /tasks create path", () => {
     const { id } = (await resp.json()) as { id: string };
 
     const row = await adminPb.collection("tasks").getOne(id);
-    expect(row.notify_users).toEqual([userB.id]);
+    expect(row.assignees).toEqual([userB.id]);
     // created_by stamped from the authenticated caller (A), not client body.
     expect(row.created_by).toBe(userA.id);
+  });
+
+  it("defaults assignees = [creator] when none supplied, and the cascade resolves to the creator", async () => {
+    const resp = await app.request("/data/tasks", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${userA.apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        list: sharedListId,
+        name: "Bare task, no assignees",
+        deadline: new Date().toISOString(),
+        deadline_lead_days: 3,
+      }),
+    });
+    expect(resp.status).toBe(201);
+    const { id } = (await resp.json()) as { id: string };
+
+    const row = await adminPb.collection("tasks").getOne(id);
+    // The create path seeds assignees to the creator — the cascade no longer
+    // has to fall through to created_by, and never fans out to all owners.
+    expect(row.assignees).toEqual([userA.id]);
+
+    const recipients = resolveNotifyRecipients(
+      row as unknown as NotifyNode,
+      new Map(),
+      [userA.id, userB.id],
+    );
+    expect(recipients).toEqual([userA.id]);
+    expect(recipients).not.toContain(userB.id);
+  });
+
+  it("explicit assignees=[B] on a task created by A → cascade resolves to [B] (reassignment)", async () => {
+    const resp = await app.request("/data/tasks", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${userA.apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        list: sharedListId,
+        name: "Assigned to B",
+        assignees: [userB.id],
+        deadline: new Date().toISOString(),
+        deadline_lead_days: 3,
+      }),
+    });
+    expect(resp.status).toBe(201);
+    const { id } = (await resp.json()) as { id: string };
+
+    const row = await adminPb.collection("tasks").getOne(id);
+    expect(row.created_by).toBe(userA.id); // provenance is still A
+    const recipients = resolveNotifyRecipients(
+      row as unknown as NotifyNode,
+      new Map(),
+      [userA.id, userB.id],
+    );
+    // Reassignment works: the notification goes to B, not the creator A.
+    expect(recipients).toEqual([userB.id]);
+    expect(recipients).not.toContain(userA.id);
   });
 });

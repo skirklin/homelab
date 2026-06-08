@@ -34,7 +34,9 @@ export interface Task {
   deadlineLeadDays: number | null;
   completed: boolean;
   snoozedUntil: Date | null;
-  notifyUsers: string[];
+  /** Users the task is assigned to — the sole notification driver. */
+  assignees: string[];
+  /** Immutable provenance: who created the task. Cascade's terminal floor. */
   createdBy: string;
   tags: string[];
   collapsed: boolean;

@@ -108,7 +108,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
           deadlineLeadDays: null,
           completed: false,
           snoozedUntil: null,
-          notifyUsers: [],
+          assignees: [],
           tags: [],
           collapsed: false,
           cleared: false,

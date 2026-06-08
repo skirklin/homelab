@@ -2526,7 +2526,7 @@ dataRoutes.post("/tasks", handler(async (c) => {
     task_type?: string;
     frequency?: unknown;
     tags?: string[];
-    notify_users?: string[];
+    assignees?: string[];
     deadline?: string;
     deadline_lead_days?: number;
   }>();
@@ -2544,15 +2544,16 @@ dataRoutes.post("/tasks", handler(async (c) => {
     task_type: body.task_type || "one_shot",
     frequency: body.frequency || 0,
     tags: body.tags || [],
-    // Persist an explicitly-supplied notify_users (MCP add_task/add_trip_task
-    // send it). Previously dropped on create — only PATCH honored it — so the
-    // deadline cascade had nothing to inherit.
-    notify_users: body.notify_users || [],
+    // assignees is the sole notification driver. Persist an explicit set when
+    // the caller supplies one; otherwise DEFAULT to the creator so a bare task
+    // notifies just the person who made it (the cascade still floors on
+    // created_by, but seeding assignees here keeps the create path the single
+    // source of the "assigned to me by default" behavior).
+    assignees: body.assignees?.length ? body.assignees : [userId],
     // Stamp the creator server-side from the authenticated identity (never
-    // client-supplied). The deadline-notification cascade's terminal floor is
-    // created_by; without this an un-configured task would fall back to all
-    // list owners — exactly the bug. UI-created tasks (home/upkeep backend)
-    // previously left this empty.
+    // client-supplied). created_by is immutable provenance and the cascade's
+    // terminal floor. UI-created tasks (home/upkeep backend) previously left
+    // this empty.
     created_by: userId,
     deadline: body.deadline || null,
     deadline_lead_days: body.deadline_lead_days ?? null,
@@ -2585,7 +2586,7 @@ dataRoutes.patch("/tasks/:id", handler(async (c) => {
   }
   const body = await c.req.json<Record<string, unknown>>();
   const allowed = ["name", "description", "task_type", "frequency", "position",
-    "completed", "snoozed_until", "tags", "collapsed", "cleared", "notify_users",
+    "completed", "snoozed_until", "tags", "collapsed", "cleared", "assignees",
     "deadline", "deadline_lead_days"];
   const data: Record<string, unknown> = {};
   for (const key of allowed) {

@@ -109,7 +109,7 @@ The homelab MCP tools are available as `mcp__homelab__*`. Use them whenever the 
 - `list_tasks` — list tasks (filter by parent_id, tag, task_type)
 
 **Tasks (write):**
-- `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot, notify_users)
+- `add_task` — create a task (supports nesting via parent_id, recurring vs one_shot, assignees)
 - `add_trip_task` — add a trip-prep task; auto-nests under `Trips/<destination>/` and tags `travel:<tripId>`. Pass `activity_id` to also tag `activity:<id>` so the Prep tab groups it under that activity. (Use this for trip prep instead of raw `add_task`.)
 - `update_task` — update fields (typed schema; pass only the fields to change). To reparent or move between lists use `move_task` instead.
 - `move_task` — reparent and/or move between lists; recomputes descendant `path` atomically

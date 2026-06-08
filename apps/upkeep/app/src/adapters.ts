@@ -23,7 +23,7 @@ export function taskFromBackend(t: BackendTask): Task {
     deadlineLeadDays: t.deadlineLeadDays,
     completed: t.completed,
     snoozedUntil: t.snoozedUntil,
-    notifyUsers: t.notifyUsers,
+    assignees: t.assignees,
     createdBy: t.createdBy,
     tags: t.tags,
     collapsed: t.collapsed,
