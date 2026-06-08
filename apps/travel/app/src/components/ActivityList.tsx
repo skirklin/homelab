@@ -244,7 +244,7 @@ export function ActivityList({ activities, showReflection = false, scheduledIds 
                 )}
                 {showReflection && !isFlight && (
                   <div style={{ marginTop: 4 }}>
-                    <NotesThread subjectType="activity" subjectId={a.id} showVerdict />
+                    <NotesThread subjectType="activity" subjectId={a.id} showVerdict title={a.name} />
                   </div>
                 )}
               </Body>

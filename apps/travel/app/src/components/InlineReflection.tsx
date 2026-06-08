@@ -23,27 +23,17 @@ interface ActivityReflectionProps {
 export function ActivityReflection({ activity }: ActivityReflectionProps) {
   return (
     <ActivityReflectionRow onClick={(e) => e.stopPropagation()}>
-      <NotesThread subjectType="activity" subjectId={activity.id} showVerdict />
+      <NotesThread subjectType="activity" subjectId={activity.id} showVerdict title={activity.name} />
     </ActivityReflectionRow>
   );
 }
 
 // ── Day-level journal (per-user thread of text/highlight/mood) ───
 
-const DayJournalCard = styled.div`
-  margin-top: 12px;
-  padding: 10px 12px;
+const DayJournalRow = styled.div`
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid #d6e4ff;
-  background: #fafcff;
-  border-radius: 0 0 6px 6px;
-`;
-
-const DayJournalLabel = styled.div`
-  font-size: 11px;
-  font-weight: 600;
-  color: #1677ff;
-  letter-spacing: 0.4px;
-  margin-bottom: 6px;
 `;
 
 interface DayJournalProps {
@@ -53,10 +43,13 @@ interface DayJournalProps {
 
 export function DayJournal({ tripId, date }: DayJournalProps) {
   return (
-    <DayJournalCard onClick={(e) => e.stopPropagation()}>
-      <DayJournalLabel>JOURNAL</DayJournalLabel>
-      <NotesThread subjectType="day" subjectId={daySubjectId(tripId, date)} />
-    </DayJournalCard>
+    <DayJournalRow onClick={(e) => e.stopPropagation()}>
+      <NotesThread
+        subjectType="day"
+        subjectId={daySubjectId(tripId, date)}
+        title={`Journal · ${date}`}
+      />
+    </DayJournalRow>
   );
 }
 

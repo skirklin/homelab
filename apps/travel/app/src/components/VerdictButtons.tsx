@@ -33,6 +33,14 @@ const VERDICTS: { key: ActivityVerdict; emoji: string; label: string }[] = [
   { key: "skip", emoji: "⏭️", label: "Would skip" },
 ];
 
+/**
+ * Verdict → glyph, the single source for the emoji. Reused by the collapsed
+ * NotesThread trigger so there's never a second verdict→emoji map to drift.
+ */
+export const VERDICT_EMOJI: Record<ActivityVerdict, string> = Object.fromEntries(
+  VERDICTS.map((v) => [v.key, v.emoji]),
+) as Record<ActivityVerdict, string>;
+
 interface Props {
   /** The rating being composed/edited on THIS note's draft (optional). */
   current: ActivityVerdict | undefined;

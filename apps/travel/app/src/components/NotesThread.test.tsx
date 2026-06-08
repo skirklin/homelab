@@ -5,6 +5,11 @@
  * tap-to-rate and no single "your reaction" card. "Add a note" is always
  * available to the caller; adding always CREATES a new note, editing updates
  * that one note by id, and delete removes only that id.
+ *
+ * Presentation: the thread is COLLAPSED behind a compact trigger button. The
+ * note cards + composer mount only once the trigger opens the modal. The
+ * trigger summarises state at-a-glance (the caller's own verdict glyph + a note
+ * count for activities; a "Notes"/"Journal" label + count for day/trip).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -67,25 +72,116 @@ function note(
   return { id, log: "log1", subjectType, subjectId, createdBy, entries, created, updated: created };
 }
 
-describe("NotesThread — rendering", () => {
-  it("renders every note with its author's name, all cross-visible", () => {
+/** Open the collapsed thread's modal by clicking its trigger button. */
+async function openThread(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("notes-trigger"));
+}
+
+describe("NotesThread — collapsed by default", () => {
+  it("renders only a trigger button; note cards + composer are NOT in the DOM until opened", () => {
+    setStateNotes([
+      note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "loved the view" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+
+    // The trigger is present...
+    expect(screen.getByTestId("notes-trigger")).toBeTruthy();
+    // ...but the thread body (note card + add affordance) is not yet mounted.
+    expect(screen.queryByTestId("note-n1")).toBeNull();
+    expect(screen.queryByTestId("note-add")).toBeNull();
+    expect(screen.queryByText(/loved the view/)).toBeNull();
+  });
+
+  it("the trigger is present even with zero notes (so the first note can be added)", () => {
+    setStateNotes([]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    expect(screen.getByTestId("notes-trigger")).toBeTruthy();
+  });
+
+  it("clicking the trigger opens the modal: existing notes + composer become visible", async () => {
+    const user = userEvent.setup();
+    setStateNotes([
+      note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "loved the view" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+
+    await openThread(user);
+    expect(screen.getByTestId("note-n1")).toBeTruthy();
+    expect(screen.getByText(/loved the view/)).toBeTruthy();
+    expect(screen.getByTestId("note-add")).toBeTruthy();
+  });
+});
+
+describe("NotesThread — trigger summary reflects state", () => {
+  it("shows the caller's own verdict glyph when they have a rated note", () => {
+    setStateNotes([
+      note("n1", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    const trigger = screen.getByTestId("notes-trigger");
+    // ❤️ is the loved glyph (reused from VerdictButtons).
+    expect(within(trigger).getByText("❤️")).toBeTruthy();
+  });
+
+  it("shows a note count when notes exist", () => {
+    setStateNotes([
+      note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "a" }]),
+      note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "b" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    expect(within(screen.getByTestId("notes-trigger")).getByText("2")).toBeTruthy();
+  });
+
+  it("shows a neutral 'Feedback' affordance when there are no notes and no rating", () => {
+    setStateNotes([]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    expect(within(screen.getByTestId("notes-trigger")).getByText(/Feedback/i)).toBeTruthy();
+  });
+
+  it("only the CALLER's own verdict drives the glyph — not another author's", () => {
+    setStateNotes([
+      note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }]),
+    ]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    const trigger = screen.getByTestId("notes-trigger");
+    // No own rating → neutral label, not Angela's ⏭️.
+    expect(within(trigger).queryByText("⏭️")).toBeNull();
+  });
+
+  it("day trigger shows a 'Notes' label and no verdict glyph", () => {
+    setStateNotes([
+      note("d1", "scott", "day", "trip1:2026-06-01", [{ name: "verdict", type: "text", value: "loved" }]),
+    ]);
+    render(<NotesThread subjectType="day" subjectId="trip1:2026-06-01" />);
+    const trigger = screen.getByTestId("notes-trigger");
+    expect(within(trigger).getByText(/Notes|Journal/i)).toBeTruthy();
+    expect(within(trigger).queryByText("❤️")).toBeNull();
+  });
+});
+
+describe("NotesThread — rendering (inside the opened modal)", () => {
+  it("renders every note with its author's name, all cross-visible", async () => {
+    const user = userEvent.setup();
     setStateNotes([
       note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "loved the view" }]),
       note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "too crowded" }], "2026-06-02T00:00:00Z"),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
+    await openThread(user);
     expect(screen.getByText("Scott")).toBeTruthy();
     expect(screen.getByText("Angela")).toBeTruthy();
     expect(screen.getByText(/loved the view/)).toBeTruthy();
     expect(screen.getByText(/too crowded/)).toBeTruthy();
   });
 
-  it("shows edit/delete affordances ONLY on the current user's own notes", () => {
+  it("shows edit/delete affordances ONLY on the current user's own notes", async () => {
+    const user = userEvent.setup();
     setStateNotes([
       note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "mine" }]),
       note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "theirs" }]),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
+    await openThread(user);
     const scottRow = screen.getByTestId("note-n1");
     const angelaRow = screen.getByTestId("note-n2");
     expect(within(scottRow).queryByTestId("note-edit")).not.toBeNull();
@@ -94,11 +190,13 @@ describe("NotesThread — rendering", () => {
     expect(within(angelaRow).queryByTestId("note-delete")).toBeNull();
   });
 
-  it("renders createdBy==='' as Imported, unattributed and non-editable", () => {
+  it("renders createdBy==='' as Imported, unattributed and non-editable", async () => {
+    const user = userEvent.setup();
     setStateNotes([
       note("n0", "", "activity", "act1", [{ name: "notes", type: "text", value: "legacy note" }]),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
+    await openThread(user);
     const row = screen.getByTestId("note-n0");
     expect(within(row).getByText(/Imported/i)).toBeTruthy();
     expect(within(row).queryByTestId("note-edit")).toBeNull();
@@ -106,9 +204,11 @@ describe("NotesThread — rendering", () => {
     expect(screen.getByText(/legacy note/)).toBeTruthy();
   });
 
-  it("always offers an add-note affordance, even when the caller already has a note", () => {
+  it("always offers an add-note affordance, even when the caller already has a note", async () => {
+    const user = userEvent.setup();
     setStateNotes([note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "mine" }])]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
+    await openThread(user);
     expect(screen.queryByTestId("note-add")).not.toBeNull();
   });
 });
@@ -118,6 +218,7 @@ describe("NotesThread — multiple notes per user", () => {
     const user = userEvent.setup();
     setStateNotes([note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "first visit" }])]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await openThread(user);
 
     await user.click(screen.getByTestId("note-add"));
     const editor = screen.getByTestId("note-add-editor");
@@ -135,6 +236,7 @@ describe("NotesThread — multiple notes per user", () => {
     const user = userEvent.setup();
     setStateNotes([]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await openThread(user);
 
     await user.click(screen.getByTestId("note-add"));
     const editor = screen.getByTestId("note-add-editor");
@@ -151,6 +253,7 @@ describe("NotesThread — multiple notes per user", () => {
     const user = userEvent.setup();
     setStateNotes([]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await openThread(user);
 
     await user.click(screen.getByTestId("note-add"));
     const editor = screen.getByTestId("note-add-editor");
@@ -167,6 +270,7 @@ describe("NotesThread — multiple notes per user", () => {
     const user = userEvent.setup();
     setStateNotes([]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await openThread(user);
 
     await user.click(screen.getByTestId("note-add"));
     const editor = screen.getByTestId("note-add-editor");
@@ -191,6 +295,7 @@ describe("NotesThread — editing isolates to one note", () => {
       note("n2", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "second" }], "2026-06-02T00:00:00Z"),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await openThread(user);
 
     const n1Card = screen.getByTestId("note-n1");
     await user.click(within(n1Card).getByTestId("note-edit"));
@@ -217,6 +322,7 @@ describe("NotesThread — editing isolates to one note", () => {
       note("n2", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "second" }], "2026-06-02T00:00:00Z"),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" />);
+    await openThread(user);
 
     const n2Card = screen.getByTestId("note-n2");
     await user.click(within(n2Card).getByTestId("note-delete"));
@@ -229,22 +335,26 @@ describe("NotesThread — editing isolates to one note", () => {
 });
 
 describe("NotesThread — others' ratings are read-only", () => {
-  it("another author's verdict renders as a read-only tag, no editable picker", () => {
+  it("another author's verdict renders as a read-only tag, no editable picker", async () => {
+    const user = userEvent.setup();
     setStateNotes([
       note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }]),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await openThread(user);
     const angelaCard = screen.getByTestId("note-n2");
     expect(within(angelaCard).getByText(/would skip/i)).toBeTruthy();
     expect(within(angelaCard).queryByTestId("verdict-skip")).toBeNull();
     expect(within(angelaCard).queryByTestId("verdict-loved")).toBeNull();
   });
 
-  it("an imported note's verdict is read-only, not an editable picker", () => {
+  it("an imported note's verdict is read-only, not an editable picker", async () => {
+    const user = userEvent.setup();
     setStateNotes([
       note("n0", "", "activity", "act1", [{ name: "verdict", type: "text", value: "meh" }]),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+    await openThread(user);
     const importedCard = screen.getByTestId("note-n0");
     expect(within(importedCard).getByText(/meh/i)).toBeTruthy();
     expect(within(importedCard).queryByTestId("verdict-meh")).toBeNull();
@@ -252,12 +362,14 @@ describe("NotesThread — others' ratings are read-only", () => {
 });
 
 describe("NotesThread — day subject", () => {
-  it("filters notes by the composite day subjectId", () => {
+  it("filters notes by the composite day subjectId", async () => {
+    const user = userEvent.setup();
     setStateNotes([
       note("d1", "scott", "day", "trip1:2026-06-01", [{ name: "text", type: "text", value: "great day" }]),
       note("d2", "angela", "day", "trip1:2026-06-02", [{ name: "text", type: "text", value: "other day" }]),
     ]);
     render(<NotesThread subjectType="day" subjectId="trip1:2026-06-01" />);
+    await openThread(user);
     expect(screen.getByText(/great day/)).toBeTruthy();
     expect(screen.queryByText(/other day/)).toBeNull();
   });
@@ -267,6 +379,7 @@ describe("NotesThread — day subject", () => {
     // Caller already has a day note — adding another is still allowed (multiple OK).
     setStateNotes([note("d1", "scott", "day", "trip1:2026-06-01", [{ name: "text", type: "text", value: "first" }])]);
     render(<NotesThread subjectType="day" subjectId="trip1:2026-06-01" />);
+    await openThread(user);
 
     await user.click(screen.getByTestId("note-add"));
     const editor = screen.getByTestId("note-add-editor");
@@ -282,5 +395,27 @@ describe("NotesThread — day subject", () => {
     const [, subjectType, , , entries] = addNote.mock.calls[0];
     expect(subjectType).toBe("day");
     expect(entries).toContainEqual({ name: "text", type: "text", value: "second day note" });
+  });
+});
+
+describe("NotesThread — trip subject", () => {
+  it("trip composer is text-only (no rating, no highlight/mood)", async () => {
+    const user = userEvent.setup();
+    setStateNotes([]);
+    render(<NotesThread subjectType="trip" subjectId="trip1" />);
+    await openThread(user);
+
+    await user.click(screen.getByTestId("note-add"));
+    const editor = screen.getByTestId("note-add-editor");
+    expect(within(editor).queryByTestId("verdict-loved")).toBeNull();
+    expect(within(editor).queryByPlaceholderText(/Best moment/i)).toBeNull();
+
+    await user.type(within(editor).getByRole("textbox"), "trip thoughts");
+    await user.click(within(editor).getByText("Save"));
+
+    expect(addNote).toHaveBeenCalledTimes(1);
+    const [, subjectType, , , entries] = addNote.mock.calls[0];
+    expect(subjectType).toBe("trip");
+    expect(entries).toContainEqual({ name: "notes", type: "text", value: "trip thoughts" });
   });
 });
