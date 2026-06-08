@@ -1,8 +1,10 @@
 /**
- * Phase 4 — the per-user notes thread. Each author gets their own stacked,
- * cross-visible note; only the current user may edit/delete their own; an
- * imported (createdBy==="") row is read-only and unattributed; and
- * VerdictButtons reflects the CALLER'S verdict, not someone else's.
+ * The per-user notes thread. Notes are independent entries: a user may leave
+ * MULTIPLE notes on the same subject. A rating (verdict) is an optional field
+ * composed INSIDE a note (activity subjects only) — there is no standalone
+ * tap-to-rate and no single "your reaction" card. "Add a note" is always
+ * available to the caller; adding always CREATES a new note, editing updates
+ * that one note by id, and delete removes only that id.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -22,17 +24,6 @@ let stateNotes = new Map<string, TravelNote>();
 /** Replace the mock state's notes from a flat list (test ergonomics). */
 function setStateNotes(list: TravelNote[]) {
   stateNotes = new Map(list.map((n) => [n.id, n]));
-}
-
-/**
- * Mutate the SAME Map in place — no new reference. This reproduces the stale-
- * render window: the component's `useMemo([state.notes])` keeps `mine` frozen
- * (the Map ref is unchanged) while a live re-read of `state.notes.values()`
- * sees the freshly-landed note. A correct write handler must consult the live
- * read at call time, not the frozen `mine`.
- */
-function injectNoteInPlace(n: TravelNote) {
-  stateNotes.set(n.id, n);
 }
 
 vi.mock("@kirkl/shared", async () => {
@@ -76,8 +67,8 @@ function note(
   return { id, log: "log1", subjectType, subjectId, createdBy, entries, created, updated: created };
 }
 
-describe("NotesThread — activity reflection", () => {
-  it("renders one note per author with their name, both cross-visible", () => {
+describe("NotesThread — rendering", () => {
+  it("renders every note with its author's name, all cross-visible", () => {
     setStateNotes([
       note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "loved the view" }]),
       note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "too crowded" }], "2026-06-02T00:00:00Z"),
@@ -89,7 +80,7 @@ describe("NotesThread — activity reflection", () => {
     expect(screen.getByText(/too crowded/)).toBeTruthy();
   });
 
-  it("shows edit/delete affordances ONLY on the current user's own note", () => {
+  it("shows edit/delete affordances ONLY on the current user's own notes", () => {
     setStateNotes([
       note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "mine" }]),
       note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "theirs" }]),
@@ -115,117 +106,136 @@ describe("NotesThread — activity reflection", () => {
     expect(screen.getByText(/legacy note/)).toBeTruthy();
   });
 
-  it("offers an add-my-note affordance only when the caller has no note yet", () => {
-    // Caller (scott) already has a note → no add affordance.
+  it("always offers an add-note affordance, even when the caller already has a note", () => {
     setStateNotes([note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "mine" }])]);
-    const { rerender } = render(<NotesThread subjectType="activity" subjectId="act1" />);
-    expect(screen.queryByTestId("note-add")).toBeNull();
-
-    // Only someone else's note → caller may add their own.
-    setStateNotes([note("n2", "angela", "activity", "act1", [{ name: "notes", type: "text", value: "theirs" }])]);
-    rerender(<NotesThread subjectType="activity" subjectId="act1" />);
+    render(<NotesThread subjectType="activity" subjectId="act1" />);
     expect(screen.queryByTestId("note-add")).not.toBeNull();
   });
 });
 
-describe("NotesThread — verdict is per-caller", () => {
-  it("VerdictButtons reflects the caller's own verdict, not someone else's", () => {
-    setStateNotes([
-      // Scott (caller) loved it; Angela skipped it.
-      note("n1", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
-      note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }]),
-    ]);
-    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
-    const loved = screen.getByTestId("verdict-loved");
-    const skip = screen.getByTestId("verdict-skip");
-    // The caller's active verdict is "loved"; "skip" (Angela's) must NOT be active.
-    expect(loved.getAttribute("data-active")).toBe("true");
-    expect(skip.getAttribute("data-active")).toBe("false");
-  });
-
-  it("clicking a verdict upserts into the caller's own note", async () => {
+describe("NotesThread — multiple notes per user", () => {
+  it("adding a second note for the same activity creates a NEW note (no upsert)", async () => {
     const user = userEvent.setup();
-    // Caller has no note yet.
-    setStateNotes([note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }])]);
+    setStateNotes([note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "first visit" }])]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
-    await user.click(screen.getByTestId("verdict-loved"));
-    expect(addNote).toHaveBeenCalledTimes(1);
-    const [logId, subjectType, subjectId, userId, entries] = addNote.mock.calls[0];
-    expect(logId).toBe("log1");
-    expect(subjectType).toBe("activity");
-    expect(subjectId).toBe("act1");
-    expect(userId).toBe("scott");
-    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
-  });
-});
 
-describe("NotesThread — verdict lives in the caller's own reaction card", () => {
-  it("renders an editable 'your reaction' card with the picker even when the caller has no note", () => {
-    // Only someone else's note exists; the caller has none yet.
-    setStateNotes([note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }])]);
-    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
-    const reaction = screen.getByTestId("my-reaction");
-    // The editable picker is inside the caller's own reaction card.
-    expect(within(reaction).getByTestId("verdict-loved")).toBeTruthy();
-  });
+    await user.click(screen.getByTestId("note-add"));
+    const editor = screen.getByTestId("note-add-editor");
+    await user.type(within(editor).getByRole("textbox"), "second visit, different");
+    await user.click(within(editor).getByText("Save"));
 
-  it("one verdict tap with no prior note creates exactly ONE note with that verdict and no text", async () => {
-    const user = userEvent.setup();
-    setStateNotes([]); // caller has no note at all
-    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
-    await user.click(screen.getByTestId("verdict-liked"));
-    // Exactly one create, no modal/editor opened, no second row.
+    // A brand-new note, NOT an update of the existing one.
     expect(addNote).toHaveBeenCalledTimes(1);
     expect(updateNote).not.toHaveBeenCalled();
+    const [, , , , entries] = addNote.mock.calls[0];
+    expect(entries).toContainEqual({ name: "notes", type: "text", value: "second visit, different" });
+  });
+
+  it("a note can be saved rating-only (no text)", async () => {
+    const user = userEvent.setup();
+    setStateNotes([]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+
+    await user.click(screen.getByTestId("note-add"));
+    const editor = screen.getByTestId("note-add-editor");
+    await user.click(within(editor).getByTestId("verdict-loved"));
+    await user.click(within(editor).getByText("Save"));
+
+    expect(addNote).toHaveBeenCalledTimes(1);
     const entries = addNote.mock.calls[0][4] as LifeEntry[];
-    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "liked" });
-    // No text entry — a bare rating.
+    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
     expect(entries.some((e) => e.name === "notes")).toBe(false);
   });
 
-  it("with an existing note, the editable picker is in the caller's own card and tapping UPDATES, preserving text", async () => {
+  it("a note can be saved text-only (no rating)", async () => {
+    const user = userEvent.setup();
+    setStateNotes([]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+
+    await user.click(screen.getByTestId("note-add"));
+    const editor = screen.getByTestId("note-add-editor");
+    await user.type(within(editor).getByRole("textbox"), "just words");
+    await user.click(within(editor).getByText("Save"));
+
+    expect(addNote).toHaveBeenCalledTimes(1);
+    const entries = addNote.mock.calls[0][4] as LifeEntry[];
+    expect(entries).toContainEqual({ name: "notes", type: "text", value: "just words" });
+    expect(entries.some((e) => e.name === "verdict")).toBe(false);
+  });
+
+  it("an all-empty compose is rejected — no addNote", async () => {
+    const user = userEvent.setup();
+    setStateNotes([]);
+    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
+
+    await user.click(screen.getByTestId("note-add"));
+    const editor = screen.getByTestId("note-add-editor");
+    // No rating, no text → Save is disabled, so nothing can be created.
+    const saveBtn = within(editor).getByText("Save").closest("button");
+    expect(saveBtn?.disabled).toBe(true);
+
+    // Typing then clearing leaves it empty again — still no create path.
+    const textbox = within(editor).getByRole("textbox");
+    await user.type(textbox, "x");
+    await user.clear(textbox);
+    expect((within(editor).getByText("Save").closest("button") as HTMLButtonElement).disabled).toBe(true);
+    expect(addNote).not.toHaveBeenCalled();
+  });
+});
+
+describe("NotesThread — editing isolates to one note", () => {
+  it("editing one of the user's two notes updates only that id (text + rating)", async () => {
     const user = userEvent.setup();
     setStateNotes([
-      note("n1", "scott", "activity", "act1", [
-        { name: "verdict", type: "text", value: "liked" },
-        { name: "notes", type: "text", value: "keep my words" },
-      ]),
+      note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "first" }], "2026-06-01T00:00:00Z"),
+      note("n2", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "second" }], "2026-06-02T00:00:00Z"),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
-    // The picker sits inside the caller's own note card.
-    const ownCard = screen.getByTestId("note-n1");
-    await user.click(within(ownCard).getByTestId("verdict-loved"));
-    // Updates the existing row, never adds.
+
+    const n1Card = screen.getByTestId("note-n1");
+    await user.click(within(n1Card).getByTestId("note-edit"));
+    // The editor replaces that card's body. Add a rating and change text.
+    const n1Editing = screen.getByTestId("note-n1");
+    await user.click(within(n1Editing).getByTestId("verdict-liked"));
+    const textbox = within(n1Editing).getByRole("textbox");
+    await user.clear(textbox);
+    await user.type(textbox, "first edited");
+    await user.click(within(n1Editing).getByText("Save"));
+
     expect(addNote).not.toHaveBeenCalled();
     expect(updateNote).toHaveBeenCalledTimes(1);
     expect(updateNote.mock.calls[0][0]).toBe("n1");
     const entries = updateNote.mock.calls[0][1] as LifeEntry[];
-    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
-    expect(entries).toContainEqual({ name: "notes", type: "text", value: "keep my words" });
+    expect(entries).toContainEqual({ name: "notes", type: "text", value: "first edited" });
+    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "liked" });
   });
 
-  it("does not render a separate top-level reaction card once the caller has a note", () => {
+  it("deleting one of several own notes removes only that id", async () => {
+    const user = userEvent.setup();
     setStateNotes([
-      note("n1", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
+      note("n1", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "first" }]),
+      note("n2", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "second" }], "2026-06-02T00:00:00Z"),
     ]);
-    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
-    // The standalone "your reaction" placeholder card is gone — the picker rides
-    // in the caller's own note card instead.
-    expect(screen.queryByTestId("my-reaction")).toBeNull();
-    // Exactly one editable verdict picker exists (the caller's), not two.
-    expect(screen.getAllByTestId("verdict-loved")).toHaveLength(1);
-  });
+    render(<NotesThread subjectType="activity" subjectId="act1" />);
 
-  it("another author's verdict is shown read-only — no clickable picker in their card", () => {
+    const n2Card = screen.getByTestId("note-n2");
+    await user.click(within(n2Card).getByTestId("note-delete"));
+    // Confirm the popconfirm.
+    await user.click(screen.getByText("Delete"));
+
+    expect(deleteNote).toHaveBeenCalledTimes(1);
+    expect(deleteNote.mock.calls[0][0]).toBe("n2");
+  });
+});
+
+describe("NotesThread — others' ratings are read-only", () => {
+  it("another author's verdict renders as a read-only tag, no editable picker", () => {
     setStateNotes([
-      note("n1", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
       note("n2", "angela", "activity", "act1", [{ name: "verdict", type: "text", value: "skip" }]),
     ]);
     render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
     const angelaCard = screen.getByTestId("note-n2");
-    // Their rating is visible…
     expect(within(angelaCard).getByText(/would skip/i)).toBeTruthy();
-    // …but there is no editable verdict control in their card.
     expect(within(angelaCard).queryByTestId("verdict-skip")).toBeNull();
     expect(within(angelaCard).queryByTestId("verdict-loved")).toBeNull();
   });
@@ -241,62 +251,6 @@ describe("NotesThread — verdict lives in the caller's own reaction card", () =
   });
 });
 
-describe("NotesThread — no duplicate note on stale-render save", () => {
-  it("verdict tap re-checks live state and updates the note that landed since render", async () => {
-    const user = userEvent.setup();
-    // Render with no note → this render's `mine` is undefined.
-    setStateNotes([]);
-    render(<NotesThread subjectType="activity" subjectId="act1" showVerdict />);
-
-    // Scott's note lands via the mirror, mutating the SAME Map in place — so the
-    // memoized `mine` stays frozen at undefined while live state now has a note.
-    injectNoteInPlace(
-      note("server-2", "scott", "activity", "act1", [{ name: "notes", type: "text", value: "keep me" }]),
-    );
-
-    await user.click(screen.getByTestId("verdict-loved"));
-
-    // Broken code would addNote a SECOND row off the stale undefined; the fix
-    // re-selects live state at click time and UPDATES the landed note, keeping
-    // its text. Exactly one row for (scott, act1).
-    expect(addNote).not.toHaveBeenCalled();
-    expect(updateNote).toHaveBeenCalledTimes(1);
-    expect(updateNote.mock.calls[0][0]).toBe("server-2");
-    const entries = updateNote.mock.calls[0][1] as LifeEntry[];
-    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
-    expect(entries).toContainEqual({ name: "notes", type: "text", value: "keep me" });
-  });
-
-  it("add-editor save routes to update when a note landed mid-edit (no double-create)", async () => {
-    const user = userEvent.setup();
-    setStateNotes([]);
-    render(<NotesThread subjectType="activity" subjectId="act1" />);
-
-    // Open the add-editor while the caller has no note, and type a draft.
-    await user.click(screen.getByTestId("note-add"));
-    const editor = screen.getByTestId("note-add-editor");
-    await user.type(within(editor).getByRole("textbox"), "my new note");
-
-    // Scott's note lands via the mirror mid-edit — Map mutated in place, so the
-    // editor stays mounted (memoized `mine` still undefined) but live state now
-    // has the note. The onSave closure captured `existing=undefined` at render.
-    injectNoteInPlace(
-      note("server-3", "scott", "activity", "act1", [{ name: "verdict", type: "text", value: "loved" }]),
-    );
-
-    await user.click(within(editor).getByText("Save"));
-
-    // The save must re-select live state and UPDATE the landed note (merging the
-    // typed text with its existing verdict), never addNote a duplicate row.
-    expect(addNote).not.toHaveBeenCalled();
-    expect(updateNote).toHaveBeenCalledTimes(1);
-    expect(updateNote.mock.calls[0][0]).toBe("server-3");
-    const entries = updateNote.mock.calls[0][1] as LifeEntry[];
-    expect(entries).toContainEqual({ name: "notes", type: "text", value: "my new note" });
-    expect(entries).toContainEqual({ name: "verdict", type: "text", value: "loved" });
-  });
-});
-
 describe("NotesThread — day subject", () => {
   it("filters notes by the composite day subjectId", () => {
     setStateNotes([
@@ -306,5 +260,27 @@ describe("NotesThread — day subject", () => {
     render(<NotesThread subjectType="day" subjectId="trip1:2026-06-01" />);
     expect(screen.getByText(/great day/)).toBeTruthy();
     expect(screen.queryByText(/other day/)).toBeNull();
+  });
+
+  it("day composer has highlight + mood but no rating picker; allows a second note", async () => {
+    const user = userEvent.setup();
+    // Caller already has a day note — adding another is still allowed (multiple OK).
+    setStateNotes([note("d1", "scott", "day", "trip1:2026-06-01", [{ name: "text", type: "text", value: "first" }])]);
+    render(<NotesThread subjectType="day" subjectId="trip1:2026-06-01" />);
+
+    await user.click(screen.getByTestId("note-add"));
+    const editor = screen.getByTestId("note-add-editor");
+    // No activity rating picker on a day composer.
+    expect(within(editor).queryByTestId("verdict-loved")).toBeNull();
+    // Highlight input + a mood Rate exist.
+    expect(within(editor).getByPlaceholderText(/Best moment/i)).toBeTruthy();
+
+    await user.type(within(editor).getAllByRole("textbox")[1], "second day note");
+    await user.click(within(editor).getByText("Save"));
+
+    expect(addNote).toHaveBeenCalledTimes(1);
+    const [, subjectType, , , entries] = addNote.mock.calls[0];
+    expect(subjectType).toBe("day");
+    expect(entries).toContainEqual({ name: "text", type: "text", value: "second day note" });
   });
 });

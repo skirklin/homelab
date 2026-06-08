@@ -34,17 +34,17 @@ const VERDICTS: { key: ActivityVerdict; emoji: string; label: string }[] = [
 ];
 
 interface Props {
-  /** The CALLER'S own verdict (from their own note), not a shared scalar. */
+  /** The rating being composed/edited on THIS note's draft (optional). */
   current: ActivityVerdict | undefined;
   /** Tap a verdict to set it; tap the active one again to clear (null). */
   onSet: (next: ActivityVerdict | null) => void;
 }
 
 /**
- * Presentational verdict picker. The owner (NotesThread) renders this inside the
- * caller's own reaction card, sourcing `current` from their own note and
- * persisting via `onSet` — the buttons themselves are stateless. Other authors'
- * verdicts render as a read-only text tag, not this control.
+ * Presentational verdict picker. NotesThread renders this inside a note's
+ * add/edit composer (activity subjects only), where the rating is an optional
+ * field of the note's draft — the buttons themselves are stateless. A saved
+ * note's rating renders elsewhere as a read-only text tag, not this control.
  */
 export function VerdictButtons({ current, onSet }: Props) {
   return (
