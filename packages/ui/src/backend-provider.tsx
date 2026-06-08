@@ -176,10 +176,17 @@ function useOptimisticErrorToast() {
  * Each short-circuits when there's nothing to do — quiet, healthy tabs
  * pay nothing on every focus blip. Polling on a fixed interval was the
  * wrong default and got removed; focus/pageshow/visibilitychange fire
- * exactly when we need to act. PB's PB_CONNECT hook also drives
- * retryErrored on detected drops, so this is the mobile-suspend
- * backstop (the OS freezes the network stack silently and the SDK never
- * notices).
+ * exactly when we need to act.
+ *
+ * This focus path is the BACKSTOP, not the primary resync trigger. The
+ * mirror self-resyncs on a real SSE drop (its own onDisconnect→PB_CONNECT
+ * hook), and wpb's PB_CONNECT hook drives retryErrored on the same signal —
+ * so the common desktop/wifi-blip case recovers in seconds without waiting
+ * for focus. What focus uniquely catches is the SILENT mobile suspend: iOS
+ * Safari freezes the network stack on tab-suspend, so the SDK never sees a
+ * clean disconnect/PB_CONNECT — focus-on-resume is the only signal left.
+ * The mirror coalesces a focus resync that lands right after a reconnect
+ * resync, so the two triggers don't double-refetch.
  */
 function useRealtimeResync() {
   useEffect(() => {

@@ -47,12 +47,27 @@ interface StubHandle {
   /** Hold all pending and future reads; release with `release()`. */
   hold: () => void;
   release: () => void;
+  /** Simulate the PB SDK detecting a realtime drop then auto-reconnecting:
+   *  fires onDisconnect(activeSubs) then every PB_CONNECT subscriber. */
+  dropAndReconnect: (activeSubs?: string[]) => void;
+  /** Fire PB_CONNECT to every subscriber WITHOUT a preceding disconnect —
+   *  models the very first connect after the initial subscribe. */
+  fireConnect: () => void;
+  /** Number of live PB_CONNECT subscribers (asserts dispose tore them down). */
+  pbConnectListenerCount: () => number;
 }
 
 function makeStubPb(): StubHandle {
   const cols = new Map<string, StubCollection>();
   let releaseAll: () => void = () => {};
   let held = false;
+  // Realtime lifecycle plumbing. The mirror's reconnect-resync hook sets
+  // `onDisconnect` and subscribes to "PB_CONNECT"; these collections let a
+  // test drive a drop+reconnect deterministically.
+  const realtime: {
+    onDisconnect?: (activeSubs: string[]) => void;
+    pbConnectCbs: Set<() => void>;
+  } = { onDisconnect: undefined, pbConnectCbs: new Set() };
   const get = (n: string): StubCollection => {
     let c = cols.get(n);
     if (!c) {
@@ -77,10 +92,14 @@ function makeStubPb(): StubHandle {
       return out;
     },
     realtime: {
-      onDisconnect: undefined,
+      get onDisconnect() { return realtime.onDisconnect; },
+      set onDisconnect(fn: ((activeSubs: string[]) => void) | undefined) { realtime.onDisconnect = fn; },
       isConnected: true,
-      async subscribe(topic: string) {
-        if (topic === "PB_CONNECT") return async () => {};
+      async subscribe(topic: string, cb?: () => void) {
+        if (topic === "PB_CONNECT" && cb) {
+          realtime.pbConnectCbs.add(cb);
+          return async () => { realtime.pbConnectCbs.delete(cb); };
+        }
         return async () => {};
       },
     },
@@ -203,6 +222,16 @@ function makeStubPb(): StubHandle {
       releaseAll();
       for (const c of cols.values()) c.gateReads = null;
       held = false;
+    },
+    dropAndReconnect(activeSubs: string[] = ["items"]) {
+      realtime.onDisconnect?.(activeSubs);
+      for (const cb of Array.from(realtime.pbConnectCbs)) cb();
+    },
+    fireConnect() {
+      for (const cb of Array.from(realtime.pbConnectCbs)) cb();
+    },
+    pbConnectListenerCount() {
+      return realtime.pbConnectCbs.size;
     },
   };
 }
@@ -936,6 +965,148 @@ describe("PBMirror: SDK quirk defense / resync", () => {
     await flush();
 
     expect(states[states.length - 1].map((r) => r.id).sort()).toEqual(["b"]);
+  });
+});
+
+// =====================================================================
+// Reconnect-driven resync (PB_CONNECT after a real SSE drop)
+//
+// Two complementary triggers feed resync():
+//   - PB_CONNECT after onDisconnect (this block) — the precise desktop/wifi
+//     path: the SDK noticed the drop, so we resync the instant SSE returns.
+//   - focus/visibility (backend-provider) — the backstop for SILENT mobile
+//     suspends where the OS freezes the network stack and the SDK never sees
+//     a clean disconnect/PB_CONNECT.
+// =====================================================================
+
+describe("PBMirror: reconnect-driven resync", () => {
+  it("resyncs on PB_CONNECT after a reported disconnect — no focus needed", async () => {
+    const { stub, mirror } = setup();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+
+    const states: RawRecord[][] = [];
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => { states.push(s); },
+    );
+    await flush();
+    expect(states[states.length - 1].map((r) => r.id)).toEqual(["a"]);
+    const fetchesBefore = stub.col("items").fetchCalls;
+
+    // Peer mutates while our SSE is presumed dead (no stub.emit).
+    stub.col("items").records.set("b", rec("items", { id: "b", list: "L1" }));
+
+    // SDK reports drop + reconnect; the mirror should resync itself.
+    stub.dropAndReconnect(["items"]);
+    await flush();
+
+    expect(stub.col("items").fetchCalls, "exactly one refetch on reconnect").toBe(fetchesBefore + 1);
+    expect(states[states.length - 1].map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("does NOT resync on the INITIAL PB_CONNECT (no prior disconnect)", async () => {
+    const { stub, mirror } = setup();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      () => {},
+    );
+    await flush();
+    const fetchesBefore = stub.col("items").fetchCalls;
+
+    // First connect after subscribe — bootstrap already fetched, so this must
+    // NOT trigger a duplicate refetch.
+    stub.fireConnect();
+    await flush();
+
+    expect(stub.col("items").fetchCalls, "no resync on initial connect").toBe(fetchesBefore);
+  });
+
+  it("focus-driven resync() still works as the mobile-suspend backstop", async () => {
+    const { stub, mirror } = setup();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+
+    const states: RawRecord[][] = [];
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => { states.push(s); },
+    );
+    await flush();
+
+    // Silent suspend: no onDisconnect/PB_CONNECT ever fires. Peer mutated.
+    stub.col("items").records.set("b", rec("items", { id: "b", list: "L1" }));
+
+    // backend-provider's focus handler calls mirror.resync() directly.
+    await mirror.resync();
+    await flush();
+
+    expect(states[states.length - 1].map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("coalesces: a focus resync immediately after a reconnect resync does not double-refetch", async () => {
+    const { stub, mirror } = setup();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      () => {},
+    );
+    await flush();
+    const fetchesBefore = stub.col("items").fetchCalls;
+
+    // Reconnect resync fires...
+    stub.dropAndReconnect(["items"]);
+    await flush();
+    const afterReconnect = stub.col("items").fetchCalls;
+    expect(afterReconnect).toBe(fetchesBefore + 1);
+
+    // ...and a focus event lands milliseconds later. The coalesce window
+    // suppresses the redundant second full refetch.
+    await mirror.resync();
+    await flush();
+    expect(stub.col("items").fetchCalls, "coalesced — no second refetch").toBe(afterReconnect);
+  });
+
+  it("a disconnect with NO active subscriptions does not arm a resync", async () => {
+    // The SDK's onDisconnect also fires on graceful unsubscribe-all teardown.
+    // Only a drop with live subs should arm the dirty flag.
+    const { stub, mirror } = setup();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      () => {},
+    );
+    await flush();
+    const fetchesBefore = stub.col("items").fetchCalls;
+
+    stub.dropAndReconnect([]); // empty active subs
+    await flush();
+
+    expect(stub.col("items").fetchCalls, "graceful close must not resync").toBe(fetchesBefore);
+  });
+
+  it("dispose() tears down the PB_CONNECT subscription (no leaked listener)", async () => {
+    const { stub, mirror } = setup();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      () => {},
+    );
+    await flush();
+    expect(stub.pbConnectListenerCount()).toBe(1);
+
+    mirror.dispose();
+    await flush();
+    expect(stub.pbConnectListenerCount(), "PB_CONNECT listener removed on dispose").toBe(0);
+
+    // And a post-dispose reconnect is inert (no refetch).
+    const fetchesBefore = stub.col("items").fetchCalls;
+    stub.dropAndReconnect(["items"]);
+    await flush();
+    expect(stub.col("items").fetchCalls).toBe(fetchesBefore);
   });
 });
 

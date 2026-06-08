@@ -41,8 +41,11 @@
  *      on relevant SSE events). Client-side overlay re-applies sort+limit
  *      so optimistic creates rank correctly during the pre-ack window.
  *
- *   5. No watchdog. Recovery from SSE drop is handled by `resync()`,
- *      driven by focus/visibility events in the app shell.
+ *   5. No watchdog. Recovery from SSE drop is handled by `resync()`, driven by
+ *      TWO complementary triggers: the mirror's own onDisconnect→PB_CONNECT
+ *      hook (precise — fires the instant a real drop reconnects) and the app
+ *      shell's focus/visibility events (the backstop for silent mobile
+ *      suspends the SDK never notices). See the realtimeDirty block below.
  *
  * Implementation notes:
  *   - The mirror talks to the raw `pb` client for SSE + reads (so it can
@@ -187,6 +190,48 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
   const slices = new Map<string, Slice>();
   const listeners = new Map<string, CollectionListener>();
   let disposed = false;
+
+  // ---- Reconnect-driven resync (precise trigger) ----
+  //
+  // resync() has TWO complementary triggers, and BOTH must exist:
+  //
+  //   1. PB_CONNECT after a real SSE drop (this block). The PB SDK reports
+  //      the disconnect via realtime.onDisconnect and fires PB_CONNECT on the
+  //      next (re)connect. We resync the instant SSE returns, so the failure
+  //      window is seconds — not "whenever the user next happens to refocus
+  //      the tab." This is the common desktop / wifi-blip path.
+  //
+  //   2. focus / pageshow / visibilitychange (backend-provider's
+  //      useRealtimeResync). This is the backstop for SILENT mobile suspends:
+  //      iOS Safari (and friends) freeze the network stack on tab-suspend, so
+  //      the SDK's EventSource never sees a clean close — no onDisconnect, no
+  //      PB_CONNECT. Focus-on-resume is the ONLY signal that catches that case.
+  //
+  // Do NOT delete either as "redundant." Trigger 1 absorbs the common
+  // desktop case so focus isn't doing a full refetch on every routine
+  // alt-tab; trigger 2 is the only thing that recovers the silent-suspend
+  // case. Together they give precise steady-state cost with no loss of
+  // recovery guarantee.
+  //
+  // CRITICAL: PB_CONNECT fires on the INITIAL connect too. Resyncing then
+  // would duplicate the per-slice bootstrap fetch. The `realtimeDirty` flag
+  // gates this — only a prior onDisconnect (with live subscriptions) arms it.
+  let realtimeDirty = false;
+  let realtimeHooked = false;
+  /** Prior onDisconnect handler to chain (e.g. wpb's, or another hook). */
+  let prevOnDisconnect: ((activeSubs: string[]) => void) | undefined;
+  /** Pending unsubscribe for the PB_CONNECT listener; torn down in dispose. */
+  let pbConnectUnsub: Promise<UnsubscribeFunc> | null = null;
+  /**
+   * Coalesce window. A reconnect-driven resync stamps `lastResyncAt`; a
+   * focus event landing within this window is suppressed (the reconnect path
+   * already fetched the latest server truth). Wide enough to absorb the
+   * "PB_CONNECT then focus-on-resume fire back-to-back" race, narrow enough
+   * that any genuinely-later focus still resyncs. Double-refetch is harmless
+   * (idempotent, JSON-hash-deduped emits) — this just trims the waste.
+   */
+  const RESYNC_COALESCE_MS = 2000;
+  let lastResyncAt = 0;
 
   /** Surface a bootstrap/refetch failure to wpb's debug ring buffer so
    *  SyncDot + window.__wpbDebug see a unified event feed. Cheap; no need
@@ -347,7 +392,60 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       .catch(() => { /* subscribe itself rejected late — ignore */ });
   }
 
+  /**
+   * Arm the reconnect-driven resync. Hooked lazily on the first collection
+   * listener (the earliest the mirror actually touches the realtime channel),
+   * so a mirror that's constructed but never watched — or a Node e2e run that
+   * never opens an EventSource — pays nothing.
+   *
+   * Wrapped in try/catch because the PB SDK's realtime.subscribe synchronously
+   * constructs `new EventSource(...)`, which throws in Node-side e2e tests
+   * that never subscribe. Mirrors the guard in wpb's hookRealtimeLifecycle.
+   */
+  function hookRealtimeLifecycle(): void {
+    if (realtimeHooked) return;
+    const client = pb();
+    const rt = client.realtime as unknown as {
+      onDisconnect?: (activeSubs: string[]) => void;
+      subscribe?: (topic: string, cb: () => void) => Promise<UnsubscribeFunc>;
+    } | undefined;
+    if (!rt || typeof rt.subscribe !== "function") return;
+    realtimeHooked = true;
+
+    // Chain (don't clobber) any existing onDisconnect — wpb may have its own,
+    // and the SDK exposes exactly one slot.
+    prevOnDisconnect = rt.onDisconnect;
+    rt.onDisconnect = (activeSubs: string[]) => {
+      // Only arm on a drop that actually loses live subscriptions. An
+      // unsubscribe-all teardown (dispose, last consumer leaving) also fires
+      // onDisconnect with no active subs — that's a graceful close, not a
+      // drop, and must not trigger a resync.
+      if (activeSubs && activeSubs.length > 0) realtimeDirty = true;
+      try { prevOnDisconnect?.(activeSubs); } catch { /* other hook's error is theirs */ }
+    };
+
+    try {
+      pbConnectUnsub = rt.subscribe("PB_CONNECT", () => {
+        // Initial connect (and reconnects after a graceful close) leave
+        // realtimeDirty false — bootstrap already fetched, so skip.
+        if (!realtimeDirty) return;
+        realtimeDirty = false;
+        void resync();
+      });
+      if (pbConnectUnsub && typeof (pbConnectUnsub as Promise<unknown>).catch === "function") {
+        (pbConnectUnsub as Promise<unknown>).catch(() => { realtimeHooked = false; });
+      }
+    } catch {
+      // EventSource unavailable (Node) — stay un-hooked. Focus/visibility
+      // resync in the app shell still recovers from drops.
+      realtimeHooked = false;
+      pbConnectUnsub = null;
+    }
+  }
+
   function ensureCollectionListener(collection: string): void {
+    // First realtime touch — arm the reconnect→resync hook once.
+    hookRealtimeLifecycle();
     let l = listeners.get(collection);
     if (!l) {
       l = { refcount: 0, unsub: null };
@@ -839,6 +937,12 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
   }
 
   async function resync(): Promise<void> {
+    // Coalesce: if a resync just ran (e.g. the reconnect path fired and a
+    // focus-on-resume event lands milliseconds later), skip the redundant
+    // full refetch. Self-healing — the next trigger past the window resyncs.
+    const now = Date.now();
+    if (now - lastResyncAt < RESYNC_COALESCE_MS) return;
+    lastResyncAt = now;
     const work: Promise<void>[] = [];
     for (const slice of Array.from(slices.values())) {
       if (slice.consumers.size === 0) continue;
@@ -928,6 +1032,19 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     }
     slices.clear();
     try { unhookMutation(); } catch { /* ignore */ }
+    // Tear down the reconnect→resync hook. Restore the prior onDisconnect
+    // (don't leave our closure dangling on a shared SDK realtime object) and
+    // unsubscribe PB_CONNECT via the async-safe helper (its DELETE /api/realtime
+    // can 404 when the channel is already gone — see safeFireAndForgetUnsub).
+    if (realtimeHooked) {
+      try {
+        const rt = (pb().realtime as unknown) as { onDisconnect?: unknown } | undefined;
+        if (rt) rt.onDisconnect = prevOnDisconnect;
+      } catch { /* SDK without realtime — nothing to restore */ }
+      if (pbConnectUnsub) safeFireAndForgetUnsub(pbConnectUnsub);
+      pbConnectUnsub = null;
+      realtimeHooked = false;
+    }
     // Drain any remaining listeners (should be none if teardownSlice did
     // its job, but be defensive).
     for (const collection of Array.from(listeners.keys())) {
