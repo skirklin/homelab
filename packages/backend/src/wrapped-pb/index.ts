@@ -17,11 +17,36 @@ import type { RecordModel, RecordOptions, RecordListOptions, RecordFullListOptio
 import { newId } from "./ids";
 import { MutationQueue, type Mutation, type RawRecord } from "./queue";
 import { persistMutation, unpersistMutation, loadAllMutations } from "./persistence";
+import {
+  persistSnapshots,
+  deleteSnapshots,
+  loadSnapshotsForUser,
+  clearAllSnapshots,
+  pruneSnapshotsOlderThan,
+  snapshotKey,
+  type PersistedSnapshot,
+} from "./snapshot-persistence";
 
 export { MutationQueue, composeView, type Mutation, type RawRecord, type PendingMutation } from "./queue";
 export { type PersistedMutation, persistMutation, loadAllMutations, clearAllMutations } from "./persistence";
+export {
+  type PersistedSnapshot,
+  persistSnapshots,
+  deleteSnapshots,
+  loadSnapshotsForUser,
+  clearAllSnapshots,
+  pruneSnapshotsOlderThan,
+} from "./snapshot-persistence";
 export { newId } from "./ids";
 export { createMirror, type PBMirror, type WatchSpec, type WatchHandle } from "./mirror";
+
+/** How long a cached snapshot survives across cold loads before age-eviction
+ *  drops it on the next hydrate. Stale rows just cost one revalidation fetch,
+ *  so this is generous. */
+const SNAPSHOT_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+/** Debounce window for the batched snapshot writer. Coalesces a bootstrap's
+ *  burst of applyServer calls into one IDB transaction. */
+const SNAPSHOT_FLUSH_MS = 250;
 
 // ---- Types ----
 
@@ -71,6 +96,21 @@ export interface WrappedPocketBase {
   collection(name: string): WrappedCollection;
   /** Triggers persisted-mutation replay. Idempotent. Call once after auth is ready. */
   replayPending(): Promise<void>;
+  /**
+   * Hydrate the mutation queue with the current user's persisted server
+   * snapshots so a cold load can paint cached data before any network fetch
+   * resolves (stale-while-revalidate). No-op when unauthenticated. Idempotent;
+   * BackendProvider awaits it (race-capped) before rendering.
+   */
+  hydrateSnapshots(): Promise<void>;
+  /**
+   * Force-flush the pending snapshot-cache writes NOW (cancel the debounce
+   * timer and write the dirty map immediately). Wired to pagehide /
+   * visibilitychange→hidden in BackendProvider so the last ~250ms of cached
+   * server state isn't lost when the tab closes mid-debounce. Cheap and a
+   * no-op when nothing is dirty or IndexedDB is absent.
+   */
+  flushSnapshots(): Promise<void>;
   /**
    * Re-fire every mutation whose dispatch failed transiently (network
    * blip, 5xx, 429, etc.). Wired internally to PB_CONNECT; BackendProvider
@@ -171,8 +211,89 @@ const DEBUG_RING_CAPACITY = 200;
 // ---- Implementation ----
 
 export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
-  const queue = new MutationQueue();
   const origin = newId(); // session id for this wrapper instance
+
+  /**
+   * Persistent server-snapshot cache writer.
+   *
+   * Every server-state change funnels through queue.applyServer →
+   * onServerChange (below). We accumulate dirty (collection,id)→snapshot in a
+   * Map and flush on a short debounce, splitting puts from deletes, stamping
+   * the authed user, and writing one IDB transaction. Anonymous sessions skip
+   * persistence entirely (no user to scope by). Guarded for the Node case
+   * where indexedDB is absent — the persist* helpers themselves swallow, but
+   * we skip the timer churn too.
+   *
+   * `hydrating` suppresses the writer during hydrateSnapshots so loading the
+   * cache back in doesn't loop straight out to IDB. (Hydration seeds via
+   * queue.seedServer, which doesn't fire onServerChange — this flag is a
+   * belt-and-suspenders for any applyServer path that runs concurrently.)
+   */
+  // Each dirty entry stamps the user CAPTURED AT QUEUE TIME (when applyServer
+  // fired), NOT at flush time. Reading authStore at flush time (~250ms later)
+  // races an auth flip in the debounce window: user A's queued snapshot would
+  // get stamped user B and land in B's scope (B's next hydrate reads A's data).
+  // Capturing here pins the row to the user who actually owned the read.
+  const dirtySnapshots = new Map<string, { collection: string; id: string; snapshot: RawRecord | null; user: string | null }>();
+  let snapshotFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let hydrating = false;
+
+  async function flushSnapshots(): Promise<void> {
+    if (snapshotFlushTimer !== null) {
+      clearTimeout(snapshotFlushTimer);
+      snapshotFlushTimer = null;
+    }
+    if (dirtySnapshots.size === 0) return;
+    const batch = Array.from(dirtySnapshots.values());
+    dirtySnapshots.clear();
+    // Group puts/deletes by the user CAPTURED AT QUEUE TIME so a mid-window
+    // auth flip can't mis-scope any row. Anonymous reads (null/empty user) are
+    // never cached — drop them.
+    const putsByUser = new Map<string, PersistedSnapshot[]>();
+    const deletes: string[] = [];
+    const now = Date.now();
+    for (const { collection, id, snapshot, user } of batch) {
+      if (!user) continue; // anonymous — nothing to scope a cache row by.
+      const key = snapshotKey(user, collection, id);
+      if (snapshot === null) {
+        deletes.push(key);
+      } else {
+        const arr = putsByUser.get(user) ?? [];
+        arr.push({ key, user, collection, id, record: snapshot, updatedAt: now });
+        putsByUser.set(user, arr);
+      }
+    }
+    // Await the IDB writes so the public force-flush (pagehide) actually lands
+    // before the tab is frozen. The timer path ignores the returned promise.
+    await Promise.all([
+      ...Array.from(putsByUser.values()).map((puts) => persistSnapshots(puts)),
+      deleteSnapshots(deletes),
+    ]);
+  }
+
+  function onServerChange(collection: string, id: string, snapshot: RawRecord | null): void {
+    // Structural guarantee: a snapshot cannot reach IDB without the sign-out
+    // clear-hook being live, independent of BackendProvider's render order.
+    // Every persisted snapshot flows through exactly this chokepoint (applyServer
+    // → onServerChange; seedServer/hydration deliberately does NOT fire it), so
+    // arming hookAuthChange as the FIRST statement here makes it impossible to
+    // queue a row for persistence before the clear-hook is installed. hydrate()
+    // also arms it (belt-and-suspenders for empty-cache read-only sessions that
+    // never persist) — see the hookAuthChange call in hydrateSnapshots. By the
+    // time any real applyServer fires the backend is initialized, so pb() is
+    // safe; hookAuthChange is idempotent (early-returns once installed).
+    hookAuthChange();
+    if (hydrating) return;
+    if (typeof indexedDB === "undefined") return;
+    // Stamp the user NOW (queue time), not at flush — see dirtySnapshots above.
+    const user = pb().authStore?.record?.id ?? null;
+    dirtySnapshots.set(`${collection}::${id}`, { collection, id, snapshot, user });
+    if (snapshotFlushTimer === null) {
+      snapshotFlushTimer = setTimeout(flushSnapshots, SNAPSHOT_FLUSH_MS);
+    }
+  }
+
+  const queue = new MutationQueue({ onServerChange });
   /**
    * Hook listeners for "any mutation was pushed/drained/applied". PBMirror
    * uses this to re-emit slices when an optimistic write lands or is rolled
@@ -237,9 +358,14 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
    *
    * No-op on token rotation for the same user (the common refresh case).
    *
-   * The change-tracking handle is lazy: we attach it on the first call
-   * that needs realtime (`hookRealtimeLifecycle`) so test stubs without
-   * an `onChange` method aren't poked.
+   * Installed EAGERLY from `hydrateSnapshots` (the read-only entrypoint every
+   * session hits on mount), not lazily on first write. A read-only session —
+   * one that hydrates the cache and watches slices but never issues a write —
+   * must still install the sign-out/user-switch clear, or one user's cached
+   * data lingers in IDB after the next user signs in on the same device.
+   * `hookRealtimeLifecycle` (first write) also calls it as a backstop.
+   * Idempotent (guarded by `authChangeUnsub`); a stub without `onChange` is a
+   * no-op.
    */
   let lastAuthRecordId: string | null = null;
   let authChangeUnsub: (() => void) | null = null;
@@ -256,6 +382,21 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       const nextId = record?.id ?? null;
       if (nextId === lastAuthRecordId) return;
       lastAuthRecordId = nextId;
+      // Identity changed (sign-out → null, or switch to a different user).
+      // Order the clear w.r.t. the snapshot writer: SYNCHRONOUSLY cancel the
+      // pending debounce timer and empty the dirty map FIRST, so no in-flight
+      // flush can repopulate the store AFTER clearAllSnapshots() runs (IDB txns
+      // are unordered — a late put racing the clear would leave a stray row).
+      if (snapshotFlushTimer !== null) {
+        clearTimeout(snapshotFlushTimer);
+        snapshotFlushTimer = null;
+      }
+      dirtySnapshots.clear();
+      // Drop every cached snapshot at rest: per-user hydrate already prevents
+      // cross-user READS, but we don't leave one user's data sitting in IDB
+      // after a logout/switch. Defense-in-depth. Fire-and-forget (.catch via
+      // the helper's internal swallow).
+      void clearAllSnapshots();
       // Identity changed — tear down realtime so the next subscribe gets
       // a fresh clientId bound to the new auth.
       try {
@@ -607,6 +748,46 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   return {
     collection: makeCollection,
     retryErrored,
+    flushSnapshots,
+    async hydrateSnapshots() {
+      // Install the auth-change clear hook EAGERLY here (not lazily on first
+      // write) so a read-only session — one that hydrates + watches but never
+      // writes — still clears cached data on sign-out/user-switch. hydrate is
+      // the read-only entrypoint and always runs after the backend is
+      // initialized, so pb() is safe. Idempotent; runs even when there's no
+      // user yet so the hook is armed before a later sign-in.
+      //
+      // This is the EARLY-ARM for empty-cache sessions (nothing persists, so
+      // onServerChange never fires). The LOAD-BEARING structural guarantee — the
+      // hook is armed before any snapshot reaches IDB — lives in onServerChange
+      // itself, which arms it as its first statement and does NOT depend on this
+      // call or on BackendProvider's render order. See onServerChange.
+      hookAuthChange();
+      const user = pb().authStore?.record?.id;
+      if (!user) return; // unauthenticated — nothing scoped to load.
+      // Age-evict before reading so a stale cache doesn't paint ancient data.
+      await pruneSnapshotsOlderThan(Date.now() - SNAPSHOT_TTL_MS);
+      const rows = await loadSnapshotsForUser(user);
+      if (rows.length === 0) return;
+      hydrating = true;
+      try {
+        for (const r of rows) {
+          // seedServer does NOT fire onServerChange — avoids a load→persist
+          // loop. composeView layers any already-replayed pending mutation on
+          // top, so an in-flight optimistic write isn't clobbered by the seed.
+          queue.seedServer(r.collection, r.id, r.record);
+        }
+      } finally {
+        hydrating = false;
+      }
+      // Re-emit any slices that already became ready before hydrate landed
+      // (best-effort for the ungated race; BackendProvider awaits hydrate so
+      // the common path has no slice yet). Notifying the mirror's mutation
+      // listener re-materializes affected slices with the freshly-seeded data.
+      for (const r of rows) {
+        notifyMutationListeners(r.collection, r.id);
+      }
+    },
     async replayPending() {
       const persisted = await loadAllMutations();
       for (const m of persisted) {

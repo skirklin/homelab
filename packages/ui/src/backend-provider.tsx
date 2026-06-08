@@ -10,7 +10,7 @@
  * home app nests providers from multiple modules).
  */
 
-import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { message } from "antd";
 import { getBackend } from "./backend";
 import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
@@ -198,22 +198,78 @@ function useRealtimeResync() {
       ]).then(() => undefined).finally(() => { inFlight = null; });
     };
 
+    // On the way OUT (tab hidden / pagehide), force-flush the snapshot-cache
+    // writer so the last ~250ms of cached server state survives the close
+    // instead of being lost mid-debounce (a cold-load flash on next open).
+    // Cheap no-op when nothing is dirty. pagehide always flushes (the page is
+    // leaving); visibilitychange only flushes when resolving to hidden.
+    const doFlush = () => {
+      void wpb.flushSnapshots().catch(() => { /* IDB unavailable — non-fatal */ });
+    };
+    const flushOnHide = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "hidden") return;
+      doFlush();
+    };
+
     const events: Array<[EventTarget, string]> = [
       [window, "focus"],
       [window, "pageshow"],
       [document, "visibilitychange"],
     ];
     for (const [target, ev] of events) target.addEventListener(ev, probe);
+    window.addEventListener("pagehide", doFlush);
+    document.addEventListener("visibilitychange", flushOnHide);
     return () => {
       for (const [target, ev] of events) target.removeEventListener(ev, probe);
+      window.removeEventListener("pagehide", doFlush);
+      document.removeEventListener("visibilitychange", flushOnHide);
     };
   }, []);
 }
 
+/**
+ * Hydration render-gate. Resolves `true` once snapshot hydration settles
+ * (success OR rejection) or a timeout wins — whichever comes first — so a cold
+ * load paints cached data (stale-while-revalidate) instead of flashing empty
+ * lists, but a pathological/hung IDB can never brick the app behind a permanent
+ * blank screen. Extracted so the gate can be unit-tested without constructing
+ * the backend singletons (which a full BackendProvider render would do at
+ * module scope).
+ *
+ * Both the timeout-wins path and the hydrate-rejects path MUST flip to true:
+ *   - timeout wins  → render anyway; hydrateSnapshots' notifyMutationListeners
+ *     delivers the cache to already-mounted slices best-effort.
+ *   - hydrate rejects → IDB failure is non-fatal; render with no cache paint.
+ */
+export function useHydrationGate(
+  hydrate: () => Promise<unknown>,
+  timeoutMs = 1000,
+): boolean {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; setHydrated(true); } };
+    const timeout = setTimeout(finish, timeoutMs);
+    hydrate().catch(() => { /* IDB failure is non-fatal */ }).finally(() => {
+      clearTimeout(timeout);
+      finish();
+    });
+    return () => clearTimeout(timeout);
+    // hydrate is a stable module-scope fn in production; we intentionally run
+    // this once on mount (empty deps mirror the original inline effect).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return hydrated;
+}
+
 export function BackendProvider({ children }: { children: ReactNode }) {
+  // Gate the first render on snapshot hydration (see useHydrationGate).
+  const hydrated = useHydrationGate(() => wpb.hydrateSnapshots());
   useEffect(() => {
     registerServiceWorker();
-    // Replay any persisted pending mutations from a prior session.
+    // Replay any persisted pending mutations from a prior session. Reads
+    // (hydrateSnapshots, above) and writes (replayPending) touch different IDB
+    // stores, so they run independently — replay does not wait on hydration.
     // Safe-by-design: client-supplied IDs make creates idempotent, updates are
     // last-write-wins, deletes treat 404 as success.
     void wpb.replayPending();
@@ -233,7 +289,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
                     <OfflineBanner />
                     <UpdateAvailableBanner />
                     <SyncStatusBanner debug={wpb.debug} />
-                    {children}
+                    {hydrated ? children : null}
                   </ChatBackendContext.Provider>
                 </ObserverBackendContext.Provider>
               </UserBackendContext.Provider>
