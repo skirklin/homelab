@@ -186,11 +186,12 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     // lands server-side.
     const createdBy = this.pb().authStore.record?.id ?? "";
 
-    // assignees is the sole notification driver. Default to the creator (same
-    // identity stamped into created_by) when the caller doesn't specify one,
-    // matching the POST /tasks default so UI- and API-created tasks behave the
-    // same.
-    const assignees = task.assignees?.length ? task.assignees : [createdBy];
+    // assignees is the sole notification driver. Persist exactly what the
+    // caller passed (empty when omitted) — do NOT default to the creator.
+    // Under the inherit model an empty-assignees task resolves via the cascade
+    // (nearest assigned ancestor → created_by floor → list.owners), matching
+    // POST /tasks so UI- and API-created tasks behave the same.
+    const assignees = task.assignees ?? [];
 
     await this.wpb.collection("tasks").create({
       id,

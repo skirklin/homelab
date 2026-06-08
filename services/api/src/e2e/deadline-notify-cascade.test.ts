@@ -14,7 +14,7 @@
  *   - bare task, created_by = A, no assignees anywhere    → [A] only (the bug)
  *   - task whose ancestor container has assignees = [B]   → [B]
  *   - task with its own assignees = [A]                   → [A] (override)
- *   - POST /tasks defaults assignees = [creator] when omitted
+ *   - POST /tasks leaves assignees empty when omitted; cascade floors to creator
  *   - POST /tasks with explicit assignees=[B] (created by A) → resolves to [B]
  *
  * Builds real PB records so the `path` format (self-inclusive, "/"-joined ids)
@@ -231,7 +231,7 @@ describe("POST /tasks create path", () => {
     expect(row.created_by).toBe(userA.id);
   });
 
-  it("defaults assignees = [creator] when none supplied, and the cascade resolves to the creator", async () => {
+  it("leaves assignees empty when none supplied; the cascade floors to the creator", async () => {
     const resp = await app.request("/data/tasks", {
       method: "POST",
       headers: {
@@ -249,9 +249,10 @@ describe("POST /tasks create path", () => {
     const { id } = (await resp.json()) as { id: string };
 
     const row = await adminPb.collection("tasks").getOne(id);
-    // The create path seeds assignees to the creator — the cascade no longer
-    // has to fall through to created_by, and never fans out to all owners.
-    expect(row.assignees).toEqual([userA.id]);
+    // Inherit model: the create path does NOT stamp assignees. The stored
+    // field is empty; the cascade resolves to the creator via the created_by
+    // floor, and never fans out to all owners.
+    expect(row.assignees).toEqual([]);
 
     const recipients = resolveNotifyRecipients(
       row as unknown as NotifyNode,

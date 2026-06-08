@@ -2544,12 +2544,13 @@ dataRoutes.post("/tasks", handler(async (c) => {
     task_type: body.task_type || "one_shot",
     frequency: body.frequency || 0,
     tags: body.tags || [],
-    // assignees is the sole notification driver. Persist an explicit set when
-    // the caller supplies one; otherwise DEFAULT to the creator so a bare task
-    // notifies just the person who made it (the cascade still floors on
-    // created_by, but seeding assignees here keeps the create path the single
-    // source of the "assigned to me by default" behavior).
-    assignees: body.assignees?.length ? body.assignees : [userId],
+    // assignees is the sole notification driver. Persist exactly what the
+    // caller sent (empty when omitted) — do NOT stamp the creator here. Under
+    // the inherit model an empty-assignees task resolves via the cascade:
+    // nearest assigned ancestor (inherit) → else created_by (floor) → else
+    // list.owners. So a task under an assigned container inherits that
+    // assignee, and an unassigned task still notifies its creator via the floor.
+    assignees: body.assignees ?? [],
     // Stamp the creator server-side from the authenticated identity (never
     // client-supplied). created_by is immutable provenance and the cascade's
     // terminal floor. UI-created tasks (home/upkeep backend) previously left
