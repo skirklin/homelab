@@ -15,6 +15,11 @@ import { useLocation, useNavigationType } from "react-router-dom";
  *     entry, with a brief rAF retry while async content is still mounting.
  *   - Hash anchors (`/foo#section`): scroll the matching element into view,
  *     winning over both of the above.
+ *   - `navigate(..., { state: { preserveScroll: true } })`: leave the scroll
+ *     where it is. For in-page param changes that swap content within the same
+ *     view (e.g. travel's day↔day Prev/Next + swipe at `:tripId/day/:date`),
+ *     where a jump to the top would feel like a full page nav. Opt-in per
+ *     navigation; everything else keeps the default scroll-to-top.
  *
  * Scope:
  *   - Operates on the window scroll only — one scroll container per app.
@@ -75,6 +80,13 @@ export function useScrollRestoration(): void {
       }
       // Hash present but target missing — fall through to default behavior
       // rather than leave the scroll wherever it happened to be.
+    }
+
+    // Caller opted out of the reset for this navigation (in-page content swap).
+    // Checked after the hash branch so an explicit `#anchor` still wins, and
+    // after the save-position bookkeeping above so back/forward still works.
+    if ((location.state as { preserveScroll?: boolean } | null)?.preserveScroll) {
+      return;
     }
 
     if (navigationType === "POP") {

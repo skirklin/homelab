@@ -110,6 +110,22 @@ describe("useScrollRestoration", () => {
     expect(lastCall).toEqual([0, 0]);
   });
 
+  it("leaves scroll alone on PUSH with state.preserveScroll", () => {
+    renderApp(["/a"]);
+    act(() => {
+      scrollY = 300;
+    });
+    scrollToSpy.mockClear();
+
+    act(() => {
+      navigateRef!("/b", { state: { preserveScroll: true } });
+    });
+
+    // The opt-out short-circuits before any scroll write.
+    expect(scrollToSpy).not.toHaveBeenCalled();
+    expect(scrollY).toBe(300);
+  });
+
   it("restores the previous scroll position on POP (back)", () => {
     renderApp(["/a"]);
 
