@@ -1068,6 +1068,39 @@ describe("PBMirror: reconnect-driven resync", () => {
     expect(stub.col("items").fetchCalls, "coalesced — no second refetch").toBe(afterReconnect);
   });
 
+  it("force (reconnect) BYPASSES coalesce even right after a focus resync", async () => {
+    // Mobile-wake ordering: focus fires first (backstop, stamps lastResyncAt),
+    // then the network returns and SSE reconnects ~1-2s later — INSIDE the
+    // coalesce window. A symmetric coalesce would wrongly drop the reconnect
+    // resync (and since PB_CONNECT already cleared realtimeDirty, the drop is
+    // silent → stale data). force:true must override the window so the
+    // authoritative reconnect signal always fetches.
+    const { stub, mirror } = setup();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+
+    const states: RawRecord[][] = [];
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => { states.push(s); },
+    );
+    await flush();
+
+    // Focus resync lands first (backstop) — coalesced path, stamps the window.
+    await mirror.resync();
+    await flush();
+    const afterFocus = stub.col("items").fetchCalls;
+
+    // Peer mutated while SSE was down (no stub.emit reached us).
+    stub.col("items").records.set("b", rec("items", { id: "b", list: "L1" }));
+
+    // Reconnect lands immediately afterward, well inside the 2s window.
+    stub.dropAndReconnect(["items"]);
+    await flush();
+
+    expect(stub.col("items").fetchCalls, "force resync ran despite the window").toBe(afterFocus + 1);
+    expect(states[states.length - 1].map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
+
   it("a disconnect with NO active subscriptions does not arm a resync", async () => {
     // The SDK's onDisconnect also fires on graceful unsubscribe-all teardown.
     // Only a drop with live subs should arm the dirty flag.
@@ -1085,6 +1118,59 @@ describe("PBMirror: reconnect-driven resync", () => {
     await flush();
 
     expect(stub.col("items").fetchCalls, "graceful close must not resync").toBe(fetchesBefore);
+  });
+
+  it("two mirrors on one pb: M1 dispose must not clobber M2's onDisconnect", async () => {
+    // onDisconnect is a single settable slot. Chain: M2 → M1 → orig(undefined).
+    // Disposing M1 first must NOT blind-restore the slot (that would knock M2's
+    // live handler off). Restore only-if-on-top keeps M2 effective; after both
+    // dispose the slot is back to the original with no dangling disposed-mirror
+    // closure left firing.
+    const stub = makeStubPb();
+    const wpb = wrapPocketBase(() => stub.pb);
+    const realtime = (stub.pb as unknown as { realtime: { onDisconnect?: unknown } }).realtime;
+    expect(realtime.onDisconnect, "slot starts empty").toBeUndefined();
+
+    const mirror1 = createMirror(() => stub.pb, wpb);
+    const mirror2 = createMirror(() => stub.pb, wpb);
+
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+    stub.col("other").records.set("x", rec("other", { id: "x", list: "L1" }));
+
+    mirror1.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      () => {},
+    );
+    mirror2.watch(
+      { collection: "other", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      () => {},
+    );
+    await flush();
+
+    // Dispose M1 (creation order). M2's handler must survive on the slot.
+    mirror1.dispose();
+    await flush();
+    expect(realtime.onDisconnect, "M2 still installed after M1 dispose").not.toBeUndefined();
+
+    // A real drop+reconnect must still resync M2 (its realtimeDirty armed).
+    const otherBefore = stub.col("other").fetchCalls;
+    stub.dropAndReconnect(["other"]);
+    await flush();
+    expect(stub.col("other").fetchCalls, "M2 resynced after M1 dispose").toBe(otherBefore + 1);
+
+    // Dispose M2 (out-of-creation-order means M2 restores to M1's now-disposed
+    // handler — single-slot chaining can't splice M1 out without a ref to it).
+    // That's fine: whatever closure remains must be INERT (the `disposed` guard
+    // makes it a no-op). Assert no live mirror is reachable: a drop+reconnect
+    // after both dispose refetches nothing.
+    mirror2.dispose();
+    await flush();
+    const itemsBefore = stub.col("items").fetchCalls;
+    const otherAfter = stub.col("other").fetchCalls;
+    stub.dropAndReconnect(["items", "other"]);
+    await flush();
+    expect(stub.col("items").fetchCalls, "M1 inert after dispose").toBe(itemsBefore);
+    expect(stub.col("other").fetchCalls, "M2 inert after dispose").toBe(otherAfter);
   });
 
   it("dispose() tears down the PB_CONNECT subscription (no leaked listener)", async () => {
