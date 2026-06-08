@@ -121,6 +121,17 @@ data:
         conditions:
           - "[STATUS] == 200"
 
+      # Coach service — long-running Claude Agent SDK harness backing the
+      # realtime Coach feature (Phase D). Cluster-only; the body check
+      # mirrors the api-health condition shape.
+      - name: coach
+        group: api
+        url: http://coach.homelab.svc.cluster.local:3030/health
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+          - "[BODY].status == ok"
+
       # Backup freshness — fails if the latest daily-* PB backup is older
       # than 25h. 25 (not 24) gives the pb-backup-daily CronJob some slack
       # if it lags by minutes. Endpoint is public (no auth) and only

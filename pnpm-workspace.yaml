@@ -4,4 +4,5 @@ packages:
   - "packages/*"
   - "services/scripts"
   - "services/api"
+  - "services/coach"
   - "services/event-watcher"

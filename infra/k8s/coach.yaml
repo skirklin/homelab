@@ -1,0 +1,91 @@
+# coach — long-running Claude Agent SDK service for the realtime Coach
+# feature. D1 ships only a health endpoint; the SDK loop, PB realtime
+# subscription, and chat writeback land in D2. See
+# apps/life/OBSERVER_BUILD_PLAN.md §"Phase D".
+#
+# Single replica deliberately: the agent holds in-memory session state per
+# user (one PocketBaseSessionStore-backed `query()` per user). Horizontal
+# scaling needs a stickiness story we're not solving in D1/D2.
+#
+# Env: ANTHROPIC_API_KEY (pay-per-token), CLAUDE_CODE_OAUTH_TOKEN
+# (subscription-credit billing on Max — preferred when set),
+# HOMELAB_API_TOKEN (for the homelab MCP), PB_URL / PB_ADMIN_EMAIL /
+# PB_ADMIN_PASSWORD (admin client backing the SessionStore). All flow in
+# via the existing `api-secrets` Secret — create/update those keys
+# out-of-band with `kubectl create secret generic api-secrets ...` (the
+# Secret is gitignored and not in any manifest).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coach
+  namespace: homelab
+spec:
+  replicas: 1
+  # In-memory per-user agent state — Recreate avoids dual-active during a
+  # rollout (same reason event-watcher uses Recreate).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: coach
+  template:
+    metadata:
+      labels:
+        app: coach
+    spec:
+      containers:
+        - name: coach
+          image: localhost:30500/homelab/coach:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3030
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3030
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3030
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          env:
+            - name: PORT
+              value: "3030"
+            - name: PB_URL
+              value: "http://pocketbase:8090"
+          envFrom:
+            # Anthropic + homelab-MCP + PB-admin credentials. The Secret
+            # is created out-of-band — `optional: true` so the pod still
+            # rolls if a key is missing (D1 doesn't actually consume any
+            # of them; matters once D2 wires the SDK loop).
+            - secretRef:
+                name: api-secrets
+                optional: true
+          resources:
+            # Anthropic SDK + a few MCP clients fit comfortably in 256Mi
+            # at idle. Limit 512Mi gives headroom for transient spikes
+            # during a turn (tool-use round-trips, large transcript
+            # window).
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coach
+  namespace: homelab
+spec:
+  selector:
+    app: coach
+  ports:
+    - port: 3030
+      targetPort: 3030

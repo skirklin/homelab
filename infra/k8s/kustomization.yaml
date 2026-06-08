@@ -10,6 +10,7 @@ resources:
   - apps.yaml
   - ingest.yaml
   - api.yaml
+  - coach.yaml
   - beszel.yaml
   - gatus.yaml
   - event-watcher.yaml

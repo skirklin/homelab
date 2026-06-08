@@ -177,6 +177,21 @@ var PB_RULES = Object.freeze({
     updateRule: LIFE_OWNER_RULE,
     deleteRule: LIFE_OWNER_RULE,
   },
+  // coach_sessions — Phase D realtime coach SDK session-store mirror.
+  // Single-relation `owner`, same shape as life_logs / claude_observations /
+  // chat_messages — direct equality, no `?=`.
+  //
+  // createRule is owner-equality (defense-in-depth). The coach service writes
+  // via admin-PB (bypasses rules), but if any future HTTP surface ever hands a
+  // session row to the user-direct PB path, the rule still enforces tenancy.
+  // See apps/life/OBSERVER_BUILD_PLAN.md §"Phase D".
+  coach_sessions: {
+    listRule: LIFE_OWNER_RULE,
+    viewRule: LIFE_OWNER_RULE,
+    createRule: LIFE_OWNER_RULE,
+    updateRule: LIFE_OWNER_RULE,
+    deleteRule: LIFE_OWNER_RULE,
+  },
 
   // ===== Upkeep / Tasks =====
   task_lists: {
