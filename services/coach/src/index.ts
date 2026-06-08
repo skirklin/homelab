@@ -97,6 +97,11 @@ app.get("/health", (c) =>
     subscription_active: state.subscription?.isActive() ?? false,
     active_sessions: state.manager?.activeSessionCount() ?? 0,
     last_error: state.manager?.lastError() ?? state.startError,
+    // Per-user daily token totals. In-memory only; resets on pod restart
+    // and at PT midnight (todayPacific). v1 is single-tenant (Scott), so
+    // this is effectively `{ <scott-owner-id>: {...} }` — but the shape
+    // is multi-user-ready when we open up the Coach.
+    token_stats: state.manager?.tokenStats() ?? {},
   }),
 );
 

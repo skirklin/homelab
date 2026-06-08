@@ -73,6 +73,23 @@ export interface AgentDeps {
    * per pod, mirroring the SDK session's lifetime.
    */
   buildWarmContext?: (pb: PocketBase, ownerId: string) => Promise<string | null>;
+  /**
+   * Wall-clock source. Defaults to `Date.now`. Tests override to drive
+   * the rate-limit windows deterministically without sleeping.
+   */
+  now?: () => number;
+}
+
+/** Per-user daily token totals. Resets when `date` changes. */
+export interface TokenStats {
+  /** Pacific calendar date (`YYYY-MM-DD`) the counters are scoped to. */
+  date: string;
+  in: number;
+  out: number;
+  cache_read: number;
+  cache_creation: number;
+  /** Number of completed assistant turns counted toward this day. */
+  turns: number;
 }
 
 interface UserSession {
@@ -95,6 +112,12 @@ export interface AgentManager {
   activeSessionCount: () => number;
   /** Returns the last per-session error (across all sessions), if any. */
   lastError: () => string | null;
+  /**
+   * Returns a snapshot of per-user daily token totals. Resets when the
+   * Pacific calendar date rolls over. In-memory only — pod restart loses
+   * the counters, which is fine (next day starts fresh anyway).
+   */
+  tokenStats: () => Record<string, TokenStats>;
   /** Test/shutdown hook: close every active session and clear the map. */
   closeAll: () => void;
 }
@@ -131,6 +154,75 @@ async function defaultBuildWarmContext(
 }
 
 /**
+ * Today's calendar day in Pacific time as `YYYY-MM-DD`. Mirrors
+ * `services/api/src/lib/notifications/tz.ts#todayPacific` — Scott (the
+ * only Coach user for v1) reads the day in PT, so the daily token
+ * counter rolls over at PT midnight rather than UTC midnight.
+ */
+function todayPacific(now: number): string {
+  return new Date(now).toLocaleDateString("en-CA", {
+    timeZone: "America/Los_Angeles",
+  });
+}
+
+/**
+ * Pull the BetaUsage off an SDK assistant message. The SDK delivers it
+ * at `msg.message.usage` (BetaMessage), where every field except
+ * input_tokens/output_tokens may be null. Returns null if usage is
+ * absent (e.g. a streamed chunk before the final usage block lands).
+ */
+function extractAssistantUsage(msg: SDKMessage): {
+  in: number;
+  out: number;
+  cache_read: number;
+  cache_creation: number;
+} | null {
+  if (msg.type !== "assistant") return null;
+  // Cast through unknown: the SDK's BetaMessage is a deep type tree, and
+  // we only need four fields off `.usage`. A narrow shape keeps the
+  // dependency surface minimal.
+  const u = (msg as unknown as { message?: { usage?: Record<string, number | null> } })
+    .message?.usage;
+  if (!u) return null;
+  return {
+    in: typeof u.input_tokens === "number" ? u.input_tokens : 0,
+    out: typeof u.output_tokens === "number" ? u.output_tokens : 0,
+    cache_read:
+      typeof u.cache_read_input_tokens === "number" ? u.cache_read_input_tokens : 0,
+    cache_creation:
+      typeof u.cache_creation_input_tokens === "number"
+        ? u.cache_creation_input_tokens
+        : 0,
+  };
+}
+
+// ─── Rate-limit + budget config ──────────────────────────────────────────────
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Read the guardrail config from env at call time. Re-evaluating per
+ * `createAgentManager` (rather than caching at module load) lets tests
+ * set env vars in `beforeEach` without import-order gymnastics, and
+ * lets the prod boot path pick up changes from a Deployment env edit on
+ * the next pod start without code edits.
+ */
+function readGuardrailConfig(): {
+  minIntervalMs: number;
+  hourlyCap: number;
+  maxTurns: number;
+} {
+  const minVal = Number(process.env.COACH_TURN_MIN_INTERVAL_MS);
+  const capVal = Number(process.env.COACH_TURN_HOURLY_CAP);
+  const turnsVal = Number(process.env.COACH_MAX_TURNS);
+  return {
+    minIntervalMs: Number.isFinite(minVal) && minVal >= 0 ? minVal : 6000,
+    hourlyCap: Number.isFinite(capVal) && capVal > 0 ? capVal : 60,
+    maxTurns: Number.isFinite(turnsVal) && turnsVal > 0 ? turnsVal : 8,
+  };
+}
+
+/**
  * Build the SDK `Options` for a given user. Pulled out so tests can
  * assert on the exact shape without spinning up the real SDK.
  */
@@ -139,6 +231,7 @@ export function buildQueryOptions(
   pb: PocketBase,
   homelabMcpUrl: string,
   homelabApiToken: string,
+  maxTurns: number = readGuardrailConfig().maxTurns,
 ): Options {
   return {
     // V0 system prompt — sparse voice. Iterate freely in
@@ -199,6 +292,14 @@ export function buildQueryOptions(
     // Standard permission mode — anything the agent can't justify gets
     // denied via canUseTool above.
     permissionMode: "default",
+
+    // Cap internal tool-use rounds per user turn. If the model hits this
+    // ceiling the SDK emits a result message with
+    // `subtype: "error_max_turns"`, which our consumer loop already
+    // surfaces as an in-chat error note. Protects against per-turn
+    // tool-loops (search → fetch → search → ...) burning credits on a
+    // single user message. Tunable via `COACH_MAX_TURNS`.
+    maxTurns,
   };
 }
 
@@ -258,6 +359,23 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
     process.env.HOMELAB_MCP_URL || "https://mcp.tail56ca88.ts.net/mcp";
   const homelabApiToken = process.env.HOMELAB_API_TOKEN || "";
 
+  // Rate-limit state. A "turn" here is one user→SDK push (one `pushMessage`
+  // call), NOT the SDK's internal tool-use rounds (those are capped by
+  // `maxTurns` on the query). The two limits stack:
+  //   - `lastTurnAt`     enforces a minimum gap between pushes per user.
+  //   - `recentTurnsAt`  caps total pushes in any trailing-hour window.
+  // Both maps are keyed by ownerId; entries live for the pod's lifetime.
+  const lastTurnAt = new Map<string, number>();
+  const recentTurnsAt = new Map<string, number[]>();
+  const { minIntervalMs, hourlyCap, maxTurns } = readGuardrailConfig();
+
+  // Per-user daily token totals. Keyed by ownerId; the `date` field is the
+  // Pacific calendar date the counters are scoped to — when it rolls over,
+  // the entry is replaced with a fresh zeroed one on the next attribution.
+  const tokenStats = new Map<string, TokenStats>();
+
+  const now = () => (deps.now ? deps.now() : Date.now());
+
   let lastError: string | null = null;
 
   async function buildSession(ownerId: string): Promise<UserSession> {
@@ -302,7 +420,13 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
       primedThisPod.add(ownerId);
     }
 
-    const options = buildQueryOptions(ownerId, pb, homelabMcpUrl, homelabApiToken);
+    const options = buildQueryOptions(
+      ownerId,
+      pb,
+      homelabMcpUrl,
+      homelabApiToken,
+      maxTurns,
+    );
     session.query = deps.runQuery({
       prompt: makeInboxGenerator(session),
       options,
@@ -313,6 +437,30 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
       try {
         for await (const msg of session.query) {
           if (msg.type === "assistant") {
+            // Attribute the assistant turn's token usage to the user's
+            // daily totals BEFORE writeback. Doing it pre-writeback means
+            // the counter advances even if writeback fails — credits were
+            // already spent on the model call.
+            const usage = extractAssistantUsage(msg);
+            if (usage) {
+              const today = todayPacific(now());
+              const cur = tokenStats.get(ownerId);
+              const stats: TokenStats =
+                cur && cur.date === today
+                  ? cur
+                  : { date: today, in: 0, out: 0, cache_read: 0, cache_creation: 0, turns: 0 };
+              stats.in += usage.in;
+              stats.out += usage.out;
+              stats.cache_read += usage.cache_read;
+              stats.cache_creation += usage.cache_creation;
+              stats.turns += 1;
+              tokenStats.set(ownerId, stats);
+              console.log(
+                `[coach/usage] user=${ownerId} in=${usage.in} out=${usage.out} ` +
+                  `cache_read=${usage.cache_read} cache_creation=${usage.cache_creation} ` +
+                  `turns_today=${stats.turns}`,
+              );
+            }
             const text = extractAssistantText(msg);
             if (text) {
               try {
@@ -332,6 +480,15 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
             const desc = `${msg.subtype}${"errors" in msg && Array.isArray(msg.errors) && msg.errors.length > 0 ? ": " + msg.errors.join("; ") : ""}`;
             session.lastError = desc;
             lastError = desc;
+            // `error_max_turns` means the per-user-message tool-use round
+            // cap (COACH_MAX_TURNS) tripped. Worth logging at info level
+            // separately so it stands out from genuine errors when grepping
+            // pod logs ("did we hit the safety net or did something break?").
+            if (msg.subtype === "error_max_turns") {
+              console.log(
+                `[coach/maxturns] user=${ownerId} hit COACH_MAX_TURNS=${maxTurns}`,
+              );
+            }
             console.error(`[coach] SDK result error for ${ownerId}:`, desc);
             try {
               await deps.postAssistantMessage(
@@ -381,8 +538,65 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
     }
   }
 
+  /**
+   * Check both rate limits for `ownerId`. Returns null if the turn is
+   * allowed (and records it as accepted); otherwise returns a
+   * human-readable throttle reason string that the caller surfaces as a
+   * `kind:"note"` chat message. The hourly window is pruned in-place so
+   * the array doesn't grow unbounded.
+   */
+  function checkRateLimit(ownerId: string): string | null {
+    const t = now();
+
+    // Min-interval gate: hard floor on push frequency. The runaway
+    // scenario we're guarding against is a buggy PB realtime / chat
+    // subscriber re-firing the same turn in a tight loop — even a 6s
+    // floor caps that at 10 turns/min instead of unbounded.
+    const last = lastTurnAt.get(ownerId);
+    if (last !== undefined && t - last < minIntervalMs) {
+      const wait = Math.ceil((minIntervalMs - (t - last)) / 1000);
+      return `Throttled: too many turns too fast. Try again in ${wait}s.`;
+    }
+
+    // Hourly cap: prune anything older than 1h, then check the window.
+    const cutoff = t - HOUR_MS;
+    const recent = recentTurnsAt.get(ownerId) ?? [];
+    let pruneIdx = 0;
+    while (pruneIdx < recent.length && recent[pruneIdx] < cutoff) pruneIdx += 1;
+    const trimmed = pruneIdx > 0 ? recent.slice(pruneIdx) : recent;
+    if (trimmed.length >= hourlyCap) {
+      // Oldest entry in the window dictates when the user can try again.
+      const oldest = trimmed[0];
+      const wait = Math.max(1, Math.ceil((oldest + HOUR_MS - t) / 1000));
+      recentTurnsAt.set(ownerId, trimmed);
+      return `Throttled: more than ${hourlyCap} turns in the last hour. Try again in ${wait}s.`;
+    }
+
+    // Accept: record the turn.
+    trimmed.push(t);
+    recentTurnsAt.set(ownerId, trimmed);
+    lastTurnAt.set(ownerId, t);
+    return null;
+  }
+
   return {
     async pushMessage(ownerId, body) {
+      const throttle = checkRateLimit(ownerId);
+      if (throttle) {
+        // Do NOT spin up the SDK session for a throttled turn — the
+        // whole point is to refuse the work, not just delay it. Post a
+        // `kind:"note"` chat row so the user sees the refusal in their
+        // chat thread immediately, same shape as the existing error
+        // writeback.
+        console.warn(`[coach/throttle] user=${ownerId}: ${throttle}`);
+        try {
+          await deps.postAssistantMessage(ownerId, throttle, "error");
+        } catch (e) {
+          console.error(`[coach] throttle-writeback failed for ${ownerId}:`, e);
+        }
+        return;
+      }
+
       const session = await getOrCreateSession(ownerId);
       const userMsg: SDKUserMessage = {
         type: "user",
@@ -401,6 +615,13 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
     },
     lastError() {
       return lastError;
+    },
+    tokenStats() {
+      // Shallow-clone each entry so callers (e.g. the /health JSON
+      // serializer) can't accidentally mutate live state.
+      const out: Record<string, TokenStats> = {};
+      for (const [k, v] of tokenStats) out[k] = { ...v };
+      return out;
     },
     closeAll() {
       for (const s of sessions.values()) {
