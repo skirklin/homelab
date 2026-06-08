@@ -814,6 +814,30 @@ describe("BLOCKER 3: per-user snapshot stamping + clear ordering", () => {
     expect((await loadSnapshotsForUser("user-B")).map((r) => r.id)).not.toContain("ay");
   });
 
+  it("STRUCTURAL: persisting a snapshot arms the clear-hook WITHOUT hydrateSnapshots ever running", async () => {
+    // Locks the structural guarantee in onServerChange: any snapshot that
+    // reaches IDB must have armed the sign-out clear-hook first, independent of
+    // hydrateSnapshots / BackendProvider's render order. We NEVER call
+    // hydrateSnapshots here — the only thing that installs the hook is the
+    // applyServer → onServerChange chokepoint. Without the fix (hookAuthChange
+    // armed in onServerChange) the hook is never installed in this session, so
+    // the later sign-out leaves A's row sitting in IDB.
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    const wpb = wrapPocketBase(() => stub.pb);
+
+    // Persist a server snapshot via the chokepoint. No hydrate, no write.
+    wpb.mirrorIntegration.queue.applyServer("items", "st1", rec("items", { id: "st1", list: "L1" }));
+    await flushSnapshotWriter();
+    expect((await loadSnapshotsForUser("user-A")).map((r) => r.id)).toContain("st1");
+
+    // The clear-hook must already be armed — flip identity and assert the
+    // snapshot store is cleared via the persistence layer.
+    stub.authStore.setRecord("user-B");
+    await flushSnapshotWriter();
+    expect((await loadSnapshotsForUser("user-A"))).toHaveLength(0);
+  });
+
   it("read-only session installs the auth-change clear hook eagerly (no write needed)", async () => {
     const stub = makeStubPb();
     stub.authStore.setRecord("user-A");

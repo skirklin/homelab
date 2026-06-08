@@ -697,6 +697,16 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     } else {
       for (const r of initial) slice.records.set(r.id, r);
     }
+    //
+    // ASYMMETRY (see the resync seed loop for why it differs): bootstrap GUARDS
+    // its seed — it skips over a LIVE (non-hydrated) server snapshot. During a
+    // bootstrap's in-flight fetch the only way the queue can already hold a live
+    // snapshot for `r.id` is that an SSE event raced ahead and applied it; that
+    // SSE event is NEWER than this now-stale fetch, so seeding unconditionally
+    // here would reopen the stale-fetch-clobbers-fresh-SSE bug (BLOCKER 1).
+    // Hydrated-from-cache snapshots DO get overwritten — that's the whole point
+    // of revalidation. resync deliberately does NOT use this guard because its
+    // job is the opposite: to overwrite stale-but-live snapshots on tab-resume.
     for (const r of initial) {
       if (!queue.hasServerSnapshot(collection, r.id) || queue.isHydrated(collection, r.id)) {
         queue.applyServer(collection, r.id, r);
@@ -886,6 +896,18 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         // is safe and necessary: the consumer's view must reflect the
         // freshest server truth underneath whatever optimistic state the
         // queue currently holds.
+        //
+        // ASYMMETRY (see the bootstrap seed loop for why it differs): resync
+        // seeds UNCONDITIONALLY — it deliberately does NOT use bootstrap's
+        // "skip over a live snapshot" guard. resync is the latest-server-truth-
+        // wins convergence mechanism that runs on tab-resume to catch events
+        // missed while the SSE was down (PocketBase realtime does NOT replay
+        // missed events). Its entire job is to overwrite stale-but-"live"
+        // (non-hydrated) snapshots; applying bootstrap's guard would make resync
+        // skip exactly the records it exists to refresh, breaking multi-device
+        // catch-up. The narrow in-flight SSE-race the guard protects bootstrap
+        // from is acceptable here because resync re-runs on the next
+        // focus/reconnect and self-heals.
         for (const r of fresh) {
           queue.applyServer(collection, r.id, r);
         }

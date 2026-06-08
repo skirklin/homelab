@@ -272,6 +272,17 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   }
 
   function onServerChange(collection: string, id: string, snapshot: RawRecord | null): void {
+    // Structural guarantee: a snapshot cannot reach IDB without the sign-out
+    // clear-hook being live, independent of BackendProvider's render order.
+    // Every persisted snapshot flows through exactly this chokepoint (applyServer
+    // → onServerChange; seedServer/hydration deliberately does NOT fire it), so
+    // arming hookAuthChange as the FIRST statement here makes it impossible to
+    // queue a row for persistence before the clear-hook is installed. hydrate()
+    // also arms it (belt-and-suspenders for empty-cache read-only sessions that
+    // never persist) — see the hookAuthChange call in hydrateSnapshots. By the
+    // time any real applyServer fires the backend is initialized, so pb() is
+    // safe; hookAuthChange is idempotent (early-returns once installed).
+    hookAuthChange();
     if (hydrating) return;
     if (typeof indexedDB === "undefined") return;
     // Stamp the user NOW (queue time), not at flush — see dirtySnapshots above.
@@ -745,6 +756,12 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       // the read-only entrypoint and always runs after the backend is
       // initialized, so pb() is safe. Idempotent; runs even when there's no
       // user yet so the hook is armed before a later sign-in.
+      //
+      // This is the EARLY-ARM for empty-cache sessions (nothing persists, so
+      // onServerChange never fires). The LOAD-BEARING structural guarantee — the
+      // hook is armed before any snapshot reaches IDB — lives in onServerChange
+      // itself, which arms it as its first statement and does NOT depend on this
+      // call or on BackendProvider's render order. See onServerChange.
       hookAuthChange();
       const user = pb().authStore?.record?.id;
       if (!user) return; // unauthenticated — nothing scoped to load.
