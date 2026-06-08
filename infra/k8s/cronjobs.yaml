@@ -153,7 +153,12 @@ spec:
 #                         daily-* of each calendar month, which is exempted
 #                         from pruning and kept forever (virtual "monthly"
 #                         tier — no separate file naming, no separate cron).
-#   - pre-deploy-*      : keep 14 days
+#   - pre-deploy-*      : keep only the newest 10 (by .modified), delete the
+#                         rest regardless of age. Count-bounded rather than
+#                         time-bounded because at ~12 deploys/day during active
+#                         work a 14-day window let these accrue to 75+ (~2 GB);
+#                         they're belt-and-suspenders insurance and the daily-*
+#                         tier is the real backstop.
 #   - pre-migration-*   : keep forever (manual / migration-related, rare,
 #                         load-bearing — the only thing that saved the
 #                         2026-05-22 life_events incident)
@@ -198,7 +203,6 @@ spec:
                     | jq -er .token)
                   NOW=$(date -u +%s)
                   DAILY_CUTOFF=$((NOW - 90*86400))
-                  PREDEPLOY_CUTOFF=$((NOW - 14*86400))
                   # GET /api/backups returns [{key, size, modified}, ...].
                   # `modified` is RFC3339-ish UTC ("2026-05-22 09:00:00.123Z"
                   # in current PB versions). Normalize space→T and strip
@@ -217,6 +221,14 @@ spec:
                   ')
                   echo "[pb-backup-prune] monthly exempts:"
                   printf '  %s\n' $MONTHLY
+                  # pre-deploy delete set: every pre-deploy-* EXCEPT the newest
+                  # 10 by .modified. Count-bounded so the tier can't bloat no
+                  # matter how often we deploy. `.[10:]` keeps the 11th-onward
+                  # (oldest) after a descending sort — i.e. the ones to delete.
+                  PREDEPLOY_DELETE=$(printf '%s' "$BACKUPS" | jq -r '
+                    [.[] | select(.key | test("^pre-deploy-"))]
+                    | sort_by(.modified) | reverse | .[10:] | .[].key
+                  ')
                   printf '%s' "$BACKUPS" \
                     | jq -r '.[] | "\(.key)\t\(.modified)"' \
                     | while IFS="$(printf '\t')" read -r KEY MODIFIED; do
@@ -238,8 +250,8 @@ spec:
                             fi
                             ;;
                           pre-deploy-*)
-                            if [ "$TS" -lt "$PREDEPLOY_CUTOFF" ]; then
-                              echo "[pb-backup-prune] delete (>14d) $KEY"
+                            if printf '%s\n' "$PREDEPLOY_DELETE" | grep -qxF "$KEY"; then
+                              echo "[pb-backup-prune] delete (>newest 10) $KEY"
                               curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
                             fi
                             ;;

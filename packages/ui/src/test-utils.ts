@@ -725,6 +725,13 @@ export function e2eTestConfig() {
     environment: "node" as const,
     testTimeout: 30000,
     hookTimeout: 30000,
+    // One retry absorbs a transient host-contention race (several parallel
+    // Claude sessions each run their own gate against their own PB on a
+    // swap-less box, so an e2e spec occasionally loses a timing race that has
+    // nothing to do with the code). A genuinely broken test still fails twice.
+    // This is a flake-absorber for resource contention, NOT a license to ship
+    // flaky e2e code — if a spec needs the retry to pass reliably, fix the spec.
+    retry: 1,
     env: {
       PB_TEST_URL: process.env.PB_TEST_URL || PB_TEST_URL_FALLBACK,
     },

@@ -295,7 +295,7 @@ All CronJobs live in [`infra/k8s/cronjobs.yaml`](infra/k8s/cronjobs.yaml).
 
 Backup retention tiers (enforced by `pb-backup-prune`):
 - **`daily-*`** — keep 90 days, EXCEPT the chronologically-first daily of each calendar month (monthly tier, kept forever). At ~30 MB/snapshot that's ~3 GB/yr.
-- **`pre-deploy-*`** — keep 14 days. Written by the pre-deploy hook in `infra/deploy.sh` (tagged with the git SHA, e.g. `pre-deploy-abc1234-20260524t090000z.zip`); belt-and-suspenders on top of the nightly so a same-day rollback always has a fresh baseline. Backup failure does NOT abort the deploy — it's insurance, not critical-path.
+- **`pre-deploy-*`** — keep only the newest 10 (by `.modified`), delete the rest regardless of age. Count-bounded rather than time-bounded because at ~12 deploys/day during active work a 14-day window let these accrue to 75+ (~2 GB). Written by the pre-deploy hook in `infra/deploy.sh` (tagged with the git SHA, e.g. `pre-deploy-abc1234-20260524t090000z.zip`); belt-and-suspenders on top of the nightly so a same-day rollback always has a fresh baseline. Backup failure does NOT abort the deploy — it's insurance, not critical-path.
 - **`pre-migration-*`** — keep forever.
 - **Anything else** (`emergency-*`, `pre-restore-*`, manual) — keep forever.
 
