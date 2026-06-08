@@ -179,6 +179,13 @@ old behavior). They'll keep doing so until they're backfilled or edited — acce
 the fix is correct for all new tasks and the gap closes naturally as old one-shot prep tasks
 complete and clear.
 
+**Known limitation (intended for Phase 1):** an empty `notify_users` is treated as "inherit,"
+so there is no way to silence a single leaf whose ancestor container sets an explicit
+recipient list — clearing the leaf just re-inherits the ancestor's set. A PB relation can't
+distinguish "unset" from "deliberately empty," so expressing "notify nobody" needs a sentinel
+we're not adding now. Accepted for Phase 1; revisit if a real "mute this one task" case shows
+up.
+
 Also fix the create path so `notify_users` actually persists when a caller *does* set it
 explicitly (POST `/tasks` may drop it today; only PATCH honors it). No schema change, and
 the behavior is shaped toward the target model rather than against it.
