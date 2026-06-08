@@ -241,6 +241,12 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
   // subject_id="${tripId}:${date}") — the legacy travel_day_entries collection
   // was retired. A note counts as "journaled" if it carries non-empty text or
   // highlight entries.
+  //
+  // travel_notes is PER-AUTHOR (one row per user per trip-day, no unique
+  // index), unlike the retired travel_day_entries which had a single shared
+  // UNIQUE(trip,date) row. So suppression must be keyed by author too — keying
+  // only by ${tripId}|${date} would let ONE co-owner's journal suppress the
+  // evening reminder for EVERY co-owner on a shared trip.
   const tripDateKeys = new Set(contexts.map((c) => `${c.tripId}|${c.todayInTz}`));
   const subjectIds = [...new Set(contexts.map((c) => `${c.tripId}:${c.todayInTz}`))];
   const journaled = new Set<string>();
@@ -251,12 +257,16 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     );
     const rows = await pb.collection("travel_notes").getFullList({ filter, $autoCancel: false });
     for (const r of rows) {
+      const author = r.created_by as string;
+      // Skip unattributed/backfilled rows so a historical day-note with no
+      // author can't suppress anyone's reminder.
+      if (!author) continue;
       const subjectId = r.subject_id as string;
       // subject_id is "${tripId}:${date}" — split on the FIRST colon.
       const sep = subjectId.indexOf(":");
       if (sep === -1) continue;
-      const key = `${subjectId.slice(0, sep)}|${subjectId.slice(sep + 1)}`;
-      if (!tripDateKeys.has(key)) continue;
+      const tripDateKey = `${subjectId.slice(0, sep)}|${subjectId.slice(sep + 1)}`;
+      if (!tripDateKeys.has(tripDateKey)) continue;
       const entries = Array.isArray(r.entries) ? r.entries : [];
       const filled = entries.some(
         (e: { name?: string; value?: unknown }) =>
@@ -264,7 +274,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
           typeof e.value === "string" &&
           e.value.trim().length > 0,
       );
-      if (filled) journaled.add(key);
+      if (filled) journaled.add(`${author}|${tripDateKey}`);
     }
   }
 
@@ -296,7 +306,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     }
 
     if (isEvening) {
-      if (journaled.has(`${ctx.tripId}|${ctx.todayInTz}`)) { eSkipped++; continue; }
+      if (journaled.has(`${ctx.userId}|${ctx.tripId}|${ctx.todayInTz}`)) { eSkipped++; continue; }
       const last = dedup.evening?.[ctx.tripId];
       if (last === ctx.todayInTz) { eSkipped++; continue; }
       const buildUrl = (origin: string) => ctx.todayDay
