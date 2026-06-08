@@ -10,11 +10,22 @@ import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { safeTz } from "./tz";
 
-// Life is reachable both as a subdomain (life.kirkl.in) and as a module under
-// the home shell (kirkl.in/life). preferredOrigins picks one per user so we
-// don't double-push to the same device.
-const LIFE_SUBDOMAIN_BASE = `https://life.${DOMAIN}`;
-const LIFE_ORIGINS = [LIFE_SUBDOMAIN_BASE, `https://${DOMAIN}`];
+// Life is unhosted from the home shell — it's standalone at life.kirkl.in ONLY.
+// (The old kirkl.in/life module was removed.) Both session wizards and the
+// sampling UI mount at root there, so deep links are root-relative paths.
+const LIFE_ORIGINS = [`https://life.${DOMAIN}`];
+
+/**
+ * Origin-aware deep link for the morning/evening/weekly session wizards.
+ * Life is standalone-only, so the path is just root-relative (`/morning` …);
+ * the service worker resolves it against the delivery origin. Same shape as
+ * travel's tripUrl/dayUrl — passed to sendPushToUser as `buildUrl` so the
+ * emitted url is SAME-ORIGIN relative (never an absolute https://life.kirkl.in
+ * URL, which would cold-load an empty per-origin authStore = forced sign-out).
+ */
+export function sessionUrl(kind: "morning" | "evening" | "weekly"): string {
+  return `/${kind}`;
+}
 
 // Used when RANDOM_SAMPLES.timezone is missing/garbage. Differs from travel's
 // "America/Denver" default — for random sampling we want deterministic times
@@ -221,17 +232,14 @@ const SESSION_REMINDERS = {
   morning: {
     title: "Morning check-in",
     body: "Good morning. A few questions before the day gets going.",
-    url: `${LIFE_SUBDOMAIN_BASE}/morning`,
   },
   evening: {
     title: "Evening wind-down",
     body: "Wind-down time. Three quick reflections.",
-    url: `${LIFE_SUBDOMAIN_BASE}/evening`,
   },
   weekly: {
     title: "Weekly review",
     body: "Time to look back on the week.",
-    url: `${LIFE_SUBDOMAIN_BASE}/weekly`,
   },
 } as const;
 
@@ -363,7 +371,7 @@ export async function runLifeReminderCheck(
         const result = await sendPushToUser(pb, ownerId, {
           title: payload.title,
           body: payload.body,
-          url: payload.url,
+          buildUrl: () => sessionUrl(kind.kind),
           data: { type: `life_${kind.kind}_reminder`, logId: logDoc.id },
         }, { preferredOrigins: LIFE_ORIGINS });
         console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);
@@ -413,7 +421,7 @@ export async function runLifeReminderCheck(
               const result = await sendPushToUser(pb, ownerId, {
                 title: payload.title,
                 body: payload.body,
-                url: payload.url,
+                buildUrl: () => sessionUrl("weekly"),
                 data: { type: "life_weekly_reminder", logId: logDoc.id },
               }, { preferredOrigins: LIFE_ORIGINS });
               console.log(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);

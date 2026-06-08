@@ -34,6 +34,8 @@ vi.mock("web-push", () => ({
 
 import { sendPushToUser } from "./push";
 import { tripUrl, dayUrl } from "./notifications/travel";
+import { sessionUrl } from "./notifications/life";
+import { tasksUrl } from "./notifications/deadlines";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -168,5 +170,73 @@ describe("travel.ts tripUrl/dayUrl — real origin branching", () => {
     // travel.kirkl.in. They must NOT get the /travel prefix.
     expect(tripUrl("", "T1")).toBe("/T1");
     expect(dayUrl("", "T1", "2026-06-02")).toBe("/T1/day/2026-06-02");
+  });
+});
+
+// Life is standalone-only at life.kirkl.in — the session wizards mount at root
+// (/morning, /evening, /weekly). The push must carry a SAME-ORIGIN RELATIVE
+// path, never an absolute https://life.kirkl.in/... URL (which would cold-load
+// an empty per-origin authStore and present as a forced sign-out).
+describe("life.ts sessionUrl — same-origin relative path", () => {
+  it("emits a root-relative path for each session kind", () => {
+    expect(sessionUrl("morning")).toBe("/morning");
+    expect(sessionUrl("evening")).toBe("/evening");
+    expect(sessionUrl("weekly")).toBe("/weekly");
+  });
+
+  it("never emits an absolute life.kirkl.in URL", () => {
+    for (const kind of ["morning", "evening", "weekly"] as const) {
+      const url = sessionUrl(kind);
+      expect(url.startsWith("/")).toBe(true);
+      expect(url).not.toContain("https://life.kirkl.in");
+      expect(url).not.toContain("https://");
+    }
+  });
+});
+
+// task_deadline_due taps must open the unified task outliner at /tasks (served
+// by the home app at the kirkl.in origin), NOT fall through to the home root /.
+describe("deadlines.ts tasksUrl — opens the task outliner", () => {
+  it("emits the relative /tasks path", () => {
+    expect(tasksUrl()).toBe("/tasks");
+  });
+
+  it("is relative (resolves against the delivery origin), not root", () => {
+    const url = tasksUrl();
+    expect(url.startsWith("/")).toBe(true);
+    expect(url).not.toBe("/");
+    expect(url).not.toContain("https://");
+  });
+});
+
+// End-to-end through sendPushToUser: a life morning push delivered to the
+// life.kirkl.in subscription carries the relative /morning path, and a
+// deadline push carries /tasks — both via buildUrl, matched to the delivery
+// origin.
+describe("life + deadline buildUrl delivered through sendPushToUser", () => {
+  it("life morning push lands a relative /morning, not an absolute URL", async () => {
+    const pb = makeFakePb([sub("l1", "https://life.kirkl.in")]);
+    await sendPushToUser(
+      pb,
+      "user1",
+      { title: "Morning check-in", buildUrl: () => sessionUrl("morning") },
+      { preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"] },
+    );
+    const url = pushedUrlFor("https://push.example/l1");
+    expect(url).toBe("/morning");
+    expect(url).not.toContain("https://life.kirkl.in");
+  });
+
+  it("task_deadline_due push lands /tasks, not /", async () => {
+    const pb = makeFakePb([sub("d1", "https://kirkl.in")]);
+    await sendPushToUser(
+      pb,
+      "user1",
+      { title: "Todo is due", buildUrl: () => tasksUrl() },
+      { preferredOrigins: ["https://upkeep.kirkl.in", "https://kirkl.in"] },
+    );
+    const url = pushedUrlFor("https://push.example/d1");
+    expect(url).toBe("/tasks");
+    expect(url).not.toBe("/");
   });
 });

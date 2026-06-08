@@ -26,6 +26,18 @@ export { resolveNotifyRecipients, type NotifyNode };
 const UPKEEP_ORIGINS = [`https://upkeep.${DOMAIN}`, `https://${DOMAIN}`];
 
 /**
+ * Deep link for a deadline tap: the unified task outliner. It's served by the
+ * home app at the kirkl.in origin (and the upkeep app shows its own Kanban),
+ * so a root-relative `/tasks` resolves correctly on whichever origin delivered
+ * the push. Passed to sendPushToUser as `buildUrl` (mirrors travel/life) so the
+ * emitted url is SAME-ORIGIN relative — and so a tap opens /tasks instead of
+ * falling through the service worker default to the home root /.
+ */
+export function tasksUrl(): string {
+  return "/tasks";
+}
+
+/**
  * Whole-day diff between today and the deadline, both anchored to the Pacific
  * calendar day. Negative = overdue. The pod runs in UTC, so naive local-midnight
  * truncation would read a day off near a UTC boundary vs the browser (which
@@ -138,6 +150,7 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
     const result = await sendPushToUser(pb, userId, {
       title,
       body,
+      buildUrl: () => tasksUrl(),
       data: { type: "task_deadline_due", taskCount: String(userTasks.length) },
     }, { preferredOrigins: UPKEEP_ORIGINS });
 
