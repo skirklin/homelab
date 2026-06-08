@@ -468,9 +468,13 @@ export function DayView() {
   // `replace: true` because prev/next is a "scrubbing" interaction, not a
   // "navigate" one — a single back press should escape the whole DayView
   // rather than walk back through every day the user paged through.
+  // `preserveScroll` so day↔day feels like an in-page content swap, not a
+  // fresh page nav — ScrollRestoration honors the flag and leaves the scroll
+  // alone. Fresh entries to a day (deep link, notification, itinerary list)
+  // carry no flag, so they still start at the top.
   const navToDate = (d?: string) => {
     if (!d) return;
-    navigate(`../${d}`, { relative: "path", replace: true });
+    navigate(`../${d}`, { relative: "path", replace: true, state: { preserveScroll: true } });
   };
   const swipeHandlers = useHorizontalSwipe({
     onSwipeLeft: () => navToDate(swipeNav.next),
