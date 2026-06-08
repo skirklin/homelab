@@ -1,11 +1,27 @@
 /**
  * Upkeep (household task) notification trigger.
- * Finds overdue tasks and notifies subscribed users via Web Push.
+ *
+ * Finds due recurring tasks and notifies their RESOLVED cascade recipients via
+ * Web Push — the same `inherit`-strategy cascade the deadline cron uses
+ * (resolveNotifyRecipients, see recipients.ts). A chore notifies its own
+ * notify_users / nearest-ancestor notify_users / else its `created_by` — NOT
+ * every owner of the list. The legacy union(list.owners, notify_users) rule
+ * pinged both members of a shared list regardless of who the chore was for.
+ *
+ * The per-user `upkeep_notification_mode` is now a binary opt-out: only `off`
+ * is honored (fully mutes a user). The legacy `all` / `subscribed` distinction
+ * is gone — any non-`off` value means "notify me about chores I'm a resolved
+ * recipient of."
  */
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { todayPacific } from "./tz";
+import {
+  resolveNotifyRecipients,
+  fetchAncestorsByPath,
+  type NotifyNode,
+} from "./recipients";
 
 // Upkeep is reachable at upkeep.<domain> and as a module under <domain>/upkeep.
 // Prefer the standalone subdomain (more recent enable flow); fall back to root.
@@ -46,14 +62,12 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
     $autoCancel: false,
   });
 
-  // Find due tasks
-  const dueTasks: { taskName: string; listId: string; notifyUserIds: string[]; listOwnerIds: string[] }[] = [];
-
-  for (const task of tasks) {
+  // First pass: filter to the recurring tasks that are actually due today.
+  const dueRaw = tasks.filter((task) => {
     const frequency = task.frequency as TaskFrequency | null;
-    if (!frequency?.value || !frequency?.unit) continue;
+    if (!frequency?.value || !frequency?.unit) return false;
 
-    let isDue = false;
+    let isDue: boolean;
     if (!task.last_completed) {
       isDue = true;
     } else {
@@ -67,36 +81,39 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
       if (snoozeEnd > new Date()) isDue = false;
     }
 
-    if (!isDue) continue;
+    return isDue;
+  });
 
-    const list = task.expand?.list;
-    const listOwnerIds: string[] = list?.owners || [];
-    const notifyUserIds: string[] = task.notify_users || [];
+  // Recipients cascade up the ancestor chain (`inherit` strategy), same as the
+  // deadline cron. Batch-fetch every proper-ancestor referenced by a due task.
+  const ancestorsById = await fetchAncestorsByPath(pb, dueRaw as NotifyNode[]);
 
-    dueTasks.push({
-      taskName: task.name,
-      listId: task.list,
-      notifyUserIds,
-      listOwnerIds,
-    });
+  const dueTasks: { taskName: string; recipientIds: string[] }[] = [];
+  for (const task of dueRaw) {
+    const listOwnerIds: string[] = task.expand?.list?.owners || [];
+    const recipientIds = resolveNotifyRecipients(task as NotifyNode, ancestorsById, listOwnerIds);
+    dueTasks.push({ taskName: task.name, recipientIds });
   }
 
   console.log(`[upkeep] Found ${dueTasks.length} due tasks`);
 
   if (dueTasks.length === 0) return { notified: 0, skipped: 0 };
 
-  // Build per-user task lists based on notification mode
-  // Collect all users who might need notifying
-  const allUserIds = new Set<string>();
+  // Aggregate per resolved recipient.
+  const tasksByUser = new Map<string, string[]>();
   for (const t of dueTasks) {
-    for (const id of t.notifyUserIds) allUserIds.add(id);
-    for (const id of t.listOwnerIds) allUserIds.add(id);
+    for (const userId of t.recipientIds) {
+      const list = tasksByUser.get(userId) || [];
+      list.push(t.taskName);
+      tasksByUser.set(userId, list);
+    }
   }
 
-  // Fetch user preferences
+  // Fetch user preferences (honor the global upkeep off opt-out + idempotency stamp).
+  const userIds = [...tasksByUser.keys()];
   const users = await pb.collection("users").getFullList({
-    filter: allUserIds.size > 0
-      ? [...allUserIds].map(id => pb.filter("id = {:id}", { id })).join(" || ")
+    filter: userIds.length > 0
+      ? userIds.map(id => pb.filter("id = {:id}", { id })).join(" || ")
       : "1 = 0",
     $autoCancel: false,
   });
@@ -106,9 +123,16 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
   let notified = 0;
   let skipped = 0;
 
-  for (const [userId, user] of userMap) {
-    const mode = (user.upkeep_notification_mode as string) || "subscribed";
+  for (const [userId, userTasks] of tasksByUser) {
+    const user = userMap.get(userId);
+    if (!user) {
+      skipped++;
+      continue;
+    }
 
+    // `upkeep_notification_mode` is now a binary opt-out: only `off` mutes.
+    // The legacy `all` / `subscribed` values are equivalent ("on").
+    const mode = (user.upkeep_notification_mode as string) || "subscribed";
     if (mode === "off") {
       skipped++;
       continue;
@@ -122,22 +146,6 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
         continue;
       }
     }
-
-    // Determine which tasks this user should hear about
-    let userTasks: string[];
-    if (mode === "all") {
-      // All due tasks in lists they own
-      userTasks = dueTasks
-        .filter(t => t.listOwnerIds.includes(userId))
-        .map(t => t.taskName);
-    } else {
-      // "subscribed" — only tasks they explicitly subscribed to
-      userTasks = dueTasks
-        .filter(t => t.notifyUserIds.includes(userId))
-        .map(t => t.taskName);
-    }
-
-    if (userTasks.length === 0) continue;
 
     const title = userTasks.length === 1
       ? `${userTasks[0]} needs doing`

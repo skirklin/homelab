@@ -6,77 +6,21 @@
  * by the same daily task-notification cron — no new cron/endpoint.
  *
  * Recipients are resolved by an `inherit`-strategy cascade over the task's
- * ancestor chain (see resolveNotifyRecipients) — NOT the old "union of all
- * list owners" rule. That union pinged every owner of a shared list regardless
- * of who the task was for (e.g. Angela got Scott's trip-prep reminders). The
- * cascade walks the node's `path` chain: the nearest ancestor with an explicit
- * `notify_users` wins, the node's own value overrides ancestors, and the
- * terminal floor is the task's own `created_by` (a single user) — deliberately
- * NOT the root list owners, which is what re-introduced the bug.
+ * ancestor chain (resolveNotifyRecipients, shared with upkeep.ts — see
+ * recipients.ts) — NOT the old "union of all list owners" rule.
  */
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { todayPacific } from "./tz";
+import {
+  resolveNotifyRecipients,
+  fetchAncestorsByPath,
+  type NotifyNode,
+} from "./recipients";
 
-/** Minimal shape of a task record needed to resolve its notify recipients. */
-export interface NotifyNode {
-  notify_users?: string[] | null;
-  /** Materialized ancestor-id chain, `/`-separated, SELF-INCLUSIVE (last
-   *  segment is the node's own id). Root node → path === own id. */
-  path?: string | null;
-  /** Single-user relation (maxSelect:1) → string id, or "" / undefined. */
-  created_by?: string | null;
-}
-
-/**
- * Resolve the notify-recipient set for one due task via the `inherit` cascade.
- *
- * @param task          the due task record
- * @param ancestorsById ancestor task records keyed by id (need NOT include the
- *                      task itself; only proper ancestors are consulted). Only
- *                      `notify_users` is read off them.
- * @param listOwners    fallback ONLY for legacy tasks with no chain config and
- *                      no `created_by` (predating created_by stamping).
- *
- * Resolution order (CSS-cascade `inherit`):
- *   1. nearest node on the root→self chain (self first, then closest ancestor,
- *      …) with a NON-EMPTY explicit `notify_users` wins;
- *   2. else the task's own `created_by` (single user) — the floor that fixes
- *      the bug: an un-configured task notifies its creator, not all owners;
- *   3. else (legacy: no created_by either) the list owners, to preserve old
- *      behavior rather than silently notifying nobody.
- */
-export function resolveNotifyRecipients(
-  task: NotifyNode,
-  ancestorsById: Map<string, NotifyNode>,
-  listOwners: string[],
-): string[] {
-  const nonEmpty = (v?: string[] | null): string[] | null =>
-    Array.isArray(v) && v.length > 0 ? v : null;
-
-  // Self overrides ancestors.
-  const own = nonEmpty(task.notify_users);
-  if (own) return [...new Set(own)];
-
-  // Walk ancestors nearest → farthest. `path` is root→…→self, so proper
-  // ancestor ids are every segment except the last (self). Reverse to get
-  // nearest-first.
-  const segments = (task.path || "").split("/").filter(Boolean);
-  const ancestorIds = segments.slice(0, -1).reverse();
-  for (const id of ancestorIds) {
-    const anc = ancestorsById.get(id);
-    const v = anc && nonEmpty(anc.notify_users);
-    if (v) return [...new Set(v)];
-  }
-
-  // Terminal floor: the task's creator (single user).
-  if (task.created_by) return [task.created_by];
-
-  // Legacy floor: tasks predating created_by stamping fall back to owners
-  // rather than notifying nobody.
-  return [...new Set(listOwners)];
-}
+// Re-export so existing importers (tests) keep their import site.
+export { resolveNotifyRecipients, type NotifyNode };
 
 // Same origins as upkeep — deadlines surface in the same app(s).
 const UPKEEP_ORIGINS = [`https://upkeep.${DOMAIN}`, `https://${DOMAIN}`];
@@ -124,22 +68,8 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
 
   // Recipients cascade up the ancestor chain (`inherit` strategy). Ancestors
   // (containers) are usually NOT in the due set above, so batch-fetch every
-  // proper-ancestor id referenced by any due task's `path` and read their
-  // `notify_users`. One getFullList instead of N+1 per task.
-  const ancestorIds = new Set<string>();
-  for (const task of dueRaw) {
-    const segments = ((task.path as string) || "").split("/").filter(Boolean);
-    for (const id of segments.slice(0, -1)) ancestorIds.add(id);
-  }
-  const ancestorsById = new Map<string, NotifyNode>();
-  if (ancestorIds.size > 0) {
-    const ancestors = await pb.collection("tasks").getFullList({
-      filter: [...ancestorIds].map((id) => pb.filter("id = {:id}", { id })).join(" || "),
-      fields: "id,notify_users",
-      $autoCancel: false,
-    });
-    for (const a of ancestors) ancestorsById.set(a.id, a as NotifyNode);
-  }
+  // proper-ancestor id referenced by any due task's `path` (shared helper).
+  const ancestorsById = await fetchAncestorsByPath(pb, dueRaw as NotifyNode[]);
 
   const dueTasks: { taskName: string; recipientIds: string[] }[] = [];
   for (const task of dueRaw) {
