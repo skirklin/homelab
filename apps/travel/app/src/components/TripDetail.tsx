@@ -375,7 +375,7 @@ export function TripDetail() {
                 )}
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 500, color: "#8c8c8c", marginBottom: 4 }}>NOTES</div>
-                  <NotesThread subjectType="trip" subjectId={trip.id} />
+                  <NotesThread subjectType="trip" subjectId={trip.id} title={`${trip.destination} · Notes`} />
                 </div>
                 {sourceRefLines.length > 0 && (
                   <div>

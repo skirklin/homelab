@@ -13,13 +13,13 @@
  * safety net, never a second display source).
  */
 import { useMemo, useState } from "react";
-import { Button, Input, Popconfirm, Rate } from "antd";
-import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
+import { Button, Input, Modal, Popconfirm, Rate } from "antd";
+import { CommentOutlined, DeleteOutlined, EditOutlined } from "@ant-design/icons";
 import styled from "styled-components";
 import { useAuth, useTravelBackend, useUserNames, useFeedback } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import type { ActivityVerdict, LifeEntry, TravelNote } from "../types";
-import { VerdictButtons } from "./VerdictButtons";
+import { VerdictButtons, VERDICT_EMOJI } from "./VerdictButtons";
 import {
   type SubjectType,
   type DayFields,
@@ -125,15 +125,138 @@ const Label = styled.div`
   margin: 6px 0 2px;
 `;
 
+// Compact trigger that opens the modal. A real tap target (min-height 28px)
+// while staying low-profile in dense activity/day rows.
+const TriggerBtn = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid #f0f0f0;
+  border-radius: 14px;
+  color: #8c8c8c;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  &:hover {
+    color: #1677ff;
+    border-color: #91caff;
+  }
+`;
+
+const TriggerGlyph = styled.span`
+  font-size: 14px;
+  line-height: 1;
+`;
+
+const TriggerCount = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #e6f4ff;
+  color: #1677ff;
+  font-size: 11px;
+  font-weight: 600;
+`;
+
 interface Props {
   subjectType: SubjectType;
   /** activity→activity id, trip→trip id, day→`"${tripId}:${date}"`. */
   subjectId: string;
   /** Show the optional rating picker in activity composers/editors. */
   showVerdict?: boolean;
+  /** Modal header — the activity name / day label / trip name where known. */
+  title?: string;
 }
 
-export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
+/**
+ * Collapsed presentation wrapper. The thread is hidden behind a compact trigger
+ * button summarising state at a glance (the caller's own verdict glyph + a note
+ * count for activities; a "Notes"/"Journal" label + count for day/trip). The
+ * actual thread + composer (`ThreadBody`) mount only inside the modal once it's
+ * opened — no per-row blob. All note logic lives in `ThreadBody`; this is pure
+ * presentation.
+ */
+export function NotesThread({ subjectType, subjectId, showVerdict, title }: Props) {
+  const { user } = useAuth();
+  const { state } = useTravelContext();
+  const myId = user?.uid;
+  const [open, setOpen] = useState(false);
+
+  const notes = useMemo(
+    () => selectNotes(state.notes.values(), subjectType, subjectId),
+    [state.notes, subjectType, subjectId],
+  );
+
+  // The caller's OWN verdict (activity only) — their own rated note drives the
+  // glyph so they don't have to open the modal to recall their rating. An
+  // imported (createdBy==="") note is never "own"; myId===undefined never owns.
+  const ownVerdict =
+    subjectType === "activity"
+      ? (() => {
+          for (const n of notes) {
+            if (n.createdBy === myId && !isImported(n)) {
+              const v = verdictOf(n);
+              if (v) return v;
+            }
+          }
+          return undefined;
+        })()
+      : undefined;
+
+  const count = notes.length;
+  const subjectWord = subjectType === "day" ? "Journal" : "Notes";
+
+  return (
+    <>
+      <TriggerBtn
+        type="button"
+        data-testid="notes-trigger"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        title={`${subjectWord}${count ? ` (${count})` : ""}`}
+      >
+        {ownVerdict ? (
+          <TriggerGlyph>{VERDICT_EMOJI[ownVerdict]}</TriggerGlyph>
+        ) : count === 0 ? (
+          // Quiet neutral affordance when there's nothing yet.
+          <>
+            <CommentOutlined />
+            <span>{subjectType === "activity" ? "Feedback" : subjectWord}</span>
+          </>
+        ) : (
+          <span>{subjectWord}</span>
+        )}
+        {count > 0 && <TriggerCount>{count}</TriggerCount>}
+      </TriggerBtn>
+
+      <Modal
+        title={title || (subjectType === "activity" ? "Feedback" : subjectWord)}
+        open={open}
+        onCancel={() => setOpen(false)}
+        footer={null}
+        width={520}
+        destroyOnHidden
+      >
+        {open && (
+          <ThreadBody subjectType={subjectType} subjectId={subjectId} showVerdict={showVerdict} />
+        )}
+      </Modal>
+    </>
+  );
+}
+
+// ── thread body (the original inline thread, now modal-hosted) ────
+
+function ThreadBody({ subjectType, subjectId, showVerdict }: Omit<Props, "title">) {
   const { user } = useAuth();
   const travel = useTravelBackend();
   const { message } = useFeedback();
