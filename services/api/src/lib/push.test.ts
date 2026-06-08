@@ -34,6 +34,8 @@ vi.mock("web-push", () => ({
 
 import { sendPushToUser } from "./push";
 import { tripUrl, dayUrl } from "./notifications/travel";
+import { sessionUrl } from "./notifications/life";
+import { tasksUrl } from "./notifications/deadlines";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -168,5 +170,95 @@ describe("travel.ts tripUrl/dayUrl — real origin branching", () => {
     // travel.kirkl.in. They must NOT get the /travel prefix.
     expect(tripUrl("", "T1")).toBe("/T1");
     expect(dayUrl("", "T1", "2026-06-02")).toBe("/T1/day/2026-06-02");
+  });
+});
+
+// Life is standalone-only at life.kirkl.in — the session wizards mount at root
+// (/morning, /evening, /weekly). The push must carry a SAME-ORIGIN RELATIVE
+// path, never an absolute https://life.kirkl.in/... URL (which would cold-load
+// an empty per-origin authStore and present as a forced sign-out).
+describe("life.ts sessionUrl — same-origin relative path", () => {
+  it("emits a root-relative path for each session kind", () => {
+    expect(sessionUrl("morning")).toBe("/morning");
+    expect(sessionUrl("evening")).toBe("/evening");
+    expect(sessionUrl("weekly")).toBe("/weekly");
+  });
+
+  it("never emits an absolute life.kirkl.in URL", () => {
+    for (const kind of ["morning", "evening", "weekly"] as const) {
+      const url = sessionUrl(kind);
+      expect(url.startsWith("/")).toBe(true);
+      expect(url).not.toContain("https://life.kirkl.in");
+      expect(url).not.toContain("https://");
+    }
+  });
+});
+
+// task_deadline_due taps open the unified task outliner at /tasks — but ONLY
+// the home app (kirkl.in) serves that route. Standalone upkeep has no /tasks
+// route (it would match the `/:slug` catch-all → "list doesn't exist"), so on
+// the upkeep origin the link must fall back to `/` (the usable ListPicker).
+describe("deadlines.ts tasksUrl — origin-aware task outliner link", () => {
+  it("emits /tasks on the home origin (the outliner)", () => {
+    expect(tasksUrl("https://kirkl.in")).toBe("/tasks");
+  });
+
+  it("emits / on the upkeep origin (no /tasks route there → ListPicker)", () => {
+    expect(tasksUrl("https://upkeep.kirkl.in")).toBe("/");
+  });
+
+  it("is relative on the home origin, not root", () => {
+    const url = tasksUrl("https://kirkl.in");
+    expect(url.startsWith("/")).toBe(true);
+    expect(url).not.toBe("/");
+    expect(url).not.toContain("https://");
+  });
+});
+
+// End-to-end through sendPushToUser: a life morning push delivered to the
+// life.kirkl.in subscription carries the relative /morning path, and a
+// deadline push carries /tasks — both via buildUrl, matched to the delivery
+// origin.
+describe("life + deadline buildUrl delivered through sendPushToUser", () => {
+  it("life morning push lands a relative /morning, not an absolute URL", async () => {
+    const pb = makeFakePb([sub("l1", "https://life.kirkl.in")]);
+    await sendPushToUser(
+      pb,
+      "user1",
+      { title: "Morning check-in", buildUrl: () => sessionUrl("morning") },
+      { preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"] },
+    );
+    const url = pushedUrlFor("https://push.example/l1");
+    expect(url).toBe("/morning");
+    expect(url).not.toContain("https://life.kirkl.in");
+  });
+
+  it("deadline delivered to a kirkl.in sub lands /tasks (the outliner)", async () => {
+    const pb = makeFakePb([sub("d1", "https://kirkl.in")]);
+    await sendPushToUser(
+      pb,
+      "user1",
+      { title: "Todo is due", buildUrl: (origin) => tasksUrl(origin) },
+      { preferredOrigins: ["https://kirkl.in", "https://upkeep.kirkl.in"] },
+    );
+    const url = pushedUrlFor("https://push.example/d1");
+    expect(url).toBe("/tasks");
+    expect(url).not.toBe("/");
+  });
+
+  // The blocker: a user with ONLY an upkeep.kirkl.in sub (no home sub) must NOT
+  // get /tasks — that route doesn't exist on standalone upkeep (dead-end slug
+  // page). It must fall back to `/` (the usable ListPicker).
+  it("deadline delivered to an upkeep-only sub lands /, not the dead-end /tasks", async () => {
+    const pb = makeFakePb([sub("d2", "https://upkeep.kirkl.in")]);
+    await sendPushToUser(
+      pb,
+      "user1",
+      { title: "Todo is due", buildUrl: (origin) => tasksUrl(origin) },
+      { preferredOrigins: ["https://kirkl.in", "https://upkeep.kirkl.in"] },
+    );
+    const url = pushedUrlFor("https://push.example/d2");
+    expect(url).toBe("/");
+    expect(url).not.toBe("/tasks");
   });
 });

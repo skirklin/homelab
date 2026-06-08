@@ -22,8 +22,24 @@ import {
 // Re-export so existing importers (tests) keep their import site.
 export { resolveNotifyRecipients, type NotifyNode };
 
-// Same origins as upkeep — deadlines surface in the same app(s).
-const UPKEEP_ORIGINS = [`https://upkeep.${DOMAIN}`, `https://${DOMAIN}`];
+// Deadlines deep-link to the unified task outliner, which ONLY the home app
+// serves (at kirkl.in/tasks). The standalone upkeep app has no /tasks route —
+// it would match its `/:slug` catch-all and render a "list doesn't exist"
+// dead-end. So prefer the home origin FIRST; an upkeep-only sub is the fallback.
+const UPKEEP_ORIGINS = [`https://${DOMAIN}`, `https://upkeep.${DOMAIN}`];
+
+/**
+ * Origin-aware deep link for a deadline tap. The unified task outliner lives
+ * ONLY on the home app (kirkl.in/tasks), so `/tasks` is correct on the home
+ * origin but a dead-end on standalone upkeep (no such route). When a push is
+ * delivered to an upkeep-only sub, land on `/` instead — the upkeep ListPicker,
+ * which is usable (and non-regressive vs the old no-url → root behavior).
+ * Passed to sendPushToUser as `buildUrl` (mirrors travel/life) so the emitted
+ * url is SAME-ORIGIN relative for the origin that actually delivered the push.
+ */
+export function tasksUrl(origin: string): string {
+  return origin.startsWith(`https://upkeep.`) ? "/" : "/tasks";
+}
 
 /**
  * Whole-day diff between today and the deadline, both anchored to the Pacific
@@ -138,6 +154,7 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
     const result = await sendPushToUser(pb, userId, {
       title,
       body,
+      buildUrl: (origin) => tasksUrl(origin),
       data: { type: "task_deadline_due", taskCount: String(userTasks.length) },
     }, { preferredOrigins: UPKEEP_ORIGINS });
 
