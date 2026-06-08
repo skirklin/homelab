@@ -42,6 +42,10 @@ let pastTripId: string;
 let noDatesTripId: string;
 let noLocationTripId: string;
 
+// Activity IDs on the in-window trip, for the per-activity hourly tests.
+let cdmxActivityId: string;     // geocoded, on inWindowTrip
+let otherTripActivityId: string; // geocoded, on a DIFFERENT trip (not inWindow)
+
 const cleanup: Array<{ collection: string; id: string }> = [];
 
 function ymd(offsetDays: number): string {
@@ -122,6 +126,7 @@ beforeAll(async () => {
     log: logId, trip_id: inWindowTripId, name: "Zócalo",
     category: "Sightseeing", location: "Mexico City", lat: 19.4326, lng: -99.1332,
   });
+  cdmxActivityId = act.id;
   cleanup.push({ collection: "travel_activities", id: act.id });
 
   // Trip starting beyond the 16-day horizon.
@@ -131,6 +136,12 @@ beforeAll(async () => {
   });
   notYetTripId = notYet.id;
   cleanup.push({ collection: "travel_trips", id: notYetTripId });
+  const otherAct = await adminPb.collection("travel_activities").create({
+    log: logId, trip_id: notYetTripId, name: "Aurora viewing",
+    category: "Sightseeing", location: "Fairbanks", lat: 64.84, lng: -147.72,
+  });
+  otherTripActivityId = otherAct.id;
+  cleanup.push({ collection: "travel_activities", id: otherAct.id });
 
   // Trip already ended.
   const past = await adminPb.collection("travel_trips").create({
@@ -245,4 +256,56 @@ describe("GET /travel/weather", () => {
       expect(Array.isArray(data.packingHints)).toBe(true);
     },
   );
+});
+
+describe("GET /travel/weather/hourly (per-activity)", () => {
+  function inWindowDate(): string {
+    // The in-window trip starts in 2 days; ask for a date inside its span so we
+    // stay under the forecast horizon (not_yet guard) even without network.
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + 3);
+    return d.toISOString().slice(0, 10);
+  }
+
+  it("400s when tripId is missing", async () => {
+    const { status } = await req(`/travel/weather/hourly?date=${inWindowDate()}&activityIds=x`, userToken);
+    expect(status).toBe(400);
+  });
+
+  it("400s for a malformed date", async () => {
+    const { status } = await req(`/travel/weather/hourly?tripId=${inWindowTripId}&date=nope&activityIds=x`, userToken);
+    expect(status).toBe(400);
+  });
+
+  it("403s a non-owner holding an API token", async () => {
+    const { status } = await req(
+      `/travel/weather/hourly?tripId=${inWindowTripId}&date=${inWindowDate()}&activityIds=${cdmxActivityId}`,
+      otherApiToken,
+    );
+    expect(status).toBe(403);
+  });
+
+  it("returns an empty byActivity for an empty activityIds list", async () => {
+    const { status, data } = await req(
+      `/travel/weather/hourly?tripId=${inWindowTripId}&date=${inWindowDate()}&activityIds=`,
+      userToken,
+    );
+    expect(status).toBe(200);
+    expect(data.byActivity).toEqual({});
+  });
+
+  it("keys byActivity by in-trip activities and omits ones from another trip", async () => {
+    // No network is required to exercise resolution + grouping: each coord
+    // degrades to an empty hours[] on Open-Meteo failure, but the activity key
+    // is still present. The other-trip activity must NOT appear.
+    const ids = `${cdmxActivityId},${otherTripActivityId}`;
+    const { status, data } = await req(
+      `/travel/weather/hourly?tripId=${inWindowTripId}&date=${inWindowDate()}&activityIds=${ids}`,
+      userToken,
+    );
+    expect(status).toBe(200);
+    expect(Object.keys(data.byActivity)).toEqual([cdmxActivityId]);
+    expect(Array.isArray(data.byActivity[cdmxActivityId])).toBe(true);
+    expect(data.byActivity).not.toHaveProperty(otherTripActivityId);
+  });
 });

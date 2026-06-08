@@ -1004,16 +1004,17 @@ describe("Travel", () => {
     expect(added.data.day_index).toBe(0);
     expect(added.data.day.slots).toHaveLength(1);
     expect(added.data.day.slots[0].activityId).toBe(travelActivityId);
-    expect(added.data.day.slots[0].startTime).toBe("9:00 AM");
+    // Human input is normalized to canonical 24-hour HH:MM on write.
+    expect(added.data.day.slots[0].startTime).toBe("09:00");
 
-    // Patch the slot's notes; clear startTime via null
+    // Patch the slot's dayNote; clear startTime via null
     const patched = await apiReq(`/data/travel/itineraries/${itinId}/days/0/slots/0`, {
       method: "PATCH",
       token: userToken,
-      body: { notes: "Arrive early", start_time: null },
+      body: { day_note: "Arrive early", start_time: null },
     });
     expect(patched.status).toBe(200);
-    expect(patched.data.day.slots[0].notes).toBe("Arrive early");
+    expect(patched.data.day.slots[0].dayNote).toBe("Arrive early");
     expect(patched.data.day.slots[0].startTime).toBeUndefined();
 
     // Move the slot from day 0 to day 1
@@ -1109,13 +1110,15 @@ describe("Travel", () => {
     expect(flightAdd.status).toBe(200);
     expect((flightAdd.data.day.flights ?? []).length).toBe(1);
 
+    // Legacy `notes` param is still accepted and stored as `dayNote`.
     const flightPatch = await apiReq(`/data/travel/itineraries/${itinId}/days/0/flights/0`, {
       method: "PATCH",
       token: userToken,
       body: { notes: "early arrival" },
     });
     expect(flightPatch.status).toBe(200);
-    expect(flightPatch.data.day.flights[0].notes).toBe("early arrival");
+    expect(flightPatch.data.day.flights[0].dayNote).toBe("early arrival");
+    expect(flightPatch.data.day.flights[0].notes).toBeUndefined();
 
     // Move flight from day 0 to day 1.
     const flightMove = await apiReq(`/data/travel/itineraries/${itinId}/days/0/flights/0/move`, {

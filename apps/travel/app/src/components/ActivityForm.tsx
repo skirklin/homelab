@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Form, Input, InputNumber, Select, Button, Space, DatePicker, Checkbox } from "antd";
 import dayjs from "dayjs";
 
@@ -20,6 +20,7 @@ const CATEGORIES: ActivityCategory[] = [
 export function ActivityForm() {
   const { tripId, activityId } = useParams<{ tripId: string; activityId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { state } = useTravelContext();
   const { user } = useAuth();
   const travel = useTravelBackend();
@@ -27,6 +28,16 @@ export function ActivityForm() {
 
   const isEdit = !!activityId;
   const existing = isEdit ? state.activities.get(activityId) : undefined;
+
+  // Return the user to exactly where they launched the form from. Callers
+  // thread the origin through router `state.from` (detail view / day view).
+  // Fall back to history (-1), then to the trip page for a cold/direct load.
+  const from = (location.state as { from?: string } | null)?.from;
+  const goBack = useCallback(() => {
+    if (from) navigate(from, { replace: true });
+    else if (window.history.length > 1) navigate(-1);
+    else navigate(`../../${tripId}`, { relative: "path", replace: true });
+  }, [from, navigate, tripId]);
   const [form] = Form.useForm();
   const category = Form.useWatch("category", form);
   const isFlight = category === "Flight";
@@ -78,7 +89,7 @@ export function ActivityForm() {
           setting: values.setting as string,
           flightInfo,
         }));
-        navigate(`../${tripId}`);
+        goBack();
       } else {
         const logId = state.log?.id;
         if (!logId) return;
@@ -110,7 +121,7 @@ export function ActivityForm() {
             updated: now,
           })
         );
-        navigate(`../${tripId}`);
+        goBack();
       }
     } finally {
       setSaving(false);
@@ -120,7 +131,10 @@ export function ActivityForm() {
   const handleDelete = async () => {
     if (activityId) {
       await travel.deleteActivity(activityId);
-      navigate(`../${tripId}`);
+      // The detail view (a likely `from`) would 404 on the deleted record, so
+      // go to the trip page regardless. From `:tripId/activities/:activityId/edit`
+      // that's three segments up.
+      navigate(`../../../${tripId}`, { relative: "path", replace: true });
     }
   };
 
@@ -273,7 +287,7 @@ export function ActivityForm() {
             <Button type="primary" htmlType="submit" loading={saving}>
               {isEdit ? "Save" : "Add Activity"}
             </Button>
-            <Button onClick={() => navigate(`../${tripId}`, { replace: true })}>Cancel</Button>
+            <Button onClick={goBack}>Cancel</Button>
             {isEdit && (
               <Button danger onClick={handleDelete}>Delete</Button>
             )}

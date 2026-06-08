@@ -14,21 +14,22 @@ import {
   ClockCircleOutlined,
   DeleteOutlined,
   DollarOutlined,
-  EditOutlined,
   EnvironmentOutlined,
   HomeOutlined,
   LeftOutlined,
   RightOutlined,
 } from "@ant-design/icons";
-import { Button, Empty, Popconfirm, Space, Spin } from "antd";
+import { Button, Empty, Popconfirm, Spin } from "antd";
 import styled from "styled-components";
 import { useTravelBackend, WideContainer, useUrlParam } from "@kirkl/shared";
 import { useTravelContext } from "../travel-context";
 import { getActivitiesForTrip, getItinerariesForTrip, mapsUrl } from "../utils";
 import {
   calculateDayLoad,
+  formatSlotTime,
   isTripActive,
   localYmd,
+  parseSlotTime,
   validateDay,
   type Activity,
   type DayLoad,
@@ -101,21 +102,29 @@ const SubTitle = styled.div`
   font-size: 13px;
 `;
 
-// Desktop: a 3-column grid (time gutter | content | actions) matching the old
-// flex row. Phone (<=600px): time + actions share the top row, content reflows
-// full-width beneath so the middle no longer gets crushed.
-// `$flight` slots render only time + content (no actions child), so they drop
-// the dangling `auto` actions track that would otherwise misalign flight time
-// rows against activity rows on mobile.
-const Slot = styled.div<{ $flight?: boolean }>`
+// Each slot is a distinct card so activities read as separate blocks rather
+// than one undifferentiated wall. Desktop: a 3-column grid (time gutter |
+// content | actions). Phone (<=600px): time + actions share the top row,
+// content reflows full-width beneath. `$flight` slots render only time +
+// content (no actions child), so they drop the dangling `auto` actions track.
+// `$clickable` rows navigate to the activity detail view on tap.
+const Slot = styled.div<{ $flight?: boolean; $clickable?: boolean }>`
   display: grid;
   grid-template-columns: ${(p) => (p.$flight ? "64px 1fr" : "64px 1fr auto")};
   grid-template-areas: ${(p) => (p.$flight ? '"time content"' : '"time content actions"')};
   gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fff;
   align-items: flex-start;
-  &:last-child { border-bottom: none; }
+  cursor: ${(p) => (p.$clickable ? "pointer" : "default")};
+  transition: background 0.12s, border-color 0.12s;
+  &:hover { ${(p) => (p.$clickable ? "background: #fafafa; border-color: #e0e0e0;" : "")} }
+  /* :active gives touch devices the pressed feedback they otherwise lack —
+     iOS has no hover, so tap-to-detail would be invisible without it. */
+  &:active { ${(p) => (p.$clickable ? "background: #f0f0f0;" : "")} }
 
   @media (max-width: 600px) {
     grid-template-columns: ${(p) => (p.$flight ? "1fr" : "1fr auto")};
@@ -157,19 +166,15 @@ const SlotContent = styled.div`
   min-width: 0;
 `;
 
-// Action buttons (edit/delete). Visually small on desktop; padded up to a
-// comfortable touch target on phones.
+// Action button (delete). Visually small on desktop; padded up to a
+// comfortable 44px touch target on phones — it's an isolated destructive
+// button, so the target honors the touch-guideline minimum.
 const SlotActions = styled.div`
   grid-area: actions;
   @media (max-width: 600px) {
     .ant-btn {
-      min-width: 40px;
-      min-height: 40px;
-    }
-    /* 40px tap targets sit too close at the default 2px gap — destructive
-       delete is easy to mis-tap next to edit. Widen to 8px on phones only. */
-    .ant-space-item + .ant-space-item {
-      margin-inline-start: 8px !important;
+      min-width: 44px;
+      min-height: 44px;
     }
   }
 `;
@@ -188,8 +193,19 @@ const SlotBody = styled.div`
 `;
 
 const SlotName = styled.div`
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
+  color: #262626;
+`;
+
+// Trailing chevron on tappable activity cards — the "this opens a detail view"
+// affordance. Touch has no hover, so without this the card gives no cue it's
+// interactive. Muted so it reads as a hint, not a button.
+const SlotChevron = styled(RightOutlined)`
+  color: #bfbfbf;
+  font-size: 12px;
+  margin-left: 4px;
+  flex-shrink: 0;
 `;
 
 const SlotMeta = styled.div`
@@ -205,6 +221,32 @@ const SlotDesc = styled.div`
   font-size: 12px;
   color: #595959;
   margin-top: 2px;
+`;
+
+// One-to-two-line truncated description on the day card.
+const SlotDescClamp = styled(SlotDesc)`
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+`;
+
+// Per-placement note ("how this fits THIS day"), visually distinct from the
+// activity's intrinsic description.
+const DayNote = styled.div`
+  font-size: 12px;
+  color: #595959;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #f6f8fa;
+  border-left: 3px solid #d0d7de;
+  border-radius: 0 4px 4px 0;
+`;
+
+const DayNoteLabel = styled.span`
+  font-weight: 600;
+  color: #8c8c8c;
+  margin-right: 4px;
 `;
 
 const ExternalLink = styled.a`
@@ -322,8 +364,17 @@ export function DayView() {
   const weather = useTripWeather(tripId);
   const weatherByDate = useMemo(() => buildWeatherByDate(weather.data), [weather.data]);
 
-  // Hourly weather for THIS day, for the per-activity time-of-day indicator.
-  const { pickHour } = useDayHourlyWeather(tripId, date);
+  // Activity ids on this day (slots + flights) — each gets weather at its OWN
+  // location, so a day spanning timezones renders each slot in its local hours.
+  const dayActivityIds = useMemo(() => {
+    if (!itinerary) return [];
+    const d = itinerary.days.find((x) => x.date === date);
+    if (!d) return [];
+    return [...(d.flights ?? []), ...d.slots].map((s) => s.activityId).filter(Boolean);
+  }, [itinerary, date]);
+
+  // Hourly weather for THIS day's activities, for the per-activity indicator.
+  const { pickForActivity } = useDayHourlyWeather(tripId, date, dayActivityIds);
 
   if (state.loading) {
     return (
@@ -492,20 +543,33 @@ export function DayView() {
           </Header>
 
           {flights.map((f, j) => {
-            const hour = f.startTime ? pickHour(f.startTime) : null;
+            const timeStr = formatSlotTime(f.startTime);
+            const hour = parseSlotTime(f.startTime) != null ? pickForActivity(f.activityId, f.startTime) : null;
+            const clickable = !!f.activity;
             return (
-              <Slot key={`f-${j}`} $flight>
+              <Slot
+                key={`f-${j}`}
+                $flight
+                $clickable={clickable}
+                onClick={clickable ? () => navigate(`../../activities/${f.activityId}`, { relative: "path" }) : undefined}
+              >
                 <SlotTime>
-                  <span>{f.startTime || ""}</span>
+                  <span>{timeStr}</span>
                   {hour && <HourWeather hour={hour} />}
                 </SlotTime>
                 <SlotContent>
                   <SlotBody>
                     <SlotName style={{ color: "#1677ff" }}>{"✈"} {f.activity?.name || f.activityId}</SlotName>
-                    {f.activity?.description && <SlotDesc>{f.activity.description}</SlotDesc>}
+                    {f.activity?.description && <SlotDescClamp>{f.activity.description}</SlotDescClamp>}
+                    {f.dayNote && (
+                      <DayNote><DayNoteLabel>For this day:</DayNoteLabel>{f.dayNote}</DayNote>
+                    )}
                     {f.activity?.confirmationCode && (
                       <SlotMeta>
-                        <ConfCode onClick={() => navigator.clipboard.writeText(f.activity!.confirmationCode)} title="Click to copy">
+                        <ConfCode
+                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(f.activity!.confirmationCode); }}
+                          title="Click to copy"
+                        >
                           {f.activity.confirmationCode}
                         </ConfCode>
                       </SlotMeta>
@@ -535,11 +599,17 @@ export function DayView() {
                 </DriveTimeBadge>,
               );
             }
-            const hour = slot.startTime ? pickHour(slot.startTime) : null;
+            const timeStr = formatSlotTime(slot.startTime);
+            const hour = parseSlotTime(slot.startTime) != null ? pickForActivity(slot.activityId, slot.startTime) : null;
+            const clickable = !!activity;
             elements.push(
-              <Slot key={j}>
+              <Slot
+                key={j}
+                $clickable={clickable}
+                onClick={clickable ? () => navigate(`../../activities/${activity!.id}`, { relative: "path" }) : undefined}
+              >
                 <SlotTime>
-                  <span>{slot.startTime || ""}</span>
+                  <span>{timeStr}</span>
                   {hour && <HourWeather hour={hour} />}
                 </SlotTime>
                 <SlotContent>
@@ -554,15 +624,16 @@ export function DayView() {
                     {activity?.category === "Hiking" && <span style={{ marginRight: 4 }}>🥾</span>}
                     {activity?.name || slot.activityId}
                     {actUrl && (
-                      <ExternalLink href={actUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#8c8c8c", marginLeft: 4, fontSize: 11 }}>
+                      <ExternalLink href={actUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "#8c8c8c", marginLeft: 4, fontSize: 11 }}>
                         <EnvironmentOutlined />
                       </ExternalLink>
                     )}
+                    {clickable && <SlotChevron />}
                   </SlotName>
                   <SlotMeta>
                     {activity?.rating != null && <span style={{ color: "#fa8c16" }}>&#9733;{activity.rating}</span>}
                     {activity?.location && (
-                      <ExternalLink href={`https://www.google.com/maps/search/${encodeURIComponent(activity.location)}`} target="_blank" rel="noopener noreferrer" style={{ color: "#8c8c8c" }}>
+                      <ExternalLink href={`https://www.google.com/maps/search/${encodeURIComponent(activity.location)}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "#8c8c8c" }}>
                         {activity.location}
                       </ExternalLink>
                     )}
@@ -573,22 +644,21 @@ export function DayView() {
                     const line = hikeSummary(activity);
                     return line ? <SlotDesc style={{ fontWeight: 500 }}>{line}</SlotDesc> : null;
                   })()}
-                  {activity?.description && <SlotDesc style={{ fontStyle: "italic" }}>{activity.description}</SlotDesc>}
-                  {activity?.details && <SlotDesc style={{ whiteSpace: "pre-wrap" }}>{activity.details}</SlotDesc>}
-                  {slot.notes && <SlotDesc style={{ fontStyle: "italic", color: "#8c8c8c" }}>{slot.notes}</SlotDesc>}
+                  {activity?.description && <SlotDescClamp style={{ fontStyle: "italic" }}>{activity.description}</SlotDescClamp>}
+                  {slot.dayNote && (
+                    <DayNote><DayNoteLabel>For this day:</DayNoteLabel>{slot.dayNote}</DayNote>
+                  )}
                   {dayReflectable && activity && activity.category !== "Flight" && (
-                    <ActivityReflection activity={activity} />
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <ActivityReflection activity={activity} />
+                    </div>
                   )}
                 </SlotBody>
                 </SlotContent>
-                <SlotActions>
-                  <Space size={2} style={{ alignSelf: "flex-start", paddingTop: 2 }}>
-                    <Button type="text" size="small" icon={<EditOutlined />}
-                      onClick={() => activity && navigate(`../../activities/${activity.id}/edit`, { relative: "path" })} />
-                    <Popconfirm title="Remove from this day?" onConfirm={() => removeSlot(j)}>
-                      <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-                    </Popconfirm>
-                  </Space>
+                <SlotActions onClick={(e) => e.stopPropagation()}>
+                  <Popconfirm title="Remove from this day?" onConfirm={() => removeSlot(j)}>
+                    <Button type="text" size="small" danger icon={<DeleteOutlined />} title="Remove from this day" />
+                  </Popconfirm>
                 </SlotActions>
               </Slot>,
             );

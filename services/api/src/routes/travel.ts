@@ -32,6 +32,7 @@ import {
   fetchOpenMeteoArchive,
   fetchOpenMeteoCached,
   fetchOpenMeteoHourly,
+  fetchOpenMeteoHourlyCached,
   geocodeDestination,
   derivePackingHints,
   mergeTripForecast,
@@ -39,8 +40,11 @@ import {
   todayPacific,
   addDays,
   FORECAST_HORIZON_DAYS,
+  groupActivitiesByCoord,
   type Coord,
   type DailyForecast,
+  type HourlyForecast,
+  type WeatherActivity,
 } from "../lib/weather";
 
 export const travelRoutes = new Hono<AppEnv>();
@@ -283,6 +287,7 @@ travelRoutes.get("/weather/hourly", handler(async (c) => {
   const userId = c.get("userId") as string;
   const tripId = c.req.query("tripId");
   const date = c.req.query("date");
+  const activityIdsParam = c.req.query("activityIds");
   if (!tripId) return c.json({ error: "tripId required" }, 400);
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return c.json({ error: "valid date (YYYY-MM-DD) required" }, 400);
@@ -294,6 +299,51 @@ travelRoutes.get("/weather/hourly", handler(async (c) => {
     return c.json({ error: "access denied" }, 403);
   }
 
+  // Beyond the forecast horizon AND in the future → no data exists yet; don't
+  // fabricate. (Past dates are always fetchable via forecast/archive.)
+  const today = todayPacific();
+  const beyondHorizon = date > addDays(today, FORECAST_HORIZON_DAYS);
+
+  // --- Per-activity-location mode -------------------------------------------
+  // Each activity gets weather at its OWN coordinate, so a day that spans
+  // timezones renders each slot against its own local hours. Coords are
+  // fetched once per distinct location (timezone=auto per fetch — never batch
+  // coords under a shared tz).
+  if (activityIdsParam !== undefined) {
+    const ids = activityIdsParam.split(",").map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 0) return c.json({ date, byActivity: {} });
+    if (beyondHorizon) return c.json({ date, byActivity: {}, state: "not_yet" });
+
+    // Resolve each requested activity and verify it belongs to this trip.
+    const activities: WeatherActivity[] = [];
+    await Promise.all(ids.map(async (id) => {
+      const a = await pb.collection("travel_activities").getOne(id).catch(() => null);
+      if (a && a.trip_id === trip.id) {
+        activities.push({ id: a.id, lat: a.lat as number | null, lng: a.lng as number | null });
+      }
+    }));
+
+    const { coords, activityToKey } = groupActivitiesByCoord(activities);
+
+    // Fetch each distinct coord once (cached), degrade per-coord on failure.
+    const hoursByKey = new Map<string, HourlyForecast[]>();
+    await Promise.all(coords.map(async ({ key, coord }) => {
+      try {
+        const { hours } = await fetchOpenMeteoHourlyCached(coord, date);
+        hoursByKey.set(key, hours);
+      } catch {
+        hoursByKey.set(key, []);
+      }
+    }));
+
+    const byActivity: Record<string, HourlyForecast[]> = {};
+    for (const [activityId, key] of activityToKey) {
+      byActivity[activityId] = hoursByKey.get(key) ?? [];
+    }
+    return c.json({ date, byActivity });
+  }
+
+  // --- Legacy trip-level mode (single trip coord) ---------------------------
   const resolved = await resolveTripCoord(pb, {
     id: trip.id,
     log: trip.log as string,
@@ -301,10 +351,7 @@ travelRoutes.get("/weather/hourly", handler(async (c) => {
   });
   if (!resolved) return c.json({ date, hours: [] });
 
-  // Beyond the forecast horizon AND in the future → no data exists yet; don't
-  // fabricate. (Past dates are always fetchable via forecast/archive.)
-  const today = todayPacific();
-  if (date > addDays(today, FORECAST_HORIZON_DAYS)) {
+  if (beyondHorizon) {
     return c.json({ date, hours: [], state: "not_yet" });
   }
 

@@ -14,6 +14,7 @@ import {
   fetchOpenMeteoHourly,
   mergeTripForecast,
   derivePackingHints,
+  groupActivitiesByCoord,
   todayPacific,
   type DailyForecast,
   type HourlyForecast,
@@ -551,5 +552,31 @@ describe("mergeTripForecast", () => {
     const out = mergeTripForecast(dates, actuals, forecast);
     expect(out.map((d) => d.date)).toEqual(dates);
     expect(out.map((d) => d.source)).toEqual(["actual", "forecast", "forecast"]);
+  });
+});
+
+describe("groupActivitiesByCoord", () => {
+  it("collapses activities sharing a coord into one fetch and maps each back", () => {
+    const { coords, activityToKey } = groupActivitiesByCoord([
+      { id: "a", lat: 19.4326, lng: -99.1332 },
+      { id: "b", lat: 19.4326, lng: -99.1332 }, // same place as a
+      { id: "c", lat: 64.84, lng: -147.72 },    // Fairbanks — distinct coord/tz
+    ]);
+    expect(coords).toHaveLength(2);
+    expect(activityToKey.get("a")).toBe(activityToKey.get("b"));
+    expect(activityToKey.get("c")).not.toBe(activityToKey.get("a"));
+    // Each coord carries lat/lon for an independent (timezone=auto) fetch.
+    expect(coords.every((co) => typeof co.coord.lat === "number" && typeof co.coord.lon === "number")).toBe(true);
+  });
+
+  it("omits activities without usable coords (null / 0 / non-finite)", () => {
+    const { coords, activityToKey } = groupActivitiesByCoord([
+      { id: "ok", lat: 40.1, lng: -105.2 },
+      { id: "nullish", lat: null, lng: -105.2 },
+      { id: "zero", lat: 0, lng: 0 },
+      { id: "nan", lat: NaN, lng: -105.2 },
+    ]);
+    expect(coords).toHaveLength(1);
+    expect([...activityToKey.keys()]).toEqual(["ok"]);
   });
 });

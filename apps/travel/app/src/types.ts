@@ -18,6 +18,10 @@ export type {
 // no app-local enrichment, so we re-export rather than re-declare.
 export type { TravelNote, LifeEntry } from "@homelab/backend";
 
+// Slot start-time helpers live in ./time; re-export for callsites that pull
+// everything from "../types".
+export { parseSlotTime, canonicalSlotTime, formatSlotTime } from "./time";
+
 // Trip status values
 export type TripStatus = "Completed" | "Booked" | "Researching" | "Idea" | "Ongoing";
 
@@ -143,8 +147,22 @@ export interface DayEntry {
 
 export interface ItinerarySlot {
   activityId: string;
+  /**
+   * Canonical 24-hour `"HH:MM"`, local wall-clock at the activity's location;
+   * optional — empty/absent means unscheduled. A day may span timezones, so
+   * each slot's time is local to its OWN activity (matched against that
+   * activity's own-coordinate weather), not a single trip timezone. Legacy
+   * rows may still hold free-form strings (`"5:30 PM"`); use `parseSlotTime` /
+   * `formatSlotTime` from `./time`, which tolerate both forms.
+   */
   startTime?: string;
-  notes?: string;
+  /**
+   * A note about how this activity fits THIS day's plan (per-placement), e.g.
+   * "skip if it rains". Distinct from `Activity.description` (what the activity
+   * intrinsically IS) and `Activity.details` (logistics about the activity
+   * itself). Optional.
+   */
+  dayNote?: string;
 }
 
 export interface ItineraryDay {

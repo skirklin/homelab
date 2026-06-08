@@ -331,6 +331,46 @@ export interface Coord {
   lon: number;
 }
 
+/** An activity reduced to the fields the per-location hourly weather needs. */
+export interface WeatherActivity {
+  id: string;
+  lat: number | null | undefined;
+  lng: number | null | undefined;
+}
+
+/**
+ * Group activities that carry a usable coordinate by their DISTINCT rounded
+ * coordinate (~1km). Returns the distinct coords to fetch plus a per-activity
+ * map onto its coord key, so the caller fetches each location once and fans
+ * the result back out. Activities without coords (null/0/non-finite) are
+ * omitted entirely. Pure — the unit of the per-location grouping.
+ */
+export function groupActivitiesByCoord(activities: WeatherActivity[]): {
+  coords: Array<{ key: string; coord: Coord }>;
+  activityToKey: Map<string, string>;
+} {
+  const coords: Array<{ key: string; coord: Coord }> = [];
+  const seen = new Set<string>();
+  const activityToKey = new Map<string, string>();
+  for (const a of activities) {
+    const lat = a.lat;
+    const lng = a.lng;
+    if (
+      typeof lat !== "number" || !Number.isFinite(lat) || lat === 0 ||
+      typeof lng !== "number" || !Number.isFinite(lng) || lng === 0
+    ) {
+      continue;
+    }
+    const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      coords.push({ key, coord: { lat, lon: lng } });
+    }
+    activityToKey.set(a.id, key);
+  }
+  return { coords, activityToKey };
+}
+
 /**
  * Geocode a destination string via Open-Meteo's free geocoding API. No key,
  * no quota — deliberately NOT Google. Returns null if nothing matches.
@@ -490,4 +530,36 @@ export async function fetchOpenMeteoCached(
 /** Test seam — clear the module-level forecast cache. */
 export function _clearWeatherCache(): void {
   cache.clear();
+  hourlyCache.clear();
+}
+
+// --- Hourly in-memory cache (keyed by coord+date) ---------------------------
+
+interface HourlyCacheEntry {
+  at: number;
+  value: { hours: HourlyForecast[]; timezone: string };
+}
+
+const hourlyCache = new Map<string, HourlyCacheEntry>();
+
+function hourlyCacheKey(coord: Coord, date: string): string {
+  // Round coords to ~1km so distinct activities at the same place share a slot.
+  return `${coord.lat.toFixed(2)},${coord.lon.toFixed(2)}:${date}`;
+}
+
+/**
+ * Cached single-coord, single-date hourly fetch. Keeps shared activity coords
+ * from each triggering their own Open-Meteo call within the TTL window.
+ */
+export async function fetchOpenMeteoHourlyCached(
+  coord: Coord,
+  date: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ hours: HourlyForecast[]; timezone: string }> {
+  const key = hourlyCacheKey(coord, date);
+  const hit = hourlyCache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+  const value = await fetchOpenMeteoHourly(coord, date, fetchImpl);
+  hourlyCache.set(key, { at: Date.now(), value });
+  return value;
 }
