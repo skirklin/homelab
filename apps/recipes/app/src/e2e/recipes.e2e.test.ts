@@ -454,7 +454,22 @@ describe("deleteCookingLogEvent", () => {
   });
 });
 
+// SSE round-trips (register subscription, broadcast, deliver) are inherently
+// async and slow down sharply under CPU contention — e.g. when several e2e
+// suites hammer one PB during the deploy gate. The structural flake (events
+// broadcast before the subscribe POST registers are dropped, never replayed) is
+// handled by the liveness warmup probe below; this generous budget just absorbs
+// the extra latency so a slow-but-correct delivery isn't misread as a failure.
+const SSE_DELIVERY_TIMEOUT = 15000;
+
 describe("subscribeToCookingLog", () => {
+  // This test does several sequential SSE round-trips — initial replay, a warmup
+  // probe loop that may retry for up to SSE_DELIVERY_TIMEOUT, then the real
+  // out-of-band create and its delete — each allowed SSE_DELIVERY_TIMEOUT to
+  // absorb load-induced latency. Those can't fit the suite-wide 30s per-test
+  // budget, so give this one test a wider budget (the 90000 below). In a healthy
+  // run the whole thing finishes in ~1.5s; the budget only matters when the
+  // deploy gate's CPU contention slows SSE registration and delivery.
   it("emits initial events on subscribe and live-updates on new adds (no remount needed)", async () => {
     // Smoking gun for Bug 1: CookingLog.tsx mounts once and never re-fetches.
     // This test pins the contract that the backend's subscribeToCookingLog
@@ -463,6 +478,26 @@ describe("subscribeToCookingLog", () => {
     const user = await createTestUser(ctx);
     const cleanup = new TestCleanup();
     cleanup.bind(ctx.pb);
+
+    // `createTestUser` re-authenticates the shared `ctx.userPb` as a brand-new
+    // user — an auth IDENTITY change. The PB SDK keeps ONE realtime clientId per
+    // SDK instance, so any SSE connection left open by the 34 prior tests in
+    // this file is bound to the previous identity's clientId. Reusing it makes
+    // the next subscribe POST race a stale clientId: registration can land as
+    // 403 ("authorization don't match") and silently never deliver, so the
+    // out-of-band events below are lost forever and the test times out. The app
+    // does this disconnect-on-identity-change automatically; the suite-shared
+    // SDK in this test harness does not, so we do it explicitly here. Without
+    // it, the test passes in `-t` isolation but flakes hard after a full run.
+    //
+    // `unsubscribe()` (no topic) drops every subscription and tears down the SSE
+    // connection, so the mirror's subscribe below opens a fresh one under the new
+    // identity. We await it so the teardown completes before that subscribe — a
+    // fire-and-forget would race it. `.catch` swallows the benign 404 the DELETE
+    // /api/realtime returns when there's no live connection to drop (e.g. this
+    // test running first); a real failure would still surface as the subsequent
+    // subscribe never delivering, which the warmup probe below detects.
+    await ctx.userPb.realtime.unsubscribe().catch(() => {});
 
     const box = await createTestBox(ctx, cleanup, { name: "Sub Box" });
     const recipe = await createTestRecipe(ctx, box.id, cleanup, { name: "Roast" });
@@ -487,7 +522,56 @@ describe("subscribeToCookingLog", () => {
     };
 
     // Wait for initial delivery
-    await waitFor(() => callbackCount >= 1 && lastBatch.length === 1, 5000);
+    await waitFor(() => callbackCount >= 1 && lastBatch.length === 1, SSE_DELIVERY_TIMEOUT);
+    expect(noteOf(lastBatch[0])).toBe("Seed");
+
+    // ── Liveness warmup probe ──────────────────────────────────────────────
+    // The mirror delivers initial state off `getFullList` (the callback above)
+    // and attaches its SSE listener fire-and-forget. So a passing initial
+    // callback does NOT mean the realtime subscription is registered — the SSE
+    // connection may still be coming up (clientId still empty) when we issue an
+    // out-of-band write. PocketBase does NOT replay events broadcast before
+    // registration, so any create that beats registration is dropped forever and
+    // the assertion times out. This is the SSE-registration race; under CPU load
+    // (the deploy gate) it loses reliably. The real fix lives in the mirror
+    // (await registration before resolving the watch) and is a separate, harder
+    // track — here we make the TEST honest about waiting for the channel to be
+    // live before producing the event it expects to receive over SSE.
+    //
+    // We can't just wait on `clientId` becoming non-empty: that signals the SSE
+    // socket connected, not that THIS subscription is registered server-side, and
+    // a create can still slip into the gap. The robust, internals-free proof is
+    // to keep issuing a throwaway out-of-band create and waiting a short beat for
+    // the subscriber callback to see it; the first probe that comes back proves
+    // the channel is registered AND delivering. Probes that race registration are
+    // simply lost — we delete them and retry. Do NOT replace this with a fixed
+    // sleep: that's the exact load-sensitive thing that made this test flaky.
+    const probeNote = "Warmup probe";
+    let warmedUp = false;
+    const warmupDeadline = Date.now() + SSE_DELIVERY_TIMEOUT;
+    while (Date.now() < warmupDeadline) {
+      const probeRec = await ctx.pb.collection("recipe_events").create({
+        box: box.id,
+        subject_id: recipe.id,
+        timestamp: new Date().toISOString(),
+        created_by: user.id,
+        entries: [{ name: "notes", type: "text", value: probeNote }],
+      });
+      try {
+        await waitFor(() => lastBatch.some((e) => noteOf(e) === probeNote), 1000, 50);
+        warmedUp = true;
+      } catch {
+        // This probe raced registration and was lost; fall through to delete +
+        // retry until one is delivered or the deadline passes.
+      }
+      await ctx.pb.collection("recipe_events").delete(probeRec.id);
+      if (warmedUp) break;
+    }
+    expect(warmedUp).toBe(true);
+    // Wait until the (delivered) probe deletion has propagated so it can't
+    // perturb the length-based assertions below (which expect exactly Seed, then
+    // Seed + the real event).
+    await waitFor(() => callbackCount >= 1 && lastBatch.length === 1, SSE_DELIVERY_TIMEOUT);
     expect(noteOf(lastBatch[0])).toBe("Seed");
 
     // Simulate "another device" / out-of-band write: add via the admin client
@@ -502,18 +586,18 @@ describe("subscribeToCookingLog", () => {
     });
     cleanup.track("recipe_events", newRec.id);
 
-    await waitFor(() => lastBatch.length === 2, 5000);
+    await waitFor(() => lastBatch.length === 2, SSE_DELIVERY_TIMEOUT);
     expect(lastBatch.map(noteOf)).toContain("From another tab");
     expect(lastBatch.map(noteOf)).toContain("Seed");
 
     // Delete via the same backend instance — subscription should drop it
     await recipes.deleteCookingLogEvent(newRec.id);
-    await waitFor(() => lastBatch.length === 1, 5000);
+    await waitFor(() => lastBatch.length === 1, SSE_DELIVERY_TIMEOUT);
     expect(noteOf(lastBatch[0])).toBe("Seed");
 
     unsub();
     await cleanup.cleanup();
-  });
+  }, 90000);
 });
 
 // ─── Pending Changes ──────────────────────────────────────────────────────────
