@@ -3,11 +3,21 @@
  * place after the time-canonicalization + dayNote rename.
  *
  * For every day's `slots[]` and `flights[]` in every `travel_itineraries` row:
- *   (a) startTime  → canonical 24-hour "HH:MM" (drop if unparseable; absent stays absent)
- *   (b) notes      → dayNote (delete the legacy `notes` key)
+ *   (a) startTime  → canonical 24-hour "HH:MM" WHEN parseable. Unparseable
+ *                    free-text times ("morning", "after lunch", ranges, …) are
+ *                    PRESERVED EXACTLY AS-IS — never dropped. The deployed app
+ *                    tolerates legacy/free-text times on read, so keeping them
+ *                    is lossless. Only rewritten when it canonicalizes to a
+ *                    *different* value; absent stays absent.
+ *   (b) notes      → dayNote (delete the legacy `notes` key; the value moves)
  *
  * Idempotent: already-canonical times + already-`dayNote` slots are left
  * untouched, and an itinerary is only written back if at least one day changed.
+ *
+ * Never drops data, and the dry-run proves it: the run reports how many
+ * startTime values were canonicalized vs. already canonical, plus every
+ * distinct unparseable startTime value it PRESERVED (with occurrence count and
+ * the itinerary id(s) it appears in) so the operator can see nothing was lost.
  *
  * Usage (defaults to a dry run — pass --apply to actually write):
  *   source .env && npx tsx services/scripts/normalize-itinerary-slots.ts
@@ -67,24 +77,53 @@ function canonicalSlotTime(s?: string | null): string | undefined {
 type Slot = Record<string, unknown>;
 type Day = Record<string, unknown>;
 
+/** A preserved (unparseable, non-empty) startTime value: how often, and where. */
+interface PreservedTime {
+  count: number;
+  itineraryIds: Set<string>;
+}
+
+/** Run-wide stats so the dry-run can prove nothing was dropped. */
+interface Stats {
+  canonicalized: number; // startTime rewritten to a different canonical value
+  alreadyCanonical: number; // startTime already in canonical "HH:MM" form
+  /** distinct unparseable startTime values that were left untouched */
+  preserved: Map<string, PreservedTime>;
+}
+
+function recordPreserved(stats: Stats, value: string, itineraryId: string): void {
+  let entry = stats.preserved.get(value);
+  if (!entry) {
+    entry = { count: 0, itineraryIds: new Set() };
+    stats.preserved.set(value, entry);
+  }
+  entry.count++;
+  entry.itineraryIds.add(itineraryId);
+}
+
 /** Normalize one slot/flight in place. Returns true if it changed. */
-function normalizeSlot(slot: Slot): boolean {
+function normalizeSlot(slot: Slot, itineraryId: string, stats: Stats): boolean {
   let changed = false;
 
-  // (a) startTime → canonical, drop if unparseable.
+  // (a) startTime → canonical WHEN parseable; otherwise preserve exactly as-is.
+  //     Never delete an unparseable value — the app tolerates free-text times.
   if ("startTime" in slot) {
     const raw = typeof slot.startTime === "string" ? slot.startTime : undefined;
     const canon = canonicalSlotTime(raw);
     if (canon === undefined) {
-      delete slot.startTime;
-      changed = changed || raw !== undefined;
+      // Unparseable (or non-string / empty) — leave it untouched. Track only
+      // non-empty free-text values so the operator can decide whether to fix them.
+      if (typeof raw === "string" && raw.trim()) recordPreserved(stats, raw, itineraryId);
     } else if (canon !== raw) {
       slot.startTime = canon;
+      stats.canonicalized++;
       changed = true;
+    } else {
+      stats.alreadyCanonical++;
     }
   }
 
-  // (b) notes → dayNote (delete legacy key).
+  // (b) notes → dayNote (delete legacy key; the value moves to dayNote).
   if ("notes" in slot) {
     const note = slot.notes;
     delete slot.notes;
@@ -97,14 +136,14 @@ function normalizeSlot(slot: Slot): boolean {
   return changed;
 }
 
-function normalizeDay(day: Day): boolean {
+function normalizeDay(day: Day, itineraryId: string, stats: Stats): boolean {
   let changed = false;
   for (const key of ["slots", "flights"] as const) {
     const arr = day[key];
     if (Array.isArray(arr)) {
       for (const slot of arr) {
         if (slot && typeof slot === "object") {
-          if (normalizeSlot(slot as Slot)) changed = true;
+          if (normalizeSlot(slot as Slot, itineraryId, stats)) changed = true;
         }
       }
     }
@@ -127,13 +166,14 @@ async function main() {
 
   let changedCount = 0;
   let slotChanges = 0;
+  const stats: Stats = { canonicalized: 0, alreadyCanonical: 0, preserved: new Map() };
 
   for (const it of itineraries) {
     const days = (Array.isArray(it.days) ? it.days : []) as Day[];
     let itChanged = false;
     let perItem = 0;
     for (const day of days) {
-      if (day && typeof day === "object" && normalizeDay(day)) {
+      if (day && typeof day === "object" && normalizeDay(day, it.id, stats)) {
         itChanged = true;
         perItem++;
       }
@@ -151,7 +191,26 @@ async function main() {
   console.log(
     `\n${apply ? "Updated" : "Would update"} ${changedCount} itineraries (${slotChanges} days touched).`,
   );
-  if (!apply && changedCount > 0) console.log("Re-run with --apply to persist.");
+  console.log(
+    `startTime: ${stats.canonicalized} canonicalized, ${stats.alreadyCanonical} already canonical.`,
+  );
+
+  // Prove nothing was dropped: enumerate every distinct preserved free-text time.
+  if (stats.preserved.size === 0) {
+    console.log("Preserved 0 unparseable startTime values — nothing dropped.");
+  } else {
+    const preservedTotal = [...stats.preserved.values()].reduce((n, e) => n + e.count, 0);
+    console.log(
+      `\nPreserved ${stats.preserved.size} unparseable startTime value(s) (not dropped), ${preservedTotal} occurrence(s):`,
+    );
+    const sorted = [...stats.preserved.entries()].sort((a, b) => b[1].count - a[1].count);
+    for (const [value, entry] of sorted) {
+      const ids = [...entry.itineraryIds].join(", ");
+      console.log(`  ${JSON.stringify(value)} ×${entry.count}  [${ids}]`);
+    }
+  }
+
+  if (!apply && changedCount > 0) console.log("\nRe-run with --apply to persist.");
 }
 
 main().catch((err) => {
