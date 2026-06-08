@@ -107,6 +107,10 @@ export { useFeedback } from "./useFeedback";
 // Cross-app user display-name resolver (backed by the `user_names` view)
 export { useUserNames } from "./useUserNames";
 
+// Task assignee chips + picker (shared by upkeep outliner/board + travel checklist)
+export { AssigneePicker, initialsOf } from "./AssigneePicker";
+export type { AssigneePickerProps } from "./AssigneePicker";
+
 // URL param hook
 export { useUrlParam, useUrlString, useUrlParams } from "./useUrlParam";
 export type {

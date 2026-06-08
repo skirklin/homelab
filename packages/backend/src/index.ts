@@ -61,6 +61,10 @@ export {
 } from "./lib/upkeep-urgency";
 export type { UrgencyLevel, UrgencyTask } from "./lib/upkeep-urgency";
 
+// --- Assignee resolution (client mirror of server resolveNotifyRecipients) ---
+export { resolveAssignees } from "./lib/assignee-resolution";
+export type { AssigneeNode, ResolvedAssignees } from "./lib/assignee-resolution";
+
 // --- Travel validation (canonical impl shared by travel UI + MCP server) ---
 export {
   validateDay,

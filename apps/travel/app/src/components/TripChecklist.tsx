@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Button, Checkbox, Empty, Input, Progress, Typography, Space } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useUpkeepBackend, useAuth, useUserBackend } from "@kirkl/shared";
+import { useUpkeepBackend, useAuth, useUserBackend, AssigneePicker } from "@kirkl/shared";
 import type { Task, TaskList } from "@homelab/backend";
 import type { Activity, Trip } from "../types";
 
@@ -83,6 +83,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
   const [listId, setListId] = useState<string | null>(null);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [listName, setListName] = useState<string>("");
+  const [ownerIds, setOwnerIds] = useState<string[]>([]);
   const [newItemText, setNewItemText] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -106,6 +107,10 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
   // "Clear done" view — but they still count toward the fraction above.
   const tasks = useMemo(() => tripTasks.filter((t) => !t.cleared), [tripTasks]);
 
+  // Keyed by id for the AssigneePicker's inheritance walk (covers container
+  // ancestors too, so an item inherits from its trip/Trips container if set).
+  const tasksById = useMemo(() => new Map(allTasks.map((t) => [t.id, t])), [allTasks]);
+
   // Get the user's first household task list
   useEffect(() => {
     if (!user) return;
@@ -123,7 +128,11 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
     if (!listId || !user) return;
     let cancelled = false;
     const unsub = upkeep.subscribeToList(listId, user.uid, {
-      onList: (l: TaskList) => { if (!cancelled) setListName(l.name); },
+      onList: (l: TaskList) => {
+        if (cancelled) return;
+        setListName(l.name);
+        setOwnerIds(l.owners ?? []);
+      },
       onTasks: (all: Task[]) => {
         if (cancelled) return;
         setAllTasks(all);
@@ -314,6 +323,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
         <Item key={task.id} $done={task.completed}>
           <Checkbox checked={task.completed} onChange={() => handleToggle(task)} />
           <span style={{ flex: 1 }}>{task.name}</span>
+          <AssigneePicker task={task} tasksById={tasksById} ownerIds={ownerIds} compact />
           <Button
             type="text"
             size="small"
@@ -336,6 +346,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
             <Item key={task.id} $done={task.completed}>
               <Checkbox checked={task.completed} onChange={() => handleToggle(task)} />
               <span style={{ flex: 1 }}>{task.name}</span>
+              <AssigneePicker task={task} tasksById={tasksById} ownerIds={ownerIds} compact />
               <Button
                 type="text"
                 size="small"
