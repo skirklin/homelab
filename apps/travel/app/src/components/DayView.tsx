@@ -40,6 +40,7 @@ import { hikeSummary } from "./ActivityList";
 import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 import { useTripWeather, weatherByDate as buildWeatherByDate } from "../hooks/useTripWeather";
 import { useDayHourlyWeather } from "../hooks/useDayHourlyWeather";
+import { useHorizontalSwipe } from "../hooks/useHorizontalSwipe";
 import { WeatherBadge } from "./WeatherBadge";
 import { HourWeather } from "./HourWeather";
 
@@ -81,13 +82,59 @@ const BackLink = styled.button`
   &:hover { color: #595959; }
 `;
 
-const Header = styled.div`
+// Dedicated day-navigation row. Never wraps: arrows are edge-pinned and the
+// center title block absorbs all flex/overflow, so the Prev/Next controls can
+// never be pushed off-screen (the bug this layout fixes — users couldn't tell
+// a next day existed). Metadata badges live in the separate DayMeta row below.
+const DayNav = styled.div`
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 8px;
+`;
+
+const DayNavCenter = styled.div`
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+`;
+
+// Real, tappable nav control (not the prior icon-only text button that
+// visually vanished). Bordered chevron + label, comfortable touch height.
+const NavButton = styled.button`
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  color: #595959;
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 14px;
+  line-height: 1;
+
+  &:hover:not(:disabled) { color: #1677ff; border-color: #1677ff; }
+  &:active:not(:disabled) { background: #f0f0f0; }
+  &:disabled { color: #bfbfbf; border-color: #f0f0f0; opacity: 0.6; cursor: default; }
+
+  @media (max-width: 600px) {
+    min-height: 44px;
+    padding: 0 12px;
+  }
+`;
+
+// Secondary metadata row — demoted from the old overloaded header. Allowed to
+// wrap freely now that it no longer competes with the nav arrows.
+const DayMeta = styled.div`
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
   padding-bottom: 8px;
-  margin-bottom: 12px;
+  margin: 8px 0 12px;
   border-bottom: 1px solid #f0f0f0;
 `;
 
@@ -97,9 +144,35 @@ const Title = styled.h1`
   font-weight: 600;
 `;
 
+// Single line, ellipsis-truncated — `day.label` can be long ("Day 2 — Sun Sep
+// 8: Zion Narrows") and must never force the nav row to grow and shove the
+// arrows off-screen. Full text is available via the title attribute.
 const SubTitle = styled.div`
   color: #8c8c8c;
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+// Wraps the swipe-handler region. `touch-action: pan-y` lets the browser own
+// vertical scrolling while our handler owns horizontal intent, so a lazy
+// diagonal drag can't both scroll the page AND flip the day.
+const SwipeContainer = styled.div`
+  touch-action: pan-y;
+`;
+
+// Subtle "days are swipeable" affordance for touch — muted, centered, small.
+const SwipeHint = styled.div`
+  display: none;
+  text-align: center;
+  color: #bfbfbf;
+  font-size: 11px;
+  margin-bottom: 8px;
+
+  @media (max-width: 600px) {
+    display: block;
+  }
 `;
 
 // Each slot is a distinct card so activities read as separate blocks rather
@@ -376,6 +449,34 @@ export function DayView() {
   // Hourly weather for THIS day's activities, for the per-activity indicator.
   const { pickForActivity } = useDayHourlyWeather(tripId, date, dayActivityIds);
 
+  // Swipe left → next day, swipe right → prev day. Computed here (before the
+  // early returns) so the hook is called unconditionally; the prev/next dates
+  // are resolved from the same itinerary/day data the render uses below. A
+  // no-op when the target day doesn't exist.
+  const swipeNav = useMemo(() => {
+    if (!itinerary) return { prev: undefined as string | undefined, next: undefined as string | undefined };
+    const i = itinerary.days.findIndex((d) => d.date === date);
+    return {
+      prev: i > 0 ? itinerary.days[i - 1].date : undefined,
+      next: i >= 0 && i < itinerary.days.length - 1 ? itinerary.days[i + 1].date : undefined,
+    };
+  }, [itinerary, date]);
+  // URL-relative ("../{d}") because we're already at /{tripId}/day/{date} —
+  // `..` strips the date segment, then `{d}` puts us at /{tripId}/day/{d}.
+  // Default route-relative resolution would walk up matched routes instead
+  // and produce the wrong path for these flat routes.
+  // `replace: true` because prev/next is a "scrubbing" interaction, not a
+  // "navigate" one — a single back press should escape the whole DayView
+  // rather than walk back through every day the user paged through.
+  const navToDate = (d?: string) => {
+    if (!d) return;
+    navigate(`../${d}`, { relative: "path", replace: true });
+  };
+  const swipeHandlers = useHorizontalSwipe({
+    onSwipeLeft: () => navToDate(swipeNav.next),
+    onSwipeRight: () => navToDate(swipeNav.prev),
+  });
+
   if (state.loading) {
     return (
       <WideContainer>
@@ -420,22 +521,11 @@ export function DayView() {
 
   const day = itinerary.days[dayIndex];
   const totalDays = itinerary.days.length;
-  const hasPrev = dayIndex > 0;
-  const hasNext = dayIndex < totalDays - 1;
-  const prevDate = hasPrev ? itinerary.days[dayIndex - 1].date : null;
-  const nextDate = hasNext ? itinerary.days[dayIndex + 1].date : null;
-  // URL-relative ("../{d}") because we're already at /{tripId}/day/{date} —
-  // `..` strips the date segment, then `{d}` puts us at /{tripId}/day/{d}.
-  // Default route-relative resolution would walk up matched routes instead
-  // and produce the wrong path for these flat routes.
-  // `replace: true` because prev/next is a "scrubbing" interaction, not a
-  // "navigate" one — a single back press should escape the whole DayView
-  // rather than walk back through every day the user paged through.
-  const goToDay = (d?: string) => {
-    if (!d) return;
-    navigate(`../${d}`, { relative: "path", replace: true });
-  };
-
+  // prev/next dates already resolved in `swipeNav` above (shared with the
+  // swipe gesture). The nav buttons and the swipe target off the same data.
+  const { prev: prevDate, next: nextDate } = swipeNav;
+  const hasPrev = !!prevDate;
+  const hasNext = !!nextDate;
   const lodging = day.lodgingActivityId ? activityMap.get(day.lodgingActivityId) : null;
   const flights = (day.flights || []).map((f) => ({ ...f, activity: activityMap.get(f.activityId) }));
   const slotActivities = day.slots
@@ -492,29 +582,38 @@ export function DayView() {
           <div />
         )}
 
-        <div>
-          <Header>
-            <Button
-              type="text"
-              icon={<LeftOutlined />}
+        <SwipeContainer {...swipeHandlers}>
+          <DayNav>
+            <NavButton
               disabled={!hasPrev}
-              onClick={() => goToDay(prevDate ?? undefined)}
+              onClick={() => navToDate(prevDate)}
               title="Previous day"
-            />
-            <div>
+            >
+              <LeftOutlined /> Prev
+            </NavButton>
+            <DayNavCenter>
               <Title>Day {dayIndex + 1} / {totalDays}</Title>
-              <SubTitle>{day.label || dateLabel}</SubTitle>
-            </div>
+              <SubTitle title={day.label || dateLabel}>{day.label || dateLabel}</SubTitle>
+            </DayNavCenter>
+            <NavButton
+              disabled={!hasNext}
+              onClick={() => navToDate(nextDate)}
+              title="Next day"
+            >
+              Next <RightOutlined />
+            </NavButton>
+          </DayNav>
+
+          {(hasPrev || hasNext) && (
+            <SwipeHint>
+              {`${hasPrev ? "‹ " : ""}swipe to change day${hasNext ? " ›" : ""}`}
+            </SwipeHint>
+          )}
+
+          <DayMeta>
             {day.date && weatherByDate.get(day.date) && (
               <WeatherBadge day={weatherByDate.get(day.date)!} />
             )}
-            <Button
-              type="text"
-              icon={<RightOutlined />}
-              disabled={!hasNext}
-              onClick={() => goToDay(nextDate ?? undefined)}
-              title="Next day"
-            />
             {load.totalHours > 0 && (() => {
               const hasDriving = load.driveMiles > 5;
               const driveStr = ri
@@ -540,7 +639,7 @@ export function DayView() {
                 </LodgingBadge>
               );
             })()}
-          </Header>
+          </DayMeta>
 
           {flights.map((f, j) => {
             const timeStr = formatSlotTime(f.startTime);
@@ -686,7 +785,7 @@ export function DayView() {
           {dayReflectable && day.date && (
             <DayJournal tripId={trip.id} date={day.date} />
           )}
-        </div>
+        </SwipeContainer>
       </TwoColumn>
     </WideContainer>
   );
