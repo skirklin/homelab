@@ -91,7 +91,18 @@ const BUILTIN_TOOLS = [
   "WebFetch",
 ];
 
-/** Full list passed to the SDK's `allowedTools` option. */
+/**
+ * Restricted built-in tool surface — passed to the SDK's `tools` option,
+ * which is the option that actually limits what the model SEES (sdk.d.ts
+ * ~1378). Without this the model gets the full claude_code preset
+ * (Bash/Read/Write/Edit/Grep/Glob/…) in its context and burns tokens
+ * trying calls that `canUseTool` then denies. MCP tools (`mcp__homelab__*`)
+ * are NOT listed here — they come via `mcpServers` and aren't part of the
+ * built-in surface.
+ */
+export const BUILTIN_TOOL_SURFACE: string[] = [...BUILTIN_TOOLS];
+
+/** Full list passed to the SDK's `allowedTools` option (auto-approve, no UI prompt). */
 export const ALLOWED_TOOLS: string[] = [
   ...HOMELAB_READ_TOOLS.map((t) => `mcp__homelab__${t}`),
   ...HOMELAB_WRITE_TOOLS.map((t) => `mcp__homelab__${t}`),

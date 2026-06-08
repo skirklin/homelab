@@ -24,7 +24,9 @@ import { safeTz } from "../notifications/tz";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface BundleOptions {
-  /** PocketBase client (already authenticated as the user) */
+  /** PocketBase client. Typically already authenticated as the user; the
+   * observer route passes a user-auth'd `pb` so PB rules scope the fetch
+   * automatically and `ownerId` can be left unset. */
   pb: PocketBase;
   /** Start of the data window */
   windowStart: Date;
@@ -32,6 +34,15 @@ export interface BundleOptions {
   windowEnd: Date;
   /** User's timezone (IANA string like "America/Los_Angeles"), for formatting */
   timezone?: string;
+  /**
+   * If set, restrict every fetcher to records owned by this user id —
+   * either directly (`life_logs.owner`) or via the parent log's `owners`
+   * multi-relation (`log.owners.id`). REQUIRED when the caller passes an
+   * admin-PB client (e.g. coach service warm-context) so the bundle
+   * doesn't return every tenant's data. The observer route leaves this
+   * unset; PB rules on its user-auth'd client scope the fetch.
+   */
+  ownerId?: string;
 }
 
 export interface BundleResult {
@@ -155,17 +166,47 @@ function humanize(snake: string): string {
 
 // ─── Data fetchers ───────────────────────────────────────────────────────────
 
+/**
+ * Build an `owner = {:owner} &&` prefix (or `log.owners.id ?= {:owner} &&`
+ * for child collections) when `ownerId` is provided, otherwise an empty
+ * string. The caller concatenates this in front of the existing filter.
+ *
+ * Tenancy posture:
+ *   - `life_logs` was collapsed to a single-relation `owner` field in
+ *     migration 0028, so its children use `log.owner = {:owner}`.
+ *   - All other parent collections (`recipe_boxes`, `task_lists`,
+ *     `travel_logs`) keep the multi-relation `owners`, so children use
+ *     `<parent>.owners.id ?= {:owner}`.
+ *   - `recipes` itself has its own `owners` multi-relation (it can be
+ *     shared independently of its box).
+ *   - `tasks` has no direct owner field; the parent is `list`
+ *     (`task_lists.owners`).
+ */
+function ownerFilter(
+  pb: PocketBase,
+  parentPath: string,
+  ownerId: string | undefined,
+): string {
+  if (!ownerId) return "";
+  // life_logs uses a single-relation `owner`; everything else uses `owners` ?=.
+  const op = parentPath === "log.owner" ? "=" : "?=";
+  return pb.filter(`${parentPath} ${op} {:owner} && `, { owner: ownerId });
+}
+
 async function fetchLifeEvents(
   pb: PocketBase,
   windowStart: Date,
   windowEnd: Date,
+  ownerId: string | undefined,
 ): Promise<LifeEventRecord[]> {
   try {
     return await pb.collection("life_events").getFullList<LifeEventRecord>({
-      filter: pb.filter(
-        "timestamp >= {:start} && timestamp <= {:end}",
-        { start: windowStart.toISOString(), end: windowEnd.toISOString() },
-      ),
+      filter:
+        ownerFilter(pb, "log.owner", ownerId) +
+        pb.filter(
+          "timestamp >= {:start} && timestamp <= {:end}",
+          { start: windowStart.toISOString(), end: windowEnd.toISOString() },
+        ),
       sort: "timestamp",
     });
   } catch {
@@ -177,13 +218,16 @@ async function fetchCookingLog(
   pb: PocketBase,
   windowStart: Date,
   windowEnd: Date,
+  ownerId: string | undefined,
 ): Promise<RecipeEventRecord[]> {
   try {
     return await pb.collection("recipe_events").getFullList<RecipeEventRecord>({
-      filter: pb.filter(
-        "timestamp >= {:start} && timestamp <= {:end}",
-        { start: windowStart.toISOString(), end: windowEnd.toISOString() },
-      ),
+      filter:
+        ownerFilter(pb, "box.owners.id", ownerId) +
+        pb.filter(
+          "timestamp >= {:start} && timestamp <= {:end}",
+          { start: windowStart.toISOString(), end: windowEnd.toISOString() },
+        ),
       sort: "timestamp",
     });
   } catch {
@@ -195,26 +239,31 @@ async function fetchCompletedTasks(
   pb: PocketBase,
   windowStart: Date,
   windowEnd: Date,
+  ownerId: string | undefined,
 ): Promise<{ tasks: TaskRecord[]; events: TaskEventRecord[] }> {
   try {
     // Recurring completions are flagged as noise per the spec and not
     // rendered — but we still fetch them so future surfaces (e.g.
     // V5 derived "days since last X") can use them without another query.
     const events = await pb.collection("task_events").getFullList<TaskEventRecord>({
-      filter: pb.filter(
-        "timestamp >= {:start} && timestamp <= {:end}",
-        { start: windowStart.toISOString(), end: windowEnd.toISOString() },
-      ),
+      filter:
+        ownerFilter(pb, "list.owners.id", ownerId) +
+        pb.filter(
+          "timestamp >= {:start} && timestamp <= {:end}",
+          { start: windowStart.toISOString(), end: windowEnd.toISOString() },
+        ),
       sort: "timestamp",
     });
 
     // One-shot tasks marked complete in the window — these are the
     // narrative-shaped completions (trip prep, projects).
     const tasks = await pb.collection("tasks").getFullList<TaskRecord>({
-      filter: pb.filter(
-        "task_type = 'one_shot' && completed = true && updated >= {:start} && updated <= {:end}",
-        { start: windowStart.toISOString(), end: windowEnd.toISOString() },
-      ),
+      filter:
+        ownerFilter(pb, "list.owners.id", ownerId) +
+        pb.filter(
+          "task_type = 'one_shot' && completed = true && updated >= {:start} && updated <= {:end}",
+          { start: windowStart.toISOString(), end: windowEnd.toISOString() },
+        ),
     });
 
     return { tasks, events };
@@ -227,25 +276,30 @@ async function fetchActiveTravel(
   pb: PocketBase,
   windowStart: Date,
   windowEnd: Date,
+  ownerId: string | undefined,
 ): Promise<{ trips: TripRecord[]; activities: ActivityRecord[] }> {
   try {
     // Trips overlapping the window OR starting within 7 days of window end
     const lookahead = new Date(windowEnd.getTime() + 7 * 24 * 60 * 60 * 1000);
     const trips = await pb.collection("travel_trips").getFullList<TripRecord>({
-      filter: pb.filter(
-        "(start_date <= {:end} && end_date >= {:start}) || " +
-        "(start_date >= {:start} && start_date <= {:lookahead})",
-        {
-          start: windowStart.toISOString().split("T")[0],
-          end: windowEnd.toISOString().split("T")[0],
-          lookahead: lookahead.toISOString().split("T")[0],
-        },
-      ),
+      filter:
+        ownerFilter(pb, "log.owners.id", ownerId) +
+        pb.filter(
+          "(start_date <= {:end} && end_date >= {:start}) || " +
+          "(start_date >= {:start} && start_date <= {:lookahead})",
+          {
+            start: windowStart.toISOString().split("T")[0],
+            end: windowEnd.toISOString().split("T")[0],
+            lookahead: lookahead.toISOString().split("T")[0],
+          },
+        ),
     });
 
     if (trips.length === 0) return { trips: [], activities: [] };
 
-    // Single batched query for activities across all relevant trips.
+    // Single batched query for activities across all relevant trips. The
+    // trip-id filter implicitly scopes to this owner (since `trips` is
+    // already filtered above), so no extra owner prefix is needed here.
     const tripFilter = trips
       .map((t) => pb.filter("trip_id = {:tripId}", { tripId: t.id }))
       .join(" || ");
@@ -267,6 +321,12 @@ async function fetchActiveTravel(
 /**
  * Batch-resolve recipe names for cooking events that lack a snapshot.
  * Uses a single OR'd PB filter instead of one getOne per id (was N+1).
+ *
+ * Owner scoping is unnecessary here: the recipe IDs were derived from
+ * `recipe_events` rows that the caller already filtered to the owner
+ * (or to PB-rules-visible recipes). A second tenant's recipe couldn't
+ * appear in the id set unless that recipe was already visible to this
+ * caller through normal PB rules.
  */
 async function resolveRecipeNames(
   pb: PocketBase,
@@ -613,15 +673,15 @@ function buildActiveContext(
 // ─── Main entry point ────────────────────────────────────────────────────────
 
 export async function assembleBundle(options: BundleOptions): Promise<BundleResult> {
-  const { pb, windowStart, windowEnd } = options;
+  const { pb, windowStart, windowEnd, ownerId } = options;
   const tz = safeTz(options.timezone, FALLBACK_TZ);
 
   // Fetch all data sources in parallel
   const [lifeEvents, cookingLog, completedTasks, travel] = await Promise.all([
-    fetchLifeEvents(pb, windowStart, windowEnd),
-    fetchCookingLog(pb, windowStart, windowEnd),
-    fetchCompletedTasks(pb, windowStart, windowEnd),
-    fetchActiveTravel(pb, windowStart, windowEnd),
+    fetchLifeEvents(pb, windowStart, windowEnd, ownerId),
+    fetchCookingLog(pb, windowStart, windowEnd, ownerId),
+    fetchCompletedTasks(pb, windowStart, windowEnd, ownerId),
+    fetchActiveTravel(pb, windowStart, windowEnd, ownerId),
   ]);
 
   // Batch-resolve recipe names for cooking events missing a snapshot.

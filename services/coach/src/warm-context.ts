@@ -25,12 +25,11 @@ import type PocketBase from "pocketbase";
 // eslint-disable-next-line import/no-relative-parent-imports
 import { assembleBundle } from "../../api/src/lib/observer/bundle.js";
 
-const COLLECTION = "coach_sessions";
 const DEFAULT_WINDOW_DAYS = 14;
 
 export interface WarmContextDeps {
   pb: PocketBase;
-  /** PB user id the session belongs to. */
+  /** PB user id the session belongs to. Passed through to `assembleBundle` so the bundle can owner-filter its fetches when called with admin auth. */
   ownerId: string;
   /** Optional override for the lookback window. Defaults to 14 days. */
   windowDays?: number;
@@ -39,37 +38,16 @@ export interface WarmContextDeps {
 }
 
 /**
- * Returns true if this owner already has any rows in `coach_sessions`.
- * Used to decide whether to inject a warm-context blob — first-time users
- * get the bundle, returning users don't (their prior turns are already in
- * the SDK's resumed transcript).
- */
-export async function ownerHasPriorSessions(
-  pb: PocketBase,
-  ownerId: string,
-): Promise<boolean> {
-  try {
-    await pb.collection(COLLECTION).getFirstListItem(
-      pb.filter("owner = {:owner}", { owner: ownerId }),
-    );
-    return true;
-  } catch (e) {
-    const status = (e as { status?: number } | null)?.status;
-    if (status === 404) return false;
-    // Anything else (network / 5xx) — fail safe: ASSUME prior history
-    // exists rather than risk re-stamping the bundle on every restart.
-    console.error(
-      `[coach] ownerHasPriorSessions probe failed for ${ownerId}; assuming prior session exists:`,
-      e instanceof Error ? e.message : e,
-    );
-    return true;
-  }
-}
-
-/**
  * Build the synthetic warm-context user message. Wraps the bundle markdown
  * in a clear `[System context — ...]` header so the agent can see this
  * isn't conversational input.
+ *
+ * Whether to call this on a given message is the agent manager's decision
+ * (per-pod `primedThisPod` set, see agent.ts). The old PB-backed
+ * `ownerHasPriorSessions` probe was misleading: it returned true for any
+ * user with prior coach_sessions rows, which after a pod restart would
+ * SKIP warm-context — but the SDK session was also fresh, so the agent
+ * read blind. The per-pod set tracks the SDK session's actual lifetime.
  */
 export async function buildWarmContextMessage(
   deps: WarmContextDeps,
@@ -82,6 +60,10 @@ export async function buildWarmContextMessage(
   try {
     const result = await assembleBundle({
       pb: deps.pb,
+      // Admin PB is used by the coach; tell the bundle to filter on owner
+      // so a future second user can't see Scott's data through the
+      // warm-context path. Single-tenant moot today; tenancy-correct now.
+      ownerId: deps.ownerId,
       windowStart,
       windowEnd,
       timezone: deps.timezone,

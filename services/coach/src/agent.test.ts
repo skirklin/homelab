@@ -14,8 +14,10 @@
  *   4. Assistant text emitted by the (mock) SDK triggers a writeback POST.
  *   5. Writeback failures are caught — they don't crash the consumer loop.
  *   6. Result-level errors emitted by the SDK become "error"-kind writebacks.
- *   7. First-time owners get a warm-context synthetic message; returning
- *      owners do not.
+ *   7. Warm-context fires on the FIRST message per owner per pod and is
+ *      skipped on subsequent messages (per-pod set).
+ *   8. Concurrent `pushMessage` calls for the same ownerId during the
+ *      async session-create window share one session (in-flight dedup).
  */
 import { describe, it, expect } from "vitest";
 import type PocketBase from "pocketbase";
@@ -130,8 +132,9 @@ function stubPb(): PocketBase {
 }
 
 /**
- * Default test deps. `hasPriorSessions` returns true so warm-context is
- * skipped (no real PB to probe); individual tests override.
+ * Default test deps. `buildWarmContext` returns null so the synthetic
+ * warm-context message doesn't appear in the inbox (most tests don't care
+ * about it). The warm-context-specific tests override.
  */
 function baseDeps(overrides: Partial<AgentDeps>): AgentDeps {
   return {
@@ -140,7 +143,6 @@ function baseDeps(overrides: Partial<AgentDeps>): AgentDeps {
     },
     getPb: async () => stubPb(),
     postAssistantMessage: async () => {},
-    hasPriorSessions: async () => true,
     buildWarmContext: async () => null,
     ...overrides,
   };
@@ -285,15 +287,13 @@ describe("createAgentManager", () => {
     manager.closeAll();
   });
 
-  it("injects a warm-context message for first-time users only", async () => {
+  it("injects warm-context on the first message per owner per pod", async () => {
     const { runQuery, sessions } = makeStubRunQuery();
 
-    // First-time user: hasPriorSessions returns false → warm-context fires.
     let warmCalls = 0;
     const manager = createAgentManager(
       baseDeps({
         runQuery,
-        hasPriorSessions: async () => false,
         buildWarmContext: async () => {
           warmCalls += 1;
           return "## Context window: …\n(warm bundle markdown)";
@@ -301,7 +301,7 @@ describe("createAgentManager", () => {
       }),
     );
 
-    await manager.pushMessage("first-time-user", "hello");
+    await manager.pushMessage("user-a", "hello");
     expect(warmCalls).toBe(1);
 
     // Pull two messages off the generator: warm-context first, then the
@@ -327,33 +327,76 @@ describe("createAgentManager", () => {
     manager.closeAll();
   });
 
-  it("skips warm-context for returning users", async () => {
-    const { runQuery, sessions } = makeStubRunQuery();
+  it("does NOT re-inject warm-context on subsequent messages for the same owner", async () => {
+    const { runQuery } = makeStubRunQuery();
     let warmCalls = 0;
     const manager = createAgentManager(
       baseDeps({
         runQuery,
-        hasPriorSessions: async () => true, // returning
         buildWarmContext: async () => {
           warmCalls += 1;
-          return "(should not be called)";
+          return "(warm)";
         },
       }),
     );
 
-    await manager.pushMessage("returning-user", "hi again");
-    expect(warmCalls).toBe(0);
+    await manager.pushMessage("user-a", "one");
+    await manager.pushMessage("user-a", "two");
+    await manager.pushMessage("user-a", "three");
 
+    // Per-pod primed set — exactly one warm-context call across all three
+    // messages because the session is reused.
+    expect(warmCalls).toBe(1);
+
+    manager.closeAll();
+  });
+
+  it("dedups concurrent pushMessage calls into a single session (race fix)", async () => {
+    // Reproduce the race: two pushMessage calls for the same ownerId
+    // arrive while getOrCreateSession is mid-await (getPb / buildWarmContext).
+    // Without the inflight-promise map, BOTH callers would observe
+    // sessions.get(ownerId) === undefined and each spawn its own SDK
+    // query() — the second `sessions.set` orphaning the first.
+    const { runQuery, sessions } = makeStubRunQuery();
+
+    // Slow getPb so both pushMessage calls observe the empty sessions Map.
+    let resolvePb: ((pb: PocketBase) => void) | null = null;
+    const pbPromise = new Promise<PocketBase>((resolve) => {
+      resolvePb = resolve;
+    });
+    const manager = createAgentManager(
+      baseDeps({
+        runQuery,
+        getPb: () => pbPromise,
+      }),
+    );
+
+    // Fire both pushes WITHOUT awaiting — they both enter
+    // getOrCreateSession before getPb resolves.
+    const p1 = manager.pushMessage("user-a", "first");
+    const p2 = manager.pushMessage("user-a", "second");
+
+    // Let microtasks settle so both calls are parked on `await deps.getPb()`.
+    await tick(1);
+
+    // Now resolve the pb promise; both create-paths converge on the same
+    // inflight promise and end up sharing one session.
+    resolvePb!(stubPb());
+    await Promise.all([p1, p2]);
+
+    expect(sessions).toHaveLength(1);
+    expect(manager.activeSessionCount()).toBe(1);
+
+    // Both messages should be queued in that single session's inbox.
     const it = sessions[0].prompt[Symbol.asyncIterator]();
-    const first = await it.next();
-    // First (and only pending) message is the real user push — no
-    // synthetic warm-context message in front.
-    expect(first.value?.isSynthetic).toBeFalsy();
-    expect(
-      typeof first.value?.message?.content === "string"
-        ? first.value.message.content
+    const m1 = await it.next();
+    const m2 = await it.next();
+    const contents = [m1, m2].map((m) =>
+      typeof m.value?.message?.content === "string"
+        ? m.value.message.content
         : "",
-    ).toBe("hi again");
+    );
+    expect(contents).toEqual(expect.arrayContaining(["first", "second"]));
 
     manager.closeAll();
   });

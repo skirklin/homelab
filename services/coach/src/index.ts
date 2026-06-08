@@ -32,6 +32,18 @@ import { startChatSubscriber, type ChatSubscription } from "./chat-subscriber.js
 // ─── Auth detection (log-only; SDK auto-detects from env) ────────────────────
 
 function detectAuthMode(): "oauth" | "api_key" | "none" {
+  // Both set is wrong-by-default: SDK precedence picks ANTHROPIC_API_KEY
+  // (pay-per-token), but on a Max subscription OAuth has $0 marginal
+  // cost. Log a loud warn so the misconfiguration is visible in pod logs;
+  // don't change behavior (changing precedence would surprise anyone
+  // who actually wants API-key billing despite having both set).
+  if (process.env.ANTHROPIC_API_KEY && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    console.warn(
+      "[coach] Both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN are set; " +
+        "SDK precedence selects ANTHROPIC_API_KEY. Unset it to use OAuth " +
+        "subscription billing.",
+    );
+  }
   if (process.env.ANTHROPIC_API_KEY) return "api_key";
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return "oauth";
   return "none";

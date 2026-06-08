@@ -42,13 +42,11 @@ import { PocketBaseSessionStore } from "./session-store.js";
 import { COACH_SYSTEM_PROMPT } from "./system-prompt.js";
 import {
   ALLOWED_TOOLS,
+  BUILTIN_TOOL_SURFACE,
   DISALLOWED_TOOLS,
   isToolAllowed,
 } from "./tool-policy.js";
-import {
-  buildWarmContextMessage,
-  ownerHasPriorSessions,
-} from "./warm-context.js";
+import { buildWarmContextMessage } from "./warm-context.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,15 +62,15 @@ export interface AgentDeps {
   /** POST an assistant message back to /chat/messages. Awaited so we can log failures. */
   postAssistantMessage: (ownerId: string, body: string, kind?: "chat" | "error") => Promise<void>;
   /**
-   * Has the owner ever had a Coach session? Returning true skips
-   * warm-context injection so we don't re-prime the agent with the
-   * bundle on every pod restart. Defaults to the PB-backed
-   * `ownerHasPriorSessions` probe; tests override.
-   */
-  hasPriorSessions?: (pb: PocketBase, ownerId: string) => Promise<boolean>;
-  /**
    * Build the synthetic warm-context user message. Defaults to the
    * bundle-based implementation. Tests override (or stub to return null).
+   *
+   * Called once per ownerId per pod lifetime (the first time a session is
+   * created in this process). The SDK session is always fresh on pod
+   * startup — we don't wire `resume:` — so warm-context is correct to
+   * inject every time we spin up a new in-memory session. The
+   * `primedThisPod` set scopes the call to the first message per owner
+   * per pod, mirroring the SDK session's lifetime.
    */
   buildWarmContext?: (pb: PocketBase, ownerId: string) => Promise<string | null>;
 }
@@ -172,6 +170,17 @@ export function buildQueryOptions(
     },
 
     // Curated tool surface — see `tool-policy.ts`.
+    //
+    // `tools` actually RESTRICTS the model's built-in tool surface (sdk.d.ts
+    // line ~1378). `allowedTools` only auto-approves without prompting — it's
+    // a UX gate, not a visibility one (sdk.d.ts ~1324). Without `tools`, the
+    // model still sees Bash/Read/Write/Edit/Grep/Glob/etc. in its context
+    // and wastes tokens trying them before `canUseTool` denies each one.
+    //
+    // MCP tools (mcp__homelab__*) come via `mcpServers` and are NOT listed
+    // here — `tools` is only for built-ins. The MCP server-side allow/deny
+    // (`canUseTool` + `disallowedTools`) is the effective gate for those.
+    tools: BUILTIN_TOOL_SURFACE,
     allowedTools: ALLOWED_TOOLS,
     disallowedTools: DISALLOWED_TOOLS,
 
@@ -231,16 +240,27 @@ function makeInboxGenerator(
  */
 export function createAgentManager(deps: AgentDeps): AgentManager {
   const sessions = new Map<string, UserSession>();
+  // Concurrent `pushMessage` calls for the same ownerId can both observe
+  // `sessions.get(ownerId) === undefined` during the async setup window
+  // (PB connect + warm-context fetch + SDK spawn). Without this map the
+  // second caller spawns a second SDK `query()` and orphans the first;
+  // the orphan keeps draining its inbox + burning credits forever.
+  // Dedup via in-flight promises so concurrent callers await the same
+  // create.
+  const inflight = new Map<string, Promise<UserSession>>();
+  // Owners whose warm-context has been injected during THIS pod's lifetime.
+  // Reset on pod restart, which is correct: the SDK session is also fresh
+  // after restart (we don't pass `resume:`), so the new session needs the
+  // bundle. Subsequent messages within the same pod skip it — warm-context
+  // is already in the running SDK transcript.
+  const primedThisPod = new Set<string>();
   const homelabMcpUrl =
     process.env.HOMELAB_MCP_URL || "https://mcp.tail56ca88.ts.net/mcp";
   const homelabApiToken = process.env.HOMELAB_API_TOKEN || "";
 
   let lastError: string | null = null;
 
-  async function getOrCreateSession(ownerId: string): Promise<UserSession> {
-    const existing = sessions.get(ownerId);
-    if (existing && !existing.closed) return existing;
-
+  async function buildSession(ownerId: string): Promise<UserSession> {
     const pb = await deps.getPb();
     const session: UserSession = {
       ownerId,
@@ -253,12 +273,15 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
       closed: false,
     };
 
-    // Warm-context injection — first-time users get a snapshot of recent
-    // life data as a synthetic first message so the agent has a baseline
-    // before the conversation starts. Returning users skip this (their
-    // prior turns are already in the SDK transcript).
-    const hasPrior = await (deps.hasPriorSessions ?? ownerHasPriorSessions)(pb, ownerId);
-    if (!hasPrior) {
+    // Warm-context injection — first time we see this owner in THIS pod
+    // (regardless of whether PB has prior coach_sessions rows). Rationale:
+    //   - SDK session is always fresh after pod restart (no `resume:` wire),
+    //     so the running transcript has nothing in it.
+    //   - Asking PB "has this user ever had a session?" returns true for
+    //     anyone with history, which would SKIP warm-context after a
+    //     restart and leave the new SDK session reading blind.
+    //   - Per-pod scoping matches the SDK session's actual lifetime.
+    if (!primedThisPod.has(ownerId)) {
       const warmCtx = await (deps.buildWarmContext ?? defaultBuildWarmContext)(
         pb,
         ownerId,
@@ -276,6 +299,7 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
         };
         session.inbox.push(warmMsg);
       }
+      primedThisPod.add(ownerId);
     }
 
     const options = buildQueryOptions(ownerId, pb, homelabMcpUrl, homelabApiToken);
@@ -341,6 +365,20 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
 
     sessions.set(ownerId, session);
     return session;
+  }
+
+  async function getOrCreateSession(ownerId: string): Promise<UserSession> {
+    const existing = sessions.get(ownerId);
+    if (existing && !existing.closed) return existing;
+    const pending = inflight.get(ownerId);
+    if (pending) return pending;
+    const p = buildSession(ownerId);
+    inflight.set(ownerId, p);
+    try {
+      return await p;
+    } finally {
+      inflight.delete(ownerId);
+    }
   }
 
   return {
