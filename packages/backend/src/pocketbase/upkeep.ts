@@ -179,6 +179,13 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     const parentPath = task.parentId ? await this.resolveParentPath(task.parentId) : null;
     const path = parentPath ? `${parentPath}/${id}` : id;
 
+    // Stamp created_by from the client's own authenticated identity (never a
+    // caller-supplied value). This is the terminal floor of the deadline
+    // notify cascade — without it, UI-created tasks degrade to notifying every
+    // list owner. The wpb create carries it so the optimistic overlay matches
+    // what lands server-side.
+    const createdBy = this.pb().authStore.record?.id ?? "";
+
     await this.wpb.collection("tasks").create({
       id,
       list: listId,
@@ -195,6 +202,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       completed: task.completed || false,
       snoozed_until: null,
       notify_users: task.notifyUsers || [],
+      created_by: createdBy,
       tags: task.tags || [],
       collapsed: false,
       cleared: false,

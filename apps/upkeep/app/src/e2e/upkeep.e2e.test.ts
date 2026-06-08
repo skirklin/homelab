@@ -170,6 +170,45 @@ describe("Task Operations", () => {
     await cleanup.cleanup();
   });
 
+  it("stamps created_by from the signed-in identity on create", async () => {
+    // The frontend adapter (travel/outliner UI) writes tasks directly via the
+    // PB client, NOT through POST /tasks. addTask must stamp created_by from
+    // the client's own authStore identity so the deadline-notify cascade's
+    // terminal floor is populated — otherwise UI-born tasks degrade to
+    // notifying every list owner. See TASK-MODEL-DESIGN.md Phase 1.
+    const user = await createTestUser(ctx);
+    const listId = await upkeep.createList("Created-By Test", user.id);
+    await userBackend.setSlug(user.id, "household", "createdby", listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const taskId = await upkeep.addTask(listId, {
+      name: "Book restaurant",
+      description: "",
+      parentId: "",
+      position: 0,
+      taskType: "one_shot",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      deadline: null,
+      deadlineLeadDays: null,
+      completed: false,
+      snoozedUntil: null,
+      notifyUsers: [],
+      tags: [],
+      collapsed: false,
+      cleared: false,
+    });
+    cleanup.track("tasks", taskId);
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.created_by).toBe(user.id);
+
+    await cleanup.cleanup();
+  });
+
   it("updates a task", async () => {
     const user = await createTestUser(ctx);
     const listId = await upkeep.createList("Update Test", user.id);
