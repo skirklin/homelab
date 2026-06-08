@@ -24,7 +24,7 @@ export type { TaskList, Task, TaskCompletion, Frequency, TaskType } from "./type
 export type {
   TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay,
   ActivitySlot, FlightSlot, FlightInfo,
-  DayEntry, TravelNote,
+  TravelNote,
 } from "./types/travel";
 export type {
   LifeLog, LifeEvent, LifeEntry, SampleSchedule,

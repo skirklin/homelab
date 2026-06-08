@@ -327,7 +327,7 @@ server.tool(
 
 server.tool(
   "get_travel_trip",
-  "Get full details for a single trip including notes, activities, and itineraries. Each itinerary day is annotated with `issue_count` (and `issues[]` when nonzero) — overlap/out-of-order/drive-gap planning conflicts. Address these before considering the day's schedule final.",
+  "Get full details for a single trip including activities and itineraries. Each itinerary day is annotated with `issue_count` (and `issues[]` when nonzero) — overlap/out-of-order/drive-gap planning conflicts. Address these before considering the day's schedule final.",
   { id: z.string().describe("The travel trip record ID") },
   async ({ id }) => {
     // Get full trip details directly
@@ -1184,12 +1184,11 @@ server.tool(
     region: z.string().optional().describe("Geographic region"),
     start_date: z.string().optional().describe("Start date (ISO format)"),
     end_date: z.string().optional().describe("End date (ISO format)"),
-    notes: z.string().optional().describe("Trip notes"),
   },
-  async ({ log, destination, status, region, start_date, end_date, notes }) => {
+  async ({ log, destination, status, region, start_date, end_date }) => {
     const data = await api("/travel/trips", {
       method: "POST",
-      body: JSON.stringify({ log, destination, status, region, start_date, end_date, notes }),
+      body: JSON.stringify({ log, destination, status, region, start_date, end_date }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
@@ -1205,7 +1204,6 @@ server.tool(
     region: z.string().optional().describe("Geographic region"),
     start_date: z.string().optional().describe("Start date (ISO format)"),
     end_date: z.string().optional().describe("End date (ISO format)"),
-    notes: z.string().optional().describe("Trip notes"),
   },
   async ({ id, ...fields }) => {
     // Only send non-undefined fields
@@ -1254,14 +1252,12 @@ const activityFields = {
   confirmation_code: z.string().optional().describe("Booking confirmation code — set this once the booking is done; the readiness dashboard treats it as the 'confirmed' signal."),
   details: z.string().optional().describe("Freeform details text"),
   flight_info: flightInfoSchema.optional(),
-  verdict: z.enum(["loved", "liked", "meh", "skip", ""]).optional().describe("Post-experience reflection"),
-  personal_notes: z.string().optional().describe("Private notes about this activity (post-trip journal)"),
   experienced_at: z.string().optional().describe("ISO date when the activity was actually done"),
 };
 
 server.tool(
   "get_travel_activity",
-  "Get full details for a single travel activity, including geocoding (lat/lng/place_id), flight info, verdict/notes, and all metadata fields.",
+  "Get full details for a single travel activity, including geocoding (lat/lng/place_id), flight info, and all metadata fields. Per-user feedback (verdict/notes) lives in travel_notes — see list_travel_notes.",
   { id: z.string().describe("The activity record ID") },
   async ({ id }) => {
     const data = await api(`/travel/activities/${id}`);
@@ -1292,7 +1288,7 @@ server.tool(
 
 server.tool(
   "update_travel_activity",
-  "Update fields on an existing travel activity. Only provided fields change. Use for post-trip reflection (verdict/personal_notes/experienced_at) too.",
+  "Update fields on an existing travel activity. Only provided fields change. Set experienced_at to timestamp a completed activity; per-user verdict/notes go in travel_notes via add_travel_note.",
   {
     id: z.string().describe("The activity record ID"),
     ...activityFields,

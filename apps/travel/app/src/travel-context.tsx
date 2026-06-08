@@ -10,8 +10,8 @@ import {
 } from "react";
 import { useAuth } from "@kirkl/shared";
 import { useTravelBackend, useUserBackend } from "@kirkl/shared";
-import { tripFromBackend, activityFromBackend, itineraryFromBackend, logFromBackend, dayEntryFromBackend } from "./adapters";
-import type { Trip, TravelLog, Activity, Itinerary, DayEntry, TravelNote } from "./types";
+import { tripFromBackend, activityFromBackend, itineraryFromBackend, logFromBackend } from "./adapters";
+import type { Trip, TravelLog, Activity, Itinerary, TravelNote } from "./types";
 
 export interface TravelState {
   userSlugs: Record<string, string>;
@@ -20,7 +20,6 @@ export interface TravelState {
   trips: Map<string, Trip>;
   activities: Map<string, Activity>;
   itineraries: Map<string, Itinerary>;
-  dayEntries: Map<string, DayEntry>;
   /** Per-user feedback notes for the whole log; filtered by subject in the UI. */
   notes: Map<string, TravelNote>;
   loading: boolean;
@@ -32,7 +31,6 @@ export type TravelAction =
   | { type: "SET_TRIPS"; trips: Trip[] }
   | { type: "SET_ACTIVITIES"; activities: Activity[] }
   | { type: "SET_ITINERARIES"; itineraries: Itinerary[] }
-  | { type: "SET_DAY_ENTRIES"; entries: DayEntry[] }
   | { type: "SET_NOTES"; notes: TravelNote[] }
   | { type: "CLEAR_DATA" }
   | { type: "SET_LOADING"; loading: boolean };
@@ -63,12 +61,6 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
       return { ...state, itineraries: newItineraries };
     }
 
-    case "SET_DAY_ENTRIES": {
-      const m = new Map<string, DayEntry>();
-      for (const e of action.entries) m.set(e.id, e);
-      return { ...state, dayEntries: m };
-    }
-
     case "SET_NOTES": {
       const m = new Map<string, TravelNote>();
       for (const n of action.notes) m.set(n.id, n);
@@ -82,7 +74,6 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
         trips: new Map(),
         activities: new Map(),
         itineraries: new Map(),
-        dayEntries: new Map(),
         notes: new Map(),
       };
 
@@ -101,7 +92,6 @@ const initialState: TravelState = {
   trips: new Map(),
   activities: new Map(),
   itineraries: new Map(),
-  dayEntries: new Map(),
   notes: new Map(),
   loading: true,
 };
@@ -169,13 +159,9 @@ export function TravelProvider({ children }: { children: ReactNode }) {
           if (currentLogIdRef.current !== logId) return;
           dispatch({ type: "SET_ITINERARIES", itineraries: itineraries.map(itineraryFromBackend) });
         },
-        onDayEntries: (entries) => {
-          if (currentLogIdRef.current !== logId) return;
-          dispatch({ type: "SET_DAY_ENTRIES", entries: entries.map(dayEntryFromBackend) });
-        },
-        // Notes ride the log-level mirror; mirrors the dayEntries slice. The
-        // payload is already TravelNote[] (no app-local adapter needed) and
-        // log-scoped, so the UI just filters by (subjectType, subjectId).
+        // Notes ride the log-level mirror. The payload is already TravelNote[]
+        // (no app-local adapter needed) and log-scoped, so the UI just filters
+        // by (subjectType, subjectId).
         onNotes: (notes) => {
           if (currentLogIdRef.current !== logId) return;
           dispatch({ type: "SET_NOTES", notes });

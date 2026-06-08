@@ -24,7 +24,7 @@ import { setupTestEnv } from "@kirkl/shared/test-utils";
 //   - shopping: items → lists (+ trips)
 //   - upkeep:   tasks/events → task_lists
 //   - recipes:  events/recipes → boxes
-//   - travel:   activities/itineraries/day_entries → trips → logs
+//   - travel:   activities/itineraries → trips → logs
 const HOME_COLLECTIONS = [
   "shopping_items",
   "shopping_lists",
@@ -37,7 +37,6 @@ const HOME_COLLECTIONS = [
   "recipe_boxes",
   "travel_activities",
   "travel_itineraries",
-  "travel_day_entries",
   "travel_trips",
   "travel_logs",
 ];

@@ -1000,8 +1000,6 @@ dataRoutes.get("/travel/trips", handler(async (c) => {
     region: t.region,
     start_date: t.start_date,
     end_date: t.end_date,
-    // Summary only — use GET /travel/trips/:id for full notes
-    notes_preview: t.notes ? t.notes.slice(0, 100) + (t.notes.length > 100 ? "..." : "") : "",
   })));
 }));
 
@@ -1018,7 +1016,6 @@ dataRoutes.get("/travel/trips/:id", handler(async (c) => {
     region: t.region,
     start_date: t.start_date,
     end_date: t.end_date,
-    notes: t.notes,
     flagged_for_review: t.flagged_for_review,
     review_comment: t.review_comment,
   });
@@ -1071,8 +1068,6 @@ function activityResponse(a: Record<string, unknown>) {
     rating_count: a.rating_count,
     photo_ref: a.photo_ref,
     flight_info: a.flight_info,
-    verdict: a.verdict,
-    personal_notes: a.personal_notes,
     experienced_at: a.experienced_at,
     trip_id: a.trip_id,
   };
@@ -1132,7 +1127,6 @@ dataRoutes.post("/travel/trips", handler(async (c) => {
     region?: string;
     start_date?: string;
     end_date?: string;
-    notes?: string;
   }>();
   if (!body.log || !body.destination) return c.json({ error: "log and destination required" }, 400);
   if (!(await userOwnsTravelLog(pb, body.log, userId))) {
@@ -1146,7 +1140,6 @@ dataRoutes.post("/travel/trips", handler(async (c) => {
     region: body.region || "",
     start_date: body.start_date || "",
     end_date: body.end_date || "",
-    notes: body.notes || "",
   });
   return c.json({ id: record.id, destination: record.destination }, 201);
 }));
@@ -1173,7 +1166,6 @@ dataRoutes.patch("/travel/trips/:id", handler(async (c) => {
     region: record.region,
     start_date: record.start_date,
     end_date: record.end_date,
-    notes: record.notes,
   });
 }));
 
@@ -1197,8 +1189,6 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     confirmation_code?: string;
     details?: string;
     flight_info?: Record<string, unknown> | null;
-    verdict?: string;
-    personal_notes?: string;
     experienced_at?: string;
   }>();
   if (!body.log || !body.name) return c.json({ error: "log and name required" }, 400);
@@ -1222,8 +1212,6 @@ dataRoutes.post("/travel/activities", handler(async (c) => {
     confirmation_code: body.confirmation_code || "",
     details: body.details || "",
     flight_info: body.flight_info ?? null,
-    verdict: body.verdict || "",
-    personal_notes: body.personal_notes || "",
     experienced_at: body.experienced_at || "",
   });
   const warnings = activityWarnings(record);
@@ -1247,7 +1235,7 @@ dataRoutes.patch("/travel/activities/:id", handler(async (c) => {
     "description", "cost_notes", "duration_estimate", "walk_miles",
     "elevation_gain_feet", "difficulty", "confirmation_code",
     "details", "setting", "rating", "rating_count",
-    "photo_ref", "flight_info", "verdict", "personal_notes", "experienced_at",
+    "photo_ref", "flight_info", "experienced_at",
     "trip_id",
   ];
   const updates: Record<string, unknown> = {};

@@ -56,7 +56,6 @@ export function TripForm() {
             region: (values.region as string) || "",
             startDate,
             endDate,
-            notes: "",
             sourceRefs: (values.sourceRefs as string) || "",
             flaggedForReview: false,
             reviewComment: "",

@@ -27,7 +27,6 @@ function mkTrip(overrides: Partial<Trip> = {}): Trip {
     region: "",
     startDate: null,
     endDate: null,
-    notes: "",
     sourceRefs: "",
     flaggedForReview: false,
     reviewComment: "",

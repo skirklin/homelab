@@ -441,8 +441,7 @@ export function TripList({ embedded: _embedded = false }: { embedded?: boolean }
       const q = search.toLowerCase();
       trips = trips.filter((t) =>
         t.destination.toLowerCase().includes(q) ||
-        t.region.toLowerCase().includes(q) ||
-        t.notes.toLowerCase().includes(q)
+        t.region.toLowerCase().includes(q)
       );
     }
     return trips;

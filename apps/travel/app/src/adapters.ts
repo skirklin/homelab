@@ -34,18 +34,15 @@ import type {
   Itinerary as BackendItinerary,
   TravelLog as BackendTravelLog,
   ItineraryDay as BackendItineraryDay,
-  DayEntry as BackendDayEntry,
 } from "@homelab/backend";
 import { utcYmd, localYmd } from "./types";
 import type {
   Trip,
   Activity,
-  ActivityVerdict,
   Itinerary,
   TravelLog,
   TripStatus,
   ActivityCategory,
-  DayEntry,
 } from "./types";
 
 // ==========================================
@@ -102,7 +99,6 @@ export function tripFromBackend(bt: BackendTrip): Trip {
     region: decodeEntities(bt.region || ""),
     startDate: tripDateFromBackend(bt.startDate),
     endDate: tripDateFromBackend(bt.endDate),
-    notes: decodeEntities(bt.notes || ""),
     sourceRefs: bt.sourceRefs || "",
     flaggedForReview: bt.flagged || false,
     reviewComment: bt.flagComment || "",
@@ -133,25 +129,10 @@ export function activityFromBackend(ba: BackendActivity): Activity {
     ratingCount: ba.ratingCount ?? null,
     photoRef: ba.photoRef || "",
     flightInfo: ba.flightInfo,
-    verdict: (ba.verdict as ActivityVerdict | undefined) || undefined,
-    personalNotes: ba.personalNotes ? decodeEntities(ba.personalNotes) : undefined,
     experiencedAt: ba.experiencedAt ? new Date(ba.experiencedAt) : undefined,
     tripId: ba.trip || "",
     created: new Date(ba.created),
     updated: new Date(ba.updated),
-  };
-}
-
-export function dayEntryFromBackend(be: BackendDayEntry): DayEntry {
-  return {
-    id: be.id,
-    tripId: be.trip,
-    date: be.date,
-    text: be.text || "",
-    highlight: be.highlight || "",
-    mood: be.mood ?? null,
-    created: new Date(be.created),
-    updated: new Date(be.updated),
   };
 }
 
@@ -193,7 +174,6 @@ export function tripToBackend(trip: Omit<Trip, "id">): Omit<BackendTrip, "id" | 
     destination: trip.destination,
     startDate: tripDateToBackend(trip.startDate),
     endDate: tripDateToBackend(trip.endDate),
-    notes: trip.notes || "",
     flagged: trip.flaggedForReview || false,
     flagComment: trip.reviewComment || "",
     status: trip.status,
@@ -208,7 +188,6 @@ export function tripUpdatesToBackend(fields: {
   region?: string;
   startDate?: Date | null;
   endDate?: Date | null;
-  notes?: string;
   sourceRefs?: string;
   flaggedForReview?: boolean;
   reviewComment?: string;
@@ -222,7 +201,6 @@ export function tripUpdatesToBackend(fields: {
   if (fields.region !== undefined) updates.region = fields.region;
   if (fields.startDate !== undefined) updates.startDate = tripDateToBackend(fields.startDate);
   if (fields.endDate !== undefined) updates.endDate = tripDateToBackend(fields.endDate);
-  if (fields.notes !== undefined) updates.notes = fields.notes;
   if (fields.sourceRefs !== undefined) updates.sourceRefs = fields.sourceRefs;
   if (fields.flaggedForReview !== undefined) updates.flagged = fields.flaggedForReview;
   if (fields.reviewComment !== undefined) updates.flagComment = fields.reviewComment;
@@ -273,8 +251,6 @@ export function activityUpdatesToBackend(fields: {
   setting?: string;
   tripId?: string;
   flightInfo?: Activity["flightInfo"];
-  verdict?: ActivityVerdict | null;
-  personalNotes?: string;
   experiencedAt?: Date | null;
 }): Partial<Omit<BackendActivity, "id" | "log" | "created" | "updated">> {
   const updates: Record<string, unknown> = {};
@@ -295,9 +271,6 @@ export function activityUpdatesToBackend(fields: {
   if (fields.setting !== undefined) updates.setting = fields.setting;
   if (fields.tripId !== undefined) updates.trip = fields.tripId;
   if (fields.flightInfo !== undefined) updates.flightInfo = fields.flightInfo;
-  // Empty string clears the PB select field — null/empty both mean "no verdict".
-  if (fields.verdict !== undefined) updates.verdict = fields.verdict ?? "";
-  if (fields.personalNotes !== undefined) updates.personalNotes = fields.personalNotes;
   if (fields.experiencedAt !== undefined) {
     updates.experiencedAt = fields.experiencedAt ? fields.experiencedAt.toISOString() : "";
   }
