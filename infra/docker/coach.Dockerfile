@@ -25,6 +25,15 @@ COPY services/coach/ services/coach/
 # path; only the two files the bundle actually needs come in to keep the
 # image lean. Bumps the rebuild cost when those files change but that's
 # fine — they change roughly never.
+#
+# api/package.json comes along too so tsx walks-up-for-nearest-package finds
+# the api package's `"type": "module"` declaration. Without it, tsx walks to
+# /workspace/package.json (no `type` field → CommonJS default), loads
+# bundle.ts as CJS, and warm-context.ts's ESM named-import of `assembleBundle`
+# fails with "does not provide an export named ...". Copied AFTER `pnpm
+# install` so it doesn't trip workspace resolution — coach's node_modules
+# already has the transitive deps bundle needs at runtime (date-fns-tz etc).
+COPY services/api/package.json services/api/package.json
 COPY services/api/src/lib/observer/bundle.ts services/api/src/lib/observer/bundle.ts
 COPY services/api/src/lib/notifications/tz.ts services/api/src/lib/notifications/tz.ts
 
