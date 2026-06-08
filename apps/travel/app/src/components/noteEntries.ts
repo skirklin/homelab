@@ -61,12 +61,6 @@ export function selectNotes(
   });
 }
 
-/** The current user's own note for a subject, if any (at most one per user). */
-export function ownNote(notes: TravelNote[], userId: string | undefined): TravelNote | undefined {
-  if (!userId) return undefined;
-  return notes.find((n) => n.createdBy === userId);
-}
-
 /** `created_by === ""` → a backfilled/imported row whose author is unknown. */
 export function isImported(note: TravelNote): boolean {
   return note.createdBy === "";

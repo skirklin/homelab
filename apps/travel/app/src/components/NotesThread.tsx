@@ -1,15 +1,18 @@
 /**
- * Phase 4 — the per-user, cross-visible notes thread. One stacked note per
- * author; everyone sees everyone's; you edit/delete only your own. Reused
- * across all three reflection surfaces (activity / day / trip) — one shared
- * component beats three bespoke ones.
+ * The per-user, cross-visible notes thread. Notes are independent entries: a
+ * user may leave MULTIPLE notes on the same subject. Everyone sees everyone's;
+ * you edit/delete only your own (by id). Reused across all three reflection
+ * surfaces (activity / day / trip) — one shared component beats three bespoke.
  *
- * Interaction model mirrors the recipe Cooking Log: live data via the
- * subscription mirror, `useUserNames` attribution, author-only edit/delete.
+ * A rating (verdict) is an OPTIONAL field composed inside a note, for activity
+ * subjects only — there is no standalone tap-to-rate and no single "your
+ * reaction" card. Adding always CREATES a new note; a fully-empty compose (no
+ * rating AND no text/highlight/mood) is rejected.
+ *
  * Data is read ONLY from `travel_notes` state (legacy columns are the Phase-5
  * safety net, never a second display source).
  */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Input, Popconfirm, Rate } from "antd";
 import { DeleteOutlined, EditOutlined } from "@ant-design/icons";
 import styled from "styled-components";
@@ -21,7 +24,6 @@ import {
   type SubjectType,
   type DayFields,
   selectNotes,
-  ownNote,
   isImported,
   verdictOf,
   activityNotesText,
@@ -127,7 +129,7 @@ interface Props {
   subjectType: SubjectType;
   /** activity→activity id, trip→trip id, day→`"${tripId}:${date}"`. */
   subjectId: string;
-  /** Render the editable verdict picker in the caller's reaction card (activity subjects only). */
+  /** Show the optional rating picker in activity composers/editors. */
   showVerdict?: boolean;
 }
 
@@ -143,83 +145,64 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
     () => selectNotes(state.notes.values(), subjectType, subjectId),
     [state.notes, subjectType, subjectId],
   );
-  const mine = ownNote(notes, myId);
-
-  // Live mirror of state so write handlers can re-select the caller's CURRENT
-  // note at call time — never the render-time `mine`. Without this, an editor
-  // opened when the caller had no note (and a note arriving mid-edit via the
-  // mirror, or a verdict tap, or a double-tapped Save) would `addNote` a SECOND
-  // row for the same (subject, author) instead of updating the first.
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  const currentMine = (): TravelNote | undefined =>
-    ownNote(selectNotes(stateRef.current.notes.values(), subjectType, subjectId), myId);
 
   const names = useUserNames(notes.map((n) => n.createdBy));
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const entriesFor = (verdict: ActivityVerdict | null, draft: NoteDraft): LifeEntry[] => {
-    if (subjectType === "activity") return activityEntries(verdict, draft.text);
+  // The rating field is offered only for activity subjects when enabled.
+  const ratingEnabled = !!showVerdict && subjectType === "activity";
+
+  const entriesFor = (draft: NoteDraft): LifeEntry[] => {
+    if (subjectType === "activity") return activityEntries(draft.verdict ?? null, draft.text);
     if (subjectType === "trip") return tripEntries(draft.text);
     return dayEntries({ text: draft.text, highlight: draft.highlight, mood: draft.mood });
   };
 
-  const persist = async (entries: LifeEntry[], existing: TravelNote | undefined) => {
+  // Add ALWAYS creates a new note. An all-empty compose is rejected — nothing
+  // is created (the editor's Save is also disabled, this is the backstop).
+  const addNewNote = async (draft: NoteDraft) => {
+    const entries = entriesFor(draft);
+    if (isEmptyEntries(entries) || !myId) {
+      setAdding(false);
+      return;
+    }
     try {
-      if (existing) {
-        if (isEmptyEntries(entries)) await travel.deleteNote(existing.id);
-        else await travel.updateNote(existing.id, entries);
-      } else if (!isEmptyEntries(entries) && myId) {
-        await travel.addNote(logId, subjectType, subjectId, myId, entries);
-      }
+      await travel.addNote(logId, subjectType, subjectId, myId, entries);
     } catch {
       message.error("Couldn't save your note");
     }
+    setAdding(false);
   };
 
-  // Verdict writes upsert into the caller's OWN note, preserving its text.
-  // Re-select the caller's note at CLICK time so a note authored since render
-  // (mirror delivery / a just-saved editor) is updated, not duplicated.
-  const setVerdict = (next: ActivityVerdict | null) => {
-    const existing = currentMine();
-    const text = activityNotesText(existing);
-    persist(activityEntries(next, text), existing);
-  };
-
-  const remove = async (note: TravelNote) => {
+  // Edit updates exactly THAT note id. An emptied note is deleted.
+  const saveEdit = async (noteId: string, draft: NoteDraft) => {
+    const entries = entriesFor(draft);
     try {
-      await travel.deleteNote(note.id);
+      if (isEmptyEntries(entries)) await travel.deleteNote(noteId);
+      else await travel.updateNote(noteId, entries);
+    } catch {
+      message.error("Couldn't save your note");
+    }
+    setEditingId(null);
+  };
+
+  const remove = async (noteId: string) => {
+    try {
+      await travel.deleteNote(noteId);
     } catch {
       message.error("Couldn't delete your note");
     }
   };
 
-  // Shared save for the inline "add my note" editor. Re-select at SAVE time: if a
-  // note exists now (mirror delivery, a verdict tapped while this editor was open,
-  // or a double-tapped Save), UPDATE it — merging the existing verdict so we don't
-  // drop it — instead of adding a duplicate row.
-  const saveNewNote = async (draft: NoteDraft) => {
-    const existing = currentMine();
-    await persist(entriesFor(verdictOf(existing) ?? null, draft), existing);
-    setAdding(false);
-  };
-
-  // The editable verdict picker now lives WITH the caller's reaction, not as a
-  // floating top-level control. Only activity subjects have a verdict.
-  const verdictEditable = !!showVerdict && subjectType === "activity";
-
-  // Offer the add affordance whenever the caller has no note yet. For an
-  // activity the verdict picker is a second way in (tapping it creates the
-  // note implicitly); this lets them write a text note without a verdict.
-  const showAdd = !mine && !adding;
-
   return (
     <Thread onClick={(e) => e.stopPropagation()}>
       {notes.map((note) => {
-        const own = note.createdBy === myId && !isImported(note);
         const imported = isImported(note);
+        // `myId===undefined` (auth not loaded) must never make a note "own";
+        // an imported (createdBy==="") note is never own either.
+        const own = note.createdBy === myId && !imported;
         const authorName = imported ? "Imported" : names.get(note.createdBy) || "Someone";
         const editing = editingId === note.id;
         const verdict = verdictOf(note);
@@ -229,9 +212,8 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
             <NoteHead>
               <Author $muted={imported}>
                 {authorName}
-                {/* Others'/imported verdicts are read-only text; the caller's own
-                    is an editable picker rendered below, not here. */}
-                {subjectType === "activity" && !own && verdict && (
+                {/* Others'/imported ratings are read-only text tags. */}
+                {subjectType === "activity" && verdict && (
                   <VerdictTag>· {VERDICT_LABEL[verdict]}</VerdictTag>
                 )}
               </Author>
@@ -244,30 +226,20 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
                     icon={<EditOutlined />}
                     onClick={() => setEditingId(note.id)}
                   />
-                  <Popconfirm title="Delete your note?" onConfirm={() => remove(note)} okText="Delete">
+                  <Popconfirm title="Delete this note?" onConfirm={() => remove(note.id)} okText="Delete">
                     <Button type="text" size="small" danger data-testid="note-delete" icon={<DeleteOutlined />} />
                   </Popconfirm>
                 </Actions>
               )}
             </NoteHead>
 
-            {/* The caller's own reaction carries the editable verdict picker, so
-                a tap (re-selecting live state, preserving text) rates in-place. */}
-            {own && verdictEditable && (
-              <VerdictRow>
-                <VerdictButtons current={verdict} onSet={setVerdict} />
-              </VerdictRow>
-            )}
-
             {editing ? (
               <NoteEditor
                 subjectType={subjectType}
+                ratingEnabled={ratingEnabled}
                 initial={draftFromNote(subjectType, note)}
                 onCancel={() => setEditingId(null)}
-                onSave={async (draft) => {
-                  await persist(entriesFor(verdict ?? null, draft), note);
-                  setEditingId(null);
-                }}
+                onSave={(draft) => saveEdit(note.id, draft)}
               />
             ) : (
               <NoteBody subjectType={subjectType} note={note} />
@@ -276,48 +248,22 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
         );
       })}
 
-      {/* No note yet, but for an activity the caller still gets a "your reaction"
-          card whose verdict picker is one-tap (creates the note implicitly) and a
-          low-key affordance to add text. Keeps rating frictionless. */}
-      {!mine && verdictEditable && (
-        <NoteCard $own data-testid="my-reaction">
-          <Author>Your reaction</Author>
-          <VerdictRow>
-            <VerdictButtons current={undefined} onSet={setVerdict} />
-          </VerdictRow>
-          {adding ? (
-            <NoteEditor
-              subjectType={subjectType}
-              initial={emptyDraft()}
-              autoFocus
-              onCancel={() => setAdding(false)}
-              onSave={saveNewNote}
-            />
-          ) : (
-            <AddRow type="button" data-testid="note-add" onClick={() => setAdding(true)}>
-              + add my {subjectLabel(subjectType)}
-            </AddRow>
-          )}
-        </NoteCard>
-      )}
-
-      {/* Non-activity subjects (day / trip) have no verdict, so the inline add
-          editor stands on its own. */}
-      {!mine && !verdictEditable && adding && (
+      {/* "Add a note" is ALWAYS available to the caller — never gated on
+          having zero notes. Each add creates a new, independent note. */}
+      {adding ? (
         <NoteCard $own data-testid="note-add-editor">
           <NoteEditor
             subjectType={subjectType}
+            ratingEnabled={ratingEnabled}
             initial={emptyDraft()}
             autoFocus
             onCancel={() => setAdding(false)}
-            onSave={saveNewNote}
+            onSave={addNewNote}
           />
         </NoteCard>
-      )}
-
-      {showAdd && !verdictEditable && (
+      ) : (
         <AddRow type="button" data-testid="note-add" onClick={() => setAdding(true)}>
-          + add my {subjectLabel(subjectType)}
+          + add {subjectLabel(subjectType)}
         </AddRow>
       )}
     </Thread>
@@ -325,7 +271,7 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
 }
 
 function subjectLabel(t: SubjectType): string {
-  return t === "day" ? "journal entry" : "note";
+  return t === "day" ? "a journal entry" : "a note";
 }
 
 // ── read-only body ───────────────────────────────────────────────
@@ -355,29 +301,33 @@ interface NoteDraft {
   text: string;
   highlight: string;
   mood: number | null;
+  /** Optional rating, activity subjects only. */
+  verdict: ActivityVerdict | null;
 }
 
 function emptyDraft(): NoteDraft {
-  return { text: "", highlight: "", mood: null };
+  return { text: "", highlight: "", mood: null, verdict: null };
 }
 
 function draftFromNote(subjectType: SubjectType, note: TravelNote): NoteDraft {
   if (subjectType === "day") {
     const f: DayFields = dayFieldsOf(note);
-    return { text: f.text, highlight: f.highlight, mood: f.mood };
+    return { text: f.text, highlight: f.highlight, mood: f.mood, verdict: null };
   }
   const text = subjectType === "activity" ? activityNotesText(note) : tripNotesText(note);
-  return { text, highlight: "", mood: null };
+  return { text, highlight: "", mood: null, verdict: verdictOf(note) ?? null };
 }
 
 function NoteEditor({
   subjectType,
+  ratingEnabled,
   initial,
   autoFocus,
   onSave,
   onCancel,
 }: {
   subjectType: SubjectType;
+  ratingEnabled: boolean;
   initial: NoteDraft;
   autoFocus?: boolean;
   onSave: (draft: NoteDraft) => void | Promise<void>;
@@ -385,6 +335,14 @@ function NoteEditor({
 }) {
   const [draft, setDraft] = useState<NoteDraft>(initial);
   const [saving, setSaving] = useState(false);
+
+  // Block a fully-empty note: no rating AND no text/highlight/mood. Disabling
+  // Save is the affordance; the handler re-checks as a backstop.
+  const empty =
+    !draft.text.trim() &&
+    !draft.highlight.trim() &&
+    draft.mood == null &&
+    draft.verdict == null;
 
   const save = async () => {
     setSaving(true);
@@ -397,6 +355,14 @@ function NoteEditor({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {ratingEnabled && (
+        <VerdictRow>
+          <VerdictButtons
+            current={draft.verdict ?? undefined}
+            onSet={(v) => setDraft((d) => ({ ...d, verdict: v }))}
+          />
+        </VerdictRow>
+      )}
       {subjectType === "day" && (
         <>
           <Input
@@ -430,7 +396,7 @@ function NoteEditor({
         style={{ fontSize: 13 }}
       />
       <div style={{ display: "flex", gap: 6 }}>
-        <Button type="primary" size="small" loading={saving} onClick={save}>
+        <Button type="primary" size="small" loading={saving} disabled={empty} onClick={save}>
           Save
         </Button>
         <Button size="small" onClick={onCancel} disabled={saving}>

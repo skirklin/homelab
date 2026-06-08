@@ -7,7 +7,6 @@ import { describe, it, expect } from "vitest";
 import type { TravelNote, LifeEntry } from "../types";
 import {
   selectNotes,
-  ownNote,
   isImported,
   verdictOf,
   activityNotesText,
@@ -60,18 +59,10 @@ describe("selectNotes", () => {
   });
 });
 
-describe("ownNote / isImported", () => {
-  it("finds the caller's own note, ignores others", () => {
-    const notes = [note("a", "scott", "trip", "t1", []), note("b", "angela", "trip", "t1", [])];
-    expect(ownNote(notes, "scott")?.id).toBe("a");
-    expect(ownNote(notes, "nobody")).toBeUndefined();
-    expect(ownNote(notes, undefined)).toBeUndefined();
-  });
-
-  it("treats createdBy==='' as imported (and thus never anyone's own)", () => {
-    const legacy = note("x", "", "trip", "t1", []);
-    expect(isImported(legacy)).toBe(true);
-    expect(ownNote([legacy], "")).toBeUndefined; // empty caller never matches an import
+describe("isImported", () => {
+  it("treats createdBy==='' as imported, anyone else as attributed", () => {
+    expect(isImported(note("x", "", "trip", "t1", []))).toBe(true);
+    expect(isImported(note("a", "scott", "trip", "t1", []))).toBe(false);
   });
 });
 
