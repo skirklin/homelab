@@ -41,7 +41,7 @@ export interface Task {
   deadlineLeadDays: number | null;
   completed: boolean;
   snoozedUntil: Date | null;
-  notifyUsers: string[];
+  assignees: string[];
   createdBy: string;
   tags: string[];
   collapsed: boolean;

@@ -94,7 +94,7 @@ function taskFromRecord(r: RecordModel | RawRecord): Task {
     deadlineLeadDays: (x.deadline_lead_days as number) ?? null,
     completed: !!x.completed,
     snoozedUntil: x.snoozed_until ? new Date(x.snoozed_until as string) : null,
-    notifyUsers: Array.isArray(x.notify_users) ? (x.notify_users as string[]) : [],
+    assignees: Array.isArray(x.assignees) ? (x.assignees as string[]) : [],
     createdBy: (x.created_by as string) || "",
     tags: Array.isArray(x.tags) ? (x.tags as string[]) : [],
     collapsed: !!x.collapsed,
@@ -180,11 +180,18 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     const path = parentPath ? `${parentPath}/${id}` : id;
 
     // Stamp created_by from the client's own authenticated identity (never a
-    // caller-supplied value). This is the terminal floor of the deadline
-    // notify cascade — without it, UI-created tasks degrade to notifying every
-    // list owner. The wpb create carries it so the optimistic overlay matches
-    // what lands server-side.
+    // caller-supplied value). This is the terminal floor of the notify
+    // cascade — without it, UI-created tasks degrade to notifying every list
+    // owner. The wpb create carries it so the optimistic overlay matches what
+    // lands server-side.
     const createdBy = this.pb().authStore.record?.id ?? "";
+
+    // assignees is the sole notification driver. Persist exactly what the
+    // caller passed (empty when omitted) — do NOT default to the creator.
+    // Under the inherit model an empty-assignees task resolves via the cascade
+    // (nearest assigned ancestor → created_by floor → list.owners), matching
+    // POST /tasks so UI- and API-created tasks behave the same.
+    const assignees = task.assignees ?? [];
 
     await this.wpb.collection("tasks").create({
       id,
@@ -201,7 +208,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       deadline_lead_days: task.deadlineLeadDays ?? null,
       completed: task.completed || false,
       snoozed_until: null,
-      notify_users: task.notifyUsers || [],
+      assignees,
       created_by: createdBy,
       tags: task.tags || [],
       collapsed: false,
@@ -225,7 +232,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     if (updates.deadlineLeadDays !== undefined) data.deadline_lead_days = updates.deadlineLeadDays ?? null;
     if (updates.completed !== undefined) data.completed = updates.completed;
     if (updates.snoozedUntil !== undefined) data.snoozed_until = updates.snoozedUntil?.toISOString() || null;
-    if (updates.notifyUsers !== undefined) data.notify_users = updates.notifyUsers;
+    if (updates.assignees !== undefined) data.assignees = updates.assignees;
     if (updates.tags !== undefined) data.tags = updates.tags;
     if (updates.collapsed !== undefined) data.collapsed = updates.collapsed;
     if (updates.cleared !== undefined) data.cleared = updates.cleared;
@@ -376,9 +383,9 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
 
   async toggleTaskNotification(taskId: string, userId: string, enable: boolean): Promise<void> {
     if (enable) {
-      await this.wpb.collection("tasks").update(taskId, { "notify_users+": userId });
+      await this.wpb.collection("tasks").update(taskId, { "assignees+": userId });
     } else {
-      await this.wpb.collection("tasks").update(taskId, { "notify_users-": userId });
+      await this.wpb.collection("tasks").update(taskId, { "assignees-": userId });
     }
   }
 
@@ -454,7 +461,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
         deadlineLeadDays: task.deadlineLeadDays,
         completed: false,
         snoozedUntil: null,
-        notifyUsers: [],
+        assignees: [],
         tags: tags.filter((t) => !t.startsWith("template:")),
         collapsed: task.collapsed,
         cleared: false,

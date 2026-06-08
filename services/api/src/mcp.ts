@@ -1746,14 +1746,14 @@ server.tool(
     task_type: z.enum(["recurring", "one_shot"]).optional().describe("'recurring' (has frequency/due dates) or 'one_shot' (checkbox). Default: one_shot"),
     frequency: taskFrequencySchema.optional().describe("Recurrence frequency (only for recurring tasks)"),
     tags: z.array(z.string()).optional().describe("Tags (e.g. ['travel:tripId123'])"),
-    notify_users: z.array(z.string()).optional().describe("User IDs to notify on completion/due"),
+    assignees: z.array(z.string()).optional().describe("User IDs the task is assigned to; drives reminders. Defaults to the creator when omitted."),
     deadline: z.string().optional().describe("ISO date (YYYY-MM-DD) — one-shot todos only"),
     deadline_lead_days: z.number().optional().describe("Remind this many days before the deadline (default 0 = day-of + overdue)"),
   },
-  async ({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users, deadline, deadline_lead_days }) => {
+  async ({ list, name, description, parent_id, position, task_type, frequency, tags, assignees, deadline, deadline_lead_days }) => {
     const data = await api("/tasks", {
       method: "POST",
-      body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags, notify_users, deadline, deadline_lead_days }),
+      body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags, assignees, deadline, deadline_lead_days }),
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   },
@@ -1774,14 +1774,14 @@ server.tool(
     description: z.string().optional().describe("Optional task description"),
     list_id: z.string().optional().describe("Task list to add into. Defaults to the caller's first household task list (matching the Travel UI's behavior)."),
     position: z.number().optional().describe("Sort position among siblings under the per-trip container. Defaults to max-sibling-position + 1."),
-    notify_users: z.array(z.string()).optional().describe("User IDs to notify on completion/due"),
+    assignees: z.array(z.string()).optional().describe("User IDs the task is assigned to; drives reminders. Defaults to the creator when omitted."),
     activity_id: z.string().optional().describe(
       "Optional activity record ID. When provided, the task is also tagged `activity:<id>` so the Prep tab can group it under that activity (e.g. 'Book Frida Kahlo tickets' under the Frida Kahlo Museum activity).",
     ),
     deadline: z.string().optional().describe("ISO date (YYYY-MM-DD) — book-by date for this prep item"),
     deadline_lead_days: z.number().optional().describe("Remind this many days before the deadline (default 0 = day-of + overdue)"),
   },
-  async ({ trip_id, name, description, list_id, position, notify_users, activity_id, deadline, deadline_lead_days }) => {
+  async ({ trip_id, name, description, list_id, position, assignees, activity_id, deadline, deadline_lead_days }) => {
     // 1. Resolve list. If none given, fall back to the first task list owned by the
     // caller. The Travel UI uses user.household_slugs (first entry), but no API
     // endpoint exposes that map — /data/task-lists already filters to lists the
@@ -1874,7 +1874,7 @@ server.tool(
         task_type: "one_shot",
         frequency: { value: 1, unit: "days" },
         tags: leafTags,
-        notify_users,
+        assignees,
         deadline,
         deadline_lead_days,
       }),
@@ -1896,7 +1896,7 @@ server.tool(
     completed: z.boolean().optional().describe("One-shot tasks only — for recurring use complete_task instead"),
     snoozed_until: z.string().optional().describe("ISO date — empty string clears snooze"),
     tags: z.array(z.string()).optional().describe("Replaces the tag list. For partial edits use tag_task once available."),
-    notify_users: z.array(z.string()).optional(),
+    assignees: z.array(z.string()).optional().describe("User IDs the task is assigned to; drives reminders. Defaults to the creator when omitted."),
     collapsed: z.boolean().optional(),
     cleared: z.boolean().optional().describe("Soft-hide flag set by clear_done_tasks. Set false to un-hide a single task."),
     deadline: z.string().optional().describe("ISO date (YYYY-MM-DD) — one-shot todos only. Empty string clears the deadline."),

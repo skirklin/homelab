@@ -127,7 +127,7 @@ async function seedTask(
     last_completed: null,
     completed: !!fields.completed,
     snoozed_until: null,
-    notify_users: [],
+    assignees: [],
     tags: [],
     collapsed: false,
     cleared: !!fields.cleared,

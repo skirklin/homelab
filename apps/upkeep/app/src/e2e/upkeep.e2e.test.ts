@@ -153,7 +153,7 @@ describe("Task Operations", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -196,7 +196,7 @@ describe("Task Operations", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -230,7 +230,7 @@ describe("Task Operations", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -270,7 +270,7 @@ describe("Task Operations", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -300,7 +300,7 @@ describe("Task Operations", () => {
         frequency: { value: 1, unit: "days" },
         lastCompleted: null,
         snoozedUntil: null,
-        notifyUsers: [],
+        assignees: [],
       })
     ).rejects.toThrow();
 
@@ -333,7 +333,7 @@ describe("Task Completion", () => {
       lastCompleted: twoDaysAgo,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -382,7 +382,7 @@ describe("Task Completion", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -436,7 +436,7 @@ describe("Task Completion", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -486,7 +486,7 @@ describe("Task Completion", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -533,7 +533,7 @@ describe("Task Completion", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -575,7 +575,7 @@ describe("Task Completion", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -622,7 +622,7 @@ describe("Snooze Operations", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -736,7 +736,7 @@ describe("Notification Operations", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -747,13 +747,13 @@ describe("Notification Operations", () => {
     await upkeep.toggleTaskNotification(taskId, user.id, true);
 
     const enabled = await ctx.pb.collection("tasks").getOne(taskId);
-    expect(enabled.notify_users).toContain(user.id);
+    expect(enabled.assignees).toContain(user.id);
 
     // Disable notification
     await upkeep.toggleTaskNotification(taskId, user.id, false);
 
     const disabled = await ctx.pb.collection("tasks").getOne(taskId);
-    expect(disabled.notify_users).not.toContain(user.id);
+    expect(disabled.assignees).not.toContain(user.id);
 
     await cleanup.cleanup();
   });
@@ -792,7 +792,7 @@ describe("Multi-user Scenarios", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -855,7 +855,7 @@ describe("Multi-user Scenarios", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -905,7 +905,7 @@ describe("Frequency Edge Cases", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -939,7 +939,7 @@ describe("Frequency Edge Cases", () => {
       deadlineLeadDays: null,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,
@@ -974,7 +974,7 @@ describe("Frequency Edge Cases", () => {
       lastCompleted: fiveDaysAgo,
       completed: false,
       snoozedUntil: null,
-      notifyUsers: [],
+      assignees: [],
       tags: [],
       collapsed: false,
       cleared: false,

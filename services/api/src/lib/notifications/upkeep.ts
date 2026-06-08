@@ -4,7 +4,7 @@
  * Finds due recurring tasks and notifies their RESOLVED cascade recipients via
  * Web Push — the same `inherit`-strategy cascade the deadline cron uses
  * (resolveNotifyRecipients, see recipients.ts). A chore notifies its own
- * notify_users / nearest-ancestor notify_users / else its `created_by` — NOT
+ * assignees / nearest-ancestor assignees / else its `created_by` — NOT
  * every owner of the list. The legacy union(list.owners, notify_users) rule
  * pinged both members of a shared list regardless of who the chore was for.
  *

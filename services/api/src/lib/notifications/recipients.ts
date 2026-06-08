@@ -4,9 +4,13 @@
  * Both task-notification crons (one-shot deadline reminders in deadlines.ts and
  * recurring chore reminders in upkeep.ts) resolve who to notify the SAME way:
  * an `inherit`-strategy cascade over the task's ancestor `path` chain. The
- * nearest ancestor with an explicit `notify_users` wins, the node's own value
+ * nearest ancestor with an explicit `assignees` set wins, the node's own value
  * overrides ancestors, and the terminal floor is the task's own `created_by` —
  * deliberately NOT the root list owners.
+ *
+ * `assignees` (formerly `notify_users`) is the SOLE notification driver:
+ * whoever a task is assigned to is who gets reminded. `created_by` stays as
+ * immutable provenance and as the cascade's terminal floor.
  *
  * The old rule was union(list.owners, notify_users), which pinged every owner of
  * a shared list regardless of who the task was for (e.g. Angela got Scott's
@@ -17,7 +21,8 @@ import type PocketBase from "pocketbase";
 
 /** Minimal shape of a task record needed to resolve its notify recipients. */
 export interface NotifyNode {
-  notify_users?: string[] | null;
+  /** Multi-relation set of assigned users — the sole notification driver. */
+  assignees?: string[] | null;
   /** Materialized ancestor-id chain, `/`-separated, SELF-INCLUSIVE (last
    *  segment is the node's own id). Root node → path === own id. */
   path?: string | null;
@@ -31,13 +36,13 @@ export interface NotifyNode {
  * @param task          the due task record
  * @param ancestorsById ancestor task records keyed by id (need NOT include the
  *                      task itself; only proper ancestors are consulted). Only
- *                      `notify_users` is read off them.
+ *                      `assignees` is read off them.
  * @param listOwners    fallback ONLY for legacy tasks with no chain config and
  *                      no `created_by` (predating created_by stamping).
  *
  * Resolution order (CSS-cascade `inherit`):
  *   1. nearest node on the root→self chain (self first, then closest ancestor,
- *      …) with a NON-EMPTY explicit `notify_users` wins;
+ *      …) with a NON-EMPTY explicit `assignees` set wins;
  *   2. else the task's own `created_by` (single user) — the floor that fixes
  *      the bug: an un-configured task notifies its creator, not all owners;
  *   3. else (legacy: no created_by either) the list owners, to preserve old
@@ -52,7 +57,7 @@ export function resolveNotifyRecipients(
     Array.isArray(v) && v.length > 0 ? v : null;
 
   // Self overrides ancestors.
-  const own = nonEmpty(task.notify_users);
+  const own = nonEmpty(task.assignees);
   if (own) return [...new Set(own)];
 
   // Walk ancestors nearest → farthest. `path` is root→…→self, so proper
@@ -62,7 +67,7 @@ export function resolveNotifyRecipients(
   const ancestorIds = segments.slice(0, -1).reverse();
   for (const id of ancestorIds) {
     const anc = ancestorsById.get(id);
-    const v = anc && nonEmpty(anc.notify_users);
+    const v = anc && nonEmpty(anc.assignees);
     if (v) return [...new Set(v)];
   }
 
@@ -76,10 +81,10 @@ export function resolveNotifyRecipients(
 
 /**
  * Batch-fetch every proper-ancestor task referenced by any of `tasks`' `path`
- * chains, returning a `{id → {notify_users}}` map for resolveNotifyRecipients.
+ * chains, returning a `{id → {assignees}}` map for resolveNotifyRecipients.
  *
  * Ancestors (containers) are usually NOT themselves in the due set, so this is
- * one getFullList instead of an N+1 per-task walk. Reads only `notify_users`
+ * one getFullList instead of an N+1 per-task walk. Reads only `assignees`
  * (the sole field the cascade consults on ancestors).
  */
 export async function fetchAncestorsByPath(
@@ -97,7 +102,7 @@ export async function fetchAncestorsByPath(
 
   const ancestors = await pb.collection("tasks").getFullList({
     filter: [...ancestorIds].map((id) => pb.filter("id = {:id}", { id })).join(" || "),
-    fields: "id,notify_users",
+    fields: "id,assignees",
     $autoCancel: false,
   });
   for (const a of ancestors) ancestorsById.set(a.id, a as NotifyNode);

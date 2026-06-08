@@ -8,15 +8,16 @@
  *
  * The fix mirrors the deadline cron: an `inherit`-strategy cascade
  * (resolveNotifyRecipients, shared in recipients.ts). Nearest ancestor on the
- * node's `path` chain with an explicit notify_users wins, self overrides
+ * node's `path` chain with an explicit `assignees` set wins, self overrides
  * ancestors, and the terminal floor is the task's OWN created_by — NOT the list
- * owners. The `all` / `subscribed` mode distinction is retired; only `off` mutes.
+ * owners. `assignees` (formerly `notify_users`) is the sole notification
+ * driver. The `all` / `subscribed` mode distinction is retired; only `off` mutes.
  *
  * This pins, against REAL PB records (so the self-inclusive `path` format is
  * exercised) + the same resolve/due/aggregate seam the cron uses:
- *   - bare recurring task, created_by = A, no notify config → resolves to [A]
+ *   - bare recurring task, created_by = A, no assignees → resolves to [A]
  *     only, NOT {A,B} (the bug)
- *   - ancestor container with notify_users = [B] → child resolves to [B]
+ *   - ancestor container with assignees = [B] → child resolves to [B]
  *   - an `off` user is never aggregated into the notify set
  *   - due-detection: a recurring task with empty/past last_completed is due
  *
@@ -83,7 +84,7 @@ async function makeRecurringTask(fields: {
   list: string;
   name: string;
   parent_id?: string;
-  notify_users?: string[];
+  assignees?: string[];
   created_by?: string;
   frequency?: { value: number; unit: "days" | "weeks" | "months" };
   last_completed?: string | null;
@@ -92,7 +93,7 @@ async function makeRecurringTask(fields: {
     list: fields.list,
     name: fields.name,
     parent_id: fields.parent_id || "",
-    notify_users: fields.notify_users || [],
+    assignees: fields.assignees || [],
     created_by: fields.created_by || "",
     task_type: "recurring",
     frequency: fields.frequency ?? { value: 7, unit: "days" },
@@ -145,12 +146,12 @@ describe("upkeep recurring cron — resolveNotifyRecipients cascade", () => {
     expect(recipients).not.toContain(userB.id);
   });
 
-  it("ancestor container with notify_users=[B] → child recurring task resolves to [B]", async () => {
+  it("ancestor container with assignees=[B] → child recurring task resolves to [B]", async () => {
     const container = await makeRecurringTask({
       list: sharedListId,
       name: "Yard",
       created_by: userA.id,
-      notify_users: [userB.id],
+      assignees: [userB.id],
     });
     const child = await makeRecurringTask({
       list: sharedListId,
@@ -239,12 +240,12 @@ describe("upkeep recurring cron — due/aggregate seam", () => {
     expect(notified).not.toContain(userB.id);
   });
 
-  it("an `off` recipient is dropped even when explicitly named in notify_users", async () => {
+  it("an `off` recipient is dropped even when explicitly named in assignees", async () => {
     const chore = await makeRecurringTask({
       list: sharedListId,
       name: "Water the plants",
       created_by: userA.id,
-      notify_users: [userB.id], // explicitly target B…
+      assignees: [userB.id], // explicitly target B…
       last_completed: null,
     });
     const recipientIds = resolveNotifyRecipients(chore, new Map(), [userA.id, userB.id]);
@@ -306,7 +307,7 @@ describe("upkeep recurring cron — runUpkeepNotifications drives PB state", () 
     await makeRecurringTask({
       list: list.id,
       name: "Cron clean gutters",
-      created_by: a.id, // no explicit notify_users
+      created_by: a.id, // no explicit assignees
       last_completed: null, // never done → due
     });
 
@@ -347,7 +348,7 @@ describe("upkeep recurring cron — runUpkeepNotifications drives PB state", () 
     expect(notified).toBe(0);
   });
 
-  it("ancestor container notify_users=[B] over a task created_by=A stamps B, not A", async () => {
+  it("ancestor container assignees=[B] over a task created_by=A stamps B, not A", async () => {
     const a = await makeActor("cron-anc-a");
     const b = await makeActor("cron-anc-b");
     const list = await adminPb.collection("task_lists").create({
@@ -358,13 +359,13 @@ describe("upkeep recurring cron — runUpkeepNotifications drives PB state", () 
       list: list.id,
       name: "Cron yard",
       created_by: a.id,
-      notify_users: [b.id], // container targets B
+      assignees: [b.id], // container targets B
     });
     await makeRecurringTask({
       list: list.id,
       name: "Cron mow lawn",
       parent_id: container.id,
-      created_by: a.id, // creator A, but inherits container's notify_users=[B]
+      created_by: a.id, // creator A, but inherits container's assignees=[B]
       last_completed: null,
     });
 
