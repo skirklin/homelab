@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Empty, Spin, Tag, App } from "antd";
-import { RobotOutlined, CalendarOutlined, BookOutlined, LineChartOutlined } from "@ant-design/icons";
+import { RobotOutlined, CalendarOutlined, BookOutlined, LineChartOutlined, MessageOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import {
@@ -92,6 +92,16 @@ const LoadingWrap = styled.div`
 const List = styled.div`
   display: flex;
   flex-direction: column;
+`;
+
+// Footer row sits below the body — keeps the "Continue in Chat" affordance
+// always visible (even when the card is collapsed) without competing with the
+// timestamp in the header. The card itself is clickable to toggle expand;
+// the button stops propagation so a tap on it doesn't also toggle the card.
+const CardFooter = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-sm);
 `;
 
 // ---------------------------------------------------------------------------
@@ -235,6 +245,21 @@ export function Observations() {
                     </Timestamp>
                   </CardHeader>
                   <Content $expanded={expanded}>{obs.content}</Content>
+                  <CardFooter>
+                    <Button
+                      size="small"
+                      type="link"
+                      icon={<MessageOutlined />}
+                      onClick={(e) => {
+                        // Don't toggle the card's expand/collapse \u2014 this
+                        // click is the handoff, not a read affordance.
+                        e.stopPropagation();
+                        navigate(`/chat?observation=${encodeURIComponent(obs.id)}`);
+                      }}
+                    >
+                      Continue in Chat
+                    </Button>
+                  </CardFooter>
                 </ObservationCard>
               );
             })}
