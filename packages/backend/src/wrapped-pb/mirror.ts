@@ -485,8 +485,103 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
 
   // ---- Bootstrap ----
 
+  /**
+   * Eager paint from the snapshot cache, BEFORE the network bootstrap
+   * resolves. The mutation queue was seeded from IDB by wpb.hydrateSnapshots,
+   * so queue.view / viewCollection already hold cached server records.
+   *
+   * Gate: only emit when the slice's view contains at least one record that
+   * has a real SERVER snapshot. A replayed *pending* mutation (e.g. a stale
+   * persisted SET from a prior session) composes to a non-null view but is
+   * NOT cached server truth — painting it would resurrect the A11/A12 dogfood
+   * oscillation (show a stale create-time body, then vanish on the replay's
+   * 409). For pending-only records we fall through to today's
+   * spinner/blank-then-data behavior.
+   *
+   * Returns true if an eager emit happened (so bootstrap can mark the slice
+   * ready and skip a redundant first force-emit decision — though we still
+   * deliver server-truth on revalidate via the per-consumer hash check).
+   */
+  function eagerEmitFromCache(slice: Slice): boolean {
+    const col = slice.spec.collection;
+    const topic = slice.spec.topic;
+
+    // Representative per-consumer predicate. Every consumer on a slice shares
+    // the same filter string, so any one predicate scopes the cache the same
+    // way. Used to seed slice.records with only the records that belong to
+    // THIS slice's filter (so reconcileGhosts can't tombstone a cached record
+    // owned by a different filter).
+    const predicate = slice.consumers.values().next().value?.spec.predicate;
+
+    // Build the candidate view + the set of ids it draws from, so we can
+    // confirm at least one has a server snapshot (not pending-only).
+    let candidate: RawRecord[];
+    if (topic !== "*") {
+      const v = queue.view(col, topic);
+      candidate = v ? [v] : [];
+    } else if (slice.spec.sort || slice.spec.limit) {
+      // Seed slice.records from the cache so materialize's top-N window has
+      // something to work with before the server's getList lands.
+      for (const r of queue.viewCollection(col, predicate)) {
+        if (queue.hasServerSnapshot(col, r.id)) slice.records.set(r.id, r);
+      }
+      candidate = materialize(slice);
+    } else {
+      // filter-only wildcard. Seed slice.records (scoped by predicate) so
+      // reconcileGhosts has a precise prior set; materialize() itself reads
+      // queue.viewCollection, not slice.records.
+      for (const r of queue.viewCollection(col, predicate)) {
+        if (queue.hasServerSnapshot(col, r.id)) slice.records.set(r.id, r);
+      }
+      candidate = queue.viewCollection(col, predicate);
+    }
+
+    if (candidate.length === 0) return false;
+    // At least one record must be server-backed (cached), not pending-only.
+    const hasServerBacked = candidate.some((r) => queue.hasServerSnapshot(col, r.id));
+    if (!hasServerBacked) return false;
+
+    slice.ready = true;
+    for (const consumer of slice.consumers) forceEmitConsumer(slice, consumer);
+    return true;
+  }
+
+  /**
+   * Tombstone cached/known records that vanished from a fresh fetch.
+   *
+   * `fresh` is the authoritative server set for this wildcard slice. The
+   * prior set we reconcile against is:
+   *   - sort+limit: slice.records (the server's prior top-N window, seeded
+   *     from cache during eager paint).
+   *   - filter-only wildcard: every record the queue currently has a SERVER
+   *     snapshot for that matches the slice's filter — slice.records is a
+   *     routing helper only here, so we ask the queue directly.
+   * Records with a pending mutation are left alone — an optimistic write must
+   * not be clobbered by a server fetch that predates it. Used by bootstrap;
+   * resync has its own inline copy against slice.records (sufficient there
+   * because resync always runs after a ready bootstrap seeded slice.records).
+   */
+  function reconcileGhosts(slice: Slice, collection: string, fresh: RawRecord[]): void {
+    const seen = new Set(fresh.map((r) => r.id));
+    // slice.records is the scoped prior set: sort+limit seeds it from cache
+    // during eager paint, and filter-only wildcard also seeds it there (so
+    // we never tombstone a cached record belonging to a *different* filter,
+    // which a collection-wide scan would wrongly do).
+    for (const id of Array.from(slice.records.keys())) {
+      if (seen.has(id)) continue;
+      if (queue.hasPending(collection, id)) continue;
+      queue.applyServer(collection, id, null);
+      slice.records.delete(id);
+    }
+  }
+
   async function bootstrap(slice: Slice): Promise<void> {
     const { collection, topic, filter, sort, limit } = slice.spec;
+
+    // Stale-while-revalidate: paint the snapshot cache immediately, then let
+    // the network fetch below revalidate. No-op (returns false) when the
+    // cache is empty for this slice — preserves today's blank-then-data.
+    const eagerEmitted = eagerEmitFromCache(slice);
 
     let initial: RawRecord[] = [];
     try {
@@ -495,11 +590,20 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
           const r = await pb().collection(collection).getOne(topic, { $autoCancel: false });
           initial = [r as unknown as RawRecord];
         } catch (err) {
-          // 404 = record doesn't exist yet, which is a legitimate empty
-          // bootstrap (subscribe(id) on a missing record). Anything else
-          // is a real failure worth surfacing — auth blip, network down,
-          // permission denied, etc. — and resync will retry.
-          if ((err as { status?: number })?.status !== 404) {
+          // 404 = record doesn't exist on the server. Two sub-cases:
+          //   - never existed (subscribe(id) on a missing record) → empty
+          //     bootstrap, nothing to reconcile.
+          //   - existed in our snapshot cache but was deleted server-side
+          //     while we were offline → tombstone the cached snapshot so the
+          //     eager-painted record doesn't linger. Guard on no-pending so
+          //     an optimistic create-with-id isn't clobbered.
+          // (Pre-cache this branch did nothing — safe only because the queue
+          // was always empty here; it isn't anymore.)
+          if ((err as { status?: number })?.status === 404) {
+            if (queue.hasServerSnapshot(collection, topic) && !queue.hasPending(collection, topic)) {
+              queue.applyServer(collection, topic, null);
+            }
+          } else {
             recordBootstrapError(collection, topic, err, "bootstrap");
           }
         }
@@ -538,26 +642,32 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // wasted pb.subscribe call (scenarios 7, 9).
     if (slice.tornDown || slice.consumers.size === 0) return;
 
+    // Ghost reconciliation (the cache-clobber fix). Any record we eager-
+    // painted from the cache that is MISSING from the fresh fetch — and has
+    // no pending mutation — was deleted server-side while we were offline.
+    // Tombstone it so it doesn't linger in the post-bootstrap view. Mirrors
+    // the resync() reconcile. Single-record (topic) is handled inline in the
+    // 404 branch above; this covers wildcard/filter + sort+limit.
+    if (topic === "*") {
+      reconcileGhosts(slice, collection, initial);
+    }
+
     // Seed slice.records AND the mutation queue. Seeding the queue is the
     // key to making queue.viewCollection() the single source of truth in
     // materialize() — otherwise the initial filtered set would only live
     // in slice.records and the queue overlay would be partial.
     //
-    // The seed-skip guard is intentionally narrow: only skip when the
-    // queue ALREADY has a server snapshot for this id (an SSE event
-    // raced ahead during our await — that snapshot is more authoritative
-    // than our potentially-stale getList). A pending-only entry must NOT
-    // skip the seed: a stale persisted SET replayed from IDB does not
-    // constitute server truth, and without the server seed, composeView
-    // would (a) show the stale create-time body to consumers, and (b)
-    // leave the record with no server snapshot when the replay's 409
-    // drains the pending — making the record vanish entirely. This is
-    // the dogfood oscillation bug (A11/A12 in realworld.test.ts).
+    // We apply the fresh fetch UNCONDITIONALLY (same as resync), so a stale
+    // hydrated cache snapshot is overwritten by fresh server truth — the
+    // whole point of stale-while-revalidate. applyServer is composition-safe:
+    // it never clobbers pending optimistic writes (composeView layers them on
+    // top). This still seeds A11/A12's record so its stale replayed SET has a
+    // server snapshot underneath (the dogfood oscillation fix) — the prior
+    // `!hasServerSnapshot` skip-guard was only there to dodge a fresher SSE
+    // snapshot during the await, a sub-ms window resync recovers from anyway.
     for (const r of initial) {
       slice.records.set(r.id, r);
-      if (!queue.hasServerSnapshot(collection, r.id)) {
-        queue.applyServer(collection, r.id, r);
-      }
+      queue.applyServer(collection, r.id, r);
     }
 
     // Attach SSE listener (refcount per collection).
@@ -573,9 +683,15 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
 
     slice.ready = true;
 
-    // Deliver initial state to every consumer attached so far.
+    // Deliver revalidated state to every consumer attached so far. If we
+    // already eager-painted from cache, use the hash-checked deliver so an
+    // identical server result doesn't double-emit (per-consumer dedup); the
+    // eager paint already set each consumer's hash. With no eager paint, force
+    // exactly one emit so a fresh consumer always sees initial state (even if
+    // it's empty).
     for (const consumer of slice.consumers) {
-      forceEmitConsumer(slice, consumer);
+      if (eagerEmitted) deliverToConsumer(slice, consumer);
+      else forceEmitConsumer(slice, consumer);
     }
   }
 

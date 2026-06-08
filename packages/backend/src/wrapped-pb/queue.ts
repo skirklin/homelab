@@ -76,9 +76,28 @@ export function composeView(
   return result;
 }
 
+/** Options for MutationQueue construction. */
+export interface MutationQueueOptions {
+  /**
+   * Fired whenever a server snapshot changes via `applyServer` — bootstrap
+   * seeds, SSE events, resync, AND write-acks all funnel through that one
+   * method, so this is the single chokepoint the snapshot-cache writer hooks
+   * to mirror server state into IDB. `snapshot` is null for a tombstone.
+   *
+   * NOT fired by `seedServer` (hydration replay), so loading the cache back
+   * in doesn't loop straight back out to IDB.
+   */
+  onServerChange?: (collection: string, recordId: string, snapshot: RawRecord | null) => void;
+}
+
 /** Single-collection store: per-record state + collection-wide listeners. */
 export class MutationQueue {
   private state = new Map<string, Map<string, RecordState>>();
+  private opts?: MutationQueueOptions;
+
+  constructor(opts?: MutationQueueOptions) {
+    this.opts = opts;
+  }
 
   // ---- Record state ----
 
@@ -163,6 +182,30 @@ export class MutationQueue {
 
   /** Server snapshot upserted (null = tombstone). Returns the prior view. */
   applyServer(
+    collection: string,
+    recordId: string,
+    snapshot: RawRecord | null,
+  ): { before: RawRecord | null; after: RawRecord | null } {
+    const rec = this.getOrCreate(collection, recordId);
+    const before = composeView(rec.server, rec.pending);
+    rec.server = snapshot;
+    if (snapshot === null && rec.pending.length === 0) {
+      this.state.get(collection)?.delete(recordId);
+    }
+    const after = composeView(rec.server, rec.pending);
+    // Mirror the server-state change to any cache writer. This is the single
+    // chokepoint for bootstrap seeds, SSE events, resync, and write-acks.
+    this.opts?.onServerChange?.(collection, recordId, snapshot);
+    return { before, after };
+  }
+
+  /**
+   * Seed a server snapshot WITHOUT firing `onServerChange`. Used by snapshot
+   * hydration: the snapshot was just read FROM the cache, so re-emitting it
+   * to the cache writer would be a pointless load→persist loop. Identical to
+   * applyServer otherwise. Returns the prior/next view.
+   */
+  seedServer(
     collection: string,
     recordId: string,
     snapshot: RawRecord | null,

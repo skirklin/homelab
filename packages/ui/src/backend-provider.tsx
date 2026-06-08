@@ -10,7 +10,7 @@
  * home app nests providers from multiple modules).
  */
 
-import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { message } from "antd";
 import { getBackend } from "./backend";
 import { createPocketBaseBackends } from "@homelab/backend/pocketbase";
@@ -211,9 +211,28 @@ function useRealtimeResync() {
 }
 
 export function BackendProvider({ children }: { children: ReactNode }) {
+  // Gate the first render on snapshot hydration so a cold load paints cached
+  // data (stale-while-revalidate) instead of flashing empty lists. Hydration
+  // is normally sub-100ms (one indexed IDB read), but we race it against a
+  // 1s timeout so a pathological/hung IDB can never brick the app — if the
+  // timeout wins we render anyway and hydrateSnapshots' notifyMutationListeners
+  // delivers the cache to already-mounted slices best-effort.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; setHydrated(true); } };
+    const timeout = setTimeout(finish, 1000);
+    wpb.hydrateSnapshots().catch(() => { /* IDB failure is non-fatal */ }).finally(() => {
+      clearTimeout(timeout);
+      finish();
+    });
+    return () => clearTimeout(timeout);
+  }, []);
   useEffect(() => {
     registerServiceWorker();
-    // Replay any persisted pending mutations from a prior session.
+    // Replay any persisted pending mutations from a prior session. Reads
+    // (hydrateSnapshots, above) and writes (replayPending) touch different IDB
+    // stores, so they run independently — replay does not wait on hydration.
     // Safe-by-design: client-supplied IDs make creates idempotent, updates are
     // last-write-wins, deletes treat 404 as success.
     void wpb.replayPending();
@@ -233,7 +252,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
                     <OfflineBanner />
                     <UpdateAvailableBanner />
                     <SyncStatusBanner debug={wpb.debug} />
-                    {children}
+                    {hydrated ? children : null}
                   </ChatBackendContext.Provider>
                 </ObserverBackendContext.Provider>
               </UserBackendContext.Provider>
