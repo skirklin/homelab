@@ -22,7 +22,7 @@
  *
  * Requires the per-worktree test env (infra/test-env.sh up).
  */
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import PocketBase from "pocketbase";
 import { randomBytes } from "crypto";
 import { getPbTestUrl } from "./pb-test-url";
@@ -32,9 +32,24 @@ import {
   type NotifyNode,
 } from "../lib/notifications/recipients";
 
+// upkeep.ts → push.ts reads VAPID keys at import-time and `sendPushToUser`
+// calls ensureVapid()/setVapidDetails() (which validates key length) before its
+// zero-subscription early return. Generate a REAL, well-formed VAPID keypair —
+// dummy strings fail web-push's 65-byte validation. With no push_subscriptions
+// in the test PB, sendPushToUser still returns {sent:0} without touching the
+// network, but the cron stamps the user, which is what these tests observe.
+vi.hoisted(async () => {
+  const { default: webpush } = await import("web-push");
+  const keys = webpush.generateVAPIDKeys();
+  process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+  process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+});
+
 process.env.PB_URL = getPbTestUrl();
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
 process.env.PB_ADMIN_PASSWORD = "testpassword1234";
+
+const { runUpkeepNotifications } = await import("../lib/notifications/upkeep");
 
 const PB_URL = getPbTestUrl();
 
@@ -239,5 +254,125 @@ describe("upkeep recurring cron — due/aggregate seam", () => {
     const modeByUser = new Map<string, string>([[userB.id, "off"]]);
     const notified = recipientIds.filter((uid) => modeByUser.get(uid) !== "off");
     expect(notified).toEqual([]);
+  });
+});
+
+/**
+ * Drives the REAL runUpkeepNotifications() against the test PB and asserts on
+ * observable PB state — the `last_task_notification` stamp the cron writes on
+ * every user it notifies. With no push_subscriptions in the test PB,
+ * sendPushToUser is a no-op (returns {sent:0}), but the cron still stamps +
+ * counts the user, so the stamp is the ground-truth signal of "who would be
+ * notified." This is the case that actually exercises the union-retirement and
+ * the in-cron `off` check (the helper-level tests above re-implement the cron's
+ * logic inline; this one runs the cron itself).
+ */
+describe("upkeep recurring cron — runUpkeepNotifications drives PB state", () => {
+  const todayLA = () =>
+    new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+
+  /** Pacific calendar day of a stamp, or null if unset. */
+  const stampDay = (v: unknown): string | null =>
+    v ? new Date(v as string).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }) : null;
+
+  /**
+   * Neutralize every user in the PB by stamping last_task_notification = today
+   * (so the cron's per-user-per-day idempotency check skips them), THEN clear
+   * the stamp on just the users this case cares about. This makes the cron's
+   * global {notified, skipped} counts deterministic regardless of tasks/users
+   * left over from earlier describe blocks in this same file.
+   */
+  async function isolateUsers(clearIds: string[]): Promise<void> {
+    const now = new Date().toISOString();
+    const all = await adminPb.collection("users").getFullList({ $autoCancel: false });
+    for (const u of all) {
+      await adminPb.collection("users").update(u.id, { last_task_notification: now }, { $autoCancel: false });
+    }
+    for (const id of clearIds) {
+      await adminPb.collection("users").update(id, { last_task_notification: null }, { $autoCancel: false });
+    }
+  }
+
+  const stampOf = async (id: string): Promise<string | null> =>
+    stampDay((await adminPb.collection("users").getOne(id)).last_task_notification);
+
+  it("bare recurring chore created_by=A on a {A,B} list stamps A only, NOT B (union retired)", async () => {
+    const a = await makeActor("cron-a");
+    const b = await makeActor("cron-b");
+    const list = await adminPb.collection("task_lists").create({
+      name: "Cron shared list 1",
+      owners: [a.id, b.id],
+    });
+    await makeRecurringTask({
+      list: list.id,
+      name: "Cron clean gutters",
+      created_by: a.id, // no explicit notify_users
+      last_completed: null, // never done → due
+    });
+
+    await isolateUsers([a.id, b.id]);
+    const { notified, skipped } = await runUpkeepNotifications();
+
+    // A (the creator / resolved recipient) is stamped today; B is not.
+    // The OLD union-mode code would have stamped B too.
+    expect(await stampOf(a.id)).toBe(todayLA());
+    expect(await stampOf(b.id)).toBe(null);
+
+    // Counts: exactly one user newly notified (A); everyone else pre-stamped → skipped.
+    expect(notified).toBe(1);
+    expect(skipped).toBeGreaterThanOrEqual(0);
+  });
+
+  it("an `off` user who IS a resolved recipient is never stamped", async () => {
+    const off = await makeActor("cron-off");
+    const list = await adminPb.collection("task_lists").create({
+      name: "Cron off list",
+      owners: [off.id],
+    });
+    await makeRecurringTask({
+      list: list.id,
+      name: "Cron off chore",
+      created_by: off.id, // resolves to the off user
+      last_completed: null,
+    });
+
+    await isolateUsers([off.id]);
+    // The user opts fully out → the cron must skip on the `off` check, not the stamp.
+    await adminPb.collection("users").update(off.id, { upkeep_notification_mode: "off" }, { $autoCancel: false });
+
+    const { notified } = await runUpkeepNotifications();
+
+    expect(await stampOf(off.id)).toBe(null); // never stamped
+    // The off user contributed 0 to notified (only other neutralized users exist).
+    expect(notified).toBe(0);
+  });
+
+  it("ancestor container notify_users=[B] over a task created_by=A stamps B, not A", async () => {
+    const a = await makeActor("cron-anc-a");
+    const b = await makeActor("cron-anc-b");
+    const list = await adminPb.collection("task_lists").create({
+      name: "Cron shared list 2",
+      owners: [a.id, b.id],
+    });
+    const container = await makeRecurringTask({
+      list: list.id,
+      name: "Cron yard",
+      created_by: a.id,
+      notify_users: [b.id], // container targets B
+    });
+    await makeRecurringTask({
+      list: list.id,
+      name: "Cron mow lawn",
+      parent_id: container.id,
+      created_by: a.id, // creator A, but inherits container's notify_users=[B]
+      last_completed: null,
+    });
+
+    await isolateUsers([a.id, b.id]);
+    const { notified } = await runUpkeepNotifications();
+
+    expect(await stampOf(b.id)).toBe(todayLA()); // inherited recipient
+    expect(await stampOf(a.id)).toBe(null);      // creator NOT notified
+    expect(notified).toBe(1);
   });
 });

@@ -58,7 +58,7 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
   // Fetch only recurring tasks (one-shot tasks don't have due dates)
   const tasks = await pb.collection("tasks").getFullList({
     filter: 'task_type = "recurring"',
-    expand: "list,list.owners,notify_users",
+    expand: "list,list.owners",
     $autoCancel: false,
   });
 

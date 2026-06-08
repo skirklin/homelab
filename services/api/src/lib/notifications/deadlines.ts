@@ -46,7 +46,7 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
   // Only one-shot, incomplete, un-cleared tasks that actually have a deadline.
   const tasks = await pb.collection("tasks").getFullList({
     filter: 'task_type = "one_shot" && completed = false && cleared = false && deadline != ""',
-    expand: "list,list.owners,notify_users",
+    expand: "list,list.owners",
     $autoCancel: false,
   });
 
