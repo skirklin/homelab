@@ -231,7 +231,9 @@ Append-only. When a decision in the table above gets reversed, log it here.
 - Per-user writeback tokens for multi-tenant (today single Bearer = single owner stamped server-side).
 - Bundle path import is a Dockerfile-COPY hack (`infra/docker/coach.Dockerfile` copies `services/api/src/lib/observer/{bundle,tz}.ts`). Cleaner: promote to `packages/observer-bundle/`.
 
-- **D3 — Frontend handoff: Observations → Chat.** Add "Continue this in Chat" button on each observation card in `Observations.tsx`. Button navigates to `/chat?observation=<id>`. `Chat.tsx` on mount with that param posts the observation content as a `kind: "question"` assistant message (via existing `post_chat_message`), then the user types a reply and the D2 coach responds in realtime. **Status: pending D2.**
+- **D3 — Frontend handoff: Observations → Chat.** Add "Continue this in Chat" button on each observation card in `Observations.tsx`. Button navigates to `/chat?observation=<id>`. `Chat.tsx` on mount with that param fetches the observation and prefills the compose box with a markdown-quoted version (lighter touch than the originally-briefed auto-post-as-assistant-message; user retains agency, no dedup needed, no DB writes from the button). **Status: ✓ MERGED 2026-06-08 (merge commit `ddf99dc`).** Worktree `agent-a4acc51135dc2292c` (commit `137bb00`). Tested clean (63/63 life-app vitest); merge done by eyeball-review rather than full critical-reviewer dispatch (frontend-only, established URL-param pattern from LifeDashboard, real test coverage of mount + scrub + draft-preservation + 404 paths).
+
+**🎉 Phase D complete (2026-06-08): D1 + D2 + D3 all merged. The realtime coach loop is on main end-to-end pending deploy + secrets.**
 
 **Deferred to v2 (not blocking v1):**
 - Streaming output (tokens appearing as generated). v1 = full reply lands when ready, ~3-8s.
