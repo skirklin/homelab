@@ -41,9 +41,10 @@ interface Props {
 }
 
 /**
- * Presentational verdict picker. The owner (NotesThread / ActivityVerdictRow)
- * sources `current` from the caller's own note and persists via `onSet` — the
- * buttons themselves are stateless.
+ * Presentational verdict picker. The owner (NotesThread) renders this inside the
+ * caller's own reaction card, sourcing `current` from their own note and
+ * persisting via `onSet` — the buttons themselves are stateless. Other authors'
+ * verdicts render as a read-only text tag, not this control.
  */
 export function VerdictButtons({ current, onSet }: Props) {
   return (

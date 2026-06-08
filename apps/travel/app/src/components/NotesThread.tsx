@@ -77,6 +77,10 @@ const VerdictTag = styled.span`
   font-weight: 400;
 `;
 
+const VerdictRow = styled.div`
+  margin: 2px 0 4px;
+`;
+
 const NoteText = styled.div`
   font-size: 13px;
   color: #262626;
@@ -123,7 +127,7 @@ interface Props {
   subjectType: SubjectType;
   /** activity→activity id, trip→trip id, day→`"${tripId}:${date}"`. */
   subjectId: string;
-  /** Show the verdict picker above the activity editor (activity subjects only). */
+  /** Render the editable verdict picker in the caller's reaction card (activity subjects only). */
   showVerdict?: boolean;
 }
 
@@ -192,6 +196,20 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
     }
   };
 
+  // Shared save for the inline "add my note" editor. Re-select at SAVE time: if a
+  // note exists now (mirror delivery, a verdict tapped while this editor was open,
+  // or a double-tapped Save), UPDATE it — merging the existing verdict so we don't
+  // drop it — instead of adding a duplicate row.
+  const saveNewNote = async (draft: NoteDraft) => {
+    const existing = currentMine();
+    await persist(entriesFor(verdictOf(existing) ?? null, draft), existing);
+    setAdding(false);
+  };
+
+  // The editable verdict picker now lives WITH the caller's reaction, not as a
+  // floating top-level control. Only activity subjects have a verdict.
+  const verdictEditable = !!showVerdict && subjectType === "activity";
+
   // Offer the add affordance whenever the caller has no note yet. For an
   // activity the verdict picker is a second way in (tapping it creates the
   // note implicitly); this lets them write a text note without a verdict.
@@ -199,23 +217,22 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
 
   return (
     <Thread onClick={(e) => e.stopPropagation()}>
-      {showVerdict && subjectType === "activity" && (
-        <VerdictButtons current={verdictOf(mine)} onSet={setVerdict} />
-      )}
-
       {notes.map((note) => {
         const own = note.createdBy === myId && !isImported(note);
         const imported = isImported(note);
         const authorName = imported ? "Imported" : names.get(note.createdBy) || "Someone";
         const editing = editingId === note.id;
+        const verdict = verdictOf(note);
 
         return (
           <NoteCard key={note.id} $own={own} data-testid={`note-${note.id}`}>
             <NoteHead>
               <Author $muted={imported}>
                 {authorName}
-                {subjectType === "activity" && verdictOf(note) && (
-                  <VerdictTag>· {VERDICT_LABEL[verdictOf(note)!]}</VerdictTag>
+                {/* Others'/imported verdicts are read-only text; the caller's own
+                    is an editable picker rendered below, not here. */}
+                {subjectType === "activity" && !own && verdict && (
+                  <VerdictTag>· {VERDICT_LABEL[verdict]}</VerdictTag>
                 )}
               </Author>
               {own && !editing && (
@@ -234,13 +251,21 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
               )}
             </NoteHead>
 
+            {/* The caller's own reaction carries the editable verdict picker, so
+                a tap (re-selecting live state, preserving text) rates in-place. */}
+            {own && verdictEditable && (
+              <VerdictRow>
+                <VerdictButtons current={verdict} onSet={setVerdict} />
+              </VerdictRow>
+            )}
+
             {editing ? (
               <NoteEditor
                 subjectType={subjectType}
                 initial={draftFromNote(subjectType, note)}
                 onCancel={() => setEditingId(null)}
                 onSave={async (draft) => {
-                  await persist(entriesFor(verdictOf(note) ?? null, draft), note);
+                  await persist(entriesFor(verdict ?? null, draft), note);
                   setEditingId(null);
                 }}
               />
@@ -251,28 +276,46 @@ export function NotesThread({ subjectType, subjectId, showVerdict }: Props) {
         );
       })}
 
-      {/* The current user's own editor: an inline add when they have no note. */}
-      {!mine && adding && (
+      {/* No note yet, but for an activity the caller still gets a "your reaction"
+          card whose verdict picker is one-tap (creates the note implicitly) and a
+          low-key affordance to add text. Keeps rating frictionless. */}
+      {!mine && verdictEditable && (
+        <NoteCard $own data-testid="my-reaction">
+          <Author>Your reaction</Author>
+          <VerdictRow>
+            <VerdictButtons current={undefined} onSet={setVerdict} />
+          </VerdictRow>
+          {adding ? (
+            <NoteEditor
+              subjectType={subjectType}
+              initial={emptyDraft()}
+              autoFocus
+              onCancel={() => setAdding(false)}
+              onSave={saveNewNote}
+            />
+          ) : (
+            <AddRow type="button" data-testid="note-add" onClick={() => setAdding(true)}>
+              + add my {subjectLabel(subjectType)}
+            </AddRow>
+          )}
+        </NoteCard>
+      )}
+
+      {/* Non-activity subjects (day / trip) have no verdict, so the inline add
+          editor stands on its own. */}
+      {!mine && !verdictEditable && adding && (
         <NoteCard $own data-testid="note-add-editor">
           <NoteEditor
             subjectType={subjectType}
             initial={emptyDraft()}
             autoFocus
             onCancel={() => setAdding(false)}
-            onSave={async (draft) => {
-              // Re-select at SAVE time: if a note exists now (mirror delivery,
-              // a verdict tapped while this editor was open, or a double-tapped
-              // Save), UPDATE it — merging the existing verdict so we don't drop
-              // it — instead of adding a duplicate row.
-              const existing = currentMine();
-              await persist(entriesFor(verdictOf(existing) ?? null, draft), existing);
-              setAdding(false);
-            }}
+            onSave={saveNewNote}
           />
         </NoteCard>
       )}
 
-      {showAdd && (
+      {showAdd && !verdictEditable && (
         <AddRow type="button" data-testid="note-add" onClick={() => setAdding(true)}>
           + add my {subjectLabel(subjectType)}
         </AddRow>
