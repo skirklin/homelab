@@ -8,9 +8,9 @@ import {
   CheckOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { useUpkeepBackend } from "@kirkl/shared";
+import { useUpkeepBackend, AssigneePicker } from "@kirkl/shared";
 import { formatDueDate, formatDeadline, formatFrequency, isTaskSnoozed, formatSnoozeRemaining, daysUntilDue } from "../types";
-import type { TaskNode } from "../types";
+import type { Task, TaskNode } from "../types";
 
 type DropZone = "before" | "inside" | "after" | null;
 
@@ -125,6 +125,10 @@ const Actions = styled.div`
 
 interface OutlinerRowProps {
   node: TaskNode;
+  /** Every task keyed by id — feeds the AssigneePicker's inheritance walk. */
+  tasksById: Map<string, Task>;
+  /** Owners of the task's list = the candidate assignees. */
+  ownerIds: string[];
   focusedId: string | null;
   onFocus: (id: string) => void;
   onAddChild: (parentId: string) => void;
@@ -140,6 +144,8 @@ interface OutlinerRowProps {
 
 export function OutlinerRow({
   node,
+  tasksById,
+  ownerIds,
   focusedId,
   onFocus,
   onAddChild,
@@ -363,6 +369,7 @@ export function OutlinerRow({
               Snoozed {formatSnoozeRemaining(task)}
             </Tag>
           )}
+          <AssigneePicker task={task} tasksById={tasksById} ownerIds={ownerIds} compact />
         </Meta>
 
         <Actions>
@@ -396,6 +403,8 @@ export function OutlinerRow({
         <OutlinerRow
           key={child.task.id}
           node={child}
+          tasksById={tasksById}
+          ownerIds={ownerIds}
           focusedId={focusedId}
           onFocus={onFocus}
           onAddChild={onAddChild}

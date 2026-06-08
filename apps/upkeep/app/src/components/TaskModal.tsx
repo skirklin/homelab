@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Modal, Input, InputNumber, Select, Button } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth, useFeedback } from "@kirkl/shared";
+import { useAuth, useFeedback, AssigneePicker } from "@kirkl/shared";
 import { useUpkeepBackend } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
 import type { Task, Frequency, FrequencyUnit } from "../types";
@@ -52,6 +52,7 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
   const upkeep = useUpkeepBackend();
   const { state } = useUpkeepContext();
   const listId = state.list?.id;
+  const ownerIds = state.list?.owners ?? [];
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [frequencyValue, setFrequencyValue] = useState(1);
@@ -196,6 +197,13 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
             />
           </FrequencyRow>
         </FormField>
+
+        {isEditing && task && (
+          <FormField>
+            <Label>Assigned to</Label>
+            <AssigneePicker task={task} tasksById={state.tasks} ownerIds={ownerIds} />
+          </FormField>
+        )}
 
         {isEditing && (
           <DangerZone>

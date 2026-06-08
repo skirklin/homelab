@@ -4,7 +4,7 @@ import { Button, Empty, Spin, Typography, Input, Select, InputNumber, Tag, Space
 import { PlusOutlined, CloseOutlined, ClearOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import styled from "styled-components";
-import { useUpkeepBackend, useUrlParam } from "@kirkl/shared";
+import { useUpkeepBackend, useUrlParam, AssigneePicker } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
 import { getTaskTree, getTasksFromState } from "../selectors";
 import { formatFrequency } from "../types";
@@ -107,6 +107,11 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   const tree = getTaskTree(state);
   const allTasks = getTasksFromState(state);
   const selectedTask = selectedId ? allTasks.find((t) => t.id === selectedId) : null;
+
+  // Keyed task set + list owners feed the AssigneePicker (chip resolution +
+  // candidate list). Memoized so OutlinerRow children don't re-resolve every render.
+  const tasksById = useMemo(() => new Map(allTasks.map((t) => [t.id, t])), [allTasks]);
+  const ownerIds = state.list?.owners ?? [];
 
   // Drop stale/share-link ?focus= values that don't match any visible task —
   // otherwise the row would render with a stuck focus border on no row.
@@ -366,6 +371,8 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
               <OutlinerRow
                 key={node.task.id}
                 node={node}
+                tasksById={tasksById}
+                ownerIds={ownerIds}
                 focusedId={focusedId}
                 onFocus={setFocusedId}
                 onAddChild={handleAddChild}
@@ -386,6 +393,8 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       {selectedTask && (
         <DetailPanel
           task={selectedTask}
+          tasksById={tasksById}
+          ownerIds={ownerIds}
           onUpdate={handleUpdateField}
           onTagAdd={handleTagAdd}
           onTagRemove={handleTagRemove}
@@ -396,8 +405,10 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   );
 }
 
-function DetailPanel({ task, onUpdate, onTagAdd, onTagRemove, onClose }: {
+function DetailPanel({ task, tasksById, ownerIds, onUpdate, onTagAdd, onTagRemove, onClose }: {
   task: Task;
+  tasksById: Map<string, Task>;
+  ownerIds: string[];
   onUpdate: (field: string, value: unknown) => void;
   onTagAdd: (tag: string) => void;
   onTagRemove: (tag: string) => void;
@@ -411,6 +422,11 @@ function DetailPanel({ task, onUpdate, onTagAdd, onTagRemove, onClose }: {
         <Typography.Text strong style={{ fontSize: 14 }}>{task.name}</Typography.Text>
         <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
       </DetailHeader>
+
+      <DetailField>
+        <FieldLabel>Assigned to</FieldLabel>
+        <AssigneePicker task={task} tasksById={tasksById} ownerIds={ownerIds} />
+      </DetailField>
 
       <DetailField>
         <FieldLabel>Description</FieldLabel>

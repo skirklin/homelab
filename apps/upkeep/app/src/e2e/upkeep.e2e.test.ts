@@ -16,6 +16,7 @@ import {
 } from "@kirkl/shared/test-utils";
 import { PocketBaseUpkeepBackend, PocketBaseUserBackend } from "@homelab/backend/pocketbase";
 import { wrapPocketBase, createMirror } from "@homelab/backend/wrapped-pb";
+import { resolveAssignees, type AssigneeNode } from "@homelab/backend";
 
 // The backend Task type declares frequency as `number`, but the actual schema
 // stores it as `{ value: number; unit: string }`. We use `as any` for task
@@ -985,6 +986,148 @@ describe("Frequency Edge Cases", () => {
 
     const record = await ctx.pb.collection("tasks").getOne(taskId);
     expect(record.frequency).toEqual({ value: 30, unit: "days" });
+
+    await cleanup.cleanup();
+  });
+});
+
+// ─── Assignees (Phase B: UI write path + client resolver) ─────────────────────
+//
+// Exercises the SAME `updateTask({ assignees })` path the AssigneePicker uses,
+// then runs the shared client resolver (`resolveAssignees`) against the tasks as
+// PERSISTED by PB (real `path` chains) to prove the chip the UI shows matches
+// the model. The server-side notify cascade is covered separately in
+// services/api/src/e2e/upkeep-notify-cascade.test.ts; this guards that the
+// client mirror reads the same way off live data.
+
+describe("Assignees — UI write path + client resolver", () => {
+  // Helper: load a list's tasks keyed by id, as `AssigneeNode`s, straight from PB.
+  async function loadNodes(listId: string): Promise<Map<string, AssigneeNode>> {
+    const records = await ctx.pb.collection("tasks").getFullList({
+      filter: `list = "${listId}"`,
+    });
+    const m = new Map<string, AssigneeNode>();
+    for (const r of records) {
+      m.set(r.id, {
+        id: r.id,
+        parentId: (r.parent_id as string) || "",
+        path: r.path as string,
+        assignees: (r.assignees as string[]) || [],
+        createdBy: (r.created_by as string) || "",
+      });
+    }
+    return m;
+  }
+
+  it("updateTask({ assignees }) persists an explicit override; resolver reads it as explicit", async () => {
+    const userA = await createTestUser(ctx);
+    const listId = await upkeep.createList("Assign Test", userA.id);
+    await userBackend.setSlug(userA.id, "household", "assign", listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const userB = await createUserWithoutSignIn(ctx);
+    await ctx.pb.collection("task_lists").update(listId, { owners: [userA.id, userB.id] });
+
+    const taskId = await upkeep.addTask(listId, {
+      name: "Assign me",
+      description: "",
+      parentId: "",
+      position: 0,
+      taskType: "one_shot",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      deadline: null,
+      deadlineLeadDays: null,
+      completed: false,
+      snoozedUntil: null,
+      assignees: [],
+      tags: [],
+      collapsed: false,
+      cleared: false,
+    });
+    cleanup.track("tasks", taskId);
+
+    // The picker writes assignees via updateTask.
+    await upkeep.updateTask(taskId, { assignees: [userB.id] });
+
+    const record = await ctx.pb.collection("tasks").getOne(taskId);
+    expect(record.assignees).toEqual([userB.id]);
+
+    const nodes = await loadNodes(listId);
+    const resolved = resolveAssignees(nodes.get(taskId)!, nodes);
+    expect(resolved).toEqual({ assignees: [userB.id], inherited: false });
+
+    await cleanup.cleanup();
+  });
+
+  it("an unassigned child surfaces the inherited assignee from its parent", async () => {
+    const userA = await createTestUser(ctx);
+    const listId = await upkeep.createList("Inherit Test", userA.id);
+    await userBackend.setSlug(userA.id, "household", "inherit", listId);
+
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+    cleanup.track("task_lists", listId);
+
+    const userB = await createUserWithoutSignIn(ctx);
+    await ctx.pb.collection("task_lists").update(listId, { owners: [userA.id, userB.id] });
+
+    const parentId = await upkeep.addTask(listId, {
+      name: "Parent",
+      description: "",
+      parentId: "",
+      position: 0,
+      taskType: "one_shot",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      deadline: null,
+      deadlineLeadDays: null,
+      completed: false,
+      snoozedUntil: null,
+      assignees: [],
+      tags: [],
+      collapsed: false,
+      cleared: false,
+    });
+    cleanup.track("tasks", parentId);
+
+    const childId = await upkeep.addTask(listId, {
+      name: "Child",
+      description: "",
+      parentId,
+      position: 0,
+      taskType: "one_shot",
+      frequency: { value: 1, unit: "days" },
+      lastCompleted: null,
+      deadline: null,
+      deadlineLeadDays: null,
+      completed: false,
+      snoozedUntil: null,
+      assignees: [],
+      tags: [],
+      collapsed: false,
+      cleared: false,
+    });
+    cleanup.track("tasks", childId);
+
+    // Assign the parent only.
+    await upkeep.updateTask(parentId, { assignees: [userB.id] });
+
+    const nodes = await loadNodes(listId);
+    // The child has empty assignees → inherits the parent's, via the real
+    // PB-materialized `path` chain.
+    const childResolved = resolveAssignees(nodes.get(childId)!, nodes);
+    expect(childResolved).toEqual({ assignees: [userB.id], inherited: true });
+
+    // Clearing the parent's assignees floors the child to its own created_by.
+    await upkeep.updateTask(parentId, { assignees: [] });
+    const nodes2 = await loadNodes(listId);
+    const childFloored = resolveAssignees(nodes2.get(childId)!, nodes2);
+    expect(childFloored.inherited).toBe(true);
+    expect(childFloored.assignees).toEqual([userA.id]); // created_by floor
 
     await cleanup.cleanup();
   });
