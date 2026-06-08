@@ -205,7 +205,35 @@ Append-only. When a decision in the table above gets reversed, log it here.
 **Note: the channel only goes live after a deploy** (UI + collection + MCP must reach prod) — bootstrapping the deploy-nudge channel itself requires a manual deploy.
 
 ### Future work (noted 2026-05-29 — DO NOT build yet)
-- **Realtime Chat via a Claude Code SDK service.** Replace the daily-cron responder with a long-running Claude Code SDK service that drives the agentic loop and responds in realtime, with full access to Scott's data (life/money/recipes/travel/tasks via the homelab MCP). Turns the async PM channel into a live "personal coach with my data" chat. The `chat_messages` flat-log model in C1 is designed to make this an additive swap (new responder reads/writes the same collection). Scott flagged this explicitly as future-not-now.
+- ~~**Realtime Chat via a Claude Code SDK service.**~~ **→ promoted to Phase D below (2026-06-08).** The June 15 2026 Anthropic billing change opened subscription credit pool to Agent SDK use, removing the cost-uncertainty that justified deferring. Scott also surfaced the gap directly: observations end with questions that invite engagement but the surface is read-only.
+
+## Phase D — Realtime Coach Agent (Claude Agent SDK harness)
+
+**Why now:** the observer ends its observations with questions ("which thread are you avoiding?") but there's no way to engage. Either drop the questions or make them interactive — Scott picked interactive, and specifically synchronous-realtime rather than cron-async (which would feel broken). This is the realtime coach that was Phase C's named-future-work, brought forward.
+
+**Architecture (synthesized from 2026-06-08 research, both raw briefs in conversation history):**
+
+- **Shape:** long-running k3s pod (`services/coach/`) holding a streaming-input `query()` from `@anthropic-ai/claude-agent-sdk`. The pod subscribes to PB realtime on `chat_messages` (filter `role="user"`) — every UI tab already learns about new messages via this channel, so the agent becomes just another subscriber. No PB hook, no webhook plumbing.
+- **Session state:** custom `SessionStore` adapter mirroring SDK state to a new `coach_sessions` PB collection. Pod can restart anytime; conversation resumes from PB.
+- **Tools:** homelab MCP via Streamable HTTP (configured programmatically via `mcpServers` option, NOT `.mcp.json`) + Anthropic's hosted web search (`{type: "web_search_20250305"}`, pay-per-query, no MCP). Tool allowlist via SDK's `allowedTools`/`disallowedTools` to block destructive ops by default.
+- **Auth:** prefer `CLAUDE_CODE_OAUTH_TOKEN` (subscription-credit billing on Max — likely $0 marginal cost), fall back to `ANTHROPIC_API_KEY` (pay-per-token). Probe the OAuth path before committing to it for cost-modeling.
+- **What does NOT change:** the daily PM cron stays as-is. Different concern (build management, not coaching). The Chat UI shipped in C2 stays as-is (refetches via existing PB realtime; agent assistant messages just appear).
+
+**Work items:**
+
+- **D1 — Foundation: PB collection + SessionStore + service scaffolding** (this commit). `coach_sessions` migration + authz mirror + `userOwnsCoachSession` helper. New `services/coach/` directory with Hono health-endpoint stub, Dockerfile, k8s Deployment + Service manifest, `infra/deploy.sh` SERVICE_BUILDS entry, `gatus-config` check, secret stubs in `api-secrets`. Custom `PocketBaseSessionStore` class implementing the SDK's `SessionStore` interface. **No SDK loop yet** — pure scaffolding so D2 can fill in the agent logic. **Status: dispatched 2026-06-08.**
+
+- **D2 — SDK loop + chat integration.** Wire up `query()` with streaming-input mode + inbox queue. PB realtime subscription to `chat_messages`. System prompt (chat-shaped variant of observer's prompt). Bundle warm-context on session boot (reuse `services/api/src/lib/observer/bundle.ts`). Assistant message writeback via existing `post_chat_message` route. Programmatic MCP config pointing at `mcp.tail56ca88.ts.net/mcp` with `HOMELAB_API_TOKEN`. Anthropic web search tool. Tool allowlist enforcement. **Status: pending D1.**
+
+- **D3 — Frontend handoff: Observations → Chat.** Add "Continue this in Chat" button on each observation card in `Observations.tsx`. Button navigates to `/chat?observation=<id>`. `Chat.tsx` on mount with that param posts the observation content as a `kind: "question"` assistant message (via existing `post_chat_message`), then the user types a reply and the D2 coach responds in realtime. **Status: pending D2.**
+
+**Deferred to v2 (not blocking v1):**
+- Streaming output (tokens appearing as generated). v1 = full reply lands when ready, ~3-8s.
+- Gmail + Calendar MCP servers as OAuth-authenticated clients.
+- Per-token MCP scopes on the homelab server (defense-in-depth beyond SDK `allowedTools`).
+- "Good morning" CronJob → `coach/morning` for unsolicited daily check-ins.
+- `claude_observations`-reactive loop ("I notice last week's observation flagged X — want to talk?").
+- `propose_delete` approval pattern for destructive writes (using existing `kind: "deploy_request"` chat message shape).
 
 ## How the cron is wired (local, not remote)
 
