@@ -378,12 +378,7 @@ export function Settings() {
       });
       setSettings(prev => ({ ...prev, upkeepNotificationMode: mode }));
 
-      const messages: Record<NotificationMode, string> = {
-        all: "Upkeep: Notifying for all tasks",
-        subscribed: "Upkeep: Notifying for subscribed tasks only",
-        off: "Upkeep: Notifications paused",
-      };
-      message.success(messages[mode]);
+      message.success(mode === "off" ? "Upkeep: Notifications paused" : "Upkeep: Notifications on");
     } catch (error) {
       console.error("Failed to update notification mode:", error);
       message.error("Failed to save settings");
@@ -472,7 +467,10 @@ export function Settings() {
   }
 
   const tokenCount = settings.fcmTokens?.length || 0;
-  const notificationMode = settings.upkeepNotificationMode || "subscribed";
+  // Binary opt-out: only `off` is honored by the notification crons; the legacy
+  // `all` / `subscribed` values both mean "on" (notify me about tasks I'm a
+  // resolved recipient of). Surface a simple On/Off toggle.
+  const notificationsOn = (settings.upkeepNotificationMode || "subscribed") !== "off";
 
   return (
     <PageContainer>
@@ -568,16 +566,15 @@ export function Settings() {
             <SettingInfo>
               <SettingLabel>Task Reminders</SettingLabel>
               <SettingDescription>
-                Daily reminders at 8 AM for due household tasks
+                Daily reminders at 8 AM for tasks you're a notification recipient of
               </SettingDescription>
             </SettingInfo>
             <Segmented
-              value={notificationMode}
-              onChange={(v) => updateNotificationMode(v as NotificationMode)}
+              value={notificationsOn ? "on" : "off"}
+              onChange={(v) => updateNotificationMode(v === "on" ? "subscribed" : "off")}
               disabled={saving}
               options={[
-                { label: "All", value: "all" },
-                { label: "Subscribed", value: "subscribed" },
+                { label: "On", value: "on" },
                 { label: "Off", value: "off" },
               ]}
             />
