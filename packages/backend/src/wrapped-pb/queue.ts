@@ -29,6 +29,16 @@ export interface PendingMutation {
 interface RecordState {
   server: RawRecord | null;
   pending: PendingMutation[];
+  /**
+   * True when `server` came from snapshot HYDRATION (seedServer) and has not
+   * since been confirmed by real server truth. Any non-hydration write —
+   * an SSE event, a write-ack, or a fresh bootstrap/resync fetch (all via
+   * applyServer) — flips this back to false. The mirror's bootstrap seed loop
+   * reads this to decide whether a fresh fetch may overwrite the current
+   * snapshot: it may overwrite an empty-or-hydrated snapshot, but must NOT
+   * overwrite a LIVE SSE snapshot that raced ahead during the fetch's await.
+   */
+  hydrated: boolean;
 }
 
 /**
@@ -109,7 +119,7 @@ export class MutationQueue {
     }
     let rec = col.get(recordId);
     if (!rec) {
-      rec = { server: null, pending: [] };
+      rec = { server: null, pending: [], hydrated: false };
       col.set(recordId, rec);
     }
     return rec;
@@ -134,6 +144,19 @@ export class MutationQueue {
     if (!col) return false;
     const rec = col.get(recordId);
     return !!rec && rec.server !== null;
+  }
+
+  /** True when the current server snapshot came from snapshot HYDRATION
+   *  (seedServer) and hasn't since been overwritten by real server truth
+   *  (applyServer: SSE event / write-ack / fresh fetch). Used by the mirror's
+   *  bootstrap seed loop to distinguish "stale hydrated snapshot, safe to
+   *  overwrite with a fresh fetch" from "live SSE snapshot that raced ahead
+   *  during the fetch's await, must NOT be clobbered by the stale fetch". */
+  isHydrated(collection: string, recordId: string): boolean {
+    const col = this.state.get(collection);
+    if (!col) return false;
+    const rec = col.get(recordId);
+    return !!rec && rec.hydrated;
   }
 
   /** Returns the current view of a record (server snapshot + pending). */
@@ -189,6 +212,8 @@ export class MutationQueue {
     const rec = this.getOrCreate(collection, recordId);
     const before = composeView(rec.server, rec.pending);
     rec.server = snapshot;
+    // Real server truth — clear the hydrated provenance flag (see RecordState).
+    rec.hydrated = false;
     if (snapshot === null && rec.pending.length === 0) {
       this.state.get(collection)?.delete(recordId);
     }
@@ -213,6 +238,9 @@ export class MutationQueue {
     const rec = this.getOrCreate(collection, recordId);
     const before = composeView(rec.server, rec.pending);
     rec.server = snapshot;
+    // Provenance: this snapshot came from the cache, not real server truth.
+    // Marks it overwritable by a fresh bootstrap fetch (the SSE-race guard).
+    rec.hydrated = true;
     if (snapshot === null && rec.pending.length === 0) {
       this.state.get(collection)?.delete(recordId);
     }

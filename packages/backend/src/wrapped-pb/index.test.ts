@@ -400,7 +400,7 @@ describe("wrapPocketBase auth-change realtime reset", () => {
     const wpb = wrapPocketBase(() => stub.pb);
 
     // First write hooks the realtime lifecycle, which also wires the
-    // auth-change handler.
+    // auth-change handler (captures user-a as the baseline).
     stub.authStore.setRecord("user-a");
     await wpb.collection("items").create({ id: "a", list: "L1" });
     expect(stub.realtime.disconnectCalls).toBe(0);

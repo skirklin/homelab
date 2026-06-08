@@ -288,6 +288,18 @@ describe("snapshot persistence", () => {
     expect((await loadSnapshotsForUser("user-A")).map((r) => r.id)).not.toContain("x2");
   });
 
+  it("flushSnapshots() force-writes the dirty map before the debounce fires", async () => {
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    const wpb = wrapPocketBase(() => stub.pb);
+    wpb.mirrorIntegration.queue.applyServer("items", "ff1", rec("items", { id: "ff1", list: "L1" }));
+
+    // Force-flush immediately — do NOT wait for the 250ms debounce. The IDB
+    // write must have landed by the time the awaited promise resolves.
+    await wpb.flushSnapshots();
+    expect((await loadSnapshotsForUser("user-A")).map((r) => r.id)).toContain("ff1");
+  });
+
   it("does NOT persist when there is no authed user (anonymous = no cache)", async () => {
     const stub = makeStubPb();
     // no setRecord → authStore.record is null
@@ -577,7 +589,11 @@ describe("snapshot ghost reconciliation", () => {
     await wpb.hydrateSnapshots();
     // Optimistic update on the cached record before bootstrap reconciles.
     // The dispatch's network call is held, so the mutation stays pending.
-    void wpb.collection("items").update("p1", { v: 2 });
+    // .catch() because the server never has p1 → the held write resolves to a
+    // permanent 404 (WrappedPbError) when released; swallow it so the rejection
+    // doesn't escape as an unhandled rejection (the safeFireAndForgetUnsub
+    // footgun in test form).
+    void wpb.collection("items").update("p1", { v: 2 }).catch(() => {});
 
     const states: RawRecord[][] = [];
     mirror.watch(
@@ -629,6 +645,191 @@ describe("snapshot per-user scoping", () => {
     expect((await loadSnapshotsForUser("user-A")).length).toBeGreaterThan(0);
 
     stub.authStore.setRecord(null); // sign out
+    await flushSnapshotWriter();
+    expect((await loadSnapshotsForUser("user-A"))).toHaveLength(0);
+  });
+});
+
+// ===================================================================
+// BLOCKER 1 — SSE-race protection: a stale bootstrap fetch must NOT
+// overwrite a fresher live SSE snapshot that raced ahead during the await.
+// ===================================================================
+
+describe("BLOCKER 1: bootstrap seed vs racing SSE snapshot", () => {
+  it("slice-2's stale fetch (v=1) does NOT clobber an SSE update (v=2) delivered via the shared collection listener", async () => {
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    // Shared record "x" matches BOTH filters (g='A' and h='A'), so it lives in
+    // two distinct slices on the SAME collection → they share one SSE listener.
+    // It starts at v=1.
+    stub.col("items").records.set("x", rec("items", { id: "x", g: "A", h: "A", v: 1 }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    // Slice 1: filter g='A'. Bootstrap it fully so the shared collection SSE
+    // listener is attached and ready.
+    const s1: RawRecord[][] = [];
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "g = 'A'", predicate: (r) => r.g === "A" },
+      (s) => s1.push(s),
+    );
+    await flush();
+    expect(s1[s1.length - 1].find((r) => r.id === "x")?.v).toBe(1);
+
+    // Now hold reads so slice 2's bootstrap getFullList pends in flight.
+    // CRITICAL: the stub's getFullList reads from c.records at resolve time, so
+    // we snapshot the v=1 body into a stale clone the gated fetch will return,
+    // then mutate the live store to v=2 below. (The mirror calls getFullList
+    // before we hold; we hold first, so the await is captured pre-SSE.)
+    stub.holdReads();
+    const s2: RawRecord[][] = [];
+    mirror.watch(
+      // Same collection, different filter → different slice, shared listener.
+      { collection: "items", topic: "*", filter: "h = 'A'", predicate: (r) => r.h === "A" },
+      (s) => s2.push(s),
+    );
+    await flush();
+
+    // While slice 2's fetch is gated, a FRESH server update (v=2) lands via the
+    // shared collection SSE listener (slice 1 attached it). This calls
+    // queue.applyServer → the queue now holds v=2 (real SSE truth). We mutate
+    // the live store to v=2 AFTER the SSE so the gated getFullList would return
+    // the (already applied) v=2 — but the bug is the seed loop OVERWRITING the
+    // queue's v=2 with whatever the fetch carries; to expose it we make the
+    // gated fetch carry the STALE v=1 by snapshotting before the SSE. Since the
+    // stub reads live records at resolve, we instead rely on the provenance
+    // guard: the SSE marks the snapshot non-hydrated, and a fresh fetch that
+    // happens to also be v=1 must not regress it. Force that by keeping the
+    // gated fetch stale: set the store back to v=1 only for the resolve, then
+    // restore. Simplest: emit SSE v=2 and leave the store at v=1 (the gated
+    // fetch returns v=1, the stale value) — the guard must keep v=2.
+    stub.emit("items", { action: "update", record: rec("items", { id: "x", g: "A", h: "A", v: 2 }) });
+    await flush();
+    expect(s1[s1.length - 1].find((r) => r.id === "x")?.v).toBe(2);
+
+    // Slice 2's STALE fetch (the store still holds v=1) now resolves. It must
+    // NOT overwrite the fresher v=2 SSE snapshot.
+    stub.releaseReads();
+    await flush();
+
+    // Final emitted value for BOTH slices must be v=2, not v=1.
+    expect(s1[s1.length - 1].find((r) => r.id === "x")?.v).toBe(2);
+    expect(s2[s2.length - 1].find((r) => r.id === "x")?.v).toBe(2);
+  });
+});
+
+// ===================================================================
+// BLOCKER 2 — ghost reconciliation must NOT run for sort+limit slices:
+// a record ranked below the limit is alive on the server but absent from
+// the top-N fetch; tombstoning it destroys live data + its IDB row.
+// ===================================================================
+
+describe("BLOCKER 2: sort+limit slices never tombstone below-window records", () => {
+  it("rank-3 record (below limit:2) survives bootstrap — server still has all 3", async () => {
+    // Seed three cached records, all alive on the server.
+    const s = makeStubPb();
+    s.authStore.setRecord("user-A");
+    const w = wrapPocketBase(() => s.pb);
+    for (const r of [
+      rec("log", { id: "a", t: 3 }),
+      rec("log", { id: "b", t: 2 }),
+      rec("log", { id: "c", t: 1 }),
+    ]) {
+      w.mirrorIntegration.queue.applyServer("log", r.id as string, r as unknown as RawRecord);
+    }
+    await flushSnapshotWriter();
+
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    // Server still has ALL three — c is just ranked below the limit:2 window.
+    stub.col("log").records.set("a", rec("log", { id: "a", t: 3 }));
+    stub.col("log").records.set("b", rec("log", { id: "b", t: 2 }));
+    stub.col("log").records.set("c", rec("log", { id: "c", t: 1 }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    await wpb.hydrateSnapshots();
+    const states: RawRecord[][] = [];
+    mirror.watch({ collection: "log", topic: "*", sort: "-t", limit: 2 }, (s) => states.push(s));
+    await flush();
+
+    // The visible window is the top-2 (a, b) — that's correct.
+    expect(states[states.length - 1].map((r) => r.id)).toEqual(["a", "b"]);
+
+    // But the rank-3 record c MUST still be viewable in the queue (NOT
+    // tombstoned) — it's alive on the server, just below the window.
+    expect(wpb.collection("log").view("c")).not.toBeNull();
+
+    // And its durable IDB snapshot row must still exist (not deleted).
+    await flushSnapshotWriter();
+    expect((await loadSnapshotsForUser("user-A")).map((r) => r.id)).toContain("c");
+  });
+});
+
+// ===================================================================
+// BLOCKER 3 — per-user snapshot stamp captured at QUEUE time, not flush
+// time; an auth flip during the debounce window must not mis-scope or
+// repopulate after clear.
+// ===================================================================
+
+describe("BLOCKER 3: per-user snapshot stamping + clear ordering", () => {
+  it("a snapshot queued under user-A is never written into user-B's scope when auth flips before flush", async () => {
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    const wpb = wrapPocketBase(() => stub.pb);
+    const queue = wpb.mirrorIntegration.queue;
+
+    // Queue a snapshot under user-A (debounce timer starts, hasn't fired).
+    queue.applyServer("items", "ax", rec("items", { id: "ax", list: "L1" }));
+
+    // Flip auth to user-B BEFORE the debounce fires.
+    stub.authStore.setRecord("user-B");
+
+    // Let the debounce + any clear settle.
+    await flushSnapshotWriter();
+
+    // A's record must NOT have landed in B's scope.
+    expect((await loadSnapshotsForUser("user-B")).map((r) => r.id)).not.toContain("ax");
+  });
+
+  it("an auth-identity flip cancels a pending flush — A's record is never written", async () => {
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    const wpb = wrapPocketBase(() => stub.pb);
+    // hydrateSnapshots installs the auth-change hook (the production install
+    // point — BackendProvider always calls it on mount before any slice
+    // bootstraps and queues snapshots).
+    await wpb.hydrateSnapshots();
+    const queue = wpb.mirrorIntegration.queue;
+
+    queue.applyServer("items", "ay", rec("items", { id: "ay", list: "L1" }));
+    // Identity flip (to user-B) before the debounce fires must synchronously
+    // cancel the pending flush + empty the dirty map, then clear the store.
+    stub.authStore.setRecord("user-B");
+    await flushSnapshotWriter();
+
+    // Neither A nor B should hold ay — the flush was cancelled, and the clear
+    // ran ordered after the cancel.
+    expect((await loadSnapshotsForUser("user-A")).map((r) => r.id)).not.toContain("ay");
+    expect((await loadSnapshotsForUser("user-B")).map((r) => r.id)).not.toContain("ay");
+  });
+
+  it("read-only session installs the auth-change clear hook eagerly (no write needed)", async () => {
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    const wpb = wrapPocketBase(() => stub.pb);
+    // hydrateSnapshots is the read-only entrypoint; it must install the
+    // auth-change hook so a later sign-out clears the store even though no
+    // write ever fired this session.
+    await wpb.hydrateSnapshots();
+
+    wpb.mirrorIntegration.queue.applyServer("items", "ro1", rec("items", { id: "ro1", list: "L1" }));
+    await flushSnapshotWriter();
+    expect((await loadSnapshotsForUser("user-A")).length).toBeGreaterThan(0);
+
+    // Sign out — with the eager hook installed, the store must clear even
+    // though this session only ever read (plus the writer's own applyServer).
+    stub.authStore.setRecord(null);
     await flushSnapshotWriter();
     expect((await loadSnapshotsForUser("user-A"))).toHaveLength(0);
   });

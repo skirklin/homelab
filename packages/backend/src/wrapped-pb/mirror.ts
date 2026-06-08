@@ -645,10 +645,23 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // Ghost reconciliation (the cache-clobber fix). Any record we eager-
     // painted from the cache that is MISSING from the fresh fetch — and has
     // no pending mutation — was deleted server-side while we were offline.
-    // Tombstone it so it doesn't linger in the post-bootstrap view. Mirrors
-    // the resync() reconcile. Single-record (topic) is handled inline in the
-    // 404 branch above; this covers wildcard/filter + sort+limit.
-    if (topic === "*") {
+    // Tombstone it so it doesn't linger in the post-bootstrap view.
+    //
+    // BLOCKER 2: reconciliation is ONLY sound for an UNLIMITED query. For a
+    // filter-only wildcard (no limit), "absent from the fresh fetch" really
+    // does mean "deleted server-side". For a sort+limit slice it does NOT:
+    // the fetch returns only the top-N, so a cached record ranked BELOW the
+    // window is absent for a reason that is indistinguishable from deletion —
+    // tombstoning it would destroy a record that is still alive on the server
+    // (and delete its durable IDB row). Deletion is undecidable for any
+    // limited query. We skip reconciliation entirely for sort+limit: the
+    // fresh refetch below REPLACES slice.records with the true top-N, and
+    // materialize()'s sort+limit branch surfaces only `slice.records ∪
+    // pending`, so a genuinely-deleted cached record is naturally excluded
+    // after the refetch — with no false tombstones for below-window records.
+    // Single-record (topic) deletion is handled inline in the getOne-404
+    // branch above. So reconcile only the filter-only wildcard here.
+    if (topic === "*" && !sort && !limit) {
       reconcileGhosts(slice, collection, initial);
     }
 
@@ -657,17 +670,37 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // materialize() — otherwise the initial filtered set would only live
     // in slice.records and the queue overlay would be partial.
     //
-    // We apply the fresh fetch UNCONDITIONALLY (same as resync), so a stale
-    // hydrated cache snapshot is overwritten by fresh server truth — the
-    // whole point of stale-while-revalidate. applyServer is composition-safe:
-    // it never clobbers pending optimistic writes (composeView layers them on
-    // top). This still seeds A11/A12's record so its stale replayed SET has a
-    // server snapshot underneath (the dogfood oscillation fix) — the prior
-    // `!hasServerSnapshot` skip-guard was only there to dodge a fresher SSE
-    // snapshot during the await, a sub-ms window resync recovers from anyway.
+    // SSE-race guard (BLOCKER 1): seed only when the queue has NO server
+    // snapshot OR the snapshot it has is merely HYDRATED (from the cache).
+    // A fresh fetch legitimately MUST overwrite stale hydrated data — that's
+    // stale-while-revalidate, and it's what re-seeds A11/A12's record so its
+    // replayed SET has real server truth underneath (the dogfood oscillation
+    // fix). But it must NOT overwrite a LIVE SSE snapshot: a shared
+    // per-collection listener (attached by another already-ready slice) can
+    // apply a FRESHER server snapshot during THIS slice's in-flight
+    // getList/getFullList await; our older fetch then resolving and
+    // unconditionally calling applyServer would regress that fresher SSE
+    // snapshot, and focus-driven resync doesn't reliably recover. The
+    // `hydrated` provenance flag (queue.ts) distinguishes the two: applyServer
+    // (SSE/ack/fetch) clears it, seedServer (hydration) sets it.
+    //
+    // For sort+limit, REPLACE slice.records with the fresh top-N so the window
+    // is exactly the server's current top-N (the eager paint may have seeded
+    // below-window records into slice.records; those stay alive in the queue —
+    // we never tombstone them, per BLOCKER 2 — but they must not linger as
+    // phantom window members). For filter-only wildcard, slice.records is just
+    // a routing helper, so an incremental upsert is fine.
+    if (sort || limit) {
+      const fresh = new Map<string, RawRecord>();
+      for (const r of initial) fresh.set(r.id, r);
+      slice.records = fresh;
+    } else {
+      for (const r of initial) slice.records.set(r.id, r);
+    }
     for (const r of initial) {
-      slice.records.set(r.id, r);
-      queue.applyServer(collection, r.id, r);
+      if (!queue.hasServerSnapshot(collection, r.id) || queue.isHydrated(collection, r.id)) {
+        queue.applyServer(collection, r.id, r);
+      }
     }
 
     // Attach SSE listener (refcount per collection).
