@@ -37,6 +37,15 @@ COPY services/api/package.json services/api/package.json
 COPY services/api/src/lib/observer/bundle.ts services/api/src/lib/observer/bundle.ts
 COPY services/api/src/lib/notifications/tz.ts services/api/src/lib/notifications/tz.ts
 
+# bundle.ts imports `date-fns-tz` from the api path — Node's resolver walks
+# up looking for node_modules. services/api/ has none in this image (we
+# only copied two files), so without this symlink Node walks to
+# /workspace/node_modules and 404s (pnpm hoists per-package, not to root).
+# Link the api dir's node_modules to coach's so bundle's `date-fns-tz`,
+# `pocketbase`, etc. all resolve. The proper fix is promoting bundle.ts to
+# packages/observer-bundle/ — flagged in OBSERVER_BUILD_PLAN.md v2 work.
+RUN ln -s /workspace/services/coach/node_modules /workspace/services/api/node_modules
+
 WORKDIR /workspace/services/coach
 EXPOSE 3030
 # Run tsx directly so stdout isn't buffered behind pnpm's process wrapper.
