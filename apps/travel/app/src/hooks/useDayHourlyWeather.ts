@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiBase, getAuthHeaders } from "@kirkl/shared";
+import { parseSlotTime } from "../time";
 
 /**
  * One hourly weather record from GET /fn/travel/weather/hourly. Mirrors the
@@ -14,30 +15,29 @@ export interface HourlyForecast {
 }
 
 export interface UseDayHourlyWeather {
-  hours: HourlyForecast[];
+  byActivity: Record<string, HourlyForecast[]>;
   loading: boolean;
   error: string | null;
-  /** Nearest-hour lookup for a slot's "HH:MM" start time; null if no match. */
-  pickHour: (hhmm: string | null | undefined) => HourlyForecast | null;
+  /**
+   * Weather at a given activity's location for its slot start time. Returns
+   * null when the activity has no coords, no forecast, or an unparseable time.
+   */
+  pickForActivity: (activityId: string, startTime: string | null | undefined) => HourlyForecast | null;
 }
 
 /**
- * Pick the hourly record nearest to `hhmm` ("HH:MM"). Mirrors the server-side
- * `pickHour` in weather.ts: rounds to the nearest whole hour, ties round down,
- * falls back to the chronologically closest entry if the exact hour is absent.
+ * Pick the hourly record nearest to a minutes-since-midnight target. Rounds to
+ * the nearest whole hour (ties round down), falling back to the chronologically
+ * closest entry when the exact hour is absent. Mirrors the server-side pickHour.
  */
-function pickNearest(hours: HourlyForecast[], hhmm: string | null | undefined): HourlyForecast | null {
-  if (!hhmm || hours.length === 0) return null;
-  const m = hhmm.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  const h = Number(m[1]);
-  const min = Number(m[2]);
-  if (h > 23 || min > 59) return null;
+function pickNearest(hours: HourlyForecast[], targetMinutes: number | null): HourlyForecast | null {
+  if (targetMinutes == null || hours.length === 0) return null;
+  const h = Math.floor(targetMinutes / 60);
+  const min = targetMinutes % 60;
   const targetHour = min > 30 ? h + 1 : h;
   const targetHH = String(Math.min(targetHour, 23)).padStart(2, "0");
   const exact = hours.find((x) => x.time.slice(0, 2) === targetHH);
   if (exact) return exact;
-  const targetMinutes = h * 60 + min;
   let best: HourlyForecast | null = null;
   let bestDist = Infinity;
   for (const x of hours) {
@@ -53,40 +53,46 @@ function pickNearest(hours: HourlyForecast[], hhmm: string | null | undefined): 
 }
 
 /**
- * Fetch the hourly weather for a single trip day. Best-effort: errors and
- * missing data degrade to an empty `hours[]`, and the returned `pickHour`
- * helper yields null when no hour matches — callers render nothing in that
- * case. Mirrors the fetch/cancel pattern in useTripWeather.
+ * Fetch per-activity-location hourly weather for a single trip day. Each
+ * activity is forecast at its OWN coordinate, so a day spanning timezones
+ * renders each slot against its own local hours. Best-effort: errors and
+ * missing data degrade to empty results, and `pickForActivity` yields null
+ * when nothing matches. Mirrors the fetch/cancel pattern in useTripWeather.
  */
 export function useDayHourlyWeather(
   tripId: string | undefined,
   date: string | undefined,
+  activityIds: string[],
 ): UseDayHourlyWeather {
-  const [hours, setHours] = useState<HourlyForecast[]>([]);
+  const [byActivity, setByActivity] = useState<Record<string, HourlyForecast[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Stable, order-independent key so the effect doesn't refire on array
+  // identity churn or reordering.
+  const idsKey = useMemo(() => [...activityIds].sort().join(","), [activityIds]);
+
   useEffect(() => {
-    if (!tripId || !date) {
-      setHours([]);
+    if (!tripId || !date || idsKey === "") {
+      setByActivity({});
       setLoading(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const qs = `tripId=${encodeURIComponent(tripId)}&date=${encodeURIComponent(date)}`;
+    const qs = `tripId=${encodeURIComponent(tripId)}&date=${encodeURIComponent(date)}&activityIds=${encodeURIComponent(idsKey)}`;
     fetch(`${getApiBase()}/travel/weather/hourly?${qs}`, { headers: getAuthHeaders() })
       .then(async (res) => {
         if (!res.ok) throw new Error(`Hourly weather request failed (${res.status})`);
-        return res.json() as Promise<{ hours?: HourlyForecast[] }>;
+        return res.json() as Promise<{ byActivity?: Record<string, HourlyForecast[]> }>;
       })
       .then((resp) => {
-        if (!cancelled) setHours(resp.hours ?? []);
+        if (!cancelled) setByActivity(resp.byActivity ?? {});
       })
       .catch((e) => {
         if (!cancelled) {
-          setHours([]);
+          setByActivity({});
           setError(e instanceof Error ? e.message : "Failed to load hourly weather");
         }
       })
@@ -96,12 +102,13 @@ export function useDayHourlyWeather(
     return () => {
       cancelled = true;
     };
-  }, [tripId, date]);
+  }, [tripId, date, idsKey]);
 
-  const pickHour = useMemo(
-    () => (hhmm: string | null | undefined) => pickNearest(hours, hhmm),
-    [hours],
+  const pickForActivity = useMemo(
+    () => (activityId: string, startTime: string | null | undefined) =>
+      pickNearest(byActivity[activityId] ?? [], parseSlotTime(startTime)),
+    [byActivity],
   );
 
-  return { hours, loading, error, pickHour };
+  return { byActivity, loading, error, pickForActivity };
 }

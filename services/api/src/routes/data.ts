@@ -32,6 +32,7 @@ import {
   requireRole,
   stripParentPointers,
 } from "../lib/authz";
+import { canonicalSlotTime } from "../lib/slot-time";
 
 export const dataRoutes = new Hono<AppEnv>();
 
@@ -1599,7 +1600,7 @@ dataRoutes.put("/travel/itineraries/:id/days", handler(async (c) => {
 interface ItinerarySlot {
   activityId: string;
   startTime?: string;
-  notes?: string;
+  dayNote?: string;
 }
 interface ItineraryDay {
   date?: string;
@@ -1648,7 +1649,8 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/slots", handler(async (c
   const body = await c.req.json<{
     activity_id: string;
     start_time?: string;
-    notes?: string;
+    day_note?: string;
+    notes?: string; // legacy alias for day_note
     position?: number;
   }>();
   if (!body.activity_id) return c.json({ error: "activity_id required" }, 400);
@@ -1656,8 +1658,10 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/slots", handler(async (c
   const out = await mutateDays(pb, id, userId, (days) => {
     if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range (have ${days.length})` };
     const slot: ItinerarySlot = { activityId: body.activity_id };
-    if (body.start_time) slot.startTime = body.start_time;
-    if (body.notes) slot.notes = body.notes;
+    const startTime = canonicalSlotTime(body.start_time);
+    if (startTime) slot.startTime = startTime;
+    const dayNote = body.day_note ?? body.notes;
+    if (dayNote) slot.dayNote = dayNote;
     const slots = days[dayIdx].slots;
     const pos = body.position ?? slots.length;
     const clamped = Math.max(0, Math.min(slots.length, pos));
@@ -1701,7 +1705,8 @@ dataRoutes.patch("/travel/itineraries/:id/days/:dayIndex/slots/:slotIndex", hand
   const body = await c.req.json<{
     activity_id?: string;
     start_time?: string | null;
-    notes?: string | null;
+    day_note?: string | null;
+    notes?: string | null; // legacy alias for day_note
   }>();
 
   const out = await mutateDays(pb, id, userId, (days) => {
@@ -1710,11 +1715,17 @@ dataRoutes.patch("/travel/itineraries/:id/days/:dayIndex/slots/:slotIndex", hand
     if (slotIdx >= slots.length) return { error: `slot index ${slotIdx} out of range` };
     const slot = slots[slotIdx];
     if (body.activity_id !== undefined) slot.activityId = body.activity_id;
-    // null clears the optional field; undefined leaves it alone.
+    // null clears the optional field; undefined leaves it alone. Non-null
+    // start_time is normalized to canonical HH:MM (an unparseable value clears).
     if (body.start_time === null) delete slot.startTime;
-    else if (body.start_time !== undefined) slot.startTime = body.start_time;
-    if (body.notes === null) delete slot.notes;
-    else if (body.notes !== undefined) slot.notes = body.notes;
+    else if (body.start_time !== undefined) {
+      const canon = canonicalSlotTime(body.start_time);
+      if (canon) slot.startTime = canon;
+      else delete slot.startTime;
+    }
+    const dayNote = body.day_note !== undefined ? body.day_note : body.notes;
+    if (dayNote === null) delete slot.dayNote;
+    else if (dayNote !== undefined) slot.dayNote = dayNote;
     return { day_index: dayIdx, slot_index: slotIdx, day: days[dayIdx] };
   });
   if ("error" in out) return c.json({ error: out.error }, out.status as 400 | 403 | 404);
@@ -1870,7 +1881,8 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/flights", handler(async 
   const body = await c.req.json<{
     activity_id: string;
     start_time?: string;
-    notes?: string;
+    day_note?: string;
+    notes?: string; // legacy alias for day_note
     position?: number;
   }>();
   if (!body.activity_id) return c.json({ error: "activity_id required" }, 400);
@@ -1878,8 +1890,10 @@ dataRoutes.post("/travel/itineraries/:id/days/:dayIndex/flights", handler(async 
   const out = await mutateDays(pb, id, userId, (days) => {
     if (dayIdx >= days.length) return { error: `day index ${dayIdx} out of range` };
     const flight: ItinerarySlot = { activityId: body.activity_id };
-    if (body.start_time) flight.startTime = body.start_time;
-    if (body.notes) flight.notes = body.notes;
+    const startTime = canonicalSlotTime(body.start_time);
+    if (startTime) flight.startTime = startTime;
+    const dayNote = body.day_note ?? body.notes;
+    if (dayNote) flight.dayNote = dayNote;
     const flights = getFlights(days[dayIdx]);
     const pos = body.position ?? flights.length;
     const clamped = Math.max(0, Math.min(flights.length, pos));
@@ -1923,7 +1937,8 @@ dataRoutes.patch("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex", 
   const body = await c.req.json<{
     activity_id?: string;
     start_time?: string | null;
-    notes?: string | null;
+    day_note?: string | null;
+    notes?: string | null; // legacy alias for day_note
   }>();
 
   const out = await mutateDays(pb, id, userId, (days) => {
@@ -1933,9 +1948,14 @@ dataRoutes.patch("/travel/itineraries/:id/days/:dayIndex/flights/:flightIndex", 
     const flight = flights[flightIdx];
     if (body.activity_id !== undefined) flight.activityId = body.activity_id;
     if (body.start_time === null) delete flight.startTime;
-    else if (body.start_time !== undefined) flight.startTime = body.start_time;
-    if (body.notes === null) delete flight.notes;
-    else if (body.notes !== undefined) flight.notes = body.notes;
+    else if (body.start_time !== undefined) {
+      const canon = canonicalSlotTime(body.start_time);
+      if (canon) flight.startTime = canon;
+      else delete flight.startTime;
+    }
+    const dayNote = body.day_note !== undefined ? body.day_note : body.notes;
+    if (dayNote === null) delete flight.dayNote;
+    else if (dayNote !== undefined) flight.dayNote = dayNote;
     return { day_index: dayIdx, flight_index: flightIdx, day: days[dayIdx] };
   });
   if ("error" in out) return c.json({ error: out.error }, out.status as 400 | 403 | 404);

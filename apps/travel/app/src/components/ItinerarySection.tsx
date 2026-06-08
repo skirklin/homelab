@@ -23,6 +23,7 @@ import { mapsUrl } from "../utils";
 import { useSelectedItinerary } from "../hooks/useSelectedItinerary";
 import {
   calculateDayLoad,
+  formatSlotTime,
   validateDay,
   type Activity,
   type Itinerary,
@@ -238,7 +239,7 @@ function ItineraryTimeline({
 
             {flights.map((f, j) => (
               <CompactSlot key={`f-${j}`} style={{ color: "#1677ff" }}>
-                {f.startTime && <CompactTime>{f.startTime}</CompactTime>}
+                {formatSlotTime(f.startTime) && <CompactTime>{formatSlotTime(f.startTime)}</CompactTime>}
                 <span>{"✈"} {f.activity?.name || f.activityId}</span>
               </CompactSlot>
             ))}
@@ -247,7 +248,7 @@ function ItineraryTimeline({
               const activity = activityMap.get(slot.activityId);
               return (
                 <CompactSlot key={j}>
-                  {slot.startTime && <CompactTime>{slot.startTime}</CompactTime>}
+                  {formatSlotTime(slot.startTime) && <CompactTime>{formatSlotTime(slot.startTime)}</CompactTime>}
                   <CompactName>{activity?.name || slot.activityId}</CompactName>
                 </CompactSlot>
               );

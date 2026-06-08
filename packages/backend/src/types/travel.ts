@@ -125,8 +125,22 @@ export interface Itinerary {
 
 export interface ActivitySlot {
   activityId: string;
+  /**
+   * Canonical 24-hour `"HH:MM"`, local wall-clock at the activity's location;
+   * optional — empty/absent means unscheduled. A day may span timezones, so
+   * each slot's time is local to its OWN activity (matched against that
+   * activity's own-coordinate weather), not a single trip timezone. Legacy
+   * rows may still hold free-form strings (`"5:30 PM"`); read them through the
+   * travel app's `parseSlotTime`/`formatSlotTime` helpers, which tolerate both.
+   */
   startTime?: string;
-  notes?: string;
+  /**
+   * A note about how this activity fits THIS day's plan (per-placement), e.g.
+   * "skip if it rains" or "leave by 3 to catch the train". Distinct from
+   * `Activity.description` (what the activity intrinsically IS) and
+   * `Activity.details` (logistics about the activity itself). Optional.
+   */
+  dayNote?: string;
 }
 
 export type FlightSlot = ActivitySlot;

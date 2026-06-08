@@ -12,7 +12,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { TravelBackend } from "../interfaces/travel";
-import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, DayEntry, TravelNote } from "../types/travel";
+import type { TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay, ActivitySlot, DayEntry, TravelNote } from "../types/travel";
 import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
@@ -123,11 +123,39 @@ function notesNewestFirst(notes: TravelNote[]): TravelNote[] {
   return notes.sort((a, b) => (a.created < b.created ? 1 : a.created > b.created ? -1 : 0));
 }
 
+/**
+ * Read a slot/flight back-compatibly: surface the legacy `notes` key as
+ * `dayNote` until the backfill renames it on disk. `startTime` is read as-is
+ * (canonical or legacy free-form); the UI normalizes display via parseSlotTime.
+ */
+function slotFromRaw(raw: unknown): ActivitySlot {
+  const s = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const slot: ActivitySlot = { activityId: (s.activityId as string) || "" };
+  if (typeof s.startTime === "string" && s.startTime) slot.startTime = s.startTime;
+  const dayNote = (typeof s.dayNote === "string" ? s.dayNote : undefined)
+    ?? (typeof s.notes === "string" ? s.notes : undefined);
+  if (dayNote) slot.dayNote = dayNote;
+  return slot;
+}
+
+function dayFromRaw(raw: unknown): ItineraryDay {
+  const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const day: ItineraryDay = {
+    label: (d.label as string) || "",
+    slots: Array.isArray(d.slots) ? d.slots.map(slotFromRaw) : [],
+  };
+  if (typeof d.date === "string" && d.date) day.date = d.date;
+  if (typeof d.lodgingActivityId === "string") day.lodgingActivityId = d.lodgingActivityId;
+  if (Array.isArray(d.flights)) day.flights = d.flights.map(slotFromRaw);
+  return day;
+}
+
 function itineraryFromRecord(r: RecordModel | RawRecord): Itinerary {
   const x = r as Record<string, unknown>;
   return {
     id: r.id, log: x.log as string, trip: x.trip_id as string, name: (x.name as string) || "",
-    isActive: (x.is_active as boolean) ?? true, days: (x.days as ItineraryDay[]) || [],
+    isActive: (x.is_active as boolean) ?? true,
+    days: Array.isArray(x.days) ? x.days.map(dayFromRaw) : [],
     created: x.created as string, updated: x.updated as string,
   };
 }

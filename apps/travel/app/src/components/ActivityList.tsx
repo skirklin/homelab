@@ -11,7 +11,7 @@ import {
   SendOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTravelBackend } from "@kirkl/shared";
 import { mapsUrl } from "../utils";
 import type { Activity } from "../types";
@@ -126,6 +126,7 @@ interface ActivityListProps {
 
 export function ActivityList({ activities, showReflection = false, scheduledIds }: ActivityListProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const travel = useTravelBackend();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || "";
@@ -252,7 +253,9 @@ export function ActivityList({ activities, showReflection = false, scheduledIds 
                   type="text"
                   size="small"
                   icon={<EditOutlined />}
-                  onClick={() => navigate(`activities/${a.id}/edit`)}
+                  onClick={() => navigate(`activities/${a.id}/edit`, {
+                    state: { from: location.pathname + location.search },
+                  })}
                 />
                 <Popconfirm title="Delete activity?" onConfirm={() => travel.deleteActivity(a.id)} okButtonProps={{ danger: true }}>
                   <Button type="text" size="small" danger icon={<DeleteOutlined />} />

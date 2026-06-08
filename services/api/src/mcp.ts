@@ -1450,8 +1450,8 @@ server.tool(
       lodgingActivityId: z.string().optional().describe("Activity ID for lodging"),
       slots: z.array(z.object({
         activityId: z.string().describe("Activity ID"),
-        startTime: z.string().optional().describe("Start time (e.g. '09:00')"),
-        notes: z.string().optional().describe("Slot-specific notes"),
+        startTime: z.string().optional().describe("Start time, canonical 24-hour 'HH:MM' local to the activity (e.g. '09:00')"),
+        dayNote: z.string().optional().describe("Note about how this activity fits THIS day's plan (distinct from the activity's own description/details)"),
       })).describe("Activity slots for this day"),
       flights: z.array(z.unknown()).optional().describe("Flight data for this day"),
     })).optional().describe("Complete day-by-day plan (replaces existing days)"),
@@ -1510,8 +1510,8 @@ server.tool(
     itinerary_id: z.string().describe("The itinerary record ID"),
     day_index: z.number().int().nonnegative().describe("0-based index of the day"),
     activity_id: z.string().describe("The activity record ID to slot in"),
-    start_time: z.string().optional().describe("Time of day (e.g. '9:00 AM')"),
-    notes: z.string().optional().describe("Slot-specific notes"),
+    start_time: z.string().optional().describe("Time of day — accepts '9:00 AM' or '09:00'; stored canonical 24-hour local to the activity"),
+    day_note: z.string().optional().describe("Note about how this activity fits THIS day's plan (e.g. 'skip if it rains'), distinct from the activity's own description/details"),
     position: z.number().int().nonnegative().optional().describe("0-based insertion position; defaults to end"),
   },
   async ({ itinerary_id, day_index, ...body }) => {
@@ -1541,14 +1541,14 @@ server.tool(
 
 server.tool(
   "update_itinerary_slot",
-  "Update fields on a single slot (start_time, notes, or activity_id). Pass null to clear an optional field.",
+  "Update fields on a single slot (start_time, day_note, or activity_id). Pass null to clear an optional field.",
   {
     itinerary_id: z.string().describe("The itinerary record ID"),
     day_index: z.number().int().nonnegative(),
     slot_index: z.number().int().nonnegative(),
     activity_id: z.string().optional().describe("Replace the activity reference"),
-    start_time: z.string().nullable().optional().describe("Time of day, or null to clear"),
-    notes: z.string().nullable().optional().describe("Slot notes, or null to clear"),
+    start_time: z.string().nullable().optional().describe("Time of day ('9:00 AM' or '09:00'; stored canonical 24-hour), or null to clear"),
+    day_note: z.string().nullable().optional().describe("Note about how this activity fits THIS day's plan, or null to clear"),
   },
   async ({ itinerary_id, day_index, slot_index, ...body }) => {
     const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/slots/${slot_index}`, {
@@ -1659,8 +1659,8 @@ server.tool(
     itinerary_id: z.string().describe("The itinerary record ID"),
     day_index: z.number().int().nonnegative(),
     activity_id: z.string().describe("The Flight-category activity to slot in"),
-    start_time: z.string().optional(),
-    notes: z.string().optional(),
+    start_time: z.string().optional().describe("Time of day ('9:00 AM' or '09:00'; stored canonical 24-hour local to the activity)"),
+    day_note: z.string().optional().describe("Note about how this flight fits THIS day's plan, distinct from the activity's own description/details"),
     position: z.number().int().nonnegative().optional(),
   },
   async ({ itinerary_id, day_index, ...body }) => {
@@ -1690,14 +1690,14 @@ server.tool(
 
 server.tool(
   "update_itinerary_flight",
-  "Update fields on a single flight slot (start_time, notes, activity_id). Pass null to clear an optional field.",
+  "Update fields on a single flight slot (start_time, day_note, activity_id). Pass null to clear an optional field.",
   {
     itinerary_id: z.string().describe("The itinerary record ID"),
     day_index: z.number().int().nonnegative(),
     flight_index: z.number().int().nonnegative(),
     activity_id: z.string().optional(),
-    start_time: z.string().nullable().optional(),
-    notes: z.string().nullable().optional(),
+    start_time: z.string().nullable().optional().describe("Time of day ('9:00 AM' or '09:00'; stored canonical 24-hour), or null to clear"),
+    day_note: z.string().nullable().optional().describe("Note about how this flight fits THIS day's plan, or null to clear"),
   },
   async ({ itinerary_id, day_index, flight_index, ...body }) => {
     const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/flights/${flight_index}`, {

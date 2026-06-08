@@ -6,6 +6,7 @@ import { TripList } from "./components/TripList";
 import { TripDetail } from "./components/TripDetail";
 import { TripForm } from "./components/TripForm";
 import { ActivityForm } from "./components/ActivityForm";
+import { ActivityDetail } from "./components/ActivityDetail";
 import { DayView } from "./components/DayView";
 import { LogLoader } from "./components/LogLoader";
 import { InviteRedeem } from "./components/InviteRedeem";
@@ -29,6 +30,7 @@ export function TravelRoutes({ embedded = false }: TravelRoutesProps) {
         <Route path=":tripId/edit" element={<TripForm />} />
         <Route path=":tripId/day/:date" element={<DayView />} />
         <Route path=":tripId/activities/new" element={<ActivityForm />} />
+        <Route path=":tripId/activities/:activityId" element={<ActivityDetail />} />
         <Route path=":tripId/activities/:activityId/edit" element={<ActivityForm />} />
       </Route>
       <Route path="*" element={<NotFound homePath={embedded ? "/travel" : "/"} />} />
