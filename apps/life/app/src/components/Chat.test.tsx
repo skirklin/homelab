@@ -1,23 +1,25 @@
 /**
- * Component tests for Chat.tsx — the /chat surface (Phase C2).
+ * Component tests for Chat.tsx — the /chat surface (Phase C2 + D3 handoff).
  *
  * Mocks @kirkl/shared so we can stub useChatBackend.listMessages (the read
  * path) and useAuth, plus the global `fetch` for the two POST paths (send +
  * resolve). Mirrors LifeDashboard.test.tsx's mock layout for consistency.
  *
- * Covers (per the C2 brief):
+ * Covers:
  *   - empty state render
  *   - send flow (optimistic-append + refetch)
  *   - "Mark resolved" flow (optimistic flip + POST)
  *   - kind-badge render for a `question`
+ *   - `?observation=<id>` deep-link prefills the compose box with the quoted
+ *     observation body and scrubs the URL param (D3)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { App as AntApp } from "antd";
-import type { ChatMessage } from "@homelab/backend";
+import type { ChatMessage, ClaudeObservation } from "@homelab/backend";
 
 // --- Mocks ---------------------------------------------------------------
 
@@ -25,12 +27,17 @@ import type { ChatMessage } from "@homelab/backend";
 // Stable identities — recreating these per-render would change the deps of
 // the Chat component's `loadMessages` useCallback (which keys on `user` +
 // `chat`), causing the mount useEffect to re-fire every commit and loop.
-const { mockChatBackend, stableAuth } = vi.hoisted(() => ({
+const { mockChatBackend, mockObserverBackend, stableAuth } = vi.hoisted(() => ({
   mockChatBackend: {
     listMessages: vi.fn(),
     getMessage: vi.fn(),
     postMessage: vi.fn(),
     resolveMessage: vi.fn(),
+  },
+  mockObserverBackend: {
+    listObservations: vi.fn(),
+    getObservation: vi.fn(),
+    createObservation: vi.fn(),
   },
   stableAuth: { user: { uid: "user123" }, loading: false },
 }));
@@ -41,6 +48,7 @@ vi.mock("@kirkl/shared", async () => {
     ...actual,
     useAuth: () => stableAuth,
     useChatBackend: () => mockChatBackend,
+    useObserverBackend: () => mockObserverBackend,
     // The Chat component reads getApiBase()/getAuthHeaders() via the real
     // implementations, but the global `fetch` is stubbed per-test, so those
     // helpers' actual return values don't matter — they just feed into the
@@ -76,16 +84,49 @@ function makeMessage(overrides: Partial<ChatMessage> & { id: string }): ChatMess
   } as ChatMessage;
 }
 
+function makeObservation(overrides: Partial<ClaudeObservation> & { id: string }): ClaudeObservation {
+  const now = new Date("2026-05-29T12:00:00.000Z");
+  return {
+    owner: "user123",
+    content: "Sample observation body.",
+    period: "weekly",
+    dataWindowStart: new Date("2026-05-22T12:00:00.000Z"),
+    dataWindowEnd: now,
+    relatedEventIds: [],
+    promptVersion: "v0",
+    created: now,
+    ...overrides,
+  } as ClaudeObservation;
+}
+
 // --- Imports under test (after mocks) ------------------------------------
 
 import { Chat } from "./Chat";
 
-function renderChat() {
+// Spy on the active URL so D3 tests can assert that the `?observation=...`
+// param is scrubbed after the prefill lands. MemoryRouter is the source of
+// truth; the probe reads it on every render.
+let lastLocation: { pathname: string; search: string } = { pathname: "", search: "" };
+function LocationProbe() {
+  const loc = useLocation();
+  lastLocation = { pathname: loc.pathname, search: loc.search };
+  return null;
+}
+
+function renderChat(initialEntry = "/chat") {
   return render(
     <AntApp>
-      <MemoryRouter initialEntries={["/chat"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
-          <Route path="/chat" element={<Chat />} />
+          <Route
+            path="/chat"
+            element={
+              <>
+                <Chat />
+                <LocationProbe />
+              </>
+            }
+          />
         </Routes>
       </MemoryRouter>
     </AntApp>,
@@ -97,6 +138,7 @@ function renderChat() {
 describe("Chat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    lastLocation = { pathname: "", search: "" };
     // jsdom doesn't ship a fetch; tests that exercise the send/resolve paths
     // install their own. The empty-state + initial-load tests rely solely on
     // the mocked backend, so a fetch leak there is a real bug worth surfacing.
@@ -227,5 +269,57 @@ describe("Chat", () => {
       expect(screen.queryByRole("button", { name: /Mark resolved/i })).toBeNull();
     });
     expect(screen.getByText("resolved")).toBeInTheDocument();
+  });
+
+  it("D3 handoff: ?observation=<id> fetches the observation, prefills a quoted compose box, and scrubs the param", async () => {
+    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+    mockObserverBackend.getObservation.mockResolvedValueOnce(
+      makeObservation({
+        id: "obs-42",
+        content: "You wrote that you wanted to run more.\nNo runs logged this week.",
+      }),
+    );
+
+    renderChat("/chat?observation=obs-42");
+
+    // Wait for the prefilled textarea. The body is quoted line-by-line and
+    // followed by a blank quoted-less line so the user's reply visually
+    // separates from the quote.
+    const textarea = (await screen.findByPlaceholderText("Type a message…")) as HTMLTextAreaElement;
+    await waitFor(() => {
+      expect(textarea.value).toBe(
+        "> You wrote that you wanted to run more.\n> No runs logged this week.\n\n",
+      );
+    });
+
+    // The fetch was issued against the right ID.
+    expect(mockObserverBackend.getObservation).toHaveBeenCalledWith("obs-42");
+
+    // The `?observation=` param was scrubbed off the URL — a refresh after
+    // the prefill lands must not re-trigger the fetch / clobber the user's
+    // in-progress edits.
+    await waitFor(() => {
+      expect(lastLocation.search).toBe("");
+    });
+    expect(lastLocation.pathname).toBe("/chat");
+  });
+
+  it("D3 handoff: a failed observation fetch silently scrubs the param without prefilling", async () => {
+    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+    mockObserverBackend.getObservation.mockRejectedValueOnce(new Error("404"));
+    // Silence the expected warn so the test output stays clean.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    renderChat("/chat?observation=ghost");
+
+    // Compose box stays empty; URL param is scrubbed regardless.
+    const textarea = (await screen.findByPlaceholderText("Type a message…")) as HTMLTextAreaElement;
+    await waitFor(() => {
+      expect(lastLocation.search).toBe("");
+    });
+    expect(textarea.value).toBe("");
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
   });
 });

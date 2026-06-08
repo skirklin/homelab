@@ -27,6 +27,8 @@ import {
   Section,
   useAuth,
   useChatBackend,
+  useObserverBackend,
+  useUrlParam,
   getApiBase,
   getAuthHeaders,
 } from "@kirkl/shared";
@@ -40,6 +42,21 @@ dayjs.extend(relativeTime);
 
 /** Cap the v1 fetch — pagination is out of scope. */
 const LIST_LIMIT = 100;
+
+/**
+ * Prefix every line of a string with the GitHub/markdown quote token so the
+ * D2 coach sees the quoted observation as a real `>` blockquote (not raw
+ * text), and `react-markdown` renders it as one if the body is ever shown
+ * back to the user. Empty lines become bare `>` to keep the block contiguous.
+ */
+function quoteForCompose(body: string): string {
+  // Normalize CRLF → LF before splitting so we don't end up with `> \r` lines.
+  return body
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => (line.length === 0 ? ">" : `> ${line}`))
+    .join("\n");
+}
 
 /** Kinds for which the assistant's open messages get a "Mark resolved" button. */
 const RESOLVABLE_KINDS: ReadonlySet<ChatMessageKind> = new Set([
@@ -229,6 +246,7 @@ export function Chat() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const chat = useChatBackend();
+  const observer = useObserverBackend();
   const { message: messageApi } = App.useApp();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -237,6 +255,17 @@ export function Chat() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+
+  // Observations handoff (Phase D3): `/chat?observation=<id>` prefills the
+  // compose box with a quoted version of the observation body. URL is the
+  // source of truth; we scrub the param atomically after the prefill lands so
+  // the back button doesn't re-trigger and a refresh doesn't re-prefill on
+  // top of in-progress edits.
+  const [observationId, setObservationId] = useUrlParam<string | null>("observation", {
+    parse: (raw) => raw,
+    serialize: (v) => v,
+    default: null,
+  });
 
   // Auto-scroll the timeline to bottom on mount + whenever messages change.
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -271,6 +300,52 @@ export function Chat() {
   useEffect(() => {
     if (!loading) scrollToBottom();
   }, [messages, loading, scrollToBottom]);
+
+  // Observation handoff: fetch the observation, prefill the composer with a
+  // quoted version, then scrub the param. Single-shot — keyed off the param
+  // value so a future deep-link to a *different* observation re-fires, but a
+  // refresh after the param is already scrubbed is a no-op.
+  //
+  // Edge cases:
+  //   - Compose already has text: skip prefill (don't clobber a draft).
+  //   - Fetch fails: log + scrub the param silently (bookmark of a deleted
+  //     observation should land on a clean /chat, not a toast).
+  //   - DB writes: none on mount. The user's explicit Send is the only write.
+  useEffect(() => {
+    if (!observationId) return;
+
+    // If the user is mid-draft, leave them alone — silently scrub the param
+    // (otherwise it'd sit on the URL and re-fire on the next mount).
+    if (draft.trim().length > 0) {
+      setObservationId(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const obs = await observer.getObservation(observationId);
+        if (cancelled) return;
+        // Quoted body + blank line + cursor lands at the end. The textarea
+        // cursor naturally falls at the end of the value when React sets it.
+        setDraft(`${quoteForCompose(obs.content)}\n\n`);
+      } catch (e) {
+        // Quiet: a stale bookmark / 404 shouldn't surface as a toast. Log so
+        // a real outage is still inspectable in devtools.
+        console.warn("Failed to load observation for chat handoff:", e);
+      } finally {
+        if (!cancelled) setObservationId(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // `draft` is intentionally NOT a dep — re-firing on every keystroke would
+    // either re-fetch or scrub-then-prefill-empty. The "draft already has
+    // text" guard above is read once per observation-param transition.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [observationId, observer, setObservationId]);
 
   const handleSend = useCallback(async () => {
     const body = draft.trim();
