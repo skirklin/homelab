@@ -1000,6 +1000,12 @@ describe("MATRIX 3: sort+limit at the limit boundary", () => {
     await flush();
 
     // Pre-ready CREATE 'd' with the highest rank → pushes 'a' out of the top-2.
+    // A real SSE create echoes a COMMITTED record, so mirror the commit
+    // server-side now: the post-ready backfill refetch (armed because the
+    // bootstrap page was FULL — limit=2, 2 rows fetched) then sees the true
+    // top-2 [d, b]. (Arming on a create is the accepted "redundant refetch is
+    // harmless" simplification; with the server consistent it converges right.)
+    stub.col("log").records.set("d", rec("log", { id: "d", t: 9 }));
     stub.emit("log", { action: "create", record: rec("log", { id: "d", t: 9 }) });
     await flush();
 
@@ -1047,5 +1053,62 @@ describe("MATRIX 3: sort+limit at the limit boundary", () => {
     expect(last.map((r) => r.id), "deleted slot must be backfilled by the below-window record (refetch)").toEqual(["b", "c"]);
     expect(last.length, "window must be full again (N, not N-1)").toBe(2);
     expect(wpb.collection("log").view("a"), "deleted record stays deleted").toBeNull();
+  });
+});
+
+// =====================================================================
+// TERMINATION REGRESSION — the refetch must NOT hammer getList forever
+// =====================================================================
+//
+// The fuzzer is structurally blind to this: it drains to quiescence and reads
+// the last emit, so an UNBOUNDED refetch loop that still converges every frame
+// would pass it. This test reproduces the reviewer's storm scenario directly:
+// a sort+limit slice at a full window, a pre-ready DELETE of a windowed id, and
+// a LAGGING server whose getList still returns the deleted id forever (a commit
+// lagging its own broadcast, or a recreate whose echo was lost). The removed
+// `pendingWindowTombstones` suppression turned this into: drop the row → window
+// under-fills → re-arm a full-page refetch → drop again → ∞. With the plain
+// (non-suppressing) refetch the row simply shows for one frame and the refetch
+// count stays BOUNDED. Asserting a small bound documents the hazard so it can't
+// silently regress.
+describe("TERMINATION: lagging getList must not cause an unbounded refetch storm", () => {
+  it("a pre-ready delete whose row the server keeps returning does NOT loop", async () => {
+    const stub = makeStubPb();
+    // Full window: top-2 is b(t=3), a(t=2). c(t=1) is below.
+    stub.col("log").records.set("a", rec("log", { id: "a", t: 2 }));
+    stub.col("log").records.set("b", rec("log", { id: "b", t: 3 }));
+    stub.col("log").records.set("c", rec("log", { id: "c", t: 1 }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    const states: RawRecord[][] = [];
+    stub.holdReads();
+    stub.holdRegistration();
+    mirror.watch({ collection: "log", topic: "*", sort: "-t", limit: 2 }, (s) => states.push(s));
+    await flush();
+
+    // Pre-ready DELETE of windowed 'a'. CRUCIALLY: do NOT remove 'a' from the
+    // server records — the lagging getList keeps returning it. The mirror has
+    // tombstoned 'a' in the queue (applyServer(null)); every refetch's top-N is
+    // [b, a] (still carrying the ghost).
+    stub.emit("log", { action: "delete", record: rec("log", { id: "a", t: 2 }) });
+    await flush();
+
+    stub.releaseReads();
+    stub.releaseRegistration();
+    // Drain hard — a refetch storm would keep re-arming across many ticks.
+    await flush(40);
+
+    // The fetch count is BOUNDED: bootstrap fetch + at most a small handful of
+    // backfill refetches, NOT hundreds. (Pre-fix this would climb with every
+    // tick. We assert a loose bound so a legitimate coalesced refetch or two is
+    // fine but a storm is caught.)
+    expect(stub.col("log").fetchCalls, "getList must not be hammered in a loop").toBeLessThanOrEqual(5);
+    // Accepted one-frame-stale: the lagging server still returns 'a', so the
+    // final window may carry it — but the QUEUE keeps it tombstoned, and the
+    // next real SSE event / resync corrects the view. Convergence is delegated
+    // to resync (see the fuzzer's post-resync checkpoint); here we only assert
+    // termination.
+    expect(wpb.collection("log").view("a"), "queue stays tombstoned regardless of the lagging fetch").toBeNull();
   });
 });
