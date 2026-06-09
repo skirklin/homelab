@@ -28,6 +28,8 @@
     "@vis.gl/react-google-maps": "^1.8.1",
     "antd": "^5.29.3",
     "dayjs": "^1.11.0",
+    "embla-carousel-auto-height": "^8.6.0",
+    "embla-carousel-react": "^8.6.0",
     "pocketbase": "^0.25.0",
     "react-markdown": "^10.1.0",
     "styled-components": "^6.1.19"
