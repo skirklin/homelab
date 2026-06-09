@@ -9,7 +9,12 @@
  *
  * It is the mechanical net for the silent-corruption interleaving bugs that, to
  * date, only adversarial human review has caught (Blocker-1/2, the pre-
- * registration-event race, the sort+limit window-boundary class).
+ * registration-event race, the sort+limit window-boundary class). It also caught
+ * two of its own: the queue-only-ghost resync gap (an optimistic create acked
+ * while SSE was down, later server-deleted, never reconciled) and the sort+limit
+ * pre-ready DEMOTION under-fill (a windowed row demoted below top-N in the
+ * bootstrap window left the window short). Both are now fixed in mirror.ts, and
+ * the property fuzzes both classes at full strength.
  *
  * ── DESIGN PRINCIPLES (see the task brief) ────────────────────────────────
  *
@@ -52,7 +57,7 @@
  * (ops, schedule) it ran.
  */
 import "fake-indexeddb/auto";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, beforeEach } from "vitest";
 import fc from "fast-check";
 import type PocketBase from "pocketbase";
 import type { RecordModel, UnsubscribeFunc } from "pocketbase";
@@ -332,8 +337,19 @@ function makeStubServer(): StubServer {
       // ---- Writes (driven by wpb optimistic dispatch). These mutate the model
       // AND broadcast the SSE echo, exactly as a real PB write does. ----
       async create(body: Record<string, unknown>): Promise<RecordModel> {
+        const id = body.id as string;
+        // FIDELITY: a create on an id that already exists 409s in real
+        // PocketBase (unique PK) — it does NOT overwrite. Modeling it as an
+        // overwrite would let a "create" silently change an existing record's
+        // sort key (a demotion-by-create), which can't happen in production and
+        // would mis-attribute a window shift to the create path. 409 instead;
+        // wpb's permanent-error path drains the optimistic SET, leaving the
+        // existing server snapshot (and thus the view) intact.
+        if (model.has(id)) {
+          throw Object.assign(new Error("create conflict"), { status: 409 });
+        }
         const r: ServerRecord = {
-          id: body.id as string,
+          id,
           list: (body.list as string) ?? FILTER_VALUE,
           v: (body.v as number) ?? 0,
           t: (body.t as number) ?? 0,
@@ -363,6 +379,11 @@ function makeStubServer(): StubServer {
     pb,
     model,
     serverCreate(r) {
+      // FIDELITY: a peer create on an existing id 409s server-side too — no
+      // overwrite. Model it as a no-op so a "create" never mutates an existing
+      // record's sort key (see the pb.create 409 note). Sort-key changes flow
+      // exclusively through serverUpdate, matching production.
+      if (model.has(r.id)) return;
       model.set(r.id, r);
       broadcast("create", r);
     },
@@ -634,32 +655,26 @@ async function runScenario(scenario: Scenario): Promise<{ ok: boolean; detail: s
         // pending overlay → POST → ack (which calls the stub create, mutating
         // the model + broadcasting the echo).
         //
-        // GUARD (channelLive): only issue optimistic writes while the SSE
-        // channel is live (registered + connected). When the channel is DOWN, a
-        // write's own SSE echo is LOST — and the mirror has a SHIPPED bug where
-        // resync then fails to reconcile that queue-only record if it's later
-        // removed server-side (the "queue-only ghost" gap; see the
-        // `it.fails` regression below + the report). We deliberately do NOT
-        // generate that interleaving here so the property guards everything
-        // ELSE without going red on a known, separately-tracked defect. Remove
-        // this guard once resync's reconcile is fixed to scan the queue layer,
-        // not just slice.records — the regression test will then flip to green.
-        if (server.registered()) {
-          await wpb.collection(COLLECTION).create(mkRecord(step.id, step.v, step.time)).catch(() => {});
-          await flush();
-        }
+        // Issued UNCONDITIONALLY — including while the SSE channel is DOWN. When
+        // the channel is down a write's own SSE echo is LOST (the queue still
+        // holds the acked server snapshot, but slice.records never sees it).
+        // That is the "queue-only ghost" interleaving — exactly the class the
+        // resync queue-scan reconcile fix now heals. So mark lostEvents (the
+        // live-channel checkpoint can't apply when an echo was dropped); the
+        // post-resync checkpoint must still converge.
+        if (!channelLive()) lostEvents = true;
+        await wpb.collection(COLLECTION).create(mkRecord(step.id, step.v, step.time)).catch(() => {});
+        await flush();
         break;
       case "optUpdate":
-        if (server.registered()) {
-          await wpb.collection(COLLECTION).update(step.id, { v: step.v, t: step.time }).catch(() => {});
-          await flush();
-        }
+        if (!channelLive()) lostEvents = true;
+        await wpb.collection(COLLECTION).update(step.id, { v: step.v, t: step.time }).catch(() => {});
+        await flush();
         break;
       case "optDelete":
-        if (server.registered()) {
-          await wpb.collection(COLLECTION).delete(step.id).catch(() => {});
-          await flush();
-        }
+        if (!channelLive()) lostEvents = true;
+        await wpb.collection(COLLECTION).delete(step.id).catch(() => {});
+        await flush();
         break;
       case "disconnect":
         server.disconnect();
@@ -693,7 +708,13 @@ async function runScenario(scenario: Scenario): Promise<{ ok: boolean; detail: s
   //    ready and the bootstrap force-emit lands).
   server.resolveRegistration();
   await flush();
-  // 2. (Optimistic writes were already awaited to ack inline, so the pending
+  // 2. One more settle so a sort+limit post-ready backfill refetch (armed by a
+  //    pre-ready window-affecting event — delete/demotion/promotion) lands its
+  //    re-queried top-N BEFORE the live-channel checkpoint reads the last emit.
+  //    Without it the checkpoint could observe the pre-refetch (under-filled)
+  //    view. This is a deterministic microtask drain, not a wall-clock wait.
+  await flush();
+  // 3. (Optimistic writes were already awaited to ack inline, so the pending
   //    overlay is empty here and oracle == pure server state.)
 
   const expected = expectedView(server.model, scenario.shape);
@@ -703,23 +724,21 @@ async function runScenario(scenario: Scenario): Promise<{ ok: boolean; detail: s
   // bootstrap-pre-ready-window scenario), the mirror MUST already match the
   // oracle from bootstrap + live SSE ALONE, BEFORE any resync. This is where
   // the bootstrap-consolidation / SSE-path guards (consolidated,
-  // sseTouchedDuringBootstrap, sort+limit window) get their teeth: resync is a
-  // big hammer that would heal almost anything, so we forbid it here. Sort+limit
-  // is EXEMPT from this strict checkpoint pending a shipped under-fill bug the
-  // fuzzer found (a pre-ready event that DEMOTES a windowed record doesn't
-  // trigger the backfill refetch — see the `it.fails` regression). filter +
-  // single must converge live.
+  // sseTouchedDuringBootstrap, sort+limit window backfill) get their teeth:
+  // resync is a big hammer that would heal almost anything, so we forbid it
+  // here. ALL THREE shapes — single, filter, AND sort+limit — must converge
+  // live; the sort+limit backfill (any pre-ready window-affecting event arms the
+  // post-ready top-N re-query) is what makes the window converge without resync.
   const liveLast = emitted.length > 0 ? emitted[emitted.length - 1] : [];
-  const liveCheckApplies = !lostEvents && scenario.shape.kind !== "sortlimit";
+  const liveCheckApplies = !lostEvents;
   const liveOk = !liveCheckApplies || viewsEqual(liveLast, expected, scenario.shape);
 
   // ── CHECKPOINT #2 — POST-RESYNC CONVERGENCE (the app's true guarantee) ──
   // The app ALWAYS has resync available (focus / PB_CONNECT). So the realistic
   // convergence guarantee is the post-resync state: whatever bootstrap/SSE
   // missed, resync heals. Always drive a final reconnect+resync, then assert.
-  // This is what the queue-only-ghost regression shows resync FAILS to do for a
-  // queue-only record — that interleaving is excluded from the property (see
-  // the channelLive write guard) and captured in its own `it.fails`.
+  // The queue-only-ghost class (an optimistic create acked while SSE was down,
+  // later server-deleted) is now healed here by resync's queue-scan reconcile.
   server.reconnect();
   await flush();
   await mirror.resync({ force: true });
@@ -771,174 +790,15 @@ describe("PBMirror convergence fuzzer", () => {
         // Bounded for the deploy gate: ~1k cases settle in ~1s (each case
         // drives many microtask flushes + a full bootstrap/resync). Seeded for
         // reproducibility — a failure reproduces with the printed seed.
-        // Validated green across seeds {0x5eed,777,1,42,99999,12345,0xbeef,555}
-        // at 2k each and at 5k on the default seed.
-        numRuns: 1000,
-        seed: 0x5eed,
+        // Validated green at FULL strength (queue-only-ghost + sort+limit
+        // demotion fuzzed with NO exemption) across seeds {0x5eed, 24301, 777,
+        // 1, 42, 99999, 12345, 48879, 555, 31337, 8, 0, 65535, 271828} at 5k
+        // each, and a 20k soak on several. FUZZ_RUNS / FUZZ_SEED env vars
+        // override for an elevated soak; the committed default stays
+        // gate-friendly.
+        numRuns: Number(process.env.FUZZ_RUNS ?? 1000),
+        seed: Number(process.env.FUZZ_SEED ?? 0x5eed),
       },
     );
   }, 30000);
-});
-
-// =====================================================================
-// (7) KNOWN-BUG REGRESSION — the queue-only-ghost convergence gap.
-//
-// The fuzzer found a REAL, shipped convergence gap (reported prominently in the
-// task summary). The property above deliberately excludes this interleaving
-// (via the `server.registered()` guard on optimistic writes) so it can guard
-// everything else green in the deploy gate. This `it.fails` block pins the bug
-// as a reproducible, named spec so it is NOT lost and so the day resync's
-// reconcile is fixed, this test flips to a hard failure (forcing the author to
-// delete `.fails` + the guard above, re-enabling full optimistic-during-down
-// fuzzing).
-//
-// THE GAP: for a filter-only wildcard slice, an optimistically-created+acked
-// record whose SSE echo was LOST (created while the channel was down /
-// pre-registration) enters the mutation QUEUE but never enters `slice.records`
-// (only handleSseEvent populates that, and the echo was dropped). resync's
-// ghost-reconcile loop scans ONLY `slice.records.keys()` — so if that record is
-// later removed server-side (a removal also unseen over the dead SSE), resync's
-// getFullList returns without it, yet resync never tombstones it (it's not in
-// slice.records). Because filter-slice materialize() reads the whole
-// queue.viewCollection, the ghost lingers in the emitted view forever.
-//
-// FIX DIRECTION (not applied — left to the owner's call): resync's reconcile
-// must scan the queue's server-backed records matching the slice predicate, not
-// just slice.records — i.e. tombstone any queue record that matches the slice,
-// has a server snapshot, has no pending mutation, and is absent from the fresh
-// fetch. (bootstrap's reconcileGhosts has the same slice.records-only shape but
-// is sound there because bootstrap seeds slice.records from the queue first.)
-// =====================================================================
-
-describe("PBMirror convergence — KNOWN BUG (queue-only ghost)", () => {
-  it.fails(
-    "resync does NOT reconcile a queue-only optimistic record removed while SSE was down",
-    async () => {
-      const scenario: Scenario = {
-        shape: { kind: "filter" },
-        initial: [],
-        gateBootstrap: false,
-        schedule: [
-          // optCreate fires PRE-registration (no resolveRegistration before it),
-          // so its SSE echo is lost; then the record is deleted server-side
-          // (also unseen). At quiescence resync should heal to [] but doesn't.
-          { t: "optCreate", id: "d", v: 0, time: 0 },
-          { t: "serverDelete", id: "d" },
-        ],
-      };
-      // NOTE: runScenario's `server.registered()` guard SKIPS the pre-reg
-      // optCreate, so to actually exercise the bug we bypass the guard here by
-      // driving the minimal sequence inline. Kept faithful to the harness.
-      const { ok } = await runQueueOnlyGhostBug(scenario);
-      // Assert convergence — this SHOULD pass once fixed; today it FAILS,
-      // which `it.fails` asserts (the test passes BECAUSE the body throws).
-      expect(ok, "mirror should converge to [] after resync").toBe(true);
-    },
-  );
-});
-
-/** Inline driver for the queue-only-ghost bug that does NOT apply the
- *  optimistic-write channel-live guard — so the lost-echo optimistic create is
- *  actually issued. Mirrors runScenario's quiescence drive. */
-async function runQueueOnlyGhostBug(scenario: Scenario): Promise<{ ok: boolean }> {
-  await clearAllMutations();
-  const server = makeStubServer();
-  const wpb = wrapPocketBase(() => server.pb);
-  const mirror = createMirror(() => server.pb, wpb);
-
-  const emitted: RawRecord[][] = [];
-  const handle = mirror.watch(watchSpecFor(scenario.shape), (s) => emitted.push(s));
-  await flush();
-
-  // Pre-registration optimistic create — echo lost. Drive to ack.
-  await wpb.collection(COLLECTION).create(mkRecord("d", 0, 0)).catch(() => {});
-  await flush();
-  // Server removes it (also unseen over the dead/unregistered SSE).
-  server.serverDelete("d");
-  await flush();
-
-  // Quiescence: register, reconnect, resync.
-  server.resolveRegistration();
-  await flush();
-  server.reconnect();
-  await flush();
-  await mirror.resync({ force: true });
-  await flush();
-  handle.unsubscribe();
-
-  const expected = expectedView(server.model, scenario.shape); // []
-  const last = emitted.length > 0 ? emitted[emitted.length - 1] : [];
-  return { ok: viewsEqual(last, expected, scenario.shape) };
-}
-
-// =====================================================================
-// (8) KNOWN-BUG REGRESSION #2 — sort+limit pre-ready DEMOTION under-fill.
-//
-// The fuzzer's LIVE-CHANNEL checkpoint (#1) exempts the sortlimit shape because
-// of this second shipped bug it surfaced. THE GAP: during the bootstrap
-// pre-ready window (SSE live, fetch in flight), an SSE event that DEMOTES a
-// windowed record out of the top-N — e.g. an update lowering its sort key —
-// vacates a window slot, but the mirror only arms a backfill refetch for
-// pre-ready DELETEs (windowDeletedIds). The mirror's own comment asserts
-// "creates/updates never under-fill", which is FALSE for a demotion: the
-// below-window record that should promote into the vacated slot is never
-// fetched, so the window renders the demoted record instead of the promotion
-// until the next resync.
-//
-// Realizable on a flaky connection where the SSE registration POST lags the
-// initial fetch and a peer demotes a top-N row in that window. Resync heals it
-// (so checkpoint #2 stays green), but the LIVE convergence is wrong.
-//
-// FIX DIRECTION (not applied): in handleSseEvent / bootstrap, treat a pre-ready
-// event that drops a record's rank below the current top-N like a window
-// vacancy — arm the same post-consolidation backfill refetch
-// (scheduleRefetch) that pre-ready DELETEs already trigger.
-// =====================================================================
-
-describe("PBMirror convergence — KNOWN BUG (sort+limit pre-ready demotion)", () => {
-  it.fails(
-    "a pre-ready demotion out of the top-N does not backfill the promoted record",
-    async () => {
-      await clearAllMutations();
-      const server = makeStubServer();
-      const wpb = wrapPocketBase(() => server.pb);
-      const mirror = createMirror(() => server.pb, wpb);
-
-      // a,c,d all t=1; limit 2 → server top-2 = [a,c] (id tiebreak), d below.
-      server.model.set("a", mkRecord("a", 0, 1));
-      server.model.set("c", mkRecord("c", 0, 1));
-      server.model.set("d", mkRecord("d", 0, 1));
-
-      const emitted: RawRecord[][] = [];
-      const handle = mirror.watch(
-        watchSpecFor({ kind: "sortlimit", limit: 2 }),
-        (s) => emitted.push(s),
-      );
-
-      // Gate the bootstrap fetch + resolve registration → SSE live, fetch in
-      // flight (the pre-ready window).
-      server.holdReads();
-      server.resolveRegistration();
-      await flush();
-
-      // Pre-ready SSE: demote `a` to t=0 → it should leave the top-2 and `d`
-      // should promote. (serverUpdate broadcasts the SSE update into the window.)
-      server.serverUpdate("a", { t: 0 });
-      await flush();
-
-      // Resolve the gated bootstrap fetch (stale top-2 = [a,c]) + consolidation.
-      server.releaseReads();
-      await flush();
-
-      handle.unsubscribe();
-
-      // No lost events, no resync. Expected top-2 = [c(t1), d(t1)].
-      const expected = expectedView(server.model, { kind: "sortlimit", limit: 2 });
-      const last = emitted.length > 0 ? emitted[emitted.length - 1] : [];
-      expect(
-        viewsEqual(last, expected, { kind: "sortlimit", limit: 2 }),
-        "sort+limit window should backfill the promoted record after a pre-ready demotion",
-      ).toBe(true);
-    },
-  );
 });

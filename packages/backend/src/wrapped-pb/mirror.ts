@@ -140,12 +140,37 @@ interface Slice {
   refetchAgain: boolean;
   /** True once teardown has started; gates re-entry. */
   tornDown: boolean;
-  /** Ids deleted by a pre-consolidation SSE DELETE on a sort+limit slice. A
-   *  delete vacates a window slot, so bootstrap re-queries the top-N once
-   *  consolidated to pull in a below-window record — passing these ids as the
-   *  refetch's suppress set so a server commit lagging the SSE broadcast can't
-   *  resurrect a deleted row into the window. (MINOR fix.) */
-  windowDeletedIds: Set<string>;
+  /**
+   * True iff a pre-consolidation SSE DELETE or (demotion-capable) UPDATE touched
+   * a sort+limit slice during its bootstrap window. Arms the post-ready backfill
+   * refetch.
+   *
+   * Why UPDATE, not just DELETE: the bootstrap getList returns only the top-N. A
+   * pre-ready DELETE of a windowed row obviously vacates a slot. But so does a
+   * pre-ready UPDATE that DEMOTES a windowed row below the top-N (lowers its sort
+   * key): the slot it vacates should be filled by the next-ranked below-window
+   * record — which the top-N-only fetch never pulled in. Neither is recoverable
+   * from `slice.records ∪ pending` alone (the promoted record is in neither), so
+   * re-query the top-N once consolidated. (Pre-fix the code armed only on DELETE,
+   * with a "creates/updates never under-fill" comment — false for a demotion.) A
+   * plain CREATE genuinely never under-fills: it either enters the window
+   * (evicting the lowest FETCHED row, still tracked) or stays out — no vacancy
+   * needing a below-window promotion — so it does NOT arm this.
+   * scheduleRefetch self-coalesces, so an extra getList here is harmless. */
+  windowDirtyDuringBootstrap: boolean;
+  /**
+   * Ids the mirror has seen DELETED over SSE for which a sort+limit refetch's
+   * getList might still return a STALE row. A refetch's getList can snapshot the
+   * server BEFORE a delete the mirror already consumed (a gated/slow fetch, or a
+   * server commit lagging its own broadcast), so replacing slice.records with
+   * that result would RESURRECT a just-deleted row. We can't read "tombstoned"
+   * off the queue — applyServer(null) with no pending DELETES the queue entry,
+   * making it indistinguishable from a never-seen below-window record that the
+   * refetch legitimately PROMOTES into the window. So track deleted ids
+   * explicitly: the refetch drops any result row in this set UNLESS the queue has
+   * since gained a live server snapshot for it (recreated → keep). Pruned in the
+   * refetch once the row is confirmed gone, so it can't grow unbounded. */
+  pendingWindowTombstones: Set<string>;
   /**
    * Ids the LIVE SSE listener authoritatively touched DURING the pre-ready
    * bootstrap window (create / update / delete). See the pre-ready-window
@@ -656,14 +681,19 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         // it must still see this id in the touched-set. See `consolidated` doc.
         if (!slice.consolidated) {
           slice.sseTouchedDuringBootstrap.add(id);
-          // MINOR (sort+limit under-fill): a pre-consolidation DELETE is the
-          // ONLY event shape that can leave the top-N window short — it vacates
-          // a slot that the gated fetch (top-N only) never had a below-window
-          // record to backfill from. Record the deleted id so bootstrap
-          // re-queries the top-N once consolidated AND suppresses these ids in
-          // the refetch (a lagging server commit must not resurrect them).
-          // Creates/updates never under-fill, so they don't arm this.
-          if (slice.spec.sort || slice.spec.limit) slice.windowDeletedIds.add(id);
+          // sort+limit under-fill: a pre-consolidation DELETE vacates a window
+          // slot, so bootstrap must re-query the top-N once consolidated.
+          if (slice.spec.sort || slice.spec.limit) {
+            slice.windowDirtyDuringBootstrap = true;
+          }
+        }
+        // sort+limit: remember this delete so a subsequent (possibly stale)
+        // refetch can't resurrect the just-deleted row — see
+        // pendingWindowTombstones. Recorded for ALL deletes (pre- and post-ready)
+        // and BEFORE the `!had` early-out, since a row demoted out of the window
+        // can be deleted while slice.records no longer tracks it.
+        if (slice.spec.sort || slice.spec.limit) {
+          slice.pendingWindowTombstones.add(id);
         }
         if (!had) {
           // Delete for an id this slice doesn't track — skip emit to
@@ -675,19 +705,43 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         // create or update — upsert into slice.records.
         // Keyed on `!consolidated` (NOT `!ready`) for the warm-cache eager-paint
         // case — see the delete branch above and the `consolidated` doc.
-        if (!slice.consolidated) slice.sseTouchedDuringBootstrap.add(id);
+        if (!slice.consolidated) {
+          slice.sseTouchedDuringBootstrap.add(id);
+          // sort+limit under-fill: arm a post-ready re-query for an UPDATE only.
+          // An UPDATE can DEMOTE a windowed row below the top-N — vacating a slot
+          // the below-window (never-fetched) record should promote into, which
+          // the consolidated `slice.records ∪ pending` can't supply. A CREATE
+          // does NOT under-fill: it either enters the window (evicting the lowest
+          // FETCHED row, which is still tracked) or stays out — no vacancy needing
+          // a below-window promotion. (A delete arms via its own branch above.)
+          if ((slice.spec.sort || slice.spec.limit) && action === "update") {
+            slice.windowDirtyDuringBootstrap = true;
+          }
+        }
         slice.records.set(id, record);
       }
 
-      // Pre-ready gate: the SSE listener now attaches CONCURRENTLY with the
-      // initial fetch (Part A), so an event can land before bootstrap has
-      // marked the slice ready. We've applied it to the queue + slice.records
-      // above (keeping the queue authoritative and recording the touched id so
-      // bootstrap's consolidation treats this live value as truth), but we must
-      // NOT emit a partial pre-bootstrap view — bootstrap's force-emit, which
-      // runs after ready with the consolidated initial set, delivers the first
-      // view. Mirrors the mutation hook's `if (!slice.ready) continue`.
-      if (!slice.ready) continue;
+      // CONSOLIDATED-BUT-NOT-READY window: there is a gap between bootstrap
+      // setting `consolidated = true` (it has folded the touched-set into the
+      // fetch result) and `ready = true` (it awaits SSE registration in
+      // between). A sort+limit window-affecting event landing in THAT gap is
+      // missed by both arming paths: the touched-set / windowDirty arming keys
+      // on `!consolidated` (already false), and the post-ready refetch below
+      // keys on `ready` (not yet true) — so the window would render the demoted
+      // value with no backfill until the next resync. Since consolidation has
+      // run, a refetch is safe to schedule now; its emit is harmless because the
+      // per-consumer hash dedups against bootstrap's imminent force-emit.
+      if (!slice.ready) {
+        if (slice.consolidated && (slice.spec.sort || slice.spec.limit)) {
+          scheduleRefetch(slice);
+        }
+        // Otherwise (truly pre-consolidation) we've already recorded the event
+        // in the queue + slice.records + touched-set/windowDirty above;
+        // bootstrap's consolidation + force-emit delivers the first view. We must
+        // NOT emit a partial pre-bootstrap view here. Mirrors the mutation hook's
+        // `if (!slice.ready) continue`.
+        continue;
+      }
 
       // For sort+limit slices, the window may have shifted — refetch.
       // (For wildcard non-sort/limit slices we don't refetch on every
@@ -703,14 +757,19 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
 
   /** Debounced refetch for sort+limit slices.
    *
-   *  `suppressIds` (MINOR fix): ids the bootstrap consolidation authoritatively
-   *  DELETED in the pre-ready window. A getList issued right after those deletes
-   *  can momentarily still carry the just-deleted rows (the server commit may
-   *  lag the SSE broadcast the mirror already consumed), which would resurrect
-   *  them into the window. The set is authoritative — drop those ids from the
-   *  refetch result regardless of what the server returned. Empty for the normal
-   *  event-driven refetch path. */
-  function scheduleRefetch(slice: Slice, suppressIds?: Set<string>): void {
+   *  A refetch's getList can be STALE relative to SSE deletes the mirror has
+   *  already consumed: the getList query may snapshot the server BEFORE a delete
+   *  the mirror saw over SSE (e.g. a fetch issued while reads are slow, or a
+   *  server commit lagging its own broadcast). Replacing slice.records with such
+   *  a result would RESURRECT a just-deleted row. slice.pendingWindowTombstones
+   *  records the ids the mirror has seen deleted; we drop any result row in that
+   *  set UNLESS the queue has since gained a live server snapshot for it (the row
+   *  was re-created after the delete → keep it). A row confirmed gone (absent
+   *  from the result, or dropped here) is pruned from the set so it can't grow.
+   *  Below-window records the result legitimately PROMOTES are NOT in the set, so
+   *  they're retained — the case a naive "drop everything the queue lacks a
+   *  snapshot for" check would wrongly discard. */
+  function scheduleRefetch(slice: Slice): void {
     if (slice.refetchInFlight) {
       slice.refetchAgain = true;
       return;
@@ -724,12 +783,43 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
           $autoCancel: false,
         });
         if (slice.tornDown || slice.consumers.size === 0) return;
+        const items = result.items as unknown as RawRecord[];
+        const resultWasFull = limit !== undefined && items.length >= limit;
         const next = new Map<string, RawRecord>();
-        for (const r of result.items as unknown as RawRecord[]) {
-          if (suppressIds?.has(r.id)) continue;
+        let droppedTombstone = false;
+        for (const r of items) {
+          // Stale-delete guard: drop a row the mirror knows was deleted, unless
+          // it has since been re-created (live queue snapshot). See fn doc.
+          if (
+            slice.pendingWindowTombstones.has(r.id) &&
+            !queue.hasServerSnapshot(collection, r.id)
+          ) {
+            droppedTombstone = true;
+            continue;
+          }
           next.set(r.id, r);
         }
+        // Prune tombstones the getList result no longer carries — those are
+        // confirmed gone server-side, so we never need to suppress them again.
+        // KEEP a tombstone the result STILL carries (a server commit lagging its
+        // broadcast): we dropped it above, and the next refetch must drop it
+        // again until the server stops returning it. (Pruning on `next`, which
+        // already excludes the just-dropped row, would forget the tombstone and
+        // let the very next refetch resurrect it.)
+        const resultIds = new Set(items.map((r) => r.id));
+        for (const id of Array.from(slice.pendingWindowTombstones)) {
+          if (!resultIds.has(id)) slice.pendingWindowTombstones.delete(id);
+        }
         slice.records = next;
+        // If we dropped a tombstoned row from a result that was AT THE LIMIT, the
+        // page was full — the dropped slot pushed a below-window record off the
+        // page, so it was never fetched and the window is now under-filled.
+        // Re-query so the promotion lands. A SHORT result can't have lost a
+        // promotion (everything matching fit on the page), so we do NOT re-arm —
+        // that also avoids an unterminating refetch loop when the server keeps
+        // returning a not-yet-committed delete. refetchAgain coalesces with any
+        // event-driven request.
+        if (droppedTombstone && resultWasFull) slice.refetchAgain = true;
         emitSlice(slice);
       } catch (err) {
         // Network blip — leave records as-is; next event or resync will
@@ -1092,21 +1182,24 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // (the slice goes ready below), so the pre-ready touched-set has served its
     // purpose — clear it so it can't leak across a later resync/teardown.
     //
-    // MINOR (sort+limit under-fill): a pre-ready DELETE of a top-N record
-    // vacates a window slot, but the next-ranked (below-window, never-fetched)
-    // record wasn't pulled in — the window would render N-1 until the next
-    // event. windowDeletedIds is populated in handleSseEvent ONLY by a
-    // pre-consolidation DELETE on a sort+limit slice (creates/updates never
-    // under-fill, so they don't trigger a refetch that would otherwise throw
-    // away a touched create the stub server hasn't caught up to). Capture the
-    // ids BEFORE clearing so they can suppress a resurrected row in the refetch.
+    // sort+limit under-fill: a pre-ready DELETE or a demoting UPDATE can leave
+    // the top-N short, because the bootstrap getList fetched only the top-N.
+    //   - a DELETE vacates a slot;
+    //   - an UPDATE that DEMOTES a windowed row below the top-N vacates the slot
+    //     it occupied — the below-window record that should promote was never
+    //     fetched.
+    // Neither is recoverable from `slice.records ∪ pending` alone (the promoted
+    // record isn't in either), so re-query the top-N once consolidated whenever
+    // windowDirtyDuringBootstrap is set (armed by the DELETE / UPDATE branches in
+    // handleSseEvent; a plain CREATE never under-fills, so it doesn't arm). The
+    // refetch itself drops any stale row the queue has tombstoned (see
+    // scheduleRefetch), so a server commit lagging the SSE broadcast can't
+    // resurrect a just-deleted row — no separate suppress list needed.
     // scheduleRefetch self-coalesces (refetchInFlight / refetchAgain), so this
     // can't double-fire with a later event-driven refetch.
-    const windowDeletedIds =
-      (!!sort || !!limit) && slice.windowDeletedIds.size > 0
-        ? new Set(slice.windowDeletedIds)
-        : null;
-    slice.windowDeletedIds.clear();
+    const armWindowRefetch =
+      (!!sort || !!limit) && slice.windowDirtyDuringBootstrap;
+    slice.windowDirtyDuringBootstrap = false;
     slice.sseTouchedDuringBootstrap.clear();
     slice.consolidated = true;
 
@@ -1152,14 +1245,13 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       else forceEmitConsumer(slice, consumer);
     }
 
-    // MINOR: refill a sort+limit window that a pre-ready DELETE under-filled
-    // (see windowDeletedIds above). Runs AFTER the ready emit so the consumer
-    // gets the consolidated state first, then the re-queried top-N (which pulls
-    // in any below-window record promoted by the vacated slot). The deleted ids
-    // are passed as the suppress set so a lagging server commit can't resurrect
-    // them. scheduleRefetch is debounced — it won't fight a concurrent
-    // event-driven refetch.
-    if (windowDeletedIds) scheduleRefetch(slice, windowDeletedIds);
+    // Refill a sort+limit window that a pre-ready event under-filled (delete /
+    // demotion / promotion — see armWindowRefetch above). Runs AFTER the ready
+    // emit so the consumer gets the consolidated state first, then the
+    // re-queried top-N (which pulls in any below-window record promoted by the
+    // vacated slot). scheduleRefetch drops queue-tombstoned ghosts and is
+    // debounced — it won't fight a concurrent event-driven refetch.
+    if (armWindowRefetch) scheduleRefetch(slice);
   }
 
   // ---- Teardown ----
@@ -1200,7 +1292,8 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         refetchInFlight: null,
         refetchAgain: false,
         tornDown: false,
-        windowDeletedIds: new Set(),
+        windowDirtyDuringBootstrap: false,
+        pendingWindowTombstones: new Set(),
         sseTouchedDuringBootstrap: new Set(),
       };
       slices.set(key, slice);
@@ -1314,14 +1407,57 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
 
         if (slice.tornDown || slice.consumers.size === 0) return;
 
-        // Reconcile: anything in the prior slice.records that's MISSING
-        // from the refresh and has no pending mutation → deleted server-side
-        // during the disconnect window. Apply a queue tombstone so
-        // queue.viewCollection drops them.
+        // Reconcile: anything in the prior set that's MISSING from the refresh
+        // and has no pending mutation → deleted server-side during the
+        // disconnect window. Apply a queue tombstone so queue.viewCollection
+        // drops them.
         const next = new Map<string, RawRecord>();
         for (const r of fresh) next.set(r.id, r);
         const seen = new Set(next.keys());
-        for (const oldId of slice.records.keys()) {
+        // The prior set to reconcile against. slice.records.keys() is NOT
+        // sufficient for the shapes whose materialize() reads the QUEUE rather
+        // than slice.records: a record can be SERVER-BACKED in the queue yet
+        // absent from slice.records. The classic case is an optimistic create
+        // that ACKED while the SSE was suspended — the write succeeded (queue has
+        // a server snapshot from the ack) but its echo was lost, so
+        // handleSseEvent never ran and never put it in slice.records. If it's
+        // later server-deleted (also unseen over the dead SSE), the fetch omits
+        // it but the slice.records-only scan never tombstones it → it ghosts in
+        // the view forever. So include the queue's server-backed records in the
+        // reconcile set for those shapes:
+        //   - filter-only wildcard: materialize reads queue.viewCollection, so
+        //     scan every queue record matching this slice's predicate.
+        //   - single (topic=id): materialize reads queue.view(col, topic), so the
+        //     one relevant id is `topic` itself.
+        // sort+limit is excluded: materialize reads slice.records (the top-N
+        // window), which the refetch REPLACES with the true top-N — a below-window
+        // record absent from the top-N fetch must NOT be tombstoned (BLOCKER 2).
+        //
+        // CRITICAL: gate each queue candidate on hasServerSnapshot && !hasPending
+        // (mirroring the slice.records pending guard). An optimistic-only pending
+        // create (no server snapshot) legitimately isn't in the fetch yet —
+        // tombstoning it would destroy an in-flight write. The gate is exactly
+        // what protects it.
+        const reconcileIds = new Set<string>(slice.records.keys());
+        if (topic === "*" && !sort && !limit) {
+          const predicate = slice.consumers.values().next().value?.spec.predicate;
+          for (const r of queue.viewCollection(collection, predicate)) {
+            if (
+              queue.hasServerSnapshot(collection, r.id) &&
+              !queue.hasPending(collection, r.id)
+            ) {
+              reconcileIds.add(r.id);
+            }
+          }
+        } else if (topic !== "*") {
+          if (
+            queue.hasServerSnapshot(collection, topic) &&
+            !queue.hasPending(collection, topic)
+          ) {
+            reconcileIds.add(topic);
+          }
+        }
+        for (const oldId of reconcileIds) {
           if (seen.has(oldId)) continue;
           if (queue.hasPending(collection, oldId)) continue;
           queue.applyServer(collection, oldId, null);
