@@ -122,6 +122,26 @@ interface Slice {
   refetchAgain: boolean;
   /** True once teardown has started; gates re-entry. */
   tornDown: boolean;
+  /**
+   * Ids the LIVE SSE listener authoritatively touched DURING the pre-ready
+   * bootstrap window (create / update / delete). See the pre-ready-window
+   * commentary in handleSseEvent + bootstrap.
+   *
+   * Why this exists: the SSE listener now attaches CONCURRENTLY with the
+   * initial fetch (Part A — to overlap registration latency). So an SSE event
+   * for the collection can land in the queue + slice.records BEFORE the fetch
+   * resolves. Bootstrap's consolidation (seed loop / reconcileGhosts /
+   * sort+limit slice.records replace) then runs AFTER, against a fetch result
+   * that PREDATES those events. Without a record of "the live listener already
+   * spoke for this id," consolidation would corrupt the fresher live state:
+   *   - reconcileGhosts would tombstone a live CREATE absent from the fetch,
+   *   - the seed loop would resurrect a live DELETE (re-seed the stale row),
+   *   - the sort+limit replace would drop a live event the fetch can't see.
+   * Every consumer of this set treats a touched id as "live truth already
+   * applied — do not let the older fetch overwrite it." Cleared once bootstrap
+   * consolidation consumes it (the slice is then `ready`, so future SSE events
+   * emit directly and never enter this set). */
+  sseTouchedDuringBootstrap: Set<string>;
 }
 
 interface CollectionListener {
@@ -252,6 +272,18 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
    */
   const RESYNC_COALESCE_MS = 2000;
   let lastResyncAt = 0;
+
+  /**
+   * Upper bound on how long bootstrap waits for SSE registration to land before
+   * it marks the slice ready and emits anyway. Generous on purpose: a local-PB
+   * registration always wins this race (so tests are deterministic — the await
+   * closes the lost-pre-registration-event window before the timeout fires),
+   * but it's bounded so a hung SSE connect can never blank the app
+   * indefinitely. The pathological slow-connect case degrades to the old
+   * behavior (emit fresh state without a confirmed listener) and is recovered
+   * by resync() on focus/PB_CONNECT — the standing safety net for events missed
+   * while the SSE was not yet live. */
+  const SUBSCRIBE_READY_TIMEOUT_MS = 10000;
 
   /** Surface a bootstrap/refetch failure to wpb's debug ring buffer so
    *  SyncDot + window.__wpbDebug see a unified event feed. Cheap; no need
@@ -491,7 +523,29 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     }
   }
 
-  function ensureCollectionListener(collection: string): void {
+  /**
+   * Ensure a shared per-collection SSE listener exists; bump its refcount.
+   *
+   * Returns a Promise that resolves once the underlying `subscribe("*")`
+   * registration has COMPLETED — the PB SDK resolves the subscribe Promise only
+   * after its POST to `/api/realtime` lands (connection established +
+   * subscription registered server-side). bootstrap() awaits this (raced
+   * against a timeout) before it marks a slice ready, to close the
+   * lost-pre-registration-event race: PocketBase does NOT replay events
+   * broadcast before a subscription is registered, so a producer firing right
+   * when a fresh consumer subscribes would otherwise be lost until resync().
+   *
+   * The returned Promise NEVER rejects — a late registration rejection (network
+   * blip on the POST) is swallowed and surfaced as "ready immediately" so the
+   * readiness await can't throw or leave the slice stuck un-ready. resync()
+   * recovers any events missed on a registration that failed.
+   *
+   * Node / no-EventSource safety: if `subscribe` throws synchronously (e.g.
+   * `EventSource is not defined` in the Node e2e harness without a polyfill) we
+   * resolve immediately rather than reject — there's no realtime channel to
+   * wait for, so the slice becomes ready right away. `l.unsub` stays null;
+   * teardown is a no-op. */
+  function ensureCollectionListener(collection: string): Promise<void> {
     // First realtime touch — arm the reconnect→resync hook once.
     hookRealtimeLifecycle();
     let l = listeners.get(collection);
@@ -500,18 +554,28 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       listeners.set(collection, l);
     }
     l.refcount += 1;
-    if (l.unsub) return;
+    // Already registered (or registration in flight) from another slice — reuse
+    // its registration signal so this slice's readiness gate waits on the same
+    // POST. Map both fulfil + reject to undefined (never throw to the awaiter).
+    if (l.unsub) return l.unsub.then(() => undefined, () => undefined);
 
     // Subscribe via raw pb (NOT wpb) because we want exact control over
     // initial fetch shape (sort+limit) and we don't want wpb's own initial
     // getFullList that subscribe() does. Optimistic writes flow to the
     // mirror via the mirrorIntegration.subscribeMutations hook below.
-    l.unsub = pb().collection(collection).subscribe("*", (e) => {
-      if (disposed) return;
-      const action = e.action as "create" | "update" | "delete";
-      const record = e.record as unknown as RawRecord;
-      handleSseEvent(collection, action, record);
-    });
+    try {
+      l.unsub = pb().collection(collection).subscribe("*", (e) => {
+        if (disposed) return;
+        const action = e.action as "create" | "update" | "delete";
+        const record = e.record as unknown as RawRecord;
+        handleSseEvent(collection, action, record);
+      });
+    } catch {
+      // Synchronous throw (no EventSource in this env). No channel to await.
+      l.unsub = null;
+      return Promise.resolve();
+    }
+    return l.unsub.then(() => undefined, () => undefined);
   }
 
   function releaseCollectionListener(collection: string): void {
@@ -557,6 +621,13 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       const had = slice.records.has(id);
 
       if (action === "delete") {
+        // A pre-ready delete for an id the fetch will still carry must be
+        // recorded BEFORE the `!had` early-out: even if the slice doesn't yet
+        // track the id (bootstrap hasn't seeded slice.records), the live
+        // listener has authoritatively seen it deleted, and the consolidation
+        // (seed loop / sort+limit replace) must not resurrect it. queue.apply
+        // Server(null) above already tombstoned it in the queue.
+        if (!slice.ready) slice.sseTouchedDuringBootstrap.add(id);
         if (!had) {
           // Delete for an id this slice doesn't track — skip emit to
           // avoid spurious churn (scenario 16).
@@ -565,8 +636,19 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         slice.records.delete(id);
       } else {
         // create or update — upsert into slice.records.
+        if (!slice.ready) slice.sseTouchedDuringBootstrap.add(id);
         slice.records.set(id, record);
       }
+
+      // Pre-ready gate: the SSE listener now attaches CONCURRENTLY with the
+      // initial fetch (Part A), so an event can land before bootstrap has
+      // marked the slice ready. We've applied it to the queue + slice.records
+      // above (keeping the queue authoritative and recording the touched id so
+      // bootstrap's consolidation treats this live value as truth), but we must
+      // NOT emit a partial pre-bootstrap view — bootstrap's force-emit, which
+      // runs after ready with the consolidated initial set, delivers the first
+      // view. Mirrors the mutation hook's `if (!slice.ready) continue`.
+      if (!slice.ready) continue;
 
       // For sort+limit slices, the window may have shifted — refetch.
       // (For wildcard non-sort/limit slices we don't refetch on every
@@ -716,19 +798,24 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     for (const id of Array.from(slice.records.keys())) {
       if (seen.has(id)) continue;
       if (queue.hasPending(collection, id)) continue;
+      // Pre-ready-window guard: a live SSE event touched this id DURING the
+      // bootstrap fetch (which predates it). A create that arrived after the
+      // fetch query ran is "absent from the fresh fetch" but is NOT
+      // deleted-server-side — tombstoning it would destroy the live record (and
+      // persist the wrong tombstone to IDB). The touched-set discriminates a
+      // genuine ghost (cached, server-deleted, untouched → still tombstoned)
+      // from a live create the fetch simply couldn't see.
+      if (slice.sseTouchedDuringBootstrap.has(id)) continue;
       queue.applyServer(collection, id, null);
       slice.records.delete(id);
     }
   }
 
-  async function bootstrap(slice: Slice): Promise<void> {
+  /** The initial-fetch half of bootstrap. Pure I/O + the single-record 404
+   *  tombstone case; never touches the SSE listener or readiness. Extracted so
+   *  bootstrap() can run it CONCURRENTLY with SSE registration (Part A). */
+  async function bootstrapFetch(slice: Slice): Promise<RawRecord[]> {
     const { collection, topic, filter, sort, limit } = slice.spec;
-
-    // Stale-while-revalidate: paint the snapshot cache immediately, then let
-    // the network fetch below revalidate. No-op (returns false) when the
-    // cache is empty for this slice — preserves today's blank-then-data.
-    const eagerEmitted = eagerEmitFromCache(slice);
-
     let initial: RawRecord[] = [];
     try {
       if (topic !== "*") {
@@ -745,8 +832,17 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
           //     an optimistic create-with-id isn't clobbered.
           // (Pre-cache this branch did nothing — safe only because the queue
           // was always empty here; it isn't anymore.)
+          //
+          // Pre-ready-window guard (Part B): a live SSE CREATE for this id may
+          // have landed during the fetch (this getOne predates it). The fetch
+          // is then stale-404 but the record is alive — do NOT tombstone it.
+          // The touched-set records that the live listener spoke for this id.
           if ((err as { status?: number })?.status === 404) {
-            if (queue.hasServerSnapshot(collection, topic) && !queue.hasPending(collection, topic)) {
+            if (
+              queue.hasServerSnapshot(collection, topic) &&
+              !queue.hasPending(collection, topic) &&
+              !slice.sseTouchedDuringBootstrap.has(topic)
+            ) {
               queue.applyServer(collection, topic, null);
             }
           } else {
@@ -782,11 +878,61 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       console.warn("[mirror] bootstrap fetch failed", { collection, topic }, err);
       recordBootstrapError(collection, topic, err, "bootstrap");
     }
+    return initial;
+  }
 
-    // Cancel-before-resolve: bail if all consumers gone during the fetch.
-    // Critically this happens BEFORE we attach an SSE listener — no
-    // wasted pb.subscribe call (scenarios 7, 9).
+  async function bootstrap(slice: Slice): Promise<void> {
+    const { collection, topic, sort, limit } = slice.spec;
+
+    // Stale-while-revalidate: paint the snapshot cache immediately, then let
+    // the network fetch below revalidate. No-op (returns false) when the
+    // cache is empty for this slice — preserves today's blank-then-data.
+    //
+    // INTENTIONALLY runs FIRST, before any network or SSE-registration work,
+    // and is deliberately NOT gated behind registration: this is the instant
+    // cold-load paint the snapshot cache exists for. Gating it on a network RTT
+    // (the registration POST) would undercut the whole point of the cache —
+    // the user would stare at a blank screen for a round-trip even though we
+    // already hold their data. Registration only gates the FRESH emit below.
+    const eagerEmitted = eagerEmitFromCache(slice);
+
+    // Yield one microtask so a SYNCHRONOUS unsubscribe() (scenarios 7, 9 —
+    // watch() returns the handle and the caller tears down before bootstrap's
+    // first real await) lands BEFORE we kick off SSE registration. Without this,
+    // registration would fire before tornDown could be observed, wasting a
+    // pb.subscribe call (and leaking/late-unsubbing a listener).
+    await Promise.resolve();
     if (slice.tornDown || slice.consumers.size === 0) return;
+
+    // Overlap registration with the fetch (Part A). The SSE subscription POST
+    // and the initial getOne/getList/getFullList are independent I/O; firing
+    // them concurrently hides registration latency UNDER the fetch instead of
+    // adding a second RTT — preserving cold-load first-paint. We attach the
+    // listener (refcount bump) NOW and await its registration below.
+    //
+    // LOST-PRE-REGISTRATION-EVENT RACE (why we await registration before
+    // ready): PocketBase does NOT replay events broadcast before a subscription
+    // is registered server-side. Pre-fix, bootstrap marked the slice ready and
+    // emitted fresh state the instant the fetch resolved, while the subscribe
+    // POST was still in flight — so any event published in that window (a
+    // producer firing right when the consumer's initial state lands) was lost
+    // forever, with no realtime update until the next resync(). Awaiting the
+    // registration Promise (resolves once the POST completes + the listener is
+    // live) before marking ready closes that window. Bounded by
+    // SUBSCRIBE_READY_TIMEOUT_MS so a hung SSE connect can't blank the app.
+    const registration = ensureCollectionListener(collection);
+    slice.listenerHeld = true;
+
+    const initial = await bootstrapFetch(slice);
+
+    // Cancel-before-resolve: bail if all consumers gone during the fetch. The
+    // listener refcount was bumped above, so release it on the way out (the
+    // late unsubscribe fires once registration resolves — safeFireAndForget).
+    if (slice.tornDown || slice.consumers.size === 0) {
+      releaseCollectionListener(collection);
+      slice.listenerHeld = false;
+      return;
+    }
 
     // Ghost reconciliation (the cache-clobber fix). Any record we eager-
     // painted from the cache that is MISSING from the fresh fetch — and has
@@ -839,6 +985,19 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     if (sort || limit) {
       const fresh = new Map<string, RawRecord>();
       for (const r of initial) fresh.set(r.id, r);
+      // Pre-ready-window guard (Part B, blocker 3): the fetch result PREDATES
+      // any SSE events that landed during the bootstrap window, so for every
+      // touched id the live queue.view (server+pending, already reflecting the
+      // SSE event) is authoritative over whatever the fetch carried:
+      //   - live create/update the fetch OMITTED → set it (don't drop it),
+      //   - live update the fetch carried STALE → overwrite with the live value,
+      //   - live DELETE (queue.view === null) the fetch STILL carried → remove
+      //     it (don't let the stale fetch row resurrect the deleted record).
+      for (const id of slice.sseTouchedDuringBootstrap) {
+        const live = queue.view(collection, id);
+        if (live) fresh.set(id, live);
+        else fresh.delete(id);
+      }
       slice.records = fresh;
     } else {
       for (const r of initial) slice.records.set(r.id, r);
@@ -854,17 +1013,45 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // of revalidation. resync deliberately does NOT use this guard because its
     // job is the opposite: to overwrite stale-but-live snapshots on tab-resume.
     for (const r of initial) {
+      // Pre-ready-window guard (Part B, blocker 2): a live SSE event for this
+      // id landed during the bootstrap window (the fetch predates it). The
+      // touched-set marks the live value as authoritative — the stale fetch row
+      // must not re-seed over it. This covers the resurrection case directly: a
+      // pre-ready DELETE ran applyServer(null), which (with no pending) drops
+      // the queue entry → hasServerSnapshot is false → without this guard the
+      // seed loop would re-seed the stale fetch row and resurrect the deleted
+      // record. (For create/update the touched value is already the queue's
+      // live snapshot, so this also avoids a redundant re-write.)
+      if (slice.sseTouchedDuringBootstrap.has(r.id)) continue;
       if (!queue.hasServerSnapshot(collection, r.id) || queue.isHydrated(collection, r.id)) {
         queue.applyServer(collection, r.id, r);
       }
     }
 
-    // Attach SSE listener (refcount per collection).
-    ensureCollectionListener(collection);
-    slice.listenerHeld = true;
+    // The live SSE listener was attached concurrently with the fetch (above).
+    // Consolidation is done; from here on, future SSE events emit directly
+    // (the slice goes ready below), so the pre-ready touched-set has served its
+    // purpose — clear it so it can't leak across a later resync/teardown.
+    slice.sseTouchedDuringBootstrap.clear();
+
+    // Await SSE registration (raced against a timeout) BEFORE marking ready, to
+    // close the lost-pre-registration-event race documented above. The listener
+    // was attached concurrently with the fetch, so by here its registration
+    // POST has usually already resolved (overlap) — the await is then a no-op.
+    // If it's still in flight we wait; if it never lands within
+    // SUBSCRIBE_READY_TIMEOUT_MS we fall through to ready anyway (old behavior;
+    // resync recovers any missed events). The timer is always cleared (no
+    // dangling 10s timer); registration never rejects to the awaiter (mapped in
+    // ensureCollectionListener), so no double-resolve / unhandledrejection.
+    let regTimer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      registration.then(() => { if (regTimer) clearTimeout(regTimer); }),
+      new Promise<void>((res) => { regTimer = setTimeout(res, SUBSCRIBE_READY_TIMEOUT_MS); }),
+    ]);
 
     if (slice.tornDown || slice.consumers.size === 0) {
-      // Cancelled in the gap between refcount-bump and now. Release.
+      // Cancelled while awaiting registration. Release the listener (the late
+      // unsubscribe fires once registration resolves — safeFireAndForgetUnsub).
       releaseCollectionListener(collection);
       slice.listenerHeld = false;
       return;
@@ -921,6 +1108,7 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         refetchInFlight: null,
         refetchAgain: false,
         tornDown: false,
+        sseTouchedDuringBootstrap: new Set(),
       };
       slices.set(key, slice);
     }
