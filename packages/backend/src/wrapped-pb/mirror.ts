@@ -1308,6 +1308,10 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
                 fresh = [];
               } else {
                 recordBootstrapError(collection, topic, err, "resync");
+                // No seeding will run — release the in-flight fetch + GC, else
+                // this token leaks and pins min(inFlightFetchSeqs) forever,
+                // blocking tombstone GC across the whole queue.
+                queue.noteFetchResolved(fetchToken);
                 return;
               }
             }
