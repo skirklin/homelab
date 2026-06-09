@@ -1,0 +1,13 @@
+# k3s server config — applied at /etc/rancher/k3s/config.yaml on the VPS node.
+# Enables kubelet image garbage collection so UNUSED container images are
+# auto-pruned when disk crosses high%, freeing down toward low%. This keeps
+# deploy-churn image layers from filling the node root disk (the registry +
+# repeated app builds otherwise accumulate GBs of superseded layers).
+#
+# Apply on the node (then restart k3s):
+#   sudo cp infra/k3s/config.yaml /etc/rancher/k3s/config.yaml   # (or scp the contents)
+#   sudo systemctl restart k3s                                    # ~20s API blip; workloads keep running
+# Verify: journalctl -u k3s | grep image-gc-  (should echo the thresholds)
+kubelet-arg:
+  - image-gc-high-threshold=75
+  - image-gc-low-threshold=60
