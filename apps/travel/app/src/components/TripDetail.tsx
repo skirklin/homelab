@@ -318,6 +318,7 @@ export function TripDetail() {
           trip={trip}
           itinerary={activeItin}
           activityMap={activityMap}
+          weatherByDate={weatherMap}
           onOpenDay={(day) => {
             if (day.date) navigate(`day/${day.date}`);
           }}
