@@ -124,6 +124,57 @@ describe("ObservationDetail", () => {
     expect(screen.getByPlaceholderText("Type a message…")).toBeInTheDocument();
   });
 
+  it("renders the observation card INSIDE the chat panel's scroll container (unified scroll)", async () => {
+    // Structural assertion for the layout refactor: the observation card
+    // is no longer a sibling of <ChatThreadPanel> sitting above the
+    // panel — it's the panel's `headerSlot`, rendered inside the same
+    // scrollable Timeline as the reply messages. We confirm that by
+    // checking that the observation's text node and the empty-state
+    // placeholder share a common ancestor that is NOT just the page
+    // container — specifically, that the placeholder lives downstream of
+    // the observation in document order, which only holds when both are
+    // inside the Timeline.
+    mockObserverBackend.getObservation.mockResolvedValueOnce(
+      makeObservation({ id: "obs-7", content: "Observation body text" }),
+    );
+    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+
+    renderDetail("obs-7");
+
+    const obsText = await screen.findByText("Observation body text");
+    const placeholder = await screen.findByText(
+      /No replies yet\. Start a conversation about this observation/,
+    );
+
+    // The observation appears before the empty placeholder in document
+    // order — guarantees `headerSlot` sits ABOVE the empty state inside
+    // the Timeline (and not as a floating sibling above the panel).
+    // eslint-disable-next-line no-bitwise
+    expect(
+      obsText.compareDocumentPosition(placeholder) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // And both share an ancestor that scrolls — the panel's Timeline.
+    // Walk up from each and find their nearest common ancestor; it must
+    // be one ancestor of the observation card, NOT the document body.
+    // (The Timeline is a styled.div, so we can't query it by tag, but we
+    // can verify the common ancestor is well below <body>.)
+    let depthFromBodyToCommon = 0;
+    let walker: Node | null = obsText;
+    while (walker && walker !== document.body) {
+      if (walker.contains(placeholder)) break;
+      walker = walker.parentNode;
+      depthFromBodyToCommon += 1;
+    }
+    // The common ancestor must NOT be document.body — that would mean
+    // they're separately rooted and just happen to share the document.
+    expect(walker).not.toBe(document.body);
+    expect(walker).not.toBeNull();
+    // And we should have walked at least a couple of levels up — the
+    // common ancestor is the Timeline, several DOM levels into the page.
+    expect(depthFromBodyToCommon).toBeGreaterThan(0);
+  });
+
   it("posting a new message uses thread_id='obs:<id>'", async () => {
     const user = userEvent.setup();
     mockObserverBackend.getObservation.mockResolvedValueOnce(

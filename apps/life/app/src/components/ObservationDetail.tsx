@@ -8,8 +8,11 @@
  * observation's thread.
  *
  * Layout:
- *   - Sticky observation card at the top (the thing we're discussing).
- *   - ChatThreadPanel below filling the remaining vertical space.
+ *   - One scroll container — the observation card is the `headerSlot` of
+ *     `ChatThreadPanel`, so it shares the timeline's scroll context. As
+ *     the reader scrolls down through replies, the observation naturally
+ *     rolls out the top instead of being a frozen header. The composer
+ *     stays pinned at the bottom of the panel.
  *
  * Robustness:
  *   - 404 / fetch failure renders an "observation not found" placeholder.
@@ -61,13 +64,16 @@ const DetailPageContainer = styled(PageContainer)`
   padding-bottom: 0;
 `;
 
+// Rendered as `headerSlot` inside the ChatThreadPanel's Timeline — so it
+// flows in the same scroll container as the reply messages. No
+// `flex-shrink: 0` / `margin-bottom` needed: Timeline's `gap` handles
+// spacing between this card and the first message bubble, and we
+// explicitly WANT this to scroll away as the user reads replies.
 const ObservationCard = styled.div`
   background: var(--color-bg);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
   padding: var(--space-md);
-  margin-bottom: var(--space-md);
-  flex-shrink: 0;
 `;
 
 const CardHeader = styled.div`
@@ -181,25 +187,24 @@ export function ObservationDetail() {
             />
           </Section>
         ) : (
-          <>
-            <ObservationCard>
-              <CardHeader>
-                {periodTag(observation.period)}
-                <Timestamp>
-                  <CalendarOutlined />{" "}
-                  {dayjs(observation.created).format("MMM D, YYYY h:mm A")}
-                  {" · "}
-                  {dayjs(observation.created).fromNow()}
-                </Timestamp>
-              </CardHeader>
-              <Content>{observation.content}</Content>
-            </ObservationCard>
-
-            <ChatThreadPanel
-              threadId={threadId}
-              emptyDescription="No replies yet. Start a conversation about this observation — the coach will respond inline."
-            />
-          </>
+          <ChatThreadPanel
+            threadId={threadId}
+            emptyDescription="No replies yet. Start a conversation about this observation — the coach will respond inline."
+            headerSlot={
+              <ObservationCard>
+                <CardHeader>
+                  {periodTag(observation.period)}
+                  <Timestamp>
+                    <CalendarOutlined />{" "}
+                    {dayjs(observation.created).format("MMM D, YYYY h:mm A")}
+                    {" · "}
+                    {dayjs(observation.created).fromNow()}
+                  </Timestamp>
+                </CardHeader>
+                <Content>{observation.content}</Content>
+              </ObservationCard>
+            }
+          />
         )}
       </DetailPageContainer>
     </Shell>
