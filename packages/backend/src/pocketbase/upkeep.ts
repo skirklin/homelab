@@ -441,37 +441,6 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     return records.map(taskFromRecord);
   }
 
-  async instantiateTemplate(templateRootId: string, tags: string[]): Promise<string> {
-    const subtree = await this.getSubtree(templateRootId);
-    subtree.sort((a, b) => a.path.length - b.path.length);
-
-    const idMap = new Map<string, string>();
-
-    for (const task of subtree) {
-      const newParentId = task.parentId ? (idMap.get(task.parentId) || "") : "";
-      const newId = await this.addTask(task.list, {
-        parentId: newParentId,
-        position: task.position,
-        name: task.name,
-        description: task.description,
-        taskType: task.taskType,
-        frequency: task.frequency,
-        lastCompleted: null,
-        deadline: task.deadline,
-        deadlineLeadDays: task.deadlineLeadDays,
-        completed: false,
-        snoozedUntil: null,
-        assignees: [],
-        tags: tags.filter((t) => !t.startsWith("template:")),
-        collapsed: task.collapsed,
-        cleared: false,
-      });
-      idMap.set(task.id, newId);
-    }
-
-    return idMap.get(subtree[0].id)!;
-  }
-
   async updateCompletion(eventId: string, updates: { notes?: string; timestamp?: Date }): Promise<void> {
     const cached = this.wpb.collection("task_events").view<RecordModel>(eventId);
     const record: RecordModel = cached ?? await this.pb().collection("task_events").getOne(eventId);
