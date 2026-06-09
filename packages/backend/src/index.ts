@@ -80,7 +80,7 @@ export type {
 
 // --- Interfaces ---
 export type { AuthBackend } from "./interfaces/auth";
-export type { UserBackend, SlugNamespace } from "./interfaces/user";
+export type { UserBackend, SlugNamespace, PushSubscriptionInfo } from "./interfaces/user";
 export type { ShoppingBackend } from "./interfaces/shopping";
 export type { RecipesBackend, RecipesUser } from "./interfaces/recipes";
 export type { UpkeepBackend } from "./interfaces/upkeep";

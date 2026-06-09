@@ -51,6 +51,7 @@ export type {
   UserProfile,
   UserProfileStore,
   NotificationMode,
+  PushSubscriptionInfo,
 } from "./types";
 
 // UI Components
