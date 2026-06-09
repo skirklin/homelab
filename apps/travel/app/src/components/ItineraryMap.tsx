@@ -47,6 +47,15 @@ const MapWrapper = styled.div`
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid #f0f0f0;
+
+  /* On the day view the map sits ABOVE the day content on phones; a full
+     500px eats half the screen and pushes the activities out of reach. Shrink
+     it so the day's slots are visible without a long scroll. min(280px, 40dvh)
+     scales it down on short phones instead of eating half a small screen; dvh
+     tracks the iOS dynamic-toolbar viewport correctly. */
+  @media (max-width: 1000px) {
+    height: min(280px, 40dvh);
+  }
 `;
 
 const InfoContent = styled.div`
