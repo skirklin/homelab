@@ -364,7 +364,14 @@ case "${1:-}" in
             fi
         done
 
-        compose up -d
+        # `--build` so a changed migration/hook (baked into the PB image via
+        # COPY in pocketbase.Dockerfile) is actually picked up. Docker's layer
+        # cache makes the unchanged case ~free: the expensive PB-download layer
+        # is reused and only the cheap trailing COPY layers re-run when a file
+        # under pb_migrations/pb_hooks changes. Without this, `up` reused a
+        # stale image and the test PB ran against an OLD schema — a silent
+        # pre-deploy-gate correctness hole.
+        compose up -d --build
         echo "Waiting for services to be healthy..."
         pb_written=false
         for _ in $(seq 1 30); do
