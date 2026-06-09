@@ -111,6 +111,24 @@ interface Slice {
   /** True once initial fetch has resolved (or definitively failed) and the
    *  SSE listener is attached. */
   ready: boolean;
+  /**
+   * True once bootstrap's consolidation has run AND consumed the touched-set
+   * (set at the sseTouchedDuringBootstrap.clear() site, before the registration
+   * await). Distinct from `ready` ON PURPOSE.
+   *
+   * Why decouple touched-set population from `ready`: a WARM-CACHE slice
+   * (shopping_items / shopping_trips for every returning user) eager-paints from
+   * the snapshot cache and sets `ready = true` BEFORE the network fetch resolves
+   * (eagerEmitFromCache). If touched-set population were keyed on `!ready`, an
+   * SSE event during that in-flight fetch would take the already-ready path and
+   * NEVER enter sseTouchedDuringBootstrap — then bootstrap's consolidation, which
+   * still runs against a fetch result that PREDATES the event, would tombstone a
+   * pre-fetch create / resurrect a pre-fetch delete with an empty touched-set
+   * (the Blocker-1/2 corruption, on the steady-state path). Keying population on
+   * `!consolidated` instead means the touched-set is populated for the entire
+   * pre-consolidation window regardless of eager readiness; only the EMIT path
+   * stays gated on `ready` (eager-ready slices emit live SSE immediately). */
+  consolidated: boolean;
   /** Per-consumer last-emitted hash. Each consumer's view only emits when
    *  ITS materialized view changes (predicates differ across consumers). */
   perConsumerHash: WeakMap<Consumer, string>;
@@ -122,6 +140,12 @@ interface Slice {
   refetchAgain: boolean;
   /** True once teardown has started; gates re-entry. */
   tornDown: boolean;
+  /** Ids deleted by a pre-consolidation SSE DELETE on a sort+limit slice. A
+   *  delete vacates a window slot, so bootstrap re-queries the top-N once
+   *  consolidated to pull in a below-window record — passing these ids as the
+   *  refetch's suppress set so a server commit lagging the SSE broadcast can't
+   *  resurrect a deleted row into the window. (MINOR fix.) */
+  windowDeletedIds: Set<string>;
   /**
    * Ids the LIVE SSE listener authoritatively touched DURING the pre-ready
    * bootstrap window (create / update / delete). See the pre-ready-window
@@ -627,7 +651,20 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         // listener has authoritatively seen it deleted, and the consolidation
         // (seed loop / sort+limit replace) must not resurrect it. queue.apply
         // Server(null) above already tombstoned it in the queue.
-        if (!slice.ready) slice.sseTouchedDuringBootstrap.add(id);
+        // Keyed on `!consolidated` (NOT `!ready`): a warm-cache slice goes ready
+        // early via eager paint, but bootstrap's consolidation hasn't run yet —
+        // it must still see this id in the touched-set. See `consolidated` doc.
+        if (!slice.consolidated) {
+          slice.sseTouchedDuringBootstrap.add(id);
+          // MINOR (sort+limit under-fill): a pre-consolidation DELETE is the
+          // ONLY event shape that can leave the top-N window short — it vacates
+          // a slot that the gated fetch (top-N only) never had a below-window
+          // record to backfill from. Record the deleted id so bootstrap
+          // re-queries the top-N once consolidated AND suppresses these ids in
+          // the refetch (a lagging server commit must not resurrect them).
+          // Creates/updates never under-fill, so they don't arm this.
+          if (slice.spec.sort || slice.spec.limit) slice.windowDeletedIds.add(id);
+        }
         if (!had) {
           // Delete for an id this slice doesn't track — skip emit to
           // avoid spurious churn (scenario 16).
@@ -636,7 +673,9 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         slice.records.delete(id);
       } else {
         // create or update — upsert into slice.records.
-        if (!slice.ready) slice.sseTouchedDuringBootstrap.add(id);
+        // Keyed on `!consolidated` (NOT `!ready`) for the warm-cache eager-paint
+        // case — see the delete branch above and the `consolidated` doc.
+        if (!slice.consolidated) slice.sseTouchedDuringBootstrap.add(id);
         slice.records.set(id, record);
       }
 
@@ -662,8 +701,16 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     }
   }
 
-  /** Debounced refetch for sort+limit slices. */
-  function scheduleRefetch(slice: Slice): void {
+  /** Debounced refetch for sort+limit slices.
+   *
+   *  `suppressIds` (MINOR fix): ids the bootstrap consolidation authoritatively
+   *  DELETED in the pre-ready window. A getList issued right after those deletes
+   *  can momentarily still carry the just-deleted rows (the server commit may
+   *  lag the SSE broadcast the mirror already consumed), which would resurrect
+   *  them into the window. The set is authoritative — drop those ids from the
+   *  refetch result regardless of what the server returned. Empty for the normal
+   *  event-driven refetch path. */
+  function scheduleRefetch(slice: Slice, suppressIds?: Set<string>): void {
     if (slice.refetchInFlight) {
       slice.refetchAgain = true;
       return;
@@ -678,7 +725,10 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         });
         if (slice.tornDown || slice.consumers.size === 0) return;
         const next = new Map<string, RawRecord>();
-        for (const r of result.items as unknown as RawRecord[]) next.set(r.id, r);
+        for (const r of result.items as unknown as RawRecord[]) {
+          if (suppressIds?.has(r.id)) continue;
+          next.set(r.id, r);
+        }
         slice.records = next;
         emitSlice(slice);
       } catch (err) {
@@ -928,9 +978,18 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // Cancel-before-resolve: bail if all consumers gone during the fetch. The
     // listener refcount was bumped above, so release it on the way out (the
     // late unsubscribe fires once registration resolves — safeFireAndForget).
+    //
+    // BLOCKER 2 (double-release): a teardown DURING this await already ran
+    // teardownSlice, which released the listener and cleared listenerHeld. An
+    // unconditional release here would decrement the shared refcount a SECOND
+    // time — for two slices sharing one collection (refcount 2) that destroys
+    // the listener the SURVIVING slice still needs. Guard on listenerHeld,
+    // mirroring teardownSlice, so we only ever release a handle we still hold.
     if (slice.tornDown || slice.consumers.size === 0) {
-      releaseCollectionListener(collection);
-      slice.listenerHeld = false;
+      if (slice.listenerHeld) {
+        releaseCollectionListener(collection);
+        slice.listenerHeld = false;
+      }
       return;
     }
 
@@ -1032,7 +1091,24 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     // Consolidation is done; from here on, future SSE events emit directly
     // (the slice goes ready below), so the pre-ready touched-set has served its
     // purpose — clear it so it can't leak across a later resync/teardown.
+    //
+    // MINOR (sort+limit under-fill): a pre-ready DELETE of a top-N record
+    // vacates a window slot, but the next-ranked (below-window, never-fetched)
+    // record wasn't pulled in — the window would render N-1 until the next
+    // event. windowDeletedIds is populated in handleSseEvent ONLY by a
+    // pre-consolidation DELETE on a sort+limit slice (creates/updates never
+    // under-fill, so they don't trigger a refetch that would otherwise throw
+    // away a touched create the stub server hasn't caught up to). Capture the
+    // ids BEFORE clearing so they can suppress a resurrected row in the refetch.
+    // scheduleRefetch self-coalesces (refetchInFlight / refetchAgain), so this
+    // can't double-fire with a later event-driven refetch.
+    const windowDeletedIds =
+      (!!sort || !!limit) && slice.windowDeletedIds.size > 0
+        ? new Set(slice.windowDeletedIds)
+        : null;
+    slice.windowDeletedIds.clear();
     slice.sseTouchedDuringBootstrap.clear();
+    slice.consolidated = true;
 
     // Await SSE registration (raced against a timeout) BEFORE marking ready, to
     // close the lost-pre-registration-event race documented above. The listener
@@ -1052,8 +1128,14 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
     if (slice.tornDown || slice.consumers.size === 0) {
       // Cancelled while awaiting registration. Release the listener (the late
       // unsubscribe fires once registration resolves — safeFireAndForgetUnsub).
-      releaseCollectionListener(collection);
-      slice.listenerHeld = false;
+      // BLOCKER 2 (double-release): same as the post-fetch early-return above —
+      // teardownSlice may have already released during this await and cleared
+      // listenerHeld. Guard so we don't double-decrement a shared collection
+      // refcount and kill a sibling slice's listener. Mirrors teardownSlice.
+      if (slice.listenerHeld) {
+        releaseCollectionListener(collection);
+        slice.listenerHeld = false;
+      }
       return;
     }
 
@@ -1069,6 +1151,15 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
       if (eagerEmitted) deliverToConsumer(slice, consumer);
       else forceEmitConsumer(slice, consumer);
     }
+
+    // MINOR: refill a sort+limit window that a pre-ready DELETE under-filled
+    // (see windowDeletedIds above). Runs AFTER the ready emit so the consumer
+    // gets the consolidated state first, then the re-queried top-N (which pulls
+    // in any below-window record promoted by the vacated slot). The deleted ids
+    // are passed as the suppress set so a lagging server commit can't resurrect
+    // them. scheduleRefetch is debounced — it won't fight a concurrent
+    // event-driven refetch.
+    if (windowDeletedIds) scheduleRefetch(slice, windowDeletedIds);
   }
 
   // ---- Teardown ----
@@ -1103,11 +1194,13 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
         consumers: new Set(),
         records: new Map(),
         ready: false,
+        consolidated: false,
         perConsumerHash: new WeakMap(),
         listenerHeld: false,
         refetchInFlight: null,
         refetchAgain: false,
         tornDown: false,
+        windowDeletedIds: new Set(),
         sseTouchedDuringBootstrap: new Set(),
       };
       slices.set(key, slice);

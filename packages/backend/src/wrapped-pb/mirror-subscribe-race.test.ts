@@ -194,9 +194,18 @@ function makeStubPb(): StubHandle {
         },
         async getList(_page: number, perPage: number, opts?: { filter?: string; sort?: string }): Promise<{ items: RecordModel[] }> {
           c.fetchCalls += 1;
+          // Snapshot the result at CALL time (before the gate), mirroring a real
+          // query that executes when issued: a gated getList returns the state
+          // that existed when the request was made, not whatever the test mutated
+          // while the gate was held. This lets a test gate the bootstrap fetch
+          // (capturing pre-delete state) and then mutate the server so a later
+          // UNGATED refetch sees post-delete state.
+          const snapshot = applySort(
+            Array.from(c.records.values()).filter((r) => applyFilter(r, opts?.filter)),
+            opts?.sort,
+          ).slice(0, perPage);
           if (c.gateReads) await c.gateReads;
-          const all = Array.from(c.records.values()).filter((r) => applyFilter(r, opts?.filter));
-          return { items: applySort(all, opts?.sort).slice(0, perPage) };
+          return { items: snapshot };
         },
         async create(body: Record<string, unknown>): Promise<RecordModel> {
           const id = (body.id as string) ?? `id-${Math.random().toString(36).slice(2)}`;
@@ -796,5 +805,247 @@ describe("PART B: genuine ghost STILL reconciled (no regression)", () => {
     await flush();
 
     expect(states[states.length - 1].map((r) => r.id).sort()).toEqual(["a", "live"]);
+  });
+});
+
+// =====================================================================
+// REVIEW MATRIX CELL 1 — warm-cache (eager-ready) + live SSE in the window
+// =====================================================================
+//
+// A warm-cache slice eager-paints from the snapshot cache and sets ready=true
+// BEFORE the gated fetch resolves. Touched-set population must therefore be
+// keyed on `consolidated`, NOT `ready`: an SSE event arriving while the fetch is
+// still in flight must still enter sseTouchedDuringBootstrap, or bootstrap's
+// consolidation (which runs against a fetch result that predates the event)
+// tombstones a pre-fetch create / resurrects a pre-fetch delete. This is the
+// Blocker-1 regression on the steady-state path for every returning user.
+// These two tests FAIL on the pre-fix code (touched-set keyed on `!ready`).
+
+describe("MATRIX 1: warm-cache eager-ready + live SSE in the gated-fetch window", () => {
+  it("a pre-fetch SSE CREATE during a warm-cache (eager-ready) bootstrap is retained, not tombstoned", async () => {
+    // Cache holds c1 (server-backed) → eager paint fires + sets ready=true.
+    await seedSnapshots([
+      { key: "user-A::items::c1", user: "user-A", collection: "items", id: "c1", record: rec("items", { id: "c1", list: "L1", name: "cached" }), updatedAt: Date.now() },
+    ]);
+
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    // Fetch (gated) will return ONLY c1. The create 'new' lands via SSE after
+    // the fetch query was captured, so the fetch can't see it.
+    stub.col("items").records.set("c1", rec("items", { id: "c1", list: "L1", name: "cached" }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    await wpb.hydrateSnapshots();
+
+    const states: RawRecord[][] = [];
+    // Gate BOTH reads + registration. Eager paint still fires (ready=true) while
+    // the fetch is in flight — exactly the warm-cache window.
+    stub.holdReads();
+    stub.holdRegistration();
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => states.push(s),
+    );
+    await flush();
+
+    // Eager paint must already have emitted (ready). This is the warm-cache path.
+    expect(states.length, "eager paint sets ready before the fetch resolves").toBeGreaterThanOrEqual(1);
+
+    // Pre-fetch SSE CREATE in the window — NOT in the (already-captured) fetch.
+    stub.emit("items", { action: "create", record: rec("items", { id: "new", list: "L1" }) });
+    await flush();
+
+    stub.releaseReads();
+    stub.releaseRegistration();
+    await flush();
+
+    const last = states[states.length - 1];
+    expect(last.map((r) => r.id).sort(), "warm-cache pre-fetch create must NOT be tombstoned").toEqual(["c1", "new"]);
+    // And it must not be IDB-tombstoned (the wrong-tombstone-to-IDB hazard).
+    expect(wpb.collection("items").view("new"), "create must stay live in the queue").not.toBeNull();
+    await flushSnapshotWriter();
+    expect((await loadSnapshotsForUser("user-A")).map((r) => r.id), "create must be persisted, not tombstoned in IDB").toContain("new");
+  });
+
+  it("a pre-fetch SSE DELETE during a warm-cache (eager-ready) bootstrap stays deleted, not resurrected", async () => {
+    // Cache holds c1 + c2 (both server-backed) → eager paint sets ready=true.
+    await seedSnapshots([
+      { key: "user-A::items::c1", user: "user-A", collection: "items", id: "c1", record: rec("items", { id: "c1", list: "L1", name: "keep" }), updatedAt: Date.now() },
+      { key: "user-A::items::c2", user: "user-A", collection: "items", id: "c2", record: rec("items", { id: "c2", list: "L1", name: "doomed" }), updatedAt: Date.now() },
+    ]);
+
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    // Fetch (gated) STILL carries both c1 and c2 — the delete races in after the
+    // fetch query was captured, so the stale fetch would re-seed c2.
+    stub.col("items").records.set("c1", rec("items", { id: "c1", list: "L1", name: "keep" }));
+    stub.col("items").records.set("c2", rec("items", { id: "c2", list: "L1", name: "doomed" }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    await wpb.hydrateSnapshots();
+
+    const states: RawRecord[][] = [];
+    stub.holdReads();
+    stub.holdRegistration();
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => states.push(s),
+    );
+    await flush();
+
+    expect(states.length, "eager paint sets ready before the fetch resolves").toBeGreaterThanOrEqual(1);
+
+    // Pre-fetch SSE DELETE of c2 in the window — gated fetch STILL has c2.
+    stub.emit("items", { action: "delete", record: rec("items", { id: "c2", list: "L1" }) });
+    await flush();
+
+    stub.releaseReads();
+    stub.releaseRegistration();
+    await flush();
+
+    const last = states[states.length - 1];
+    expect(last.map((r) => r.id), "warm-cache pre-fetch delete must stay deleted (not resurrected by the stale fetch)").toEqual(["c1"]);
+    expect(wpb.collection("items").view("c2"), "delete must win in the queue").toBeNull();
+  });
+});
+
+// =====================================================================
+// REVIEW MATRIX CELL 2 — two slices sharing one collection, one torn down mid-bootstrap
+// =====================================================================
+//
+// S1 + S2 watch the SAME collection (refcount 2 on the shared listener). Both
+// bootstraps are gated. S1 is torn down DURING the await — teardownSlice already
+// released the listener (refcount 2→1). The cancel-before-resolve early-return
+// in bootstrap must then NOT release a SECOND time (refcount would drop to 0 and
+// destroy the listener S2 still needs). FAILS on the pre-fix code (unconditional
+// release in the early-return).
+
+describe("MATRIX 2: shared-collection refcount survives a teardown-during-bootstrap", () => {
+  it("tearing down one slice mid-bootstrap keeps the SHARED listener alive for the surviving slice", async () => {
+    const stub = makeStubPb();
+    stub.col("items").records.set("a", rec("items", { id: "a", list: "L1" }));
+    stub.col("items").records.set("b", rec("items", { id: "b", list: "L2" }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    // Gate reads so both bootstraps pend in their fetch await with the listener
+    // refcount already bumped to 2 (one per slice on the SAME collection).
+    stub.holdReads();
+
+    const s1States: RawRecord[][] = [];
+    const s2States: RawRecord[][] = [];
+    // Two DIFFERENT slices (different filter) on the same collection → one shared
+    // collection listener, refcount 2.
+    const h1 = mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L1'", predicate: (r) => r.list === "L1" },
+      (s) => s1States.push(s),
+    );
+    mirror.watch(
+      { collection: "items", topic: "*", filter: "list = 'L2'", predicate: (r) => r.list === "L2" },
+      (s) => s2States.push(s),
+    );
+    await flush();
+
+    // Exactly ONE shared collection subscribe for both slices.
+    expect(stub.col("items").subscribeCalls, "one shared listener for two slices").toBe(1);
+    expect(stub.col("items").realtimeCbs.size, "listener registered").toBe(1);
+
+    // Tear down S1 WHILE both bootstraps are still awaiting the gated fetch.
+    // teardownSlice releases the listener once (refcount 2→1).
+    h1.unsubscribe();
+
+    // Release the fetch → both bootstraps resume; S1's early-return must NOT
+    // release the listener a second time (would drop refcount 1→0 and kill it).
+    stub.releaseReads();
+    await flush();
+
+    // The shared listener MUST still be live for S2.
+    expect(stub.col("items").realtimeCbs.size, "shared listener must survive S1 teardown").toBe(1);
+
+    // And S2 must keep receiving SSE events.
+    s2States.length = 0;
+    stub.emit("items", { action: "create", record: rec("items", { id: "c", list: "L2" }) });
+    await flush();
+    const last = s2States[s2States.length - 1];
+    expect(last?.map((r) => r.id).sort(), "surviving slice still receives SSE").toEqual(["b", "c"]);
+  });
+});
+
+// =====================================================================
+// REVIEW MATRIX CELL 3 — sort+limit at the actual limit boundary
+// =====================================================================
+//
+// limit=2 with 3 records (one below the window). Two cases:
+//   - a pre-ready CREATE that pushes a fetched record OUT of the window (guard
+//     for the existing touched-set-merge — already works),
+//   - a pre-ready DELETE that vacates a window slot → the below-window record
+//     must be pulled in by the post-consolidation refetch (the MINOR fix).
+
+describe("MATRIX 3: sort+limit at the limit boundary", () => {
+  it("pre-ready CREATE pushes a fetched record out of the window (guard)", async () => {
+    const stub = makeStubPb();
+    // Server top-2 (sort -t): b(t=3), a(t=2). c(t=1) is below the window.
+    stub.col("log").records.set("a", rec("log", { id: "a", t: 2 }));
+    stub.col("log").records.set("b", rec("log", { id: "b", t: 3 }));
+    stub.col("log").records.set("c", rec("log", { id: "c", t: 1 }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    const states: RawRecord[][] = [];
+    stub.holdReads();
+    stub.holdRegistration();
+    mirror.watch({ collection: "log", topic: "*", sort: "-t", limit: 2 }, (s) => states.push(s));
+    await flush();
+
+    // Pre-ready CREATE 'd' with the highest rank → pushes 'a' out of the top-2.
+    stub.emit("log", { action: "create", record: rec("log", { id: "d", t: 9 }) });
+    await flush();
+
+    stub.releaseReads();
+    stub.releaseRegistration();
+    await flush();
+
+    const last = states[states.length - 1];
+    expect(last.map((r) => r.id), "highest-rank create takes the window; lowest is evicted").toEqual(["d", "b"]);
+  });
+
+  it("pre-ready DELETE vacates a window slot → the below-window record is pulled in", async () => {
+    const stub = makeStubPb();
+    // Server has 3 records; top-2 window is b(t=3), a(t=2). c(t=1) is below.
+    stub.col("log").records.set("a", rec("log", { id: "a", t: 2 }));
+    stub.col("log").records.set("b", rec("log", { id: "b", t: 3 }));
+    stub.col("log").records.set("c", rec("log", { id: "c", t: 1 }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    const states: RawRecord[][] = [];
+    // Gate the BOOTSTRAP fetch. With all 3 records present, the gated getList
+    // snapshots the PRE-delete top-2 [b, a] at call time (it cannot see c — c is
+    // below the window). Essential: if the fetch saw post-delete state it would
+    // already pull c in and the refetch would be untested.
+    stub.holdReads();
+    stub.holdRegistration();
+    mirror.watch({ collection: "log", topic: "*", sort: "-t", limit: 2 }, (s) => states.push(s));
+    await flush();
+
+    // Pre-ready DELETE of 'a' (a top-N member) vacates a window slot. The gated
+    // bootstrap fetch already snapshotted [b, a], so the touched-set merge leaves
+    // the window at [b] — N-1, under-filled. Mirror the commit server-side now so
+    // the post-consolidation REFETCH (issued AFTER reads release, snapshotted at
+    // its own call time) returns the true top-2 [b, c] with c promoted.
+    stub.emit("log", { action: "delete", record: rec("log", { id: "a", t: 2 }) });
+    stub.col("log").records.delete("a");
+    await flush();
+
+    stub.releaseReads();
+    stub.releaseRegistration();
+    await flush();
+
+    const last = states[states.length - 1];
+    expect(last.map((r) => r.id), "deleted slot must be backfilled by the below-window record (refetch)").toEqual(["b", "c"]);
+    expect(last.length, "window must be full again (N, not N-1)").toBe(2);
+    expect(wpb.collection("log").view("a"), "deleted record stays deleted").toBeNull();
   });
 });
