@@ -40,17 +40,39 @@ function isNotificationSupported(): boolean {
   return "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
 }
 
+/** True only when the existing sub's key provably differs from `wantKey`. */
+function keyChanged(sub: PushSubscription, wantKey: Uint8Array): boolean {
+  const existing = sub.options?.applicationServerKey;
+  // Some browsers don't expose options.applicationServerKey — can't tell, so
+  // assume unchanged rather than churn a working subscription.
+  if (!existing) return false;
+  const have = new Uint8Array(existing as ArrayBuffer);
+  if (have.length !== wantKey.length) return true;
+  for (let i = 0; i < have.length; i++) {
+    if (have[i] !== wantKey[i]) return true;
+  }
+  return false;
+}
+
 async function subscribePush(): Promise<PushSubscription | null> {
   const publicKey = await getVapidKey();
   if (!publicKey) return null;
+  const wantKey = urlBase64ToUint8Array(publicKey);
 
   const registration = await navigator.serviceWorker.ready;
   let subscription = await registration.pushManager.getSubscription();
 
+  // A subscription created against a now-rotated VAPID key can never receive
+  // pushes — drop it and re-subscribe with the current key.
+  if (subscription && keyChanged(subscription, wantKey)) {
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+
   if (!subscription) {
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
+      applicationServerKey: wantKey,
     } as PushSubscriptionOptionsInit);
   }
 
