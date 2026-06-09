@@ -842,4 +842,73 @@ describe("PBMirror convergence fuzzer", () => {
       },
     );
   }, 300000);
+
+  // ── DIRECT SEQ-INVARIANT ASSERTIONS ──────────────────────────────────
+  // The property above guards convergence black-box; these two pin the exact
+  // structural guarantees the seq model adds, on the public mirror surface, so
+  // a regression names itself instead of surfacing as a shrunk counterexample.
+
+  it("STRUCTURAL: a stale bootstrap fetch row never overwrites a newer SSE value", async () => {
+    const server = makeStubServer();
+    const wpb = wrapPocketBase(() => server.pb);
+    const mirror = createMirror(() => server.pb, wpb);
+    server.model.set("a", mkRecord("a", 1, 1)); // fetch will carry v=1
+
+    const emitted: RawRecord[][] = [];
+    // Gate the bootstrap fetch in flight with the channel already live, so an
+    // SSE update lands (higher seq) WHILE the older fetch (v=1) is unresolved.
+    server.holdReads();
+    server.resolveRegistration();
+    mirror.watch(watchSpecFor({ kind: "filter" }), (s) => emitted.push(s));
+    await flush();
+
+    server.serverUpdate("a", { v: 2, t: 1 }); // SSE v=2 — newer than the fetch
+    await flush();
+    server.releaseReads();                     // stale fetch (v=1) resolves now
+    await flush();
+
+    const last = emitted[emitted.length - 1] ?? [];
+    // The newer SSE value MUST win — the stale fetch's v=1 row is rejected by
+    // monotonic applyServer (fetchSeq < sseSeq). Structurally guaranteed now.
+    if (last.length !== 1 || (last[0] as { v?: number }).v !== 2) {
+      throw new Error(`stale fetch clobbered newer SSE: ${JSON.stringify(last)}`);
+    }
+  });
+
+  it("STRUCTURAL: tombstone GC does not resurrect a deleted record across a later fetch", async () => {
+    const server = makeStubServer();
+    const wpb = wrapPocketBase(() => server.pb);
+    const mirror = createMirror(() => server.pb, wpb);
+    server.model.set("a", mkRecord("a", 1, 1));
+    server.model.set("b", mkRecord("b", 1, 2));
+
+    const emitted: RawRecord[][] = [];
+    // Gate bootstrap; channel live. A pre-ready DELETE of 'a' writes a RETAINED
+    // tombstone (seq > fetchSeq). The bootstrap fetch (carrying 'a') resolves
+    // and is rejected by the tombstone. Then a resync issues a NEW fetch — its
+    // resolve runs tombstone GC. The deleted 'a' must NOT come back.
+    server.holdReads();
+    server.resolveRegistration();
+    mirror.watch(watchSpecFor({ kind: "filter" }), (s) => emitted.push(s));
+    await flush();
+
+    server.serverDelete("a"); // SSE delete — tombstone @ high seq
+    await flush();
+    server.releaseReads();    // stale bootstrap fetch (still has 'a') resolves
+    await flush();
+
+    // A later resync issues a fresh fetch (server no longer has 'a'); its
+    // resolve triggers GC of the now-unneeded tombstone — and must not let a
+    // stale anything resurrect 'a'.
+    await mirror.resync({ force: true });
+    await flush();
+
+    const last = emitted[emitted.length - 1] ?? [];
+    if (last.map((r) => r.id).sort().join(",") !== "b") {
+      throw new Error(`tombstone GC resurrected a deleted record: ${JSON.stringify(last)}`);
+    }
+    if (wpb.collection(COLLECTION).view("a") !== null) {
+      throw new Error("queue view shows the deleted record after GC");
+    }
+  });
 });

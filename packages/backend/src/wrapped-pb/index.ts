@@ -15,7 +15,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel, RecordOptions, RecordListOptions, RecordFullListOptions, ListResult } from "pocketbase";
 import { newId } from "./ids";
-import { MutationQueue, type Mutation, type RawRecord } from "./queue";
+import { MutationQueue, HYDRATED_SEQ, type Mutation, type RawRecord } from "./queue";
 import { persistMutation, unpersistMutation, loadAllMutations } from "./persistence";
 import {
   persistSnapshots,
@@ -27,7 +27,7 @@ import {
   type PersistedSnapshot,
 } from "./snapshot-persistence";
 
-export { MutationQueue, composeView, type Mutation, type RawRecord, type PendingMutation } from "./queue";
+export { MutationQueue, composeView, HYDRATED_SEQ, type Mutation, type RawRecord, type PendingMutation } from "./queue";
 export { type PersistedMutation, persistMutation, loadAllMutations, clearAllMutations } from "./persistence";
 export {
   type PersistedSnapshot,
@@ -226,8 +226,9 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
    *
    * `hydrating` suppresses the writer during hydrateSnapshots so loading the
    * cache back in doesn't loop straight out to IDB. (Hydration seeds via
-   * queue.seedServer, which doesn't fire onServerChange — this flag is a
-   * belt-and-suspenders for any applyServer path that runs concurrently.)
+   * applyServer at HYDRATED_SEQ, which doesn't fire onServerChange — this flag
+   * is a belt-and-suspenders for any real applyServer path that runs
+   * concurrently.)
    */
   // Each dirty entry stamps the user CAPTURED AT QUEUE TIME (when applyServer
   // fired), NOT at flush time. Reading authStore at flush time (~250ms later)
@@ -275,7 +276,7 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     // Structural guarantee: a snapshot cannot reach IDB without the sign-out
     // clear-hook being live, independent of BackendProvider's render order.
     // Every persisted snapshot flows through exactly this chokepoint (applyServer
-    // → onServerChange; seedServer/hydration deliberately does NOT fire it), so
+    // → onServerChange; HYDRATED_SEQ hydration deliberately does NOT fire it), so
     // arming hookAuthChange as the FIRST statement here makes it impossible to
     // queue a row for persistence before the clear-hook is installed. hydrate()
     // also arms it (belt-and-suspenders for empty-cache read-only sessions that
@@ -772,10 +773,12 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
       hydrating = true;
       try {
         for (const r of rows) {
-          // seedServer does NOT fire onServerChange — avoids a load→persist
-          // loop. composeView layers any already-replayed pending mutation on
-          // top, so an in-flight optimistic write isn't clobbered by the seed.
-          queue.seedServer(r.collection, r.id, r.record);
+          // Hydration is the OLDEST possible observation (HYDRATED_SEQ): any
+          // real fetch/SSE/ack overwrites it, and applyServer at HYDRATED_SEQ
+          // does NOT fire onServerChange (avoids a load→persist loop).
+          // composeView layers any already-replayed pending mutation on top, so
+          // an in-flight optimistic write isn't clobbered by the seed.
+          queue.applyServer(r.collection, r.id, r.record, HYDRATED_SEQ);
         }
       } finally {
         hydrating = false;
