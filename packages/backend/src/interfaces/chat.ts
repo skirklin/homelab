@@ -16,6 +16,7 @@ import type {
   ChatMessageKind,
   ChatMessageRole,
 } from "../types/chat";
+import type { Unsubscribe } from "../types/common";
 
 export interface ListChatMessagesOptions {
   /**
@@ -74,4 +75,24 @@ export interface ChatBackend {
 
   /** Flip `resolved = true`. Returns the updated record. */
   resolveMessage(id: string): Promise<ChatMessage>;
+
+  /**
+   * Subscribe to all messages in a single thread, owner-scoped. Delivers
+   * full state on every change (mirror pattern — same shape as
+   * ShoppingBackend.subscribeToList and LifeBackend.subscribeToEvents).
+   *
+   * Messages are emitted in chronological order (oldest-first) so the
+   * caller can render directly without a re-sort. The first emit IS the
+   * initial bootstrap; callers do NOT need a separate `listMessages` —
+   * the mirror handles initial fetch + SSE coalescing + resync + the
+   * optimistic-overlay-from-wpb invariants.
+   *
+   * Returns a synchronous unsubscribe function safe to call at any point,
+   * including before the first emit.
+   */
+  subscribeToMessages(
+    userId: string,
+    opts: { threadId: string },
+    onMessages: (messages: ChatMessage[]) => void,
+  ): Unsubscribe;
 }

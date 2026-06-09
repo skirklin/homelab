@@ -8,14 +8,16 @@
  * (AppHeader, observation card above the panel, etc.) and supplies the
  * `threadId` for this conversation.
  *
- * Reads go through `useChatBackend().listMessages({ threadId })` (the backend
- * abstraction); writes (post + resolve) go through the API route at
- * `/chat/messages*` using `getApiBase()` + `getAuthHeaders()`. Posts pass
- * `thread_id` so the message lands in this thread.
+ * Reads ride a PB realtime subscription via `useChatBackend()` — the mirror's
+ * first emit IS the bootstrap, so we never call `listMessages` separately
+ * (this is the canonical mirror pattern, same shape shopping/life use; see
+ * `packages/backend/src/wrapped-pb/mirror.ts`). Writes (post + resolve) go
+ * through the API route at `/chat/messages*` using `getApiBase()` +
+ * `getAuthHeaders()`. Posts pass `thread_id` so the message lands in this
+ * thread.
  *
  * Out of scope (deferred per the original C2 brief): push nudge (lives in
- * the API route already), cron prompt update, realtime PB subscription,
- * real pagination.
+ * the API route already), cron prompt update, real pagination.
  */
 import {
   useState,
@@ -32,7 +34,6 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import ReactMarkdown from "react-markdown";
 import {
-  Section,
   useAuth,
   useChatBackend,
   getApiBase,
@@ -45,9 +46,6 @@ dayjs.extend(relativeTime);
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Cap the v1 fetch — pagination is out of scope. */
-const LIST_LIMIT = 100;
 
 /** Kinds for which the assistant's open messages get a "Mark resolved" button. */
 const RESOLVABLE_KINDS: ReadonlySet<ChatMessageKind> = new Set([
@@ -272,7 +270,6 @@ export function ChatThreadPanel({ threadId, emptyDescription, headerSlot }: Chat
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -288,38 +285,68 @@ export function ChatThreadPanel({ threadId, emptyDescription, headerSlot }: Chat
     });
   }, []);
 
-  const loadMessages = useCallback(async () => {
-    if (!user) return;
-    setLoadError(null);
-    try {
-      const list = await chat.listMessages(user.uid, {
-        threadId,
-        limit: LIST_LIMIT,
-      });
-      // Backend returns newest-first; we want oldest-first in the timeline.
-      list.reverse();
-      setMessages(list);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Failed to load messages");
-    } finally {
-      setLoading(false);
-    }
-  }, [user, chat, threadId]);
-
   // Reset state whenever the thread we're viewing changes — without this a
   // route swap (e.g. /observations/:id → another observation) would keep the
-  // previous thread's messages visible until the new fetch lands.
+  // previous thread's messages visible until the new subscription's first
+  // emit lands.
   useEffect(() => {
     setMessages([]);
     setLoading(true);
-    setLoadError(null);
     setDraft("");
     setSendError(null);
   }, [threadId]);
 
+  // Subscribe to the thread. The mirror's first emit IS the bootstrap fetch,
+  // so there's no separate `listMessages` call — and no load-vs-subscribe
+  // race to handle (one source of truth = one ordering).
+  //
+  // Merge semantics: the mirror delivers full server state (sorted oldest
+  // first). We splice any unsent optimistic `temp-*` placeholders BACK ON
+  // THE END so an emit that lands mid-POST doesn't drop the user's in-flight
+  // message. We DROP a `temp-` placeholder if a server record in this same
+  // emit carries the same (role, body, threadId) — that's the realtime echo
+  // of our own POST winning the race against the POST response. The
+  // post-response swap inside handleSend handles the inverse race.
+  //
+  // The dedup-by-content can in theory false-positive if a user posts the
+  // identical body twice quickly (two temp-* in flight when the first
+  // server echo lands). The cost is one of those two temps disappears for a
+  // few hundred ms until the second server echo arrives — the user sees
+  // their second send "land" eventually, no data loss. Acceptable given
+  // (a) this is a degenerate input pattern, (b) the alternative
+  // (dedup-by-tempId-on-the-server-side) requires plumbing a client-id
+  // through the API, and (c) chat is owner-scoped so no cross-user
+  // confusion is possible.
   useEffect(() => {
-    loadMessages();
-  }, [loadMessages]);
+    if (!user) return;
+    let cancelled = false;
+    const unsub = chat.subscribeToMessages(
+      user.uid,
+      { threadId },
+      (serverMessages) => {
+        if (cancelled) return;
+        setMessages((prev) => {
+          const pendingTemps = prev.filter((m) => m.id.startsWith("temp-"));
+          if (pendingTemps.length === 0) return serverMessages;
+          const survivingTemps = pendingTemps.filter(
+            (t) =>
+              !serverMessages.some(
+                (s) =>
+                  s.role === t.role &&
+                  s.body === t.body &&
+                  s.threadId === t.threadId,
+              ),
+          );
+          return [...serverMessages, ...survivingTemps];
+        });
+        setLoading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [user, chat, threadId]);
 
   useEffect(() => {
     if (!loading) scrollToBottom();
@@ -375,8 +402,19 @@ export function ChatThreadPanel({ threadId, emptyDescription, headerSlot }: Chat
       // failed (network blip *after* the server already wrote the row) would
       // revert the optimistic insert and prompt the user to retry, producing
       // a duplicate on the server. Inline swap closes that window.
+      //
+      // Idempotent against the realtime echo: if the SSE event arrived first
+      // and dropped the temp- by the content dedup (see the subscription
+      // merge above), the temp is already gone — and a server record with
+      // the canonical id is already present. We drop the temp if it's still
+      // there, and we only insert the server record if it isn't present yet.
+      // Either ordering converges to a single bubble with the real id.
       const created = messageFromApiRecord(await res.json(), threadId);
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? created : m)));
+      setMessages((prev) => {
+        const withoutTemp = prev.filter((m) => m.id !== tempId);
+        if (withoutTemp.some((m) => m.id === created.id)) return withoutTemp;
+        return [...withoutTemp, created];
+      });
     } catch (e) {
       // Revert the optimistic insert; surface inline error so the user can retry.
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -427,17 +465,6 @@ export function ChatThreadPanel({ threadId, emptyDescription, headerSlot }: Chat
         <LoadingWrap>
           <Spin size="large" />
         </LoadingWrap>
-      ) : loadError ? (
-        <Section>
-          <Empty
-            description={`Couldn't load messages: ${loadError}`}
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          >
-            <Button onClick={() => { setLoading(true); loadMessages(); }}>
-              Retry
-            </Button>
-          </Empty>
-        </Section>
       ) : (
         // Single scroll container that holds headerSlot (if any) + the
         // empty-state placeholder (if applicable) + all messages. The
