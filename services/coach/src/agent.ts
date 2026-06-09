@@ -3,15 +3,28 @@
  * the writeback path back to the chat collection.
  *
  * Shape:
- *   - One `UserSession` per PB user (`ownerId`). Sessions are cached in a
- *     `Map<string, UserSession>` keyed by ownerId.
+ *   - One `UserSession` per `(ownerId, threadId)` pair. Sessions are cached
+ *     in a `Map<string, UserSession>` keyed by `${ownerId}::${threadId}`.
+ *     Threads are independent conversations (the "pm" PM-iteration channel
+ *     vs. "obs:<id>" per-observation reply threads) and they MUST NOT share
+ *     SDK transcript state — that contamination is the bug this refactor
+ *     exists to fix. Keying on the pair is the structural fix: two threads
+ *     can't see each other's history even by accident.
  *   - Each session pumps user messages into the SDK via streaming-input
  *     mode (`prompt: AsyncIterable<SDKUserMessage>`) — the inbox queue +
  *     notify primitive is owned by us because the SDK has no native
  *     "push from outside into a running query" call.
  *   - A consumer task drains the SDK's response stream and writes
  *     assistant text back as new `chat_messages` rows via the existing
- *     `POST /chat/messages` route (in-cluster URL).
+ *     `POST /chat/messages` route (in-cluster URL). The writeback carries
+ *     the same `thread_id` the session is responding in, so replies stay
+ *     in their thread.
+ *
+ * What is NOT per-thread:
+ *   - Token stats: keyed by ownerId only. We pay for tokens regardless of
+ *     which thread spent them.
+ *   - Rate limit: keyed by ownerId only. Protects against runaway from any
+ *     thread.
  *
  * The actual SDK module is injected (`AgentDeps.runQuery`) so unit tests
  * can swap in a mock without paying real Anthropic calls.
@@ -26,8 +39,9 @@
  *   COACH_WRITEBACK_URL=http://127.0.0.1:3000/chat/messages \
  *   pnpm --filter @homelab/coach dev
  *
- *   # then POST a user message to chat_messages via the homelab API and
- *   # watch the assistant reply arrive within a few seconds.
+ *   # then POST a user message to chat_messages (with thread_id="pm" or
+ *   # thread_id="obs:<id>") via the homelab API and watch the assistant
+ *   # reply arrive in the same thread within a few seconds.
  */
 import type PocketBase from "pocketbase";
 import type {
@@ -59,18 +73,28 @@ export interface AgentDeps {
   runQuery: (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query;
   /** Admin-PB factory used by the SessionStore. */
   getPb: () => Promise<PocketBase>;
-  /** POST an assistant message back to /chat/messages. Awaited so we can log failures. */
-  postAssistantMessage: (ownerId: string, body: string, kind?: "chat" | "error") => Promise<void>;
+  /**
+   * POST an assistant message back to /chat/messages. Awaited so we can
+   * log failures. The `threadId` must match the thread the originating
+   * user message was in — the writeback must stay in its thread.
+   */
+  postAssistantMessage: (
+    ownerId: string,
+    threadId: string,
+    body: string,
+    kind?: "chat" | "error",
+  ) => Promise<void>;
   /**
    * Build the synthetic warm-context user message. Defaults to the
    * bundle-based implementation. Tests override (or stub to return null).
    *
-   * Called once per ownerId per pod lifetime (the first time a session is
-   * created in this process). The SDK session is always fresh on pod
-   * startup — we don't wire `resume:` — so warm-context is correct to
-   * inject every time we spin up a new in-memory session. The
-   * `primedThisPod` set scopes the call to the first message per owner
-   * per pod, mirroring the SDK session's lifetime.
+   * Called once per `(ownerId, threadId)` pair per pod lifetime (the first
+   * time a session is created for that pair in this process). The SDK
+   * session is always fresh on pod startup — we don't wire `resume:` —
+   * and a new pair always means a fresh SDK transcript, so warm-context
+   * is correct to inject every time. The bundle itself is the user's
+   * life data (same across threads), but the SDK transcript is per-thread
+   * so we have to re-inject it on the first turn of each thread.
    */
   buildWarmContext?: (pb: PocketBase, ownerId: string) => Promise<string | null>;
   /**
@@ -94,6 +118,13 @@ export interface TokenStats {
 
 interface UserSession {
   ownerId: string;
+  /**
+   * Thread this session is responding in (e.g. "pm" or "obs:<id>"). Stamped
+   * once at create-time; the consumer loop reads it on every writeback so
+   * assistant replies land in the right thread without each push having to
+   * carry the threadId through the inbox.
+   */
+  threadId: string;
   query: Query;
   inbox: SDKUserMessage[];
   notify: (() => void) | null;
@@ -106,8 +137,13 @@ interface UserSession {
 }
 
 export interface AgentManager {
-  /** Push a user message into the session for `ownerId`. Creates the session if needed. */
-  pushMessage: (ownerId: string, body: string) => Promise<void>;
+  /**
+   * Push a user message into the session for `(ownerId, threadId)`.
+   * Creates the session if needed. Two distinct threadIds for the same
+   * ownerId get distinct SDK sessions and distinct warm-context windows
+   * — see the file-level comment for why.
+   */
+  pushMessage: (ownerId: string, threadId: string, body: string) => Promise<void>;
   /** Returns the current count of active sessions — used by /health. */
   activeSessionCount: () => number;
   /** Returns the last per-session error (across all sessions), if any. */
@@ -340,21 +376,29 @@ function makeInboxGenerator(
  * fast on missing env is the caller's responsibility (`index.ts`).
  */
 export function createAgentManager(deps: AgentDeps): AgentManager {
+  // Sessions are keyed by `${ownerId}::${threadId}`. The double-colon
+  // separator is safe because thread ids in this system are either bare
+  // names like "pm" or use a single-colon `<kind>:<id>` scheme, so a
+  // literal "::" can't show up inside an ownerId or threadId by accident.
   const sessions = new Map<string, UserSession>();
-  // Concurrent `pushMessage` calls for the same ownerId can both observe
-  // `sessions.get(ownerId) === undefined` during the async setup window
-  // (PB connect + warm-context fetch + SDK spawn). Without this map the
-  // second caller spawns a second SDK `query()` and orphans the first;
+  // Concurrent `pushMessage` calls for the same (ownerId, threadId) can
+  // both observe `sessions.get(key) === undefined` during the async setup
+  // window (PB connect + warm-context fetch + SDK spawn). Without this map
+  // the second caller spawns a second SDK `query()` and orphans the first;
   // the orphan keeps draining its inbox + burning credits forever.
   // Dedup via in-flight promises so concurrent callers await the same
   // create.
   const inflight = new Map<string, Promise<UserSession>>();
-  // Owners whose warm-context has been injected during THIS pod's lifetime.
-  // Reset on pod restart, which is correct: the SDK session is also fresh
-  // after restart (we don't pass `resume:`), so the new session needs the
-  // bundle. Subsequent messages within the same pod skip it — warm-context
-  // is already in the running SDK transcript.
+  // (ownerId, threadId) pairs whose warm-context has been injected during
+  // THIS pod's lifetime. Reset on pod restart, which is correct: the SDK
+  // session is also fresh after restart (we don't pass `resume:`). Keyed
+  // by the full session key (not bare ownerId) so each thread gets its
+  // own warm-context injection — they don't share SDK transcripts.
   const primedThisPod = new Set<string>();
+
+  /** Build the session-cache key. Co-located so the format stays in one place. */
+  const sessionKey = (ownerId: string, threadId: string): string =>
+    `${ownerId}::${threadId}`;
   const homelabMcpUrl =
     process.env.HOMELAB_MCP_URL || "https://mcp.tail56ca88.ts.net/mcp";
   const homelabApiToken = process.env.HOMELAB_API_TOKEN || "";
@@ -378,10 +422,12 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
 
   let lastError: string | null = null;
 
-  async function buildSession(ownerId: string): Promise<UserSession> {
+  async function buildSession(ownerId: string, threadId: string): Promise<UserSession> {
+    const key = sessionKey(ownerId, threadId);
     const pb = await deps.getPb();
     const session: UserSession = {
       ownerId,
+      threadId,
       // Placeholder; replaced below after we have the generator wired.
       query: null as unknown as Query,
       inbox: [],
@@ -391,15 +437,17 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
       closed: false,
     };
 
-    // Warm-context injection — first time we see this owner in THIS pod
-    // (regardless of whether PB has prior coach_sessions rows). Rationale:
+    // Warm-context injection — first time we see this (ownerId, threadId)
+    // pair in THIS pod. Rationale:
     //   - SDK session is always fresh after pod restart (no `resume:` wire),
     //     so the running transcript has nothing in it.
-    //   - Asking PB "has this user ever had a session?" returns true for
-    //     anyone with history, which would SKIP warm-context after a
-    //     restart and leave the new SDK session reading blind.
+    //   - Each thread gets its own SDK session, so a fresh thread also has
+    //     nothing in its transcript even if other threads for the same
+    //     owner have been primed already in this pod.
+    //   - The bundle itself is the user's life data (same content across
+    //     threads); only the transcript injection point differs.
     //   - Per-pod scoping matches the SDK session's actual lifetime.
-    if (!primedThisPod.has(ownerId)) {
+    if (!primedThisPod.has(key)) {
       const warmCtx = await (deps.buildWarmContext ?? defaultBuildWarmContext)(
         pb,
         ownerId,
@@ -417,7 +465,7 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
         };
         session.inbox.push(warmMsg);
       }
-      primedThisPod.add(ownerId);
+      primedThisPod.add(key);
     }
 
     const options = buildQueryOptions(
@@ -432,7 +480,8 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
       options,
     });
 
-    // Consumer task: drain SDK output, write assistant messages back.
+    // Consumer task: drain SDK output, write assistant messages back to
+    // the SAME thread the session is responding in.
     (async () => {
       try {
         for await (const msg of session.query) {
@@ -440,7 +489,9 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
             // Attribute the assistant turn's token usage to the user's
             // daily totals BEFORE writeback. Doing it pre-writeback means
             // the counter advances even if writeback fails — credits were
-            // already spent on the model call.
+            // already spent on the model call. Token stats are keyed by
+            // ownerId only (we pay for tokens regardless of which thread
+            // spent them).
             const usage = extractAssistantUsage(msg);
             if (usage) {
               const today = todayPacific(now());
@@ -456,7 +507,8 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
               stats.turns += 1;
               tokenStats.set(ownerId, stats);
               console.log(
-                `[coach/usage] user=${ownerId} in=${usage.in} out=${usage.out} ` +
+                `[coach/usage] user=${ownerId} thread=${threadId} ` +
+                  `in=${usage.in} out=${usage.out} ` +
                   `cache_read=${usage.cache_read} cache_creation=${usage.cache_creation} ` +
                   `turns_today=${stats.turns}`,
               );
@@ -464,11 +516,14 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
             const text = extractAssistantText(msg);
             if (text) {
               try {
-                await deps.postAssistantMessage(ownerId, text, "chat");
+                await deps.postAssistantMessage(ownerId, threadId, text, "chat");
                 session.assistantTurns += 1;
               } catch (e) {
                 const errMsg = e instanceof Error ? e.message : String(e);
-                console.error(`[coach] writeback failed for ${ownerId}:`, errMsg);
+                console.error(
+                  `[coach] writeback failed for ${ownerId}/${threadId}:`,
+                  errMsg,
+                );
                 session.lastError = `writeback: ${errMsg}`;
                 lastError = session.lastError;
               }
@@ -486,55 +541,73 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
             // pod logs ("did we hit the safety net or did something break?").
             if (msg.subtype === "error_max_turns") {
               console.log(
-                `[coach/maxturns] user=${ownerId} hit COACH_MAX_TURNS=${maxTurns}`,
+                `[coach/maxturns] user=${ownerId} thread=${threadId} hit COACH_MAX_TURNS=${maxTurns}`,
               );
             }
-            console.error(`[coach] SDK result error for ${ownerId}:`, desc);
+            console.error(
+              `[coach] SDK result error for ${ownerId}/${threadId}:`,
+              desc,
+            );
             try {
               await deps.postAssistantMessage(
                 ownerId,
+                threadId,
                 `Coach hit an error during this turn: ${desc}`,
                 "error",
               );
             } catch (e) {
-              console.error(`[coach] error-writeback failed for ${ownerId}:`, e);
+              console.error(
+                `[coach] error-writeback failed for ${ownerId}/${threadId}:`,
+                e,
+              );
             }
           }
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        console.error(`[coach] SDK stream errored for ${ownerId}:`, errMsg);
+        console.error(
+          `[coach] SDK stream errored for ${ownerId}/${threadId}:`,
+          errMsg,
+        );
         session.lastError = errMsg;
         lastError = errMsg;
         try {
           await deps.postAssistantMessage(
             ownerId,
+            threadId,
             `Coach hit an error: ${errMsg}`,
             "error",
           );
         } catch (postErr) {
-          console.error(`[coach] error-writeback failed for ${ownerId}:`, postErr);
+          console.error(
+            `[coach] error-writeback failed for ${ownerId}/${threadId}:`,
+            postErr,
+          );
         }
       } finally {
         session.closed = true;
       }
     })();
 
-    sessions.set(ownerId, session);
+    sessions.set(key, session);
     return session;
   }
 
-  async function getOrCreateSession(ownerId: string): Promise<UserSession> {
-    const existing = sessions.get(ownerId);
+  async function getOrCreateSession(
+    ownerId: string,
+    threadId: string,
+  ): Promise<UserSession> {
+    const key = sessionKey(ownerId, threadId);
+    const existing = sessions.get(key);
     if (existing && !existing.closed) return existing;
-    const pending = inflight.get(ownerId);
+    const pending = inflight.get(key);
     if (pending) return pending;
-    const p = buildSession(ownerId);
-    inflight.set(ownerId, p);
+    const p = buildSession(ownerId, threadId);
+    inflight.set(key, p);
     try {
       return await p;
     } finally {
-      inflight.delete(ownerId);
+      inflight.delete(key);
     }
   }
 
@@ -580,24 +653,34 @@ export function createAgentManager(deps: AgentDeps): AgentManager {
   }
 
   return {
-    async pushMessage(ownerId, body) {
+    async pushMessage(ownerId, threadId, body) {
+      if (typeof threadId !== "string" || threadId.length === 0) {
+        // Defensive: the type signature requires threadId, but the chat
+        // subscriber reads it off a raw PB record so we re-check at the
+        // entry point. Without this a bad subscriber call would silently
+        // land in `sessions[ownerId::]` and never reach the right thread.
+        throw new Error(`pushMessage requires a non-empty threadId (got ${JSON.stringify(threadId)})`);
+      }
       const throttle = checkRateLimit(ownerId);
       if (throttle) {
         // Do NOT spin up the SDK session for a throttled turn — the
         // whole point is to refuse the work, not just delay it. Post a
-        // `kind:"note"` chat row so the user sees the refusal in their
-        // chat thread immediately, same shape as the existing error
+        // `kind:"note"` chat row so the user sees the refusal in the
+        // SAME thread they sent from, same shape as the existing error
         // writeback.
-        console.warn(`[coach/throttle] user=${ownerId}: ${throttle}`);
+        console.warn(`[coach/throttle] user=${ownerId} thread=${threadId}: ${throttle}`);
         try {
-          await deps.postAssistantMessage(ownerId, throttle, "error");
+          await deps.postAssistantMessage(ownerId, threadId, throttle, "error");
         } catch (e) {
-          console.error(`[coach] throttle-writeback failed for ${ownerId}:`, e);
+          console.error(
+            `[coach] throttle-writeback failed for ${ownerId}/${threadId}:`,
+            e,
+          );
         }
         return;
       }
 
-      const session = await getOrCreateSession(ownerId);
+      const session = await getOrCreateSession(ownerId, threadId);
       const userMsg: SDKUserMessage = {
         type: "user",
         message: { role: "user", content: body },
@@ -652,7 +735,7 @@ export function defaultDeps(getPb: () => Promise<PocketBase>): AgentDeps {
   return {
     runQuery: sdkQuery,
     getPb,
-    async postAssistantMessage(_ownerId, body, kind = "chat") {
+    async postAssistantMessage(_ownerId, threadId, body, kind = "chat") {
       // The route stamps `owner` server-side from the auth context — that
       // means the assistant message ends up owned by whichever user the
       // `HOMELAB_API_TOKEN` belongs to. For the single-tenant v1 (Scott
@@ -665,6 +748,7 @@ export function defaultDeps(getPb: () => Promise<PocketBase>): AgentDeps {
           Authorization: `Bearer ${homelabApiToken}`,
         },
         body: JSON.stringify({
+          thread_id: threadId,
           role: "assistant",
           body,
           // Reuse existing `kind` enum from the chat route. There's no

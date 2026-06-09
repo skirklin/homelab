@@ -706,14 +706,21 @@ server.tool(
 
 server.tool(
   "list_chat_messages",
-  "List the caller's chat messages, newest first. Use `since` to fetch only messages created after a given ISO datetime (the cron passes its last-tick timestamp). Use `resolved` to filter open vs closed questions.",
+  "List the caller's chat messages in one thread, newest first. `thread_id` is REQUIRED — pass \"pm\" for the PM-iteration channel, \"obs:<observation_id>\" for an observation reply thread. The two are independent conversations and the Coach SDK keys per-(owner, thread_id), so reading without an explicit thread would silently merge surfaces. Use `since` for messages-since-last-tick; `resolved` to filter open vs closed questions.",
   {
+    thread_id: z
+      .string()
+      .min(1)
+      .describe(
+        "Which thread to read. Use \"pm\" for the PM channel, \"obs:<observation_id>\" for an observation thread.",
+      ),
     since: z.string().optional().describe("Only return messages created strictly after this ISO datetime"),
     limit: z.number().int().positive().max(500).optional().describe("Page size cap (default 50, max 500)"),
     resolved: z.boolean().optional().describe("Filter by resolved state; omit to include both"),
   },
-  async ({ since, limit, resolved }) => {
+  async ({ thread_id, since, limit, resolved }) => {
     const params = new URLSearchParams();
+    params.set("thread_id", thread_id);
     if (since) params.set("since", since);
     if (typeof limit === "number") params.set("limit", String(limit));
     if (typeof resolved === "boolean") params.set("resolved", String(resolved));
@@ -725,15 +732,21 @@ server.tool(
 
 server.tool(
   "post_chat_message",
-  "Post a chat message on the caller's behalf. The cron passes `role: \"assistant\"` to speak as the PM; user-driven Claude sessions pass `role: \"user\"`. `kind` defaults to \"chat\"; use \"question\" for things needing a reply, \"deploy_request\" for ship-this-now items (with structured `meta`), \"feedback\" / \"note\" for FYI.",
+  "Post a chat message on the caller's behalf. `thread_id` is REQUIRED — pass \"pm\" for the PM-iteration channel, \"obs:<observation_id>\" for an observation reply thread. The cron passes `role: \"assistant\"` to speak as the PM; user-driven Claude sessions pass `role: \"user\"`. `kind` defaults to \"chat\"; use \"question\" for things needing a reply, \"deploy_request\" for ship-this-now items (with structured `meta`), \"feedback\" / \"note\" for FYI.",
   {
+    thread_id: z
+      .string()
+      .min(1)
+      .describe(
+        "Which thread to post to. Use \"pm\" for the PM channel, \"obs:<observation_id>\" for an observation thread.",
+      ),
     role: z.enum(["assistant", "user"]).describe("Who is speaking — assistant=PM cron, user=the user"),
     body: z.string().min(1).max(20000).describe("Markdown body"),
     kind: z.enum(["chat", "question", "deploy_request", "feedback", "note"]).optional().describe("Message kind (default \"chat\")"),
     meta: z.unknown().optional().describe("Optional structured payload (e.g. deploy_request: { sha, files })"),
   },
-  async ({ role, body, kind, meta }) => {
-    const payload: Record<string, unknown> = { role, body };
+  async ({ thread_id, role, body, kind, meta }) => {
+    const payload: Record<string, unknown> = { thread_id, role, body };
     if (kind) payload.kind = kind;
     if (meta !== undefined) payload.meta = meta;
     const data = await apiRaw("/chat/messages", {

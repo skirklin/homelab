@@ -1,10 +1,12 @@
 /**
  * Component tests for Observations.tsx — the /observations surface.
  *
- * Focus on the Phase D3 handoff: a "Continue in Chat" button per observation
- * that navigates to `/chat?observation=<id>`. The card itself toggles
- * expand/collapse on click, so the test also pins down that the button stops
- * propagation (clicking the button must NOT also toggle the card).
+ * Focus on the per-observation thread handoff: an "Open thread" button per
+ * observation that navigates to `/observations/:id` (post thread-split
+ * refactor — previously `/chat?observation=<id>`). The card itself
+ * toggles expand/collapse on click, so the test also pins down that the
+ * button stops propagation (clicking the button must NOT also toggle the
+ * card).
  *
  * Mocks @kirkl/shared so we can stub useObserverBackend.listObservations and
  * useAuth without a real PocketBase. Mirrors LifeDashboard.test.tsx and
@@ -93,13 +95,14 @@ function renderObservations() {
               </>
             }
           />
-          {/* Render-only chat route so navigate() resolves; we never inspect
-              this surface — `lastLocation` captures the destination. */}
+          {/* Render-only observation-detail route so navigate() resolves;
+              we never inspect this surface — `lastLocation` captures the
+              destination. */}
           <Route
-            path="/chat"
+            path="/observations/:id"
             element={
               <>
-                <div>chat surface</div>
+                <div>observation detail surface</div>
                 <LocationProbe />
               </>
             }
@@ -118,7 +121,7 @@ describe("Observations", () => {
     lastLocation = { pathname: "", search: "" };
   });
 
-  it("renders a 'Continue in Chat' button per observation", async () => {
+  it("renders an 'Open thread' button per observation", async () => {
     mockObserverBackend.listObservations.mockResolvedValueOnce([
       makeObservation({ id: "obs1", content: "First observation." }),
       makeObservation({ id: "obs2", content: "Second observation." }),
@@ -127,11 +130,11 @@ describe("Observations", () => {
     renderObservations();
 
     // Both cards render a button. findAllByRole waits for the async load.
-    const buttons = await screen.findAllByRole("button", { name: /Continue in Chat/i });
+    const buttons = await screen.findAllByRole("button", { name: /Open thread/i });
     expect(buttons).toHaveLength(2);
   });
 
-  it("clicking 'Continue in Chat' navigates to /chat?observation=<id> and does not toggle the card", async () => {
+  it("clicking 'Open thread' navigates to /observations/<id> and does not toggle the card", async () => {
     const user = userEvent.setup();
     mockObserverBackend.listObservations.mockResolvedValueOnce([
       makeObservation({
@@ -142,19 +145,18 @@ describe("Observations", () => {
 
     renderObservations();
 
-    const btn = await screen.findByRole("button", { name: /Continue in Chat/i });
+    const btn = await screen.findByRole("button", { name: /Open thread/i });
     await user.click(btn);
 
-    // Navigated to /chat with the right param.
-    expect(lastLocation.pathname).toBe("/chat");
-    expect(lastLocation.search).toBe("?observation=obs-handoff");
+    // Navigated to /observations/<id> — the per-observation thread page.
+    expect(lastLocation.pathname).toBe("/observations/obs-handoff");
+    expect(lastLocation.search).toBe("");
 
     // The card-level click-to-expand must NOT have fired — stopPropagation on
     // the button is the contract that keeps the handoff from also toggling
     // the card open in-place before navigation. Hard to read directly here
     // (we navigated away), but if propagation had reached the card the URL
-    // would still be /chat (navigate wins), so the regression signal lives in
-    // the next test (collapsed-by-default rendering) plus the visual review.
-    // Leaving this comment as the explicit reasoning.
+    // would still resolve to /observations/<id> (navigate wins), so the
+    // regression signal lives in the visual review.
   });
 });
