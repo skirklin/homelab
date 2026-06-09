@@ -24,6 +24,8 @@ import {
   type Trip,
 } from "../types";
 import { directionsUrl } from "../utils";
+import { WeatherBadge } from "./WeatherBadge";
+import type { WeatherDay } from "../hooks/useTripWeather";
 
 const Card = styled.div`
   background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%);
@@ -216,9 +218,11 @@ interface TodayCardProps {
   onOpenDay?: (day: { index: number; date?: string }) => void;
   /** Optional injected "now" for testing; defaults to current time. */
   now?: Date;
+  /** Trip-level weather keyed by ISO date; badge renders when today's date hits. */
+  weatherByDate?: Map<string, WeatherDay>;
 }
 
-export function TodayCard({ trip, itinerary, activityMap, onOpenDay, now: nowProp }: TodayCardProps) {
+export function TodayCard({ trip, itinerary, activityMap, onOpenDay, now: nowProp, weatherByDate }: TodayCardProps) {
   // Auto-refresh every minute so countdowns / current-slot highlight stay live.
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -250,6 +254,9 @@ export function TodayCard({ trip, itinerary, activityMap, onOpenDay, now: nowPro
         <Tag color="green" style={{ margin: 0 }}>In progress</Tag>
         <Title>{trip.destination} — Today</Title>
         <DayBadge>Day {dayNumber} of {totalDays}</DayBadge>
+        {today.day.date && weatherByDate?.get(today.day.date) && (
+          <WeatherBadge day={weatherByDate.get(today.day.date)!} />
+        )}
         {onOpenDay && (
           <OpenDayButton onClick={() => onOpenDay({ index: today.index, date: today.day.date })}>
             Open day →
