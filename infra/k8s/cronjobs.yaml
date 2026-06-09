@@ -149,10 +149,17 @@ spec:
 ---
 # Backup pruner — runs just after the daily backup. Tiered retention:
 #
-#   - daily-*           : keep 90 days, EXCEPT the chronologically-first
-#                         daily-* of each calendar month, which is exempted
-#                         from pruning and kept forever (virtual "monthly"
-#                         tier — no separate file naming, no separate cron).
+#   - daily-*           : geometric (log2) thinning curve. Age ≤ 7 days →
+#                         keep EVERY daily. Age > 7 days → keep only the
+#                         NEWEST daily in each geometric age bucket, where
+#                         bucket = floor(log2(ageDays)). That's one
+#                         representative per doubling age band — [8,15]d,
+#                         [16,31]d, [32,63]d, [64,127]d, … — kept
+#                         indefinitely; every other >7d daily is deleted.
+#                         Age is read from the YYYY-MM-DD embedded in the
+#                         key (robust; matches how PB stamps the name), not
+#                         from .modified. (Replaces the old "keep 90 days +
+#                         first-of-month forever" policy.)
 #   - pre-deploy-*      : keep only the newest 10 (by .modified), delete the
 #                         rest regardless of age. Count-bounded rather than
 #                         time-bounded because at ~12 deploys/day during active
@@ -165,8 +172,13 @@ spec:
 #   - anything else     : keep forever (be conservative — manual backups
 #                         the user took get the same protection)
 #
-# Sizing note: at ~30 MB/snapshot, 90 daily + ~12 monthlies/year ≈ 3 GB/yr.
-# Disk on the VPS has ~13 GB free as of 2026-05-22 — plenty of headroom.
+# Sizing note: the geometric curve is self-bounding — past 7 days the kept
+# count grows ~log2(age), so an unbounded history settles to a few dozen
+# snapshots total (≤7 dailies + one per doubling band) rather than growing
+# linearly. At ~30 MB/snapshot that's well under 1 GB indefinitely.
+#
+# Safety: set PRUNE_DRY_RUN=1 (env) to log intended deletes without issuing
+# any DELETE — used by a one-shot Job to preview before trusting the nightly.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -196,31 +208,42 @@ spec:
                   # row and nothing was ever pruned — see 2026-05-24 nightly logs).
                   # After `apk add coreutils`, /bin/date is GNU date with full -d.
                   apk add --no-cache jq coreutils >/dev/null
+                  # Dry-run toggle: when PRUNE_DRY_RUN is non-empty, log intended
+                  # deletes but issue no DELETE. Unset (default in the spec) =
+                  # real deletes, identical to prior behavior.
+                  DRY="${PRUNE_DRY_RUN:-}"
                   PB=http://pocketbase.homelab.svc.cluster.local:8090
                   TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
                     -H "Content-Type: application/json" \
                     -d "{\"identity\":\"$PB_ADMIN_EMAIL\",\"password\":\"$PB_ADMIN_PASSWORD\"}" \
                     | jq -er .token)
                   NOW=$(date -u +%s)
-                  DAILY_CUTOFF=$((NOW - 90*86400))
                   # GET /api/backups returns [{key, size, modified}, ...].
                   # `modified` is RFC3339-ish UTC ("2026-05-22 09:00:00.123Z"
                   # in current PB versions). Normalize space→T and strip
                   # sub-seconds so `date -d` (GNU, installed above) parses it.
                   BACKUPS=$(curl -sf "$PB/api/backups" -H "Authorization: $TOKEN")
-                  # Monthly exempt set: chronologically-first daily-* of each
-                  # calendar month (grouped by YYYY-MM extracted from key).
-                  # Lexicographic min_by(.modified) === chronological min for
-                  # the RFC3339-ish string PB returns. Written to a file so
-                  # the while-loop subshell below can grep it cheaply.
-                  MONTHLY=$(printf '%s' "$BACKUPS" | jq -r '
-                    [.[] | select(.key | test("^daily-"))]
-                    | group_by(.key | capture("^daily-(?<ym>[0-9]{4}-[0-9]{2})") | .ym)
-                    | map(min_by(.modified) | .key)
+                  # daily delete set: geometric (log2) thinning. Age is read from
+                  # the YYYY-MM-DD embedded in the key (robust; mirrors how the PB
+                  # backup name is stamped), epoch'd at UTC midnight. Keep every
+                  # daily ≤ 7 days old; among the >7d set keep only the NEWEST
+                  # (lexicographic max on the YYYY-MM-DD date == chronological max)
+                  # per floor(log2(ageDays)) bucket, delete the rest. jq 1.7 has
+                  # strptime/mktime/log. Written to a var the while-loop greps.
+                  DAILY_DELETE=$(printf '%s' "$BACKUPS" | jq -r --argjson now "$NOW" '
+                    [ .[]
+                      | select(.key | test("^daily-"))
+                      | (.key | capture("^daily-(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2})") | .d) as $d
+                      | ($d + "T00:00:00Z" | strptime("%Y-%m-%dT%H:%M:%SZ") | mktime) as $epoch
+                      | { key: .key, d: $d, ageDays: (($now - $epoch) / 86400) }
+                    ]
+                    | map(select(.ageDays > 7))
+                    | group_by(.ageDays | log / (2 | log) | floor)
+                    | map( (max_by(.d) | .key) as $keep | .[] | select(.key != $keep) | .key )
                     | .[]
                   ')
-                  echo "[pb-backup-prune] monthly exempts:"
-                  printf '  %s\n' $MONTHLY
+                  echo "[pb-backup-prune] daily geometric-delete set:"
+                  printf '  %s\n' $DAILY_DELETE
                   # pre-deploy delete set: every pre-deploy-* EXCEPT the newest
                   # 10 by .modified. Count-bounded so the tier can't bloat no
                   # matter how often we deploy. `.[10:]` keeps the 11th-onward
@@ -240,19 +263,23 @@ spec:
                         fi
                         case "$KEY" in
                           daily-*)
-                            if printf '%s\n' "$MONTHLY" | grep -qxF "$KEY"; then
-                              # Monthly exempt — keep forever.
-                              continue
-                            fi
-                            if [ "$TS" -lt "$DAILY_CUTOFF" ]; then
-                              echo "[pb-backup-prune] delete (>90d) $KEY"
-                              curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
+                            if printf '%s\n' "$DAILY_DELETE" | grep -qxF "$KEY"; then
+                              if [ -n "$DRY" ]; then
+                                echo "[pb-backup-prune] DRY would delete $KEY"
+                              else
+                                echo "[pb-backup-prune] delete (geom >7d) $KEY"
+                                curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
+                              fi
                             fi
                             ;;
                           pre-deploy-*)
                             if printf '%s\n' "$PREDEPLOY_DELETE" | grep -qxF "$KEY"; then
-                              echo "[pb-backup-prune] delete (>newest 10) $KEY"
-                              curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
+                              if [ -n "$DRY" ]; then
+                                echo "[pb-backup-prune] DRY would delete $KEY"
+                              else
+                                echo "[pb-backup-prune] delete (>newest 10) $KEY"
+                                curl -sf -X DELETE "$PB/api/backups/$KEY" -H "Authorization: $TOKEN"
+                              fi
                             fi
                             ;;
                           *)

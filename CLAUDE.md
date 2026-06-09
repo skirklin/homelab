@@ -294,7 +294,7 @@ All CronJobs live in [`infra/k8s/cronjobs.yaml`](infra/k8s/cronjobs.yaml).
 | `pod-events-prune` | `30 9 * * *` | 2:30 AM | Deletes `pod_events` rows with `type="Normal"` older than 10 days; `type="Warning"` kept forever (low volume, high forensic value) |
 
 Backup retention tiers (enforced by `pb-backup-prune`):
-- **`daily-*`** — keep 90 days, EXCEPT the chronologically-first daily of each calendar month (monthly tier, kept forever). At ~30 MB/snapshot that's ~3 GB/yr.
+- **`daily-*`** — geometric (log2) thinning. Age ≤ 7 days → keep every daily; age > 7 days → keep only the newest daily per `floor(log2(ageDays))` age bucket ([8,15]d, [16,31]d, [32,63]d, …), kept indefinitely. Age is read from the `YYYY-MM-DD` embedded in the key, not `.modified`. Self-bounding: the kept count grows ~log2(age), so an unbounded history settles to a few dozen snapshots (well under 1 GB) rather than growing linearly. (Replaced the old "90 days + first-of-month forever" policy.) Set `PRUNE_DRY_RUN=1` on the prune Job to preview deletes without issuing any.
 - **`pre-deploy-*`** — keep only the newest 10 (by `.modified`), delete the rest regardless of age. Count-bounded rather than time-bounded because at ~12 deploys/day during active work a 14-day window let these accrue to 75+ (~2 GB). Written by the pre-deploy hook in `infra/deploy.sh` (tagged with the git SHA, e.g. `pre-deploy-abc1234-20260524t090000z.zip`); belt-and-suspenders on top of the nightly so a same-day rollback always has a fresh baseline. Backup failure does NOT abort the deploy — it's insurance, not critical-path.
 - **`pre-migration-*`** — keep forever.
 - **Anything else** (`emergency-*`, `pre-restore-*`, manual) — keep forever.
