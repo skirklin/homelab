@@ -216,7 +216,7 @@ describe("createAgentManager", () => {
     const { runQuery, sessions } = makeStubRunQuery();
     const manager = createAgentManager(baseDeps({ runQuery }));
 
-    await manager.pushMessage("user-a", "hello");
+    await manager.pushMessage("user-a", "pm", "hello");
 
     // Pull the first message off the generator the SDK was handed.
     expect(sessions).toHaveLength(1);
@@ -237,11 +237,11 @@ describe("createAgentManager", () => {
     const { runQuery, sessions } = makeStubRunQuery();
     const manager = createAgentManager(baseDeps({ runQuery }));
 
-    await manager.pushMessage("user-a", "one");
-    await manager.pushMessage("user-a", "two");
-    await manager.pushMessage("user-a", "three");
+    await manager.pushMessage("user-a", "pm", "one");
+    await manager.pushMessage("user-a", "pm", "two");
+    await manager.pushMessage("user-a", "pm", "three");
 
-    // Only one session was started for the same owner.
+    // Only one session was started for the same (owner, thread).
     expect(sessions).toHaveLength(1);
     expect(manager.activeSessionCount()).toBe(1);
 
@@ -252,8 +252,8 @@ describe("createAgentManager", () => {
     const { runQuery, sessions } = makeStubRunQuery();
     const manager = createAgentManager(baseDeps({ runQuery }));
 
-    await manager.pushMessage("user-a", "alpha");
-    await manager.pushMessage("user-b", "beta");
+    await manager.pushMessage("user-a", "pm", "alpha");
+    await manager.pushMessage("user-b", "pm", "beta");
 
     expect(sessions).toHaveLength(2);
     expect(manager.activeSessionCount()).toBe(2);
@@ -261,27 +261,98 @@ describe("createAgentManager", () => {
     manager.closeAll();
   });
 
-  it("posts assistant text back via the writeback dep", async () => {
+  it("creates distinct sessions for distinct threads on the same owner (thread isolation)", async () => {
+    // The whole point of the thread_id refactor: two threads for the same
+    // user share NO SDK transcript state. A single shared session would
+    // let observation-thread context bleed into the PM channel and vice
+    // versa — the bug this whole refactor exists to prevent.
     const { runQuery, sessions } = makeStubRunQuery();
-    const posts: Array<{ owner: string; body: string; kind?: string }> = [];
+    const manager = createAgentManager(baseDeps({ runQuery }));
 
+    await manager.pushMessage("user-a", "pm", "hello PM");
+    await manager.pushMessage("user-a", "obs:obs-42", "hello obs");
+
+    expect(sessions).toHaveLength(2);
+    expect(manager.activeSessionCount()).toBe(2);
+
+    // Each thread's inbox holds only its own message.
+    const itPm = sessions[0].prompt[Symbol.asyncIterator]();
+    const itObs = sessions[1].prompt[Symbol.asyncIterator]();
+    const m1 = await itPm.next();
+    const m2 = await itObs.next();
+    expect(
+      typeof m1.value?.message?.content === "string" ? m1.value.message.content : "",
+    ).toBe("hello PM");
+    expect(
+      typeof m2.value?.message?.content === "string" ? m2.value.message.content : "",
+    ).toBe("hello obs");
+
+    manager.closeAll();
+  });
+
+  it("writebacks carry the originating threadId so assistant replies stay in their thread", async () => {
+    const { runQuery, sessions } = makeStubRunQuery();
+    const posts: Array<{ owner: string; threadId: string; body: string }> = [];
     const manager = createAgentManager(
       baseDeps({
         runQuery,
-        postAssistantMessage: async (owner, body, kind) => {
-          posts.push({ owner, body, kind });
+        postAssistantMessage: async (owner, threadId, body) => {
+          posts.push({ owner, threadId, body });
         },
       }),
     );
 
-    await manager.pushMessage("user-a", "what's up");
+    await manager.pushMessage("user-a", "pm", "hi pm");
+    await manager.pushMessage("user-a", "obs:obs-1", "hi obs");
+
+    sessions[0].emitAssistantText("reply in pm");
+    sessions[1].emitAssistantText("reply in obs");
+    await tick(4);
+
+    expect(posts).toEqual(
+      expect.arrayContaining([
+        { owner: "user-a", threadId: "pm", body: "reply in pm" },
+        { owner: "user-a", threadId: "obs:obs-1", body: "reply in obs" },
+      ]),
+    );
+
+    manager.closeAll();
+  });
+
+  it("rejects pushMessage with empty threadId", async () => {
+    const { runQuery } = makeStubRunQuery();
+    const manager = createAgentManager(baseDeps({ runQuery }));
+
+    await expect(
+      manager.pushMessage("user-a", "", "should fail"),
+    ).rejects.toThrow(/threadId/i);
+
+    manager.closeAll();
+  });
+
+  it("posts assistant text back via the writeback dep with the originating threadId", async () => {
+    const { runQuery, sessions } = makeStubRunQuery();
+    const posts: Array<{ owner: string; threadId: string; body: string; kind?: string }> = [];
+
+    const manager = createAgentManager(
+      baseDeps({
+        runQuery,
+        postAssistantMessage: async (owner, threadId, body, kind) => {
+          posts.push({ owner, threadId, body, kind });
+        },
+      }),
+    );
+
+    await manager.pushMessage("user-a", "pm", "what's up");
     // Stub SDK emits an assistant reply.
     sessions[0].emitAssistantText("not much");
 
     // Let the consumer loop drain the emitted message.
     await tick(4);
 
-    expect(posts).toEqual([{ owner: "user-a", body: "not much", kind: "chat" }]);
+    expect(posts).toEqual([
+      { owner: "user-a", threadId: "pm", body: "not much", kind: "chat" },
+    ]);
 
     manager.closeAll();
   });
@@ -301,7 +372,7 @@ describe("createAgentManager", () => {
       }),
     );
 
-    await manager.pushMessage("user-a", "go");
+    await manager.pushMessage("user-a", "pm", "go");
     sessions[0].emitAssistantText("first reply"); // → throws inside writeback
     await tick(4);
     sessions[0].emitAssistantText("second reply"); // → succeeds
@@ -315,22 +386,23 @@ describe("createAgentManager", () => {
 
   it("posts an error-kind chat message when SDK emits a result-error", async () => {
     const { runQuery, sessions } = makeStubRunQuery();
-    const posts: Array<{ owner: string; body: string; kind?: string }> = [];
+    const posts: Array<{ owner: string; threadId: string; body: string; kind?: string }> = [];
     const manager = createAgentManager(
       baseDeps({
         runQuery,
-        postAssistantMessage: async (owner, body, kind) => {
-          posts.push({ owner, body, kind });
+        postAssistantMessage: async (owner, threadId, body, kind) => {
+          posts.push({ owner, threadId, body, kind });
         },
       }),
     );
 
-    await manager.pushMessage("user-a", "trigger error");
+    await manager.pushMessage("user-a", "pm", "trigger error");
     sessions[0].emitResultError("error_max_turns", ["over the limit"]);
     await tick(4);
 
     expect(posts).toHaveLength(1);
     expect(posts[0].kind).toBe("error");
+    expect(posts[0].threadId).toBe("pm");
     expect(posts[0].body).toContain("error_max_turns");
 
     manager.closeAll();
@@ -350,7 +422,7 @@ describe("createAgentManager", () => {
       }),
     );
 
-    await manager.pushMessage("user-a", "hello");
+    await manager.pushMessage("user-a", "pm", "hello");
     expect(warmCalls).toBe(1);
 
     // Pull two messages off the generator: warm-context first, then the
@@ -389,9 +461,9 @@ describe("createAgentManager", () => {
       }),
     );
 
-    await manager.pushMessage("user-a", "one");
-    await manager.pushMessage("user-a", "two");
-    await manager.pushMessage("user-a", "three");
+    await manager.pushMessage("user-a", "pm", "one");
+    await manager.pushMessage("user-a", "pm", "two");
+    await manager.pushMessage("user-a", "pm", "three");
 
     // Per-pod primed set — exactly one warm-context call across all three
     // messages because the session is reused.
@@ -422,8 +494,8 @@ describe("createAgentManager", () => {
 
     // Fire both pushes WITHOUT awaiting — they both enter
     // getOrCreateSession before getPb resolves.
-    const p1 = manager.pushMessage("user-a", "first");
-    const p2 = manager.pushMessage("user-a", "second");
+    const p1 = manager.pushMessage("user-a", "pm", "first");
+    const p2 = manager.pushMessage("user-a", "pm", "second");
 
     // Let microtasks settle so both calls are parked on `await deps.getPb()`.
     await tick(1);
@@ -461,14 +533,14 @@ describe("createAgentManager", () => {
       baseDeps({
         runQuery,
         now: fastClock(1000),
-        postAssistantMessage: async (owner, body, kind) => {
+        postAssistantMessage: async (owner, _threadId, body, kind) => {
           posts.push({ owner, body, kind });
         },
       }),
     );
 
-    await manager.pushMessage("user-a", "one");
-    await manager.pushMessage("user-a", "two"); // ← should be throttled
+    await manager.pushMessage("user-a", "pm", "one");
+    await manager.pushMessage("user-a", "pm", "two"); // ← should be throttled
 
     // First push spawned an SDK session; second did not.
     expect(sessions).toHaveLength(1);
@@ -501,20 +573,20 @@ describe("createAgentManager", () => {
       baseDeps({
         runQuery,
         now: fastClock(60_000),
-        postAssistantMessage: async (owner, body, kind) => {
+        postAssistantMessage: async (owner, _threadId, body, kind) => {
           posts.push({ owner, body, kind });
         },
       }),
     );
 
     for (let i = 0; i < 60; i++) {
-      await manager.pushMessage("user-a", `msg-${i}`);
+      await manager.pushMessage("user-a", "pm", `msg-${i}`);
     }
     // Pre-condition: no throttle messages yet.
     expect(posts.filter((p) => p.kind === "error")).toHaveLength(0);
 
     // The 61st push (still in the trailing 60-min window) trips the cap.
-    await manager.pushMessage("user-a", "msg-61");
+    await manager.pushMessage("user-a", "pm", "msg-61");
 
     // Exactly one throttle writeback fired and it mentions the hourly cap.
     const throttles = posts.filter((p) => p.kind === "error");
@@ -543,7 +615,7 @@ describe("createAgentManager", () => {
   it("passes maxTurns into the SDK query options", async () => {
     const { runQuery, sessions } = makeStubRunQuery();
     const manager = createAgentManager(baseDeps({ runQuery }));
-    await manager.pushMessage("user-a", "hi");
+    await manager.pushMessage("user-a", "pm", "hi");
 
     expect(sessions).toHaveLength(1);
     expect(sessions[0].options?.maxTurns).toBe(8);
@@ -573,7 +645,7 @@ describe("createAgentManager", () => {
       }),
     );
 
-    await manager.pushMessage("user-a", "hello");
+    await manager.pushMessage("user-a", "pm", "hello");
 
     // Push two assistant messages with usage fields; the manager should
     // sum them into the user's daily totals.
@@ -615,7 +687,7 @@ describe("createAgentManager", () => {
       }),
     );
 
-    await manager.pushMessage("user-a", "hello");
+    await manager.pushMessage("user-a", "pm", "hello");
     sessions[0].emitAssistantTextWithUsage("day-1", {
       input_tokens: 100,
       output_tokens: 50,
@@ -642,7 +714,7 @@ describe("createAgentManager", () => {
   it("tokenStats() returns shallow clones, not live references", async () => {
     const { runQuery, sessions } = makeStubRunQuery();
     const manager = createAgentManager(baseDeps({ runQuery }));
-    await manager.pushMessage("user-a", "hi");
+    await manager.pushMessage("user-a", "pm", "hi");
     sessions[0].emitAssistantTextWithUsage("reply", {
       input_tokens: 10,
       output_tokens: 5,

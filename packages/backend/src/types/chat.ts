@@ -19,6 +19,19 @@ export type ChatMessageKind =
 export interface ChatMessage {
   id: string;
   owner: string;
+  /**
+   * Thread identifier — partitions the chat log into independent conversations.
+   *
+   * Scheme (no sentinels; every row carries an explicit name):
+   *   - "pm"                       — the PM-iteration channel
+   *   - "obs:<observation_id>"     — a reply thread anchored to one observation
+   *   - "<kind>:<id>" (future)     — entity-scoped threads (trip:, recipe:, …)
+   *
+   * Two messages with different `threadId` values are part of independent
+   * conversations and the Coach SDK keys per-`(owner, threadId)` so they
+   * never share transcript context.
+   */
+  threadId: string;
   role: ChatMessageRole;
   /** Markdown. */
   body: string;

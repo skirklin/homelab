@@ -252,12 +252,13 @@ export function Observations() {
                       icon={<MessageOutlined />}
                       onClick={(e) => {
                         // Don't toggle the card's expand/collapse \u2014 this
-                        // click is the handoff, not a read affordance.
+                        // click is the handoff to the dedicated per-
+                        // observation thread, not a read affordance.
                         e.stopPropagation();
-                        navigate(`/chat?observation=${encodeURIComponent(obs.id)}`);
+                        navigate(`/observations/${encodeURIComponent(obs.id)}`);
                       }}
                     >
-                      Continue in Chat
+                      Open thread
                     </Button>
                   </CardFooter>
                 </ObservationCard>

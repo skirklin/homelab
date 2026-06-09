@@ -40,9 +40,19 @@ function messageFromRecord(r: RecordModel): ChatMessage {
       ? (rawMeta as Record<string, unknown>)
       : null;
 
+  // `thread_id` may be missing on a row that pre-dates the schema migration
+  // if the row was read before the backfill landed. Fall back to "pm"
+  // defensively so a transient half-applied DB never produces an empty
+  // threadId on a typed record. Steady state: the PB column is required +
+  // min:1 so this branch is unreachable in prod.
+  const rawThreadId = x.thread_id;
+  const threadId =
+    typeof rawThreadId === "string" && rawThreadId.length > 0 ? rawThreadId : "pm";
+
   return {
     id: r.id,
     owner: x.owner as string,
+    threadId,
     role: x.role as ChatMessageRole,
     body: (x.body as string) ?? "",
     kind: x.kind as ChatMessageKind,
@@ -58,12 +68,21 @@ export class PocketBaseChatBackend implements ChatBackend {
 
   async listMessages(
     userId: string,
-    opts: ListChatMessagesOptions = {},
+    opts: ListChatMessagesOptions,
   ): Promise<ChatMessage[]> {
+    // threadId is required by the type signature; the runtime check is here
+    // so a JS caller (no TS check) can't accidentally smuggle in undefined
+    // and silently merge threads.
+    if (typeof opts.threadId !== "string" || opts.threadId.length === 0) {
+      throw new Error("listMessages requires opts.threadId (e.g. 'pm' or 'obs:<id>')");
+    }
     const limit = opts.limit ?? 50;
     const pb = this.pb();
-    const clauses = ["owner = {:uid}"];
-    const params: Record<string, unknown> = { uid: userId };
+    const clauses = ["owner = {:uid} && thread_id = {:tid}"];
+    const params: Record<string, unknown> = {
+      uid: userId,
+      tid: opts.threadId,
+    };
     if (opts.since) {
       clauses.push("created > {:since}");
       params.since = opts.since.toISOString();
@@ -92,12 +111,18 @@ export class PocketBaseChatBackend implements ChatBackend {
   }
 
   async postMessage(input: PostChatMessageInput): Promise<ChatMessage> {
+    if (typeof input.threadId !== "string" || input.threadId.length === 0) {
+      throw new Error(
+        "postMessage requires input.threadId (e.g. 'pm' or 'obs:<id>')",
+      );
+    }
     const kind: ChatMessageKind = input.kind ?? "chat";
     if (!VALID_KINDS.has(kind)) {
       throw new Error(`Invalid chat message kind: ${kind}`);
     }
     const payload: Record<string, unknown> = {
       owner: input.owner,
+      thread_id: input.threadId,
       role: input.role,
       body: input.body,
       kind,

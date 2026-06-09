@@ -18,6 +18,15 @@ import type {
 } from "../types/chat";
 
 export interface ListChatMessagesOptions {
+  /**
+   * Which thread to read. REQUIRED — there is no default at this layer
+   * because letting it default would silently merge messages across
+   * threads (PM iteration + per-observation replies), reintroducing the
+   * exact contamination this refactor exists to prevent. Callers pass
+   * `"pm"` for the PM channel, `"obs:<observation_id>"` for an observation
+   * reply thread, etc. See `ChatMessage.threadId` for the scheme.
+   */
+  threadId: string;
   /** Only return messages created strictly after this instant. */
   since?: Date;
   /** Page size cap. Default 50. */
@@ -29,6 +38,11 @@ export interface ListChatMessagesOptions {
 export interface PostChatMessageInput {
   /** Conversation tenant (the user the channel belongs to). */
   owner: string;
+  /**
+   * Thread identifier. REQUIRED — see `ChatMessage.threadId` for the
+   * scheme. Pass `"pm"`, `"obs:<id>"`, etc.
+   */
+  threadId: string;
   role: ChatMessageRole;
   /** Markdown. */
   body: string;
@@ -40,12 +54,16 @@ export interface PostChatMessageInput {
 
 export interface ChatBackend {
   /**
-   * List messages for `userId`, newest-first. Supports `since` (created > since)
-   * for "messages since my last tick" and `resolved` for "still-open questions."
+   * List messages for `userId` within a specific thread, newest-first.
+   * Supports `since` (created > since) for "messages since my last tick"
+   * and `resolved` for "still-open questions."
+   *
+   * Callers MUST pass `opts.threadId` — there is no cross-thread list at
+   * this layer.
    */
   listMessages(
     userId: string,
-    opts?: ListChatMessagesOptions,
+    opts: ListChatMessagesOptions,
   ): Promise<ChatMessage[]>;
 
   /** Get a single message by id, or `null` if not found. */

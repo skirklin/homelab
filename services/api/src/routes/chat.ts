@@ -53,13 +53,45 @@ function parseSince(raw: string | undefined): string | null {
   return d.toISOString();
 }
 
-// GET /chat/messages?since=…&limit=…&resolved=true|false
+/**
+ * Validate a `thread_id`: must be a non-empty string under 200 chars.
+ * Mirrors the PB column constraints (text, required, min:1, max:200) and
+ * the conceptual scheme — `"pm"` for the PM channel, `"<kind>:<id>"` for
+ * entity-scoped threads. We don't validate the prefix shape here; the API
+ * is open to new thread kinds as we add them.
+ */
+function isValidThreadId(v: unknown): v is string {
+  return typeof v === "string" && v.length > 0 && v.length <= 200;
+}
+
+/**
+ * Map a `thread_id` to a target frontend path for the push notification's
+ * click target. Observation threads land on the observation detail page;
+ * everything else (including "pm") lands on /chat. Same-origin relative
+ * path so the click stays on whichever origin the user is signed in on
+ * (per-origin PB auth).
+ */
+function pushPathForThread(threadId: string): string {
+  if (threadId.startsWith("obs:")) {
+    return `/observations/${encodeURIComponent(threadId.slice(4))}`;
+  }
+  return "/chat";
+}
+
+// GET /chat/messages?thread_id=…&since=…&limit=…&resolved=true|false
 chatRoutes.get("/messages", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId");
   if (!userId) return c.json({ error: "Not authenticated" }, 401);
 
   const url = new URL(c.req.url);
+  const threadId = url.searchParams.get("thread_id");
+  if (!isValidThreadId(threadId)) {
+    return c.json(
+      { error: "thread_id is required (e.g. 'pm' or 'obs:<id>')" },
+      400,
+    );
+  }
   let sinceIso: string | null;
   try {
     sinceIso = parseSince(url.searchParams.get("since") ?? undefined);
@@ -72,8 +104,8 @@ chatRoutes.get("/messages", handler(async (c) => {
   const resolved =
     resolvedRaw === "true" ? true : resolvedRaw === "false" ? false : undefined;
 
-  const clauses = ["owner = {:uid}"];
-  const params: Record<string, unknown> = { uid: userId };
+  const clauses = ["owner = {:uid} && thread_id = {:tid}"];
+  const params: Record<string, unknown> = { uid: userId, tid: threadId };
   if (sinceIso) {
     clauses.push("created > {:since}");
     params.since = sinceIso;
@@ -91,19 +123,26 @@ chatRoutes.get("/messages", handler(async (c) => {
   return c.json({ items: result.items });
 }));
 
-// POST /chat/messages — body: { role, body, kind?, meta? }
+// POST /chat/messages — body: { thread_id, role, body, kind?, meta? }
 chatRoutes.post("/messages", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId");
   if (!userId) return c.json({ error: "Not authenticated" }, 401);
 
   const body = await c.req.json<{
+    thread_id?: string;
     role?: string;
     body?: string;
     kind?: string;
     meta?: unknown;
   }>();
 
+  if (!isValidThreadId(body.thread_id)) {
+    return c.json(
+      { error: "thread_id is required (e.g. 'pm' or 'obs:<id>')" },
+      400,
+    );
+  }
   if (!body.role || !VALID_ROLES.includes(body.role as Role)) {
     return c.json(
       { error: `Invalid role: must be one of ${VALID_ROLES.join(", ")}` },
@@ -124,8 +163,10 @@ chatRoutes.post("/messages", handler(async (c) => {
     );
   }
 
+  const threadId = body.thread_id;
   const payload: Record<string, unknown> = {
     owner: userId,
+    thread_id: threadId,
     role: body.role,
     body: body.body,
     kind,
@@ -140,14 +181,11 @@ chatRoutes.post("/messages", handler(async (c) => {
     const truncated = body.body.length > 100
       ? body.body.slice(0, 100) + "..."
       : body.body;
+    const path = pushPathForThread(threadId);
     sendPushToUser(pb, userId, {
       title: "New message",
       body: truncated,
-      // Same-origin relative path: chat lives at /chat on both the standalone
-      // life.kirkl.in and the embedded kirkl.in shell, so no per-origin branch
-      // is needed — but it MUST be relative so the click stays on the origin
-      // the user is signed in on (per-origin PB auth).
-      buildUrl: () => "/chat",
+      buildUrl: () => path,
     }, {
       preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"],
     }).catch((err) => console.error("chat push failed:", err));

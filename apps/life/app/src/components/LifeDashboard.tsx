@@ -569,7 +569,17 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         // undercount only if a user has >500 unresolved assistant messages,
         // which means the PM cron has misbehaved for weeks; C3 (push nudge)
         // will obsolete this entire fetch path before that's a real risk.
-        const list = await chat.listMessages(user.uid, { resolved: false, limit: 500 });
+        //
+        // Scoped to the "pm" thread because the dashboard badge points the
+        // user at /chat. Unresolved questions in observation threads
+        // (`obs:<id>`) belong to /observations/:id and are surfaced there
+        // separately; counting them in this badge would mislead the user
+        // into clicking through to /chat and seeing nothing.
+        const list = await chat.listMessages(user.uid, {
+          threadId: "pm",
+          resolved: false,
+          limit: 500,
+        });
         if (cancelled) return;
         const n = list.filter(
           (m) => m.role === "assistant" && (m.kind === "question" || m.kind === "deploy_request"),
