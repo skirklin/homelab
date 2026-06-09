@@ -23,6 +23,7 @@ import {
   useCallback,
   useRef,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import styled from "styled-components";
 import { Button, Empty, Spin, Tag, App, Input } from "antd";
@@ -218,6 +219,17 @@ const LoadingWrap = styled.div`
   flex: 1;
 `;
 
+// Wraps the empty placeholder when rendered INSIDE the Timeline scroll
+// container (above any messages, below an optional headerSlot). Without
+// this antd's <Empty> collapses against the headerSlot with no breathing
+// room; the vertical padding gives it the same airy feel it had when it
+// was the Section's sole child.
+const EmptyWrap = styled.div`
+  padding: var(--space-lg) 0;
+  display: flex;
+  justify-content: center;
+`;
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -238,13 +250,22 @@ export interface ChatThreadPanelProps {
    * the wording.
    */
   emptyDescription: string;
+  /**
+   * Optional content rendered INSIDE the Timeline scroll container, above
+   * any messages and above the empty-state placeholder. Used by
+   * `/observations/:id` to put the observation card in the same scroll as
+   * the thread (so it scrolls out of view as the user reads replies)
+   * instead of being a frozen block above the panel. When undefined the
+   * panel behaves exactly as before — no extra DOM, no layout change.
+   */
+  headerSlot?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function ChatThreadPanel({ threadId, emptyDescription }: ChatThreadPanelProps) {
+export function ChatThreadPanel({ threadId, emptyDescription, headerSlot }: ChatThreadPanelProps) {
   const { user } = useAuth();
   const chat = useChatBackend();
   const { message: messageApi } = App.useApp();
@@ -417,15 +438,24 @@ export function ChatThreadPanel({ threadId, emptyDescription }: ChatThreadPanelP
             </Button>
           </Empty>
         </Section>
-      ) : messages.length === 0 ? (
-        <Section>
-          <Empty
-            description={emptyDescription}
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
-        </Section>
       ) : (
+        // Single scroll container that holds headerSlot (if any) + the
+        // empty-state placeholder (if applicable) + all messages. The
+        // /observations/:id surface passes its observation card as
+        // headerSlot so it lives in the same scroll as the thread —
+        // scrolling past the messages naturally pushes the observation
+        // out the top. /chat passes no headerSlot, so the DOM is
+        // identical to pre-refactor for that surface.
         <Timeline ref={timelineRef}>
+          {headerSlot}
+          {messages.length === 0 && (
+            <EmptyWrap>
+              <Empty
+                description={emptyDescription}
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            </EmptyWrap>
+          )}
           {messages.map((msg) => {
             const isUser = msg.role === "user";
             const align = isUser ? "right" : "left";
