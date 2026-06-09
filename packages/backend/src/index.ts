@@ -1,14 +1,10 @@
 /**
  * @homelab/backend — Backend abstraction layer.
  *
- * Defines interfaces for all app backends (auth, shopping, recipes, upkeep, travel, life).
- * Implementations live in separate files (pocketbase/).
- * Apps import interfaces + factory functions, never backend-specific code.
- *
- * Usage:
- *   import { getAuthBackend, getShoppingBackend } from "@homelab/backend";
- *   const auth = getAuthBackend();
- *   const shopping = getShoppingBackend();
+ * Defines interfaces for all app backends (shopping, recipes, upkeep, travel, life).
+ * PocketBase implementations live under pocketbase/. Apps consume them via the
+ * `BackendProvider` from `@kirkl/shared` and import interface types from here,
+ * never backend-specific code.
  */
 
 // --- Types ---
@@ -79,7 +75,6 @@ export type {
 } from "./travel-validation";
 
 // --- Interfaces ---
-export type { AuthBackend } from "./interfaces/auth";
 export type { UserBackend, SlugNamespace, PushSubscriptionInfo } from "./interfaces/user";
 export type { ShoppingBackend } from "./interfaces/shopping";
 export type { RecipesBackend, RecipesUser } from "./interfaces/recipes";

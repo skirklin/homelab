@@ -58,11 +58,6 @@ export interface UpkeepBackend {
   getSubtree(rootTaskId: string): Promise<Task[]>;
   getTasksByTag(listId: string, tag: string): Promise<Task[]>;
 
-  // --- Templates ---
-
-  /** Deep-copy a template subtree, applying the given tags to all copies. Returns new root ID. */
-  instantiateTemplate(templateRootId: string, tags: string[]): Promise<string>;
-
   // --- Completion history ---
 
   updateCompletion(eventId: string, updates: { notes?: string; timestamp?: Date }): Promise<void>;
