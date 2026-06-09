@@ -28,6 +28,11 @@ const { mockChatBackend, mockObserverBackend, stableAuth } = vi.hoisted(() => ({
     getMessage: vi.fn(),
     postMessage: vi.fn(),
     resolveMessage: vi.fn(),
+    // The panel now subscribes via the mirror — the first emit IS the
+    // bootstrap, so tests prime an initial state by calling the captured
+    // callback before returning the unsubscribe stub. `subscribeToMessages`
+    // is implemented as a vi.fn we'll re-mock per test below.
+    subscribeToMessages: vi.fn(),
   },
   mockObserverBackend: {
     listObservations: vi.fn(),
@@ -36,6 +41,22 @@ const { mockChatBackend, mockObserverBackend, stableAuth } = vi.hoisted(() => ({
   },
   stableAuth: { user: { uid: "user123" }, loading: false },
 }));
+
+/**
+ * Default subscribe behavior: synchronously emit `initial` and return a
+ * no-op unsubscribe. Tests can re-assign this per case via
+ * mockChatBackend.subscribeToMessages.mockImplementationOnce(...).
+ */
+function emitOnce(initial: import("@homelab/backend").ChatMessage[] = []) {
+  return (
+    _uid: string,
+    _opts: { threadId: string },
+    cb: (m: import("@homelab/backend").ChatMessage[]) => void,
+  ) => {
+    cb(initial);
+    return () => {};
+  };
+}
 
 vi.mock("@kirkl/shared", async () => {
   const actual = await vi.importActual<typeof import("@kirkl/shared")>("@kirkl/shared");
@@ -100,18 +121,19 @@ describe("ObservationDetail", () => {
     mockObserverBackend.getObservation.mockResolvedValueOnce(
       makeObservation({ id: "obs-42", content: "You wrote that you wanted to run more." }),
     );
-    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+    mockChatBackend.subscribeToMessages.mockImplementationOnce(emitOnce([]));
 
     renderDetail("obs-42");
 
     // Observation body renders.
     await screen.findByText("You wrote that you wanted to run more.");
 
-    // listMessages was called with the correct threadId derived from :id.
+    // The subscription was scoped to the correct threadId derived from :id.
     await waitFor(() => {
-      expect(mockChatBackend.listMessages).toHaveBeenCalledWith(
+      expect(mockChatBackend.subscribeToMessages).toHaveBeenCalledWith(
         "user123",
         expect.objectContaining({ threadId: "obs:obs-42" }),
+        expect.any(Function),
       );
     });
 
@@ -137,7 +159,7 @@ describe("ObservationDetail", () => {
     mockObserverBackend.getObservation.mockResolvedValueOnce(
       makeObservation({ id: "obs-7", content: "Observation body text" }),
     );
-    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+    mockChatBackend.subscribeToMessages.mockImplementationOnce(emitOnce([]));
 
     renderDetail("obs-7");
 
@@ -180,7 +202,7 @@ describe("ObservationDetail", () => {
     mockObserverBackend.getObservation.mockResolvedValueOnce(
       makeObservation({ id: "obs-99" }),
     );
-    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+    mockChatBackend.subscribeToMessages.mockImplementationOnce(emitOnce([]));
     (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: () =>
@@ -228,8 +250,8 @@ describe("ObservationDetail", () => {
 
     expect(await screen.findByText(/404|Observation not found/)).toBeInTheDocument();
 
-    // The chat panel never mounted, so no listMessages call was made.
-    expect(mockChatBackend.listMessages).not.toHaveBeenCalled();
+    // The chat panel never mounted, so no subscription was opened.
+    expect(mockChatBackend.subscribeToMessages).not.toHaveBeenCalled();
     // Compose box is not rendered in the not-found state.
     expect(screen.queryByPlaceholderText("Type a message…")).toBeNull();
   });

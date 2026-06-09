@@ -32,9 +32,24 @@ const { mockChatBackend, stableAuth } = vi.hoisted(() => ({
     getMessage: vi.fn(),
     postMessage: vi.fn(),
     resolveMessage: vi.fn(),
+    // The panel reads via a mirror subscription; the first callback invocation
+    // IS the bootstrap, so tests prime an initial state by emitting once and
+    // returning a no-op unsubscribe.
+    subscribeToMessages: vi.fn(),
   },
   stableAuth: { user: { uid: "user123" }, loading: false },
 }));
+
+function emitOnce(initial: import("@homelab/backend").ChatMessage[] = []) {
+  return (
+    _uid: string,
+    _opts: { threadId: string },
+    cb: (m: import("@homelab/backend").ChatMessage[]) => void,
+  ) => {
+    cb(initial);
+    return () => {};
+  };
+}
 
 vi.mock("@kirkl/shared", async () => {
   const actual = await vi.importActual<typeof import("@kirkl/shared")>("@kirkl/shared");
@@ -83,16 +98,17 @@ describe("Chat", () => {
     (globalThis as { fetch?: unknown }).fetch = vi.fn();
   });
 
-  it("lists messages with threadId='pm' on mount", async () => {
-    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+  it("subscribes to messages with threadId='pm' on mount", async () => {
+    mockChatBackend.subscribeToMessages.mockImplementationOnce(emitOnce([]));
 
     renderChat();
 
     await screen.findByText(/Nothing yet — the PM agent will post deploy nudges/);
 
-    expect(mockChatBackend.listMessages).toHaveBeenCalledWith(
+    expect(mockChatBackend.subscribeToMessages).toHaveBeenCalledWith(
       "user123",
       expect.objectContaining({ threadId: "pm" }),
+      expect.any(Function),
     );
   });
 
@@ -101,24 +117,25 @@ describe("Chat", () => {
     // path from /chat. The handoff now navigates to /observations/:id,
     // which is its own dedicated thread. Confirm /chat no longer reacts
     // to the legacy param.
-    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+    mockChatBackend.subscribeToMessages.mockImplementationOnce(emitOnce([]));
 
     renderChat("/chat?observation=obs-42");
 
     const textarea = (await screen.findByPlaceholderText("Type a message…")) as HTMLTextAreaElement;
     // Compose box stays empty.
     expect(textarea.value).toBe("");
-    // The list call still keyed off "pm" — the param did not leak into a
+    // The subscription still keyed off "pm" — the param did not leak into a
     // cross-thread read.
-    expect(mockChatBackend.listMessages).toHaveBeenCalledWith(
+    expect(mockChatBackend.subscribeToMessages).toHaveBeenCalledWith(
       "user123",
       expect.objectContaining({ threadId: "pm" }),
+      expect.any(Function),
     );
   });
 
   it("send flow posts with thread_id='pm'", async () => {
     const user = userEvent.setup();
-    mockChatBackend.listMessages.mockResolvedValueOnce([]);
+    mockChatBackend.subscribeToMessages.mockImplementationOnce(emitOnce([]));
     (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: () =>
@@ -162,9 +179,10 @@ describe("Chat", () => {
     // After the send, the textarea is cleared.
     expect((textarea as HTMLTextAreaElement).value).toBe("");
 
-    // listMessages was called exactly once (the initial mount load). No
-    // post-send refetch — a refetch failure after a successful POST would
-    // prompt the user to retry, producing a duplicate on the server.
-    expect(mockChatBackend.listMessages).toHaveBeenCalledTimes(1);
+    // subscribeToMessages was opened exactly once (the initial mount). No
+    // re-subscribe on send — the existing subscription delivers the new
+    // message via realtime; a refetch path after a successful POST would
+    // duplicate the wpb-style overlay logic the mirror already handles.
+    expect(mockChatBackend.subscribeToMessages).toHaveBeenCalledTimes(1);
   });
 });
