@@ -242,34 +242,6 @@ describe("PocketBaseUserBackend.setSlug concurrency", () => {
     expect(slugs).toEqual({ groceries: "L1", hardware: "L2" });
   });
 
-  it("two parallel saveFcmToken calls both tokens survive", async () => {
-    // Same get-then-set race for the fcm_tokens array. A cross-device
-    // install could otherwise lose a token, breaking push delivery to one
-    // of the user's devices.
-    const stub = makeStubPb();
-    stub.col("users").records.set("u1", {
-      id: "u1",
-      collectionId: "users",
-      collectionName: "users",
-      created: "",
-      updated: "",
-      fcm_tokens: [],
-    } as unknown as RecordModel);
-
-    const wpb = wrapPocketBase(() => stub.pb);
-    const mirror = createMirror(() => stub.pb, wpb);
-    const user = new PocketBaseUserBackend(() => stub.pb, wpb, mirror);
-
-    await Promise.all([
-      user.saveFcmToken("u1", "device-A-token"),
-      user.saveFcmToken("u1", "device-B-token"),
-    ]);
-
-    const finalServer = stub.col("users").records.get("u1") as unknown as Record<string, unknown>;
-    const tokens = (finalServer.fcm_tokens as string[]).slice().sort();
-    expect(tokens).toEqual(["device-A-token", "device-B-token"]);
-  });
-
   it("serialized setSlug + removeSlug compose to the expected final state", async () => {
     // Mixed ops on the same field must also serialize cleanly.
     const stub = makeStubPb();

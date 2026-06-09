@@ -33,10 +33,8 @@ const mockLifeBackend = {
 const mockUserBackend = {
   getProfile: vi.fn().mockResolvedValue({}),
   updateProfile: vi.fn(),
-  saveFcmToken: vi.fn(),
-  removeFcmToken: vi.fn(),
-  getFcmTokens: vi.fn().mockResolvedValue([]),
-  clearAllFcmTokens: vi.fn(),
+  listPushSubscriptions: vi.fn().mockResolvedValue([]),
+  clearPushSubscriptions: vi.fn(),
   getNotificationMode: vi.fn().mockResolvedValue("subscribed"),
   setNotificationMode: vi.fn(),
 };

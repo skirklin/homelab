@@ -213,8 +213,8 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
   useEffect(() => {
     if (showDebug && userId && fcmTokenCount === null) {
       setLoadingTokens(true);
-      user.getFcmTokens(userId)
-        .then(tokens => setFcmTokenCount(tokens.length))
+      user.listPushSubscriptions(userId)
+        .then(subs => setFcmTokenCount(subs.length))
         .catch(() => setFcmTokenCount(-1))
         .finally(() => setLoadingTokens(false));
     }
@@ -224,7 +224,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
     if (!userId) return;
     setLoadingTokens(true);
     try {
-      await user.clearAllFcmTokens(userId);
+      await user.clearPushSubscriptions(userId);
       setFcmTokenCount(0);
     } catch (e) {
       console.error("Failed to clear tokens:", e);

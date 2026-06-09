@@ -1,5 +1,5 @@
 /**
- * User profile interface — slug mappings, FCM tokens, notification preferences.
+ * User profile interface — slug mappings, push subscriptions, notification preferences.
  *
  * Every app that supports multiple "lists" or "logs" uses slug mappings stored
  * on the user profile. This interface abstracts that shared pattern.
@@ -34,12 +34,12 @@ export interface UserBackend {
     onSlugs: (slugs: Record<string, string>) => void,
   ): Unsubscribe;
 
-  // --- FCM tokens (push notifications) ---
+  // --- Push subscriptions (web push) ---
 
-  saveFcmToken(userId: string, token: string): Promise<void>;
-  removeFcmToken(userId: string, token: string): Promise<void>;
-  getFcmTokens(userId: string): Promise<string[]>;
-  clearAllFcmTokens(userId: string): Promise<void>;
+  /** List the user's registered web-push subscriptions (one row per device/browser). */
+  listPushSubscriptions(userId: string): Promise<PushSubscriptionInfo[]>;
+  /** Delete ALL of the user's push subscriptions (e.g. "clear all devices"). */
+  clearPushSubscriptions(userId: string): Promise<void>;
 
   // --- Notification preferences ---
 
@@ -63,3 +63,10 @@ export interface UserBackend {
 }
 
 export type SlugNamespace = "shopping" | "household" | "travel";
+
+export interface PushSubscriptionInfo {
+  id: string;
+  origin: string;
+  endpoint: string;
+  created: string;
+}

@@ -7,7 +7,7 @@
  * so optimistic slug edits / timezone pushes are visible synchronously.
  */
 import type PocketBase from "pocketbase";
-import type { UserBackend, SlugNamespace } from "../interfaces/user";
+import type { UserBackend, SlugNamespace, PushSubscriptionInfo } from "../interfaces/user";
 import type { NotificationMode, Unsubscribe } from "../types/common";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror } from "../wrapped-pb/mirror";
@@ -23,7 +23,7 @@ export class PocketBaseUserBackend implements UserBackend {
   private mirror: PBMirror;
   /**
    * Per-(userId|field) promise chain used to serialize read-modify-write
-   * operations against JSON columns (slug maps, fcm_tokens array). Two
+   * operations against JSON columns (slug maps). Two
    * concurrent callers in the same tab would otherwise both read the same
    * baseline, each compute a single-mutation map, each write back — last
    * write silently drops the other's change.
@@ -144,38 +144,24 @@ export class PocketBaseUserBackend implements UserBackend {
     return () => handle.unsubscribe();
   }
 
-  async saveFcmToken(userId: string, token: string): Promise<void> {
-    // `fcm_tokens` is a JSON field, not a relation, so PB's `+=` array op
-    // doesn't apply. Read current list (cache-first) and write merged.
-    // Serialize against other fcm_tokens writes to keep cross-device
-    // installs from clobbering each other.
-    await this.withChain(`${userId}|fcm_tokens`, async () => {
-      const user = await this.readUser(userId);
-      const tokens = (user.fcm_tokens as string[] | undefined) || [];
-      if (tokens.includes(token)) return;
-      await this.wpb.collection("users").update(userId, { fcm_tokens: [...tokens, token] });
+  async listPushSubscriptions(userId: string): Promise<PushSubscriptionInfo[]> {
+    const rows = await this.wpb.collection("push_subscriptions").getFullList({
+      filter: `user = "${userId}"`,
+      sort: "-created",
     });
+    return rows.map((r) => ({
+      id: r.id,
+      origin: (r.origin as string) || "",
+      endpoint: (r.endpoint as string) || "",
+      created: r.created as string,
+    }));
   }
 
-  async removeFcmToken(userId: string, token: string): Promise<void> {
-    await this.withChain(`${userId}|fcm_tokens`, async () => {
-      const user = await this.readUser(userId);
-      const tokens = (user.fcm_tokens as string[] | undefined) || [];
-      await this.wpb.collection("users").update(userId, {
-        fcm_tokens: tokens.filter((t) => t !== token),
-      });
+  async clearPushSubscriptions(userId: string): Promise<void> {
+    const rows = await this.wpb.collection("push_subscriptions").getFullList({
+      filter: `user = "${userId}"`,
     });
-  }
-
-  async getFcmTokens(userId: string): Promise<string[]> {
-    const user = await this.readUser(userId);
-    return (user.fcm_tokens as string[] | undefined) || [];
-  }
-
-  async clearAllFcmTokens(userId: string): Promise<void> {
-    await this.withChain(`${userId}|fcm_tokens`, async () => {
-      await this.wpb.collection("users").update(userId, { fcm_tokens: [] });
-    });
+    await Promise.all(rows.map((r) => this.wpb.collection("push_subscriptions").delete(r.id)));
   }
 
   async getNotificationMode(userId: string): Promise<NotificationMode> {

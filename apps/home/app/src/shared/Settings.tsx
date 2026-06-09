@@ -15,7 +15,7 @@ import {
   PlusOutlined,
 } from "@ant-design/icons";
 import styled from "styled-components";
-import { useAuth, getBackend, getApiBase, getAuthHeaders, type NotificationMode, PageContainer, useFeedback } from "@kirkl/shared";
+import { useAuth, useUserBackend, getBackend, getApiBase, getAuthHeaders, type NotificationMode, type PushSubscriptionInfo, PageContainer, useFeedback } from "@kirkl/shared";
 
 const Content = styled.div`
   padding: var(--space-lg);
@@ -92,7 +92,6 @@ const LoadingState = styled.div`
 
 interface UserSettings {
   upkeepNotificationMode?: NotificationMode;
-  fcmTokens?: string[];
   timezone?: string;
 }
 
@@ -331,10 +330,6 @@ function parseUserSettings(data: Record<string, unknown>): UserSettings {
     settings.upkeepNotificationMode = data.upkeep_notification_mode;
   }
 
-  if (Array.isArray(data.fcm_tokens) && data.fcm_tokens.every((t: unknown) => typeof t === "string")) {
-    settings.fcmTokens = data.fcm_tokens;
-  }
-
   if (typeof data.timezone === "string" && data.timezone) {
     settings.timezone = data.timezone;
   }
@@ -345,7 +340,9 @@ function parseUserSettings(data: Record<string, unknown>): UserSettings {
 export function Settings() {
   const { message, modal } = useFeedback();
   const { user } = useAuth();
+  const userBackend = useUserBackend();
   const [settings, setSettings] = useState<UserSettings>({});
+  const [devices, setDevices] = useState<PushSubscriptionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -358,6 +355,7 @@ export function Settings() {
       try {
         const record = await getBackend().collection("users").getOne(user.uid);
         setSettings(parseUserSettings(record));
+        userBackend.listPushSubscriptions(user.uid).then(setDevices).catch(() => setDevices([]));
       } catch (err) {
         console.error("Failed to load settings:", err);
         setError("Failed to load settings. Please try again.");
@@ -419,10 +417,8 @@ export function Settings() {
       onOk: async () => {
         setSaving(true);
         try {
-          await getBackend().collection("users").update(user.uid, {
-            fcm_tokens: [],
-          });
-          setSettings(prev => ({ ...prev, fcmTokens: [] }));
+          await userBackend.clearPushSubscriptions(user.uid);
+          setDevices([]);
           message.success("All notification tokens cleared");
         } catch (error) {
           console.error("Failed to clear tokens:", error);
@@ -466,7 +462,7 @@ export function Settings() {
     );
   }
 
-  const tokenCount = settings.fcmTokens?.length || 0;
+  const tokenCount = devices.length;
   // Binary opt-out: only `off` is honored by the notification crons; the legacy
   // `all` / `subscribed` values both mean "on" (notify me about tasks I'm a
   // resolved recipient of). Surface a simple On/Off toggle.

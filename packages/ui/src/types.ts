@@ -9,7 +9,7 @@
 // unified entries[] shape (commits 3f8ea6c / a1cf8f8). Use LifeEvent
 // (or the per-domain TaskCompletion / CookingLogEvent) instead.
 
-export type { LifeEvent, LifeEntry } from "@homelab/backend";
+export type { LifeEvent, LifeEntry, PushSubscriptionInfo } from "@homelab/backend";
 
 // ===== User Profile Types =====
 
@@ -24,7 +24,6 @@ export interface UserProfile {
   household_slugs?: Record<string, string>;
   travel_slugs?: Record<string, string>;
   upkeep_notification_mode?: NotificationMode;
-  fcm_tokens?: string[];
   last_task_notification?: string;
 }
 
