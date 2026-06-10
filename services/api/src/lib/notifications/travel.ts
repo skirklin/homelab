@@ -19,7 +19,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
-import { safeTz } from "./tz";
+import { makeUserTzResolver } from "./tz";
 
 const TRAVEL_ORIGINS = [`https://travel.${DOMAIN}`, `https://${DOMAIN}`];
 // The home shell (kirkl.in) is the ONLY origin where travel is mounted under a
@@ -104,16 +104,9 @@ async function findActiveContexts(pb: PocketBase, now: Date): Promise<ActiveCont
     }),
   ]);
 
-  // Cache user records by id; one user often owns multiple trips.
-  const userTzCache = new Map<string, string>();
-  async function tzForUser(userId: string): Promise<string> {
-    const hit = userTzCache.get(userId);
-    if (hit) return hit;
-    const u = await pb.collection("users").getOne(userId, { $autoCancel: false });
-    const tz = safeTz(u.timezone, FALLBACK_TZ);
-    userTzCache.set(userId, tz);
-    return tz;
-  }
+  // Resolve user tz by id; one user often owns multiple trips, so the
+  // resolver memoizes per run.
+  const tzForUser = makeUserTzResolver(pb, FALLBACK_TZ);
 
   for (const trip of trips) {
     const tripActivities = activities.filter((a) => a.trip_id === trip.id);

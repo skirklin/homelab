@@ -8,7 +8,7 @@ import { RANDOM_SAMPLES } from "@homelab/backend";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
-import { safeTz } from "./tz";
+import { makeUserTzResolver, safeTz } from "./tz";
 
 // Life is now standalone at life.kirkl.in (the old kirkl.in/life module was
 // removed) — both session wizards and the sampling UI mount at root there, so
@@ -114,22 +114,8 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   // so a second user's prompts land in their local active hours (P0 isolation
   // gap — apps/life/ROADMAP.md). Owner tz wins; fall back to the system-wide
   // config tz, then UTC.
-  const userTzCache = new Map<string, string>();
-  async function tzForOwner(ownerId: string): Promise<string> {
-    const configTz = safeTz(config.timezone, FALLBACK_TZ);
-    if (!ownerId) return configTz;
-    const hit = userTzCache.get(ownerId);
-    if (hit) return hit;
-    let tz: string;
-    try {
-      const u = await pb.collection("users").getOne(ownerId, { $autoCancel: false });
-      tz = safeTz(u.timezone, configTz);
-    } catch {
-      tz = configTz;
-    }
-    userTzCache.set(ownerId, tz);
-    return tz;
-  }
+  const configTz = safeTz(config.timezone, FALLBACK_TZ);
+  const tzForOwner = makeUserTzResolver(pb, configTz);
 
   for (const logDoc of logs) {
     // Per-log opt-in gate. Must come before schedule generation so disabled
@@ -325,20 +311,7 @@ export async function runLifeReminderCheck(
   let sent = 0;
   let skipped = 0;
 
-  const userTzCache = new Map<string, string>();
-  async function tzForUser(userId: string): Promise<string> {
-    const hit = userTzCache.get(userId);
-    if (hit) return hit;
-    try {
-      const u = await pb.collection("users").getOne(userId, { $autoCancel: false });
-      const tz = safeTz(u.timezone, FALLBACK_TZ);
-      userTzCache.set(userId, tz);
-      return tz;
-    } catch {
-      userTzCache.set(userId, "UTC");
-      return "UTC";
-    }
-  }
+  const tzForUser = makeUserTzResolver(pb, FALLBACK_TZ);
 
   for (const logDoc of logs) {
     for (const kind of REMINDER_KINDS) {
