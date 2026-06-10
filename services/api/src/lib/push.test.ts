@@ -76,6 +76,49 @@ const sub = (id: string, origin: string): FakeSub => ({
   keys: { p256dh: "p", auth: "a" },
 });
 
+/** Like makeFakePb but records which sub ids had delete() called on them. */
+function makeFakePbRecordingDeletes(subs: FakeSub[], deleted: string[]) {
+  return {
+    filter: (expr: string, _params: Record<string, unknown>) => expr,
+    collection() {
+      return {
+        getFullList: async () => subs,
+        delete: async (id: string) => { deleted.push(id); },
+      };
+    },
+  } as never;
+}
+
+describe("sendPushToUser — dead-subscription pruning", () => {
+  // A VAPID key rotation leaves old subs returning 403 (applicationServerKey
+  // mismatch). They can never receive pushes again, so they must be pruned just
+  // like 404/410 — otherwise they accumulate and shadow working subs.
+  it.each([403, 404, 410])("prunes a sub when web-push rejects with %i", async (statusCode) => {
+    sendNotification.mockRejectedValueOnce(Object.assign(new Error("rejected"), { statusCode }));
+    const deleted: string[] = [];
+    const pb = makeFakePbRecordingDeletes([sub("dead", "https://kirkl.in")], deleted);
+
+    const result = await sendPushToUser(pb, "user1", { title: "x", url: "/x" });
+
+    expect(deleted).toEqual(["dead"]);
+    expect(result.expired).toBe(1);
+    expect(result.sent).toBe(0);
+    expect(result.failed).toBe(0);
+  });
+
+  it("does NOT prune on other failures (e.g. 500); counts as failed", async () => {
+    sendNotification.mockRejectedValueOnce(Object.assign(new Error("boom"), { statusCode: 500 }));
+    const deleted: string[] = [];
+    const pb = makeFakePbRecordingDeletes([sub("transient", "https://kirkl.in")], deleted);
+
+    const result = await sendPushToUser(pb, "user1", { title: "x", url: "/x" });
+
+    expect(deleted).toEqual([]);
+    expect(result.failed).toBe(1);
+    expect(result.expired).toBe(0);
+  });
+});
+
 describe("sendPushToUser — origin-aware deep link (buildUrl)", () => {
   it("delivers a SAME-ORIGIN relative path to the embedded kirkl.in subscription", async () => {
     // User only has an embedded subscription. The push must NOT carry an

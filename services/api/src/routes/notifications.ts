@@ -1,6 +1,10 @@
 /**
  * Notification trigger endpoints — internal, API-key-only.
- * Called by k8s CronJobs or manually for testing.
+ *
+ * These are now PRIMARILY driven by the in-process scheduler in
+ * ../lib/notifications/scheduler.ts, which calls the same lib functions
+ * directly (no HTTP hop). The endpoints are kept for manual triggering and for
+ * the test suite; the k8s CronJobs that used to curl them have been removed.
  */
 import { Hono } from "hono";
 import type { AppEnv } from "../index";

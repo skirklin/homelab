@@ -161,7 +161,7 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
       data: { type: "household_task_due", taskCount: String(userTasks.length) },
     }, { preferredOrigins: UPKEEP_ORIGINS });
 
-    console.log(`[upkeep] User ${userId}: ${result.sent} sent, ${result.expired} expired`);
+    console.log(`[upkeep] User ${userId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
 
     // Mark as notified today
     await pb.collection("users").update(userId, {

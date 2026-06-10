@@ -226,5 +226,8 @@ const port = parseInt(process.env.PORT || "3000");
 
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`API server running on port ${info.port}`);
-  startScheduler();
+  // Belt-and-suspenders: tests import src/test-app.ts (which never imports this
+  // file, so serve()/startScheduler never run), but guard on NODE_ENV too so a
+  // stray import of index.ts in a test can't spin up per-minute jobs.
+  if (process.env.NODE_ENV !== "test") startScheduler();
 });
