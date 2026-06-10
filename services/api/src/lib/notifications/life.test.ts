@@ -20,7 +20,7 @@ vi.mock("../push", () => ({ sendPushToUser: (...a: unknown[]) => sendPushToUser(
 const getAdminPb = vi.fn();
 vi.mock("../pb", () => ({ getAdminPb: () => getAdminPb() }));
 
-import { runLifeTrackerSampling } from "./life";
+import { runLifeTrackerSampling, runLifeReminderCheck } from "./life";
 import { RANDOM_SAMPLES } from "@homelab/backend";
 
 // ─── Fake PB ─────────────────────────────────────────────────────────────────
@@ -167,5 +167,131 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
     const res = await runLifeTrackerSampling();
     expect(res.sent).toBe(0);
     expect(scheduleFor(updates, "logOff")).toBeNull();
+  });
+});
+
+// ─── runLifeReminderCheck: mark-after-successful-delivery ────────────────────
+//
+// The reminder loop must write `last_*_reminder_sent` only when a push actually
+// landed (result.sent > 0). A tick that delivers nothing (no live subs / all
+// failed) or throws must NOT mark the day, so the next within-window tick
+// retries. (croner protect:true makes the old mark-before-send double-fire
+// guard moot.)
+
+interface ReminderLog {
+  id: string;
+  owner: string;
+  morning_reminder_time?: string;
+  evening_reminder_time?: string;
+  weekly_reminder_time?: string;
+  last_morning_reminder_sent?: string;
+  last_evening_reminder_sent?: string;
+  last_weekly_reminder_sent?: string;
+}
+
+function makeReminderPb(opts: { logs: ReminderLog[]; usersTz: Record<string, string | undefined> }) {
+  const updates: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const pb = {
+    collection(name: string) {
+      if (name === "life_logs") {
+        return {
+          getFullList: async () => opts.logs,
+          update: async (id: string, data: Record<string, unknown>) => {
+            updates.push({ id, data });
+            const log = opts.logs.find((l) => l.id === id) as Record<string, unknown> | undefined;
+            if (log) Object.assign(log, data);
+            return data;
+          },
+        };
+      }
+      if (name === "users") {
+        return {
+          getOne: async (id: string) => {
+            if (!(id in opts.usersTz)) throw new Error("no such user");
+            return { id, timezone: opts.usersTz[id] };
+          },
+        };
+      }
+      throw new Error(`unexpected collection ${name}`);
+    },
+  };
+  return { pb, updates };
+}
+
+function sentWrites(updates: Array<{ id: string; data: Record<string, unknown> }>, field: string) {
+  return updates.filter((u) => field in u.data);
+}
+
+describe("runLifeReminderCheck — mark only after successful delivery", () => {
+  // A Monday so the morning reminder fires and the Sunday-only weekly/evening
+  // suppression rules don't interfere. 2026-06-08 is a Monday; pick 08:00 UTC.
+  const MONDAY_0800Z = new Date("2026-06-08T08:00:00Z");
+
+  it("does NOT mark last_morning_reminder_sent when delivery is 0", async () => {
+    sendPushToUser.mockResolvedValue({ sent: 0, expired: 0, failed: 1 });
+    const logs: ReminderLog[] = [
+      { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
+    ];
+    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(pb);
+
+    const res = await runLifeReminderCheck(MONDAY_0800Z);
+
+    expect(sendPushToUser).toHaveBeenCalledTimes(1);
+    expect(sentWrites(updates, "last_morning_reminder_sent")).toHaveLength(0);
+    expect(res.sent).toBe(0);
+  });
+
+  it("does NOT mark when the send throws", async () => {
+    sendPushToUser.mockRejectedValue(new Error("push backend down"));
+    const logs: ReminderLog[] = [
+      { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
+    ];
+    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(pb);
+
+    const res = await runLifeReminderCheck(MONDAY_0800Z);
+
+    expect(sentWrites(updates, "last_morning_reminder_sent")).toHaveLength(0);
+    expect(res.sent).toBe(0);
+  });
+
+  it("DOES mark last_morning_reminder_sent when delivery succeeds", async () => {
+    sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
+    const logs: ReminderLog[] = [
+      { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
+    ];
+    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(pb);
+
+    const res = await runLifeReminderCheck(MONDAY_0800Z);
+
+    const writes = sentWrites(updates, "last_morning_reminder_sent");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].data.last_morning_reminder_sent).toBe("2026-06-08");
+    expect(res.sent).toBe(1);
+  });
+
+  it("weekly reminder: marks only on sent>0 (Sunday)", async () => {
+    // 2026-06-07 is a Sunday; 08:00 UTC matches the weekly target.
+    const SUNDAY_0800Z = new Date("2026-06-07T08:00:00Z");
+
+    // Failure path: no mark.
+    sendPushToUser.mockResolvedValue({ sent: 0, expired: 0, failed: 1 });
+    let logs: ReminderLog[] = [{ id: "logW", owner: "userA", weekly_reminder_time: "08:00" }];
+    let env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(env.pb);
+    await runLifeReminderCheck(SUNDAY_0800Z);
+    expect(sentWrites(env.updates, "last_weekly_reminder_sent")).toHaveLength(0);
+
+    // Success path: mark.
+    sendPushToUser.mockResolvedValue({ sent: 2, expired: 0, failed: 0 });
+    logs = [{ id: "logW", owner: "userA", weekly_reminder_time: "08:00" }];
+    env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(env.pb);
+    await runLifeReminderCheck(SUNDAY_0800Z);
+    const writes = sentWrites(env.updates, "last_weekly_reminder_sent");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].data.last_weekly_reminder_sent).toBe("2026-06-07");
   });
 });

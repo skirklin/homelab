@@ -184,12 +184,6 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
     // Send max 1 per run per log
     const timeToSend = pendingTimes[0];
 
-    // Mark as sent before sending (single replica, no race)
-    schedule.sentTimes = [...schedule.sentTimes, timeToSend];
-    await pb.collection("life_logs").update(logDoc.id, {
-      sample_schedule: schedule,
-    }, { $autoCancel: false });
-
     const title = "Life Tracker Check-in";
     const body = config.questions.length === 1
       ? config.questions[0].label
@@ -203,6 +197,16 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
     // write the resulting value event against.
     const quickRating = config.questions.length === 1 ? config.questions[0] : null;
 
+    // Mark this time into sentTimes only AFTER a delivery landed, mirroring
+    // runLifeReminderCheck. The old code marked before sending ("single
+    // replica, no race"); the no-race part still holds (croner protect:true),
+    // but marking before send burned the slot on a no-delivery tick (no subs /
+    // all failed / no owner) with no retry. Now an undelivered slot stays
+    // pending so the next within-window tick (~15-min window) retries it. Each
+    // times[] entry is independent, so this doesn't affect multi-sample-per-day
+    // semantics. The oldTimes flood-guard above is unchanged — those are
+    // intentionally suppressed regardless of delivery.
+    let delivered = false;
     if (ownerId) {
       const result = await sendPushToUser(pb, ownerId, {
         title,
@@ -217,9 +221,19 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
         },
       }, { preferredOrigins: LIFE_ORIGINS });
       console.log(`[life] Log ${logDoc.id} → user ${ownerId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
+      delivered = result.sent > 0;
     }
 
-    totalSent++;
+    if (delivered) {
+      schedule.sentTimes = [...schedule.sentTimes, timeToSend];
+      await pb.collection("life_logs").update(logDoc.id, {
+        sample_schedule: schedule,
+      }, { $autoCancel: false });
+      totalSent++;
+    } else {
+      console.warn(`[life] Log ${logDoc.id} sample 0 delivered — not marking, will retry within window`);
+      totalSkipped++;
+    }
   }
 
   return { sent: totalSent, skipped: totalSkipped };
@@ -362,14 +376,17 @@ export async function runLifeReminderCheck(
         continue;
       }
 
-      // Mark as sent BEFORE pushing — a failed send means no retry today,
-      // which is preferable to firing twice.
-      await pb.collection("life_logs").update(
-        logDoc.id,
-        { [kind.sentField]: todayYmd },
-        { $autoCancel: false },
-      );
-
+      // Mark as sent only AFTER a delivery actually landed (result.sent > 0).
+      // The old code marked BEFORE pushing to avoid a concurrent double-fire,
+      // but that's moot now: the in-process scheduler runs this job with
+      // croner `protect: true` (scheduler.ts), so ticks never overlap. Marking
+      // before send had a real cost — a tick that delivered nothing (no live
+      // subs / all failed) or threw still burned the day, silently losing the
+      // reminder with no retry. Now we mark after success; if nothing was
+      // delivered we leave sentField untouched so the next within-window tick
+      // retries. The ±1min withinWindow guard bounds retries to ~1-2 ticks, and
+      // the lastSent === todayYmd skip above still prevents a second send once
+      // one succeeds.
       const payload = SESSION_REMINDERS[kind.kind];
       try {
         const result = await sendPushToUser(pb, ownerId, {
@@ -379,10 +396,19 @@ export async function runLifeReminderCheck(
           data: { type: `life_${kind.kind}_reminder`, logId: logDoc.id },
         }, { preferredOrigins: LIFE_ORIGINS });
         console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
+        if (result.sent > 0) {
+          await pb.collection("life_logs").update(
+            logDoc.id,
+            { [kind.sentField]: todayYmd },
+            { $autoCancel: false },
+          );
+          sent++;
+        } else {
+          console.warn(`[life-reminder/${kind.kind}] 0 delivered — not marking, will retry within window`);
+        }
       } catch (err) {
         console.error(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId}:`, err);
       }
-      sent++;
     }
 
     // Weekly review — Sunday only in the user's tz. Same window + idempotency
@@ -414,12 +440,9 @@ export async function runLifeReminderCheck(
           if (lastSent === todayYmd) {
             skipped++;
           } else {
-            await pb.collection("life_logs").update(
-              logDoc.id,
-              { last_weekly_reminder_sent: todayYmd },
-              { $autoCancel: false },
-            );
-
+            // Mark-after-success, same rationale as morning/evening above:
+            // protect:true removes the double-fire concern, and marking only
+            // when result.sent > 0 lets a no-delivery tick retry within window.
             const payload = SESSION_REMINDERS.weekly;
             try {
               const result = await sendPushToUser(pb, ownerId, {
@@ -429,10 +452,19 @@ export async function runLifeReminderCheck(
                 data: { type: "life_weekly_reminder", logId: logDoc.id },
               }, { preferredOrigins: LIFE_ORIGINS });
               console.log(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
+              if (result.sent > 0) {
+                await pb.collection("life_logs").update(
+                  logDoc.id,
+                  { last_weekly_reminder_sent: todayYmd },
+                  { $autoCancel: false },
+                );
+                sent++;
+              } else {
+                console.warn(`[life-reminder/weekly] 0 delivered — not marking, will retry within window`);
+              }
             } catch (err) {
               console.error(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId}:`, err);
             }
-            sent++;
           }
         }
       }
