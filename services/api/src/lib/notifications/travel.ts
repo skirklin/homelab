@@ -300,7 +300,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
         buildUrl,
         data: { type: "travel_morning", tripId: ctx.tripId, date: ctx.todayInTz },
       }, { preferredOrigins: TRAVEL_ORIGINS });
-      console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);
+      console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
       await writeDedup(pb, ctx.userId, dedup, "morning", ctx.tripId, ctx.todayInTz);
       mNotified++;
     }
@@ -318,7 +318,7 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
         buildUrl,
         data: { type: "travel_evening", tripId: ctx.tripId, date: ctx.todayInTz },
       }, { preferredOrigins: TRAVEL_ORIGINS });
-      console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired`);
+      console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
       await writeDedup(pb, ctx.userId, dedup, "evening", ctx.tripId, ctx.todayInTz);
       eNotified++;
     }

@@ -128,7 +128,13 @@ export async function sendPushToUser(
         return "sent" as const;
       } catch (err: unknown) {
         const statusCode = (err as { statusCode?: number }).statusCode;
-        if (statusCode === 404 || statusCode === 410) {
+        // 403 means VAPID auth failed for THIS subscription: it was created
+        // against a different applicationServerKey (e.g. before a VAPID key
+        // rotation) and can never receive pushes again, so prune it just like
+        // an expired (404/410) sub. This is safe because a misconfigured
+        // server key would fail ALL sends uniformly — a 403 on only a subset
+        // means those specific subs are stale, not that the server is broken.
+        if (statusCode === 403 || statusCode === 404 || statusCode === 410) {
           await pb.collection("push_subscriptions").delete(sub.id, {
             $autoCancel: false,
           }).catch(() => {});

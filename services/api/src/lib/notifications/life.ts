@@ -216,7 +216,7 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
           }),
         },
       }, { preferredOrigins: LIFE_ORIGINS });
-      console.log(`[life] Log ${logDoc.id} → user ${ownerId}: ${result.sent} sent`);
+      console.log(`[life] Log ${logDoc.id} → user ${ownerId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
     }
 
     totalSent++;
@@ -378,7 +378,7 @@ export async function runLifeReminderCheck(
           buildUrl: () => sessionUrl(kind.kind),
           data: { type: `life_${kind.kind}_reminder`, logId: logDoc.id },
         }, { preferredOrigins: LIFE_ORIGINS });
-        console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);
+        console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
       } catch (err) {
         console.error(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId}:`, err);
       }
@@ -428,7 +428,7 @@ export async function runLifeReminderCheck(
                 buildUrl: () => sessionUrl("weekly"),
                 data: { type: "life_weekly_reminder", logId: logDoc.id },
               }, { preferredOrigins: LIFE_ORIGINS });
-              console.log(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired`);
+              console.log(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
             } catch (err) {
               console.error(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId}:`, err);
             }

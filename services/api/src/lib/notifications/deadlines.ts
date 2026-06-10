@@ -158,7 +158,7 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
       data: { type: "task_deadline_due", taskCount: String(userTasks.length) },
     }, { preferredOrigins: UPKEEP_ORIGINS });
 
-    console.log(`[deadlines] User ${userId}: ${result.sent} sent, ${result.expired} expired`);
+    console.log(`[deadlines] User ${userId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
 
     await pb.collection("users").update(userId, {
       last_deadline_notification: new Date().toISOString(),
