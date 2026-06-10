@@ -75,15 +75,35 @@ async function runObserverWeekly(): Promise<void> {
   const ownerIds = [...new Set(logs.map((l) => (l.owner as string) || "").filter(Boolean))];
 
   let generated = 0;
+  let skipped = 0;
   for (const ownerId of ownerIds) {
     try {
+      // Skip owners with no life activity in the window: generating for an
+      // inactive log just burns an Anthropic call and produces an empty
+      // observation. Gate on the same life_events query assembleBundle uses
+      // (log.owner + timestamp in window) so "has activity" means exactly what
+      // the bundle would have fed the model. Kept in the scheduler only — the
+      // manual /observer/generate route can still force a sparse-window run.
+      const activity = await pb.collection("life_events").getList(1, 1, {
+        filter: pb.filter(
+          "log.owner = {:owner} && timestamp >= {:start} && timestamp <= {:end}",
+          { owner: ownerId, start: windowStart.toISOString(), end: windowEnd.toISOString() },
+        ),
+        $autoCancel: false,
+      });
+      if (activity.totalItems === 0) {
+        skipped++;
+        continue;
+      }
       await runObserverGeneration({ pb, ownerId, period: "weekly", windowStart, windowEnd });
       generated++;
     } catch (err) {
       console.error(`[scheduler/observer-weekly] owner ${ownerId} failed:`, err);
     }
   }
-  console.log(`[scheduler/observer-weekly] done: ${generated}/${ownerIds.length} observations generated`);
+  console.log(
+    `[scheduler/observer-weekly] done: ${generated} generated, ${skipped} skipped (no activity), of ${ownerIds.length} owners`,
+  );
 }
 
 export function startScheduler(): void {
