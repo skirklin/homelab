@@ -1,96 +1,10 @@
-# Daily upkeep task notification check — 8 AM Pacific
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: upkeep-notifications
-  namespace: homelab
-spec:
-  schedule: "0 8 * * *"
-  timeZone: "America/Los_Angeles"
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          restartPolicy: Never
-          containers:
-            - name: trigger
-              image: curlimages/curl:latest
-              command: ["sh", "-c"]
-              args:
-                - |
-                  curl -sf -X POST \
-                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
-                    http://functions.homelab.svc.cluster.local:3000/notifications/upkeep-check
-              envFrom:
-                - secretRef:
-                    name: api-secrets
----
-# Life session reminders — every minute. The function decides per-log
-# whether the current minute matches the configured morning/evening
-# reminder time in the owner's timezone (±1 min window).
-# Idempotent via last_{morning,evening}_reminder_sent = "YYYY-MM-DD".
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: life-reminders-check
-  namespace: homelab
-spec:
-  schedule: "* * * * *"
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          restartPolicy: Never
-          containers:
-            - name: trigger
-              image: curlimages/curl:latest
-              command: ["sh", "-c"]
-              args:
-                - |
-                  curl -sf -X POST \
-                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
-                    http://functions.homelab.svc.cluster.local:3000/notifications/life-reminders-check
-              envFrom:
-                - secretRef:
-                    name: api-secrets
----
-# Travel notifications — hourly tick. The function decides whether each
-# active trip is at its local 7am (morning push) or 8pm (evening prompt).
-# Per-trip timezone is derived from the day's first activity coords.
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: travel-tick
-  namespace: homelab
-spec:
-  schedule: "0 * * * *"
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          restartPolicy: Never
-          containers:
-            - name: trigger
-              image: curlimages/curl:latest
-              command: ["sh", "-c"]
-              args:
-                - |
-                  curl -sf -X POST \
-                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
-                    http://functions.homelab.svc.cluster.local:3000/notifications/travel-tick
-              envFrom:
-                - secretRef:
-                    name: api-secrets
----
+# NOTE: the notification-trigger CronJobs (upkeep-notifications,
+# life-reminders-check, travel-tick, observer-weekly) that used to live here
+# have been replaced by an in-process scheduler running inside the functions
+# service — see services/api/src/lib/notifications/scheduler.ts. Only the
+# PocketBase-maintenance CronJobs remain below: they hit PB directly and must
+# run even when functions is down.
+
 # Daily PocketBase backup — 2 AM Pacific. Snapshots the whole pb_data
 # dir (collections + records + uploaded files) into a zip in
 # /pb/pb_data/backups/ on the PocketBase PVC. The 2026-05-22 life_events
@@ -375,51 +289,6 @@ spec:
                     echo "[pod-events-prune] deleted batch=$COUNT total=$TOTAL"
                   done
                   echo "[pod-events-prune] done total=$TOTAL"
-              envFrom:
-                - secretRef:
-                    name: api-secrets
----
-# Weekly observer reflection — Sunday 1 PM Pacific. Calls the observer
-# generate endpoint to produce a weekly reflection entry covering the
-# past 7 days of life log data. The endpoint is idempotent per period +
-# window, so a manual retry or overlapping run won't duplicate entries.
-#
-# Auth: uses HOMELAB_API_TOKEN from api-secrets (Bearer token, same as
-# the other CronJobs). Hits the functions service cluster-internal URL.
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: observer-weekly
-  namespace: homelab
-spec:
-  schedule: "0 20 * * 0"  # Sunday 1 PM Pacific (PDT = UTC-7)
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      backoffLimit: 1
-      template:
-        spec:
-          restartPolicy: OnFailure
-          containers:
-            - name: trigger
-              image: alpine/curl:latest
-              command: ["sh", "-c"]
-              args:
-                - |
-                  # BusyBox date doesn't support `-d '7 days ago'`; install
-                  # coreutils for GNU date (same pattern as pb-backup-prune).
-                  apk add --no-cache coreutils >/dev/null
-                  WINDOW_START=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
-                  WINDOW_END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-                  echo "[observer-weekly] window: $WINDOW_START .. $WINDOW_END"
-                  curl -sf -X POST \
-                    -H "Content-Type: application/json" \
-                    -H "Authorization: Bearer $HOMELAB_API_TOKEN" \
-                    -d "{\"period\":\"weekly\",\"window_start\":\"$WINDOW_START\",\"window_end\":\"$WINDOW_END\"}" \
-                    http://functions.homelab.svc.cluster.local:3000/observer/generate
-                  echo "[observer-weekly] done"
               envFrom:
                 - secretRef:
                     name: api-secrets

@@ -831,6 +831,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.1
         version: 1.29.0(zod@3.25.76)
+      croner:
+        specifier: ^8.1.2
+        version: 8.1.2
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
@@ -3799,6 +3802,10 @@ packages:
 
   country-regex@1.1.0:
     resolution: {integrity: sha512-iSPlClZP8vX7MC3/u6s3lrDuoQyhQukh5LyABJ3hvfzbQ3Yyayd4fp04zjLnfi267B/B2FkumcWWgrbban7sSA==}
+
+  croner@8.1.2:
+    resolution: {integrity: sha512-ypfPFcAXHuAZRCzo3vJL6ltENzniTjwe/qsLleH1V2/7SRDjgvRQyrLmumFTLmjFax4IuSxfGXEn79fozXcJog==}
+    engines: {node: '>=18.0'}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -11631,6 +11638,8 @@ snapshots:
       vary: 1.1.2
 
   country-regex@1.1.0: {}
+
+  croner@8.1.2: {}
 
   cross-spawn@7.0.6:
     dependencies:

@@ -8,14 +8,9 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
-import { getAnthropicClient, extractText, CLAUDE_MODEL } from "../lib/ai";
-import { assembleBundle } from "../lib/observer/bundle";
-import { OBSERVER_SYSTEM_PROMPT, PROMPT_VERSION } from "../lib/observer/prompt";
+import { runObserverGeneration, VALID_PERIODS, type ObserverPeriod } from "../lib/observer/generate";
 
 export const observerRoutes = new Hono<AppEnv>();
-
-const VALID_PERIODS = ["weekly", "monthly", "adhoc"] as const;
-type Period = (typeof VALID_PERIODS)[number];
 
 observerRoutes.post("/generate", handler(async (c) => {
   const body = await c.req.json<{
@@ -32,7 +27,7 @@ observerRoutes.post("/generate", handler(async (c) => {
     );
   }
 
-  if (!VALID_PERIODS.includes(body.period as Period)) {
+  if (!VALID_PERIODS.includes(body.period as ObserverPeriod)) {
     return c.json(
       { error: `Invalid period: must be one of ${VALID_PERIODS.join(", ")}` },
       400,
@@ -52,7 +47,7 @@ observerRoutes.post("/generate", handler(async (c) => {
     return c.json({ error: "window_end must be after window_start" }, 400);
   }
 
-  const period = body.period as Period;
+  const period = body.period as ObserverPeriod;
   const pb = c.get("pb");
   // authMiddleware's userClient(token) calls pb.authStore.save(token, null) —
   // the record is null for PB JWT callers (every frontend request). Always
@@ -63,43 +58,13 @@ observerRoutes.post("/generate", handler(async (c) => {
     return c.json({ error: "Not authenticated" }, 401);
   }
 
-  // --- Bundle assembly ---
-  const { markdown, relatedEventIds } = await assembleBundle({
+  const result = await runObserverGeneration({
     pb,
+    ownerId: userId,
+    period,
     windowStart,
     windowEnd,
   });
 
-  // --- Anthropic API call ---
-  const anthropic = getAnthropicClient();
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 1024,
-    system: OBSERVER_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: markdown }],
-  });
-
-  const content = extractText(response);
-
-  // --- Persist to PocketBase ---
-  const record = await pb.collection("claude_observations").create({
-    content,
-    period,
-    data_window_start: windowStart.toISOString(),
-    data_window_end: windowEnd.toISOString(),
-    related_event_ids: relatedEventIds,
-    owner: userId,
-    prompt_version: PROMPT_VERSION,
-  });
-
-  return c.json({
-    id: record.id,
-    content,
-    period,
-    data_window_start: windowStart.toISOString(),
-    data_window_end: windowEnd.toISOString(),
-    related_event_ids: relatedEventIds,
-    prompt_version: PROMPT_VERSION,
-    created: record.created,
-  });
+  return c.json(result);
 }));
