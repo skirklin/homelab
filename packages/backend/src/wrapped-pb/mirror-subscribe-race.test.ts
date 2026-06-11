@@ -909,6 +909,66 @@ describe("MATRIX 1: warm-cache eager-ready + live SSE in the gated-fetch window"
     expect(last.map((r) => r.id), "warm-cache pre-fetch delete must stay deleted (not resurrected by the stale fetch)").toEqual(["c1"]);
     expect(wpb.collection("items").view("c2"), "delete must win in the queue").toBeNull();
   });
+
+  it("STEP 3: warm-cache sort+limit window under-fill — a pre-fetch DELETE of an in-window record backfills (not N-1)", async () => {
+    // The step-2 review flagged this: a warm-cache eager-ready SORT+LIMIT slice
+    // whose cache holds exactly the top-N, then a pre-fetch SSE DELETE vacates a
+    // window slot. The server is fully CONSISTENT (the deleted row is really
+    // gone, and a below-window record exists to promote). Pre-step-3 the eager
+    // paint set membership to the cached top-N, the pre-fetch delete dropped one,
+    // and nothing pulled in the below-window record → the window rendered N-1.
+    // Step 3 fixes it: the bootstrap fetch is a full page (it returns `limit`
+    // rows, with the below-window record now promoted), and windowDirtyDuring
+    // Bootstrap arms a top-N refetch that backfills the slot.
+    //
+    // Cache holds the top-2 (b:t=3, a:t=2) — eager paint sets ready. Server ALSO
+    // has c:t=1 below the window. A pre-fetch DELETE of 'a' (in-window) must
+    // promote 'c' so the window stays full at [b, c].
+    await seedSnapshots([
+      { key: "user-A::log::a", user: "user-A", collection: "log", id: "a", record: rec("log", { id: "a", t: 2 }), updatedAt: Date.now() },
+      { key: "user-A::log::b", user: "user-A", collection: "log", id: "b", record: rec("log", { id: "b", t: 3 }), updatedAt: Date.now() },
+    ]);
+
+    const stub = makeStubPb();
+    stub.authStore.setRecord("user-A");
+    // Server truth: b(3), a(2) in-window; c(1) below. (After the delete of 'a',
+    // the true top-2 is [b, c].)
+    stub.col("log").records.set("a", rec("log", { id: "a", t: 2 }));
+    stub.col("log").records.set("b", rec("log", { id: "b", t: 3 }));
+    stub.col("log").records.set("c", rec("log", { id: "c", t: 1 }));
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+
+    await wpb.hydrateSnapshots();
+
+    const states: RawRecord[][] = [];
+    // Gate the fetch + registration so eager paint sets ready (warm-cache window)
+    // while the bootstrap getList is still in flight.
+    stub.holdReads();
+    stub.holdRegistration();
+    mirror.watch({ collection: "log", topic: "*", sort: "-t", limit: 2 }, (s) => states.push(s));
+    await flush();
+
+    expect(states.length, "eager paint sets ready before the fetch resolves").toBeGreaterThanOrEqual(1);
+    // Eager-painted window is the cached top-2 [b, a].
+    expect(states[states.length - 1].map((r) => r.id), "warm-cache paints the cached top-N").toEqual(["b", "a"]);
+
+    // Pre-fetch SSE DELETE of in-window 'a'. Commit it server-side too so the
+    // gated bootstrap getList (snapshotted when reads release) returns the true
+    // full page [b, c] (c promoted). The delete tombstones 'a' in the queue.
+    stub.emit("log", { action: "delete", record: rec("log", { id: "a", t: 2 }) });
+    stub.col("log").records.delete("a");
+    await flush();
+
+    stub.releaseReads();
+    stub.releaseRegistration();
+    await flush(8);
+
+    const last = states[states.length - 1];
+    expect(last.map((r) => r.id), "deleted in-window slot must backfill from below-window (not N-1)").toEqual(["b", "c"]);
+    expect(last.length, "window stays full at N").toBe(2);
+    expect(wpb.collection("log").view("a"), "deleted record stays tombstoned in the queue").toBeNull();
+  });
 });
 
 // =====================================================================

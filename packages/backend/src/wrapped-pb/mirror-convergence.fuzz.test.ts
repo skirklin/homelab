@@ -752,27 +752,22 @@ async function runScenario(scenario: Scenario): Promise<{ ok: boolean; detail: s
   // re-query) makes the window converge live too — EXCEPT for the accepted
   // one-frame-stale below.
   //
-  // SORT+LIMIT ONE-FRAME-STALE WAIVER. The simplified refetch carries no per-row
-  // tombstone suppression (see mirror.ts scheduleRefetch): it replaces the window
-  // with the server's top-N exactly as the getList returns it. When that getList
-  // snapshotted under a HELD read gate, its top-N can be STALE relative to a
-  // delete the mirror already consumed — and if no later SSE event re-queries
-  // that id, the ghost lingers in the LIVE view for a frame until resync corrects
-  // it (checkpoint #2). This is the deliberate trade-off we took over the old
-  // suppression (which could not tell a lagging commit from a recreate, so it
-  // either hammered getList forever or falsely omitted a recreated row — the
-  // BLOCKER + MAJOR). So waive the LIVE check for sort+limit ONLY when a gated
-  // getList could have landed stale (`staleListPossible`). single/filter never
-  // refetch and are never waived; the post-resync checkpoint is asserted
-  // unconditionally for all shapes, so a real divergence still fails there.
+  // STEP 3 — NO SORT+LIMIT WAIVER. The old one-frame-stale waiver existed because
+  // the refetch did a plain slice.records replace with the server's (possibly
+  // stale, gated) top-N and carried no reconciliation against deletes the mirror
+  // already consumed. Step 3 dissolved slice.records: the membership refetch now
+  // routes its rows through the MONOTONIC queue (applyServer) AND skips any id the
+  // queue already knows deleted (`knownDeleted` captured at refetch-issue,
+  // tombstonedIds), so a lagging getList can no longer resurrect a deleted record
+  // in the LIVE view — content is read from the queue, which stays tombstoned.
+  // The stale-list class is therefore structurally closed, so the live checkpoint
+  // is asserted for sort+limit WITHOUT exemption. (staleListPossible() is left on
+  // the stub as documentation/diagnostics only; the waiver is gone.)
   const liveLast = emitted.length > 0 ? emitted[emitted.length - 1] : [];
   const liveCheckApplies = !lostEvents;
-  const sortLimitStaleWaiver =
-    scenario.shape.kind === "sortlimit" && server.staleListPossible();
   const liveOk =
     !liveCheckApplies ||
-    viewsEqual(liveLast, expected, scenario.shape) ||
-    sortLimitStaleWaiver;
+    viewsEqual(liveLast, expected, scenario.shape);
 
   // ── CHECKPOINT #2 — POST-RESYNC CONVERGENCE (the app's true guarantee) ──
   // The app ALWAYS has resync available (focus / PB_CONNECT). So the realistic
@@ -788,6 +783,11 @@ async function runScenario(scenario: Scenario): Promise<{ ok: boolean; detail: s
   await flush();
 
   handle.unsubscribe();
+  // Fully tear down the mirror so its SSE hooks + collection listeners + any
+  // pending SUBSCRIBE_READY_TIMEOUT timer don't leak across the 20k+ scenarios in
+  // a soak (cheap teardown hygiene; the per-scenario stub `pb` is otherwise GC'd
+  // with its hooks). Runs after the convergence checks below read their inputs.
+  mirror.dispose();
 
   const postLast = emitted.length > 0 ? emitted[emitted.length - 1] : [];
   const postOk = viewsEqual(postLast, expected, scenario.shape);
