@@ -112,6 +112,9 @@ const DATE_PARAM_OPTIONS = {
   default: null,
   debounce: 250,
   mode: "replace" as const,
+  // Day stepping (prev/next/swipe/picker/back-to-today) is an in-page content swap, not a
+  // page-level navigation, so preserve the user's scroll position rather than jumping to top.
+  preserveScroll: true,
 };
 
 const NotificationToggle = styled.div`

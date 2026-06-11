@@ -23,6 +23,12 @@ export interface UseUrlParamOptions<T> {
   debounce?: number;
   /** How the URL update is committed. Defaults to `"replace"` to match the codebase convention. */
   mode?: "replace" | "push";
+  /**
+   * When `true`, attaches `state: { preserveScroll: true }` to every write so an in-page content
+   * swap doesn't reset scroll-to-top. This is the opt-out `useScrollRestoration` checks (see its
+   * `location.state.preserveScroll` branch). Leave unset for navigations that should scroll to top.
+   */
+  preserveScroll?: boolean;
 }
 
 /**
@@ -64,7 +70,7 @@ export function useUrlParam<T>(
   opts: UseUrlParamOptions<T>,
 ): [T, UrlParamSetter<T>] {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { parse, serialize, debounce, mode: defaultMode = "replace" } = opts;
+  const { parse, serialize, debounce, mode: defaultMode = "replace", preserveScroll } = opts;
 
   const value = parse(searchParams.get(name));
 
@@ -88,7 +94,13 @@ export function useUrlParam<T>(
   const commit = useCallback(
     (next: T, mode: "replace" | "push") => {
       const encoded = serialize(next);
-      const setOpts = mode === "replace" ? { replace: true } : undefined;
+      // Byte-identical to before when `preserveScroll` is unset (no `state` key passed); only
+      // when opted in do we attach `useScrollRestoration`'s opt-out marker.
+      const setOpts = preserveScroll
+        ? { replace: mode === "replace", state: { preserveScroll: true } }
+        : mode === "replace"
+          ? { replace: true }
+          : undefined;
       setSearchParams((prev) => {
         const params = new URLSearchParams(prev);
         if (encoded === null || encoded === defaultSerializedRef.current) {
@@ -99,7 +111,7 @@ export function useUrlParam<T>(
         return params;
       }, setOpts);
     },
-    [name, serialize, setSearchParams],
+    [name, serialize, setSearchParams, preserveScroll],
   );
 
   const setValue = useCallback<UrlParamSetter<T>>(
@@ -134,6 +146,8 @@ export interface UseUrlStringOptions {
   mode?: "replace" | "push";
   /** Debounce ms; see {@link UseUrlParamOptions.debounce}. */
   debounce?: number;
+  /** Preserve scroll across writes; see {@link UseUrlParamOptions.preserveScroll}. */
+  preserveScroll?: boolean;
 }
 
 /**
@@ -154,6 +168,7 @@ export function useUrlString(
     default: defaultValue,
     mode: opts?.mode,
     debounce: opts?.debounce,
+    preserveScroll: opts?.preserveScroll,
   });
 }
 
