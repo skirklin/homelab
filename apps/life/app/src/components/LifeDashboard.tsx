@@ -63,6 +63,14 @@ function startOfDay(date: Date): Date {
   return d;
 }
 
+// Serialize a Date to the `?date=` value, or null when it IS today (today =
+// clean URL). This is the single function that defines what the URL "should"
+// say for a given selectedDate, so the URL<->state reconcile below has one
+// canonical comparison point and can't drift into a feedback loop.
+function serializeSelectedDate(date: Date): string | null {
+  return getDateString(date) === getDateString(new Date()) ? null : getDateString(date);
+}
+
 // Parse a YYYY-MM-DD string in browser-local time. Returns null on malformed
 // input or on dates outside the plausible range (year < 2000, or > tomorrow).
 // "Tomorrow" is allowed so timezone edge cases at midnight don't trip users.
@@ -89,6 +97,22 @@ function parseYmdParam(raw: string | null): Date | null {
   if (d > tomorrow) return null;
   return d;
 }
+
+// Module-level so `parse`/`serialize` keep stable identities across renders.
+// `useUrlParam`'s internal `commit` deps on `serialize` and `setValue` deps on
+// `commit` — a fresh inline config each render would give `setDateParam` a new
+// identity every render, making the URL-mirror effect re-run on EVERY render
+// and clear+reschedule its 250ms debounce indefinitely while entries/chat/streak
+// data streams in (a refresh mid-session could then restore the wrong day).
+// `mode: "replace"` is passed explicitly so rapid day-stepping coalesces into a
+// single history entry even if the hook's default ever changes.
+const DATE_PARAM_OPTIONS = {
+  parse: (raw: string | null) => raw,
+  serialize: (v: string | null) => v,
+  default: null,
+  debounce: 250,
+  mode: "replace" as const,
+};
 
 const NotificationToggle = styled.div`
   display: flex;
@@ -290,13 +314,24 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // Suppress the push-subscription affordance entirely on non-phone devices.
   const isMobile = useMemo(() => isMobileDevice(), []);
 
-  // The URL is the source of truth for the viewed day. `?date=YYYY-MM-DD`
-  // (browser-local time) picks a specific day; no param means today.
-  const [dateParam, setDateParam] = useUrlParam<string | null>("date", {
-    parse: (raw) => raw,
-    serialize: (v) => v,
-    default: null,
-  });
+  // `selectedDate` (local state) is the INSTANT source of truth for the viewed
+  // day — every interactive nav (prev/next/swipe/DatePicker/back-to-today)
+  // calls setSelectedDate synchronously, so stepping never round-trips through
+  // react-router's async setSearchParams and can't race itself. The URL is a
+  // lagging, debounced mirror used only for refresh/deep-link/browser-back.
+  // `?date=YYYY-MM-DD` (browser-local) picks a day; no param means today.
+  //
+  // The URL writer runs in `mode: "replace"` + debounced so rapid stepping
+  // coalesces into a single history entry instead of N async commits.
+  const [dateParam, setDateParam] = useUrlParam<string | null>("date", DATE_PARAM_OPTIONS);
+  const [selectedDate, setSelectedDate] = useState<Date>(
+    () => parseYmdParam(dateParam) ?? startOfDay(new Date()),
+  );
+  // Latest selectedDate, read by the (rarely-rerun) midnight-rollover effect
+  // without making it a dep — keeps its event listeners from re-registering on
+  // every day step.
+  const selectedDateRef = useRef(selectedDate);
+  selectedDateRef.current = selectedDate;
   // Deep-link consume params (sample + quickResponse) — read on mount, then
   // scrubbed atomically in one history entry so neither survives a refresh.
   const [{ sample: sampleParam, quickResponse }, setDeepLinkParams] = useUrlParams<{
@@ -306,50 +341,59 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     sample: { parse: (raw) => raw, serialize: (v) => v, default: null },
     quickResponse: { parse: (raw) => raw, serialize: (v) => v, default: null },
   });
-  // todayDate ticks on midnight/visibility/focus so the derived value below
-  // re-evaluates "today" without needing to write to the URL.
+  // todayDate ticks on midnight/visibility/focus so the rollover effect below
+  // can advance `selectedDate` when the user is sitting on "today".
   const [todayDate, setTodayDate] = useState<string>(() => getDateString(new Date()));
   const [datePickerOpen, setDatePickerOpen] = useState(false);
 
-  // Derive selectedDate from the URL. Invalid params fall back to today and
-  // are scrubbed by the effect below. todayDate is a dep so the rollover
-  // effect re-derives "today" when the day flips at midnight.
-  const selectedDate = useMemo<Date>(() => {
-    const parsed = parseYmdParam(dateParam);
-    return parsed ?? startOfDay(new Date());
-    // todayDate intentionally listed so midnight rollover re-derives today.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateParam, todayDate]);
-
-  // Quietly scrub a malformed `?date=...` so URLs don't carry garbage.
+  // Mirror selectedDate INTO the URL (lagging, debounced, replace-mode). The
+  // setter no-ops when the URL already matches, so this never fights an
+  // external POP we just adopted (see the inbound-sync effect below).
   useEffect(() => {
-    if (!dateParam) return;
-    if (parseYmdParam(dateParam) !== null) return;
-    setDateParam(null);
-  }, [dateParam, setDateParam]);
+    setDateParam(serializeSelectedDate(selectedDate));
+  }, [selectedDate, setDateParam]);
 
-  // Helper: write the URL. null clears the param (back to "today" with a
-  // clean URL); a Date writes ?date=YYYY-MM-DD. Used by prev/next, the
-  // DatePicker, swipes, and the "tap to return to today" affordance.
-  const updateSelectedDate = useCallback(
-    (date: Date | null) => {
-      setDateParam(date === null ? null : getDateString(date));
-    },
-    [setDateParam],
-  );
+  // Adopt EXTERNAL `?date=` changes into state: browser back/forward (POP) or
+  // an inbound deep link whose param differs from what we'd serialize from the
+  // current selection. Comparing against our own serialization is the loop
+  // guard — when the param is just our own write echoing back, the strings
+  // match and we skip. A malformed param parses to null → falls back to today,
+  // which the mirror effect then scrubs from the URL (no separate scrub effect
+  // needed anymore).
+  useEffect(() => {
+    if (dateParam === serializeSelectedDate(selectedDate)) return;
+    setSelectedDate(parseYmdParam(dateParam) ?? startOfDay(new Date()));
+    // selectedDate is intentionally omitted: this effect reacts to inbound URL
+    // changes only. The serialize() comparison reads the latest closure value
+    // each render, which is sufficient to suppress the self-write echo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateParam]);
+
+  // Helper: jump to a day (or back to today). null = today. All interactive
+  // nav (prev/next, DatePicker, swipes, "tap to return to today") goes through
+  // setSelectedDate so the displayed value updates synchronously; the URL
+  // follows via the mirror effect above.
+  const updateSelectedDate = useCallback((date: Date | null) => {
+    setSelectedDate(date === null ? startOfDay(new Date()) : startOfDay(date));
+  }, []);
 
   // Swipe handling
   const touchStartX = useRef<number | null>(null);
   const swipeContainerRef = useRef<HTMLDivElement>(null);
 
-  // Midnight rollover: when the day flips, re-derive "today" so the dashboard
-  // (with no `?date` param) silently advances. When the user has `?date=...`
-  // explicitly set, leave them on that day — they're looking at it on purpose.
+  // Midnight rollover: when the day flips, advance the view to the new "today"
+  // — but ONLY if the user was sitting on the old "today". If they've navigated
+  // to a specific past day, leave them there; they're looking at it on purpose.
+  // We compare selectedDate against `todayDate` (the day as of the last tick),
+  // not against the fresh `new Date()`, so "was the user on today?" is answered
+  // relative to the day that just ended.
   useEffect(() => {
     const checkDayChange = () => {
       const currentToday = getDateString(new Date());
       if (currentToday !== todayDate) {
+        const wasOnToday = getDateString(selectedDateRef.current) === todayDate;
         setTodayDate(currentToday);
+        if (wasOnToday) setSelectedDate(startOfDay(new Date()));
       }
     };
 
@@ -381,21 +425,29 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   const isToday = getDateString(selectedDate) === getDateString(new Date());
   const canGoNext = !isToday;
 
-  // Navigation helpers — all writes go through the URL so refresh/back/forward
-  // and link-sharing all do the right thing.
+  // Navigation helpers — step via the FUNCTIONAL setState form so each step
+  // composes off the latest pending value, never a stale closure. This is what
+  // makes rapid prev/next race-free even when several taps land in one React
+  // batch (they'd otherwise all decrement the same render's selectedDate and
+  // collapse to a single step). No URL round-trip; the mirror effect propagates
+  // the settled day to ?date= for refresh/back/sharing.
   const goToPrevDay = useCallback(() => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() - 1);
-    updateSelectedDate(newDate);
-  }, [selectedDate, updateSelectedDate]);
+    setSelectedDate((prev) => {
+      const next = new Date(prev);
+      next.setDate(next.getDate() - 1);
+      return next;
+    });
+  }, []);
 
   const goToNextDay = useCallback(() => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() + 1);
-    // Don't go past today
-    if (newDate > startOfDay(new Date())) return;
-    updateSelectedDate(newDate);
-  }, [selectedDate, updateSelectedDate]);
+    setSelectedDate((prev) => {
+      const next = new Date(prev);
+      next.setDate(next.getDate() + 1);
+      // Don't go past today.
+      if (next > startOfDay(new Date())) return prev;
+      return next;
+    });
+  }, []);
 
   // Swipe handlers. We reserve the outer ~32px of each edge for the OS
   // back/forward gesture (iOS edge-swipe-back, Android edge-swipe-forward) —

@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import dayjs from "dayjs";
@@ -82,14 +82,6 @@ import { LifeProvider } from "../life-context";
 
 // --- Helpers -------------------------------------------------------------
 
-function todayYmd(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function yesterdayYmd(): string {
   const d = new Date();
   d.setDate(d.getDate() - 1);
@@ -113,6 +105,17 @@ function pastDate(): { ymd: string; label: string } {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return { ymd: `${y}-${m}-${day}`, label: dayjs(d).format("ddd, MMM D") };
+}
+
+/**
+ * The "ddd, MMM D" label `formatDateLabel()` renders for N days before today.
+ * N must be >= 2 so the label is never "Today"/"Yesterday".
+ */
+function daysAgoLabel(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  d.setHours(0, 0, 0, 0);
+  return dayjs(d).format("ddd, MMM D");
 }
 
 /** Captures location changes inside the MemoryRouter so tests can assert
@@ -209,14 +212,13 @@ describe("LifeDashboard URL date plumbing", () => {
     });
 
     await user.click(nextBtn);
-    await waitFor(() => {
-      // Going forward from yesterday lands on today — the URL holds an
-      // explicit ?date=<today> (the nav helper always writes), which is the
-      // documented behavior. The "tap date display to clear" affordance is
-      // the way back to a clean URL; that's covered in its own test.
-      expect(getLocation().search).toBe(`?date=${todayYmd()}`);
-    });
     await screen.findByText("Today");
+    await waitFor(() => {
+      // Going forward from yesterday lands on today. selectedDate === today
+      // serializes to null, so the debounced mirror clears the param back to a
+      // clean URL on its own — no separate "tap to clear" needed.
+      expect(getLocation().search).toBe("");
+    });
   });
 
   it("tapping the date display on a past day clears the URL", async () => {
@@ -231,6 +233,64 @@ describe("LifeDashboard URL date plumbing", () => {
       expect(getLocation().search).toBe("");
     });
     await screen.findByText("Today");
+  });
+
+  it("rapid prev clicks step the displayed day monotonically with no flicker", async () => {
+    // Regression: the viewed day used to be derived from ?date= and read back
+    // asynchronously, so each prev step decremented a STALE selectedDate (the
+    // previous step's URL write hadn't round-tripped yet). Three taps fired
+    // before any commit settled would all decrement from "today" and land on
+    // -1, not -3 — the day "jumped around" before settling. selectedDate is now
+    // local state, so each handler decrements the latest committed value.
+    //
+    // We fire three clicks BACK-TO-BACK inside one act() — no awaited settling
+    // between them — which is the exact ordering that exposed the stale-closure
+    // race. With the old URL-derived code this lands on Yesterday; the fix
+    // lands on -3.
+    const { container } = renderDashboard("/");
+    await screen.findByText("Today");
+
+    const navButtons = container.querySelectorAll(".ant-btn-text");
+    const prevBtn = navButtons[0] as HTMLButtonElement;
+
+    await act(async () => {
+      fireEvent.click(prevBtn);
+      fireEvent.click(prevBtn);
+      fireEvent.click(prevBtn);
+    });
+
+    // Settled exactly three days back — never bounced toward today, and the
+    // stale-closure decrement didn't strand us at -1.
+    await screen.findByText(daysAgoLabel(3));
+    expect(screen.queryByText(daysAgoLabel(2))).not.toBeInTheDocument();
+    expect(screen.queryByText("Yesterday")).not.toBeInTheDocument();
+    expect(screen.queryByText("Today")).not.toBeInTheDocument();
+  });
+
+  it("rapid stepping coalesces to a single ?date= for the final day", async () => {
+    // The URL is a lagging, debounced mirror: N rapid steps must not leave N
+    // intermediate ?date= values flashing — only the settled day is written.
+    const user = userEvent.setup();
+    const { getLocation, container } = renderDashboard("/");
+    await screen.findByText("Today");
+
+    const navButtons = container.querySelectorAll(".ant-btn-text");
+    const prevBtn = navButtons[0] as HTMLButtonElement;
+
+    await user.click(prevBtn);
+    await user.click(prevBtn);
+    await user.click(prevBtn);
+
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    const y = threeDaysAgo.getFullYear();
+    const m = String(threeDaysAgo.getMonth() + 1).padStart(2, "0");
+    const day = String(threeDaysAgo.getDate()).padStart(2, "0");
+    const ymd = `${y}-${m}-${day}`;
+
+    await waitFor(() => {
+      expect(getLocation().search).toBe(`?date=${ymd}`);
+    });
   });
 
   it("next-day button is disabled on Today", async () => {
