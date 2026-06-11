@@ -340,6 +340,57 @@ describe("useUrlParam", () => {
 
     useSearchParamsSpy.mockRestore();
   });
+
+  it("attaches state.preserveScroll when opted in, and no state otherwise", () => {
+    const calls: unknown[] = [];
+    const originalUseSearchParams = ReactRouter.useSearchParams;
+    const useSearchParamsSpy = vi.spyOn(ReactRouter, "useSearchParams").mockImplementation(() => {
+      const [params, set] = originalUseSearchParams();
+      const wrappedSet: typeof set = ((next, opts) => {
+        calls.push(opts);
+        return set(next, opts);
+      }) as typeof set;
+      return [params, wrappedSet];
+    });
+
+    // preserveScroll: true → state carries the opt-out marker alongside replace.
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <StringHost
+          name="q"
+          opts={{
+            parse: (raw) => raw ?? "",
+            serialize: (v) => v || null,
+            default: "",
+            preserveScroll: true,
+          }}
+        />
+      </MemoryRouter>,
+    );
+    setNextValue("a");
+    expect(calls.at(-1)).toEqual({ replace: true, state: { preserveScroll: true } });
+    unmount();
+    cleanup();
+    calls.length = 0;
+
+    // Unset (the other 17 consumers) → byte-identical to today: no `state` key.
+    render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <StringHost
+          name="q"
+          opts={{
+            parse: (raw) => raw ?? "",
+            serialize: (v) => v || null,
+            default: "",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    setNextValue("b");
+    expect(calls.at(-1)).toEqual({ replace: true });
+
+    useSearchParamsSpy.mockRestore();
+  });
 });
 
 // ---- useUrlString -----------------------------------------------------------

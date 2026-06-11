@@ -126,6 +126,23 @@ describe("useScrollRestoration", () => {
     expect(scrollY).toBe(300);
   });
 
+  it("leaves scroll alone on REPLACE with state.preserveScroll (life day-stepping)", () => {
+    // useUrlParam writes the life `?date=` param in replace mode with
+    // state.preserveScroll; that REPLACE nav must NOT scroll to top.
+    renderApp(["/a"]);
+    act(() => {
+      scrollY = 420;
+    });
+    scrollToSpy.mockClear();
+
+    act(() => {
+      navigateRef!("/b", { replace: true, state: { preserveScroll: true } });
+    });
+
+    expect(scrollToSpy).not.toHaveBeenCalled();
+    expect(scrollY).toBe(420);
+  });
+
   it("restores the previous scroll position on POP (back)", () => {
     renderApp(["/a"]);
 
