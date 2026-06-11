@@ -261,6 +261,22 @@ export class MutationQueue {
     return !!rec && rec.server !== null;
   }
 
+  /** Ids in a collection currently held as a RETAINED TOMBSTONE (observed
+   *  absent: server === null with a real serverSeq > 0), regardless of pending.
+   *  The mirror snapshots this at a sort+limit refetch's ISSUE time so a lagging
+   *  server that still returns an already-deleted row can't resurrect it through
+   *  the refetch — windowed membership is server-authoritative, but a delete the
+   *  client already observed is a more specific signal than a stale top-N row. */
+  tombstonedIds(collection: string): Set<string> {
+    const out = new Set<string>();
+    const col = this.state.get(collection);
+    if (!col) return out;
+    for (const [id, rec] of col) {
+      if (rec.server === null && rec.serverSeq > HYDRATED_SEQ) out.add(id);
+    }
+    return out;
+  }
+
   /** Current server observation seq for a record (HYDRATED_SEQ / 0 when
    *  never observed or hydrated-only). Lets the mirror express reconcile-by-seq
    *  ("tombstone an absent record only if the fetch is newer than what we
