@@ -1164,11 +1164,12 @@ describe("TERMINATION: lagging getList must not cause an unbounded refetch storm
     // tick. We assert a loose bound so a legitimate coalesced refetch or two is
     // fine but a storm is caught.)
     expect(stub.col("log").fetchCalls, "getList must not be hammered in a loop").toBeLessThanOrEqual(5);
-    // Accepted one-frame-stale: the lagging server still returns 'a', so the
-    // final window may carry it — but the QUEUE keeps it tombstoned, and the
-    // next real SSE event / resync corrects the view. Convergence is delegated
-    // to resync (see the fuzzer's post-resync checkpoint); here we only assert
-    // termination.
+    // The lagging server still returns 'a', but the refetch's knownDeleted
+    // guard skips it (queue keeps it tombstoned), so the window does NOT carry
+    // it — it renders N-1 (under-fill) until the next real SSE event / resync
+    // backfills the vacated slot. Convergence is delegated to resync (see the
+    // fuzzer's post-resync checkpoint); here we only assert termination + that
+    // the stale row never resurrects.
     expect(wpb.collection("log").view("a"), "queue stays tombstoned regardless of the lagging fetch").toBeNull();
   });
 });

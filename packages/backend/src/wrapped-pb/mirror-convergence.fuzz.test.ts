@@ -836,7 +836,10 @@ describe("PBMirror convergence fuzzer", () => {
         // 1, 42, 99999, 12345, 48879, 555, 31337, 8, 0, 65535, 271828} at 5k
         // each, and a 20k soak on several. FUZZ_RUNS / FUZZ_SEED env vars
         // override for an elevated soak; the committed default stays
-        // gate-friendly.
+        // gate-friendly. NOTE: cost is ~super-linear (fake-indexeddb global
+        // store + fast-check bookkeeping accumulate across runs, not a mirror
+        // leak) — a 20k soak already sits at ~57% of the 300s test timeout, so
+        // do NOT raise this default; use FUZZ_RUNS for ad-hoc soaks instead.
         numRuns: Number(process.env.FUZZ_RUNS ?? 1000),
         seed: Number(process.env.FUZZ_SEED ?? 0x5eed),
       },

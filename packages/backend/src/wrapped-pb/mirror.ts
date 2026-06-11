@@ -1429,6 +1429,12 @@ export function createMirror(pb: () => PocketBase, wpb: WrappedPocketBase): PBMi
             const rs = await pb().collection(collection).getFullList({ filter, $autoCancel: false });
             fresh = rs as unknown as RawRecord[];
           } else {
+            // Unfiltered "*" wildcard — no canonical fetch, so no seeding will
+            // run. Release the in-flight token before bailing, else it pins
+            // min(inFlightFetchSeqs) forever and blocks tombstone GC queue-wide
+            // (the step-2 leak class). Dead for current consumers (all supply a
+            // filter); defensive.
+            queue.noteFetchResolved(fetchToken);
             return;
           }
         } catch (err) {
