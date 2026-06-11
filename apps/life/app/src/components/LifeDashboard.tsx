@@ -98,6 +98,22 @@ function parseYmdParam(raw: string | null): Date | null {
   return d;
 }
 
+// Module-level so `parse`/`serialize` keep stable identities across renders.
+// `useUrlParam`'s internal `commit` deps on `serialize` and `setValue` deps on
+// `commit` — a fresh inline config each render would give `setDateParam` a new
+// identity every render, making the URL-mirror effect re-run on EVERY render
+// and clear+reschedule its 250ms debounce indefinitely while entries/chat/streak
+// data streams in (a refresh mid-session could then restore the wrong day).
+// `mode: "replace"` is passed explicitly so rapid day-stepping coalesces into a
+// single history entry even if the hook's default ever changes.
+const DATE_PARAM_OPTIONS = {
+  parse: (raw: string | null) => raw,
+  serialize: (v: string | null) => v,
+  default: null,
+  debounce: 250,
+  mode: "replace" as const,
+};
+
 const NotificationToggle = styled.div`
   display: flex;
   align-items: center;
@@ -307,12 +323,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   //
   // The URL writer runs in `mode: "replace"` + debounced so rapid stepping
   // coalesces into a single history entry instead of N async commits.
-  const [dateParam, setDateParam] = useUrlParam<string | null>("date", {
-    parse: (raw) => raw,
-    serialize: (v) => v,
-    default: null,
-    debounce: 250,
-  });
+  const [dateParam, setDateParam] = useUrlParam<string | null>("date", DATE_PARAM_OPTIONS);
   const [selectedDate, setSelectedDate] = useState<Date>(
     () => parseYmdParam(dateParam) ?? startOfDay(new Date()),
   );
