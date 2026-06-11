@@ -430,6 +430,14 @@ function FitBoundsToDay({ visibleDays, selectedDay }: {
     }
     if (points.length === 0) return;
 
+    // Google Maps caches its container's pixel size and only recomputes on its
+    // internal "resize" event — a CSS-driven layout reflow (e.g. the day-view
+    // column collapsing to the correct width after first paint) does NOT
+    // trigger one, so fitBounds/panTo would frame against a stale size and
+    // mis-center. Fire a resize so Maps re-reads its corrected dimensions
+    // before we fit. Harmless no-op when the size is already current.
+    google.maps.event.trigger(map, "resize");
+
     if (points.length === 1) {
       map.panTo(points[0]);
       map.setZoom(14);
