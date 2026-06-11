@@ -56,9 +56,26 @@ const TwoColumn = styled.div`
   gap: 12px;
   align-items: start;
 
+  /* Grid 1fr is minmax(auto, 1fr); the auto min lets a child expand past the
+     track. Floor every grid item at 0 so a wide child (the Embla track,
+     N x 100% slides) shrinks to the column width instead of blowing it out. */
+  > * {
+    min-width: 0;
+  }
+
   @media (max-width: 1000px) {
     grid-template-columns: 1fr;
   }
+`;
+
+// The content column. min-width:0 is load-bearing: without it this grid item
+// keeps its default `min-width: auto` and refuses to shrink below the intrinsic
+// width of the Embla flex track (N slides × 100%), blowing the `1fr` column
+// wider than the viewport and shoving the Next arrow + slides off the right
+// edge. max-width:100% is a belt against any residual overflow.
+const ContentCol = styled.div`
+  min-width: 0;
+  max-width: 100%;
 `;
 
 const StickyMap = styled.div`
@@ -177,6 +194,7 @@ const SwipeHint = styled.div`
 // the viewport take the active slide's height so the page scrolls vertically
 // for long days — no nested scroll container (which would block page scroll).
 const Viewport = styled.div`
+  width: 100%;
   overflow: hidden;
   /* Embla JS owns the horizontal drag; with AutoHeight this surface overlaps a
      long day's full vertical-scroll region. Without this hint iOS Safari
@@ -906,7 +924,7 @@ export function DayView() {
           <div />
         )}
 
-        <div>
+        <ContentCol>
           {/* Shared header — reflects the active day. Prev/Next drive Embla,
               not route nav. */}
           <DayNav>
@@ -961,7 +979,7 @@ export function DayView() {
               })}
             </Track>
           </Viewport>
-        </div>
+        </ContentCol>
       </TwoColumn>
     </WideContainer>
   );
