@@ -401,7 +401,7 @@ describe("updateCookingLogEvent", () => {
     const eventId = await recipes.addCookingLogEvent(box.id, recipe.id, user.id, { notes: "Original notes" });
     cleanup.track("recipe_events", eventId);
 
-    await recipes.updateCookingLogEvent(eventId, "Updated notes");
+    await recipes.updateCookingLogEvent(eventId, { notes: "Updated notes" });
 
     const record = await ctx.pb.collection("recipe_events").getOne(eventId);
     const updatedNote = (record.entries as Array<Record<string, unknown>>).find(
@@ -423,13 +423,73 @@ describe("updateCookingLogEvent", () => {
     const eventId = await recipes.addCookingLogEvent(box.id, recipe.id, user.id, { notes: "Some notes" });
     cleanup.track("recipe_events", eventId);
 
-    await recipes.updateCookingLogEvent(eventId, "   ");
+    await recipes.updateCookingLogEvent(eventId, { notes: "   " });
 
     const record = await ctx.pb.collection("recipe_events").getOne(eventId);
     const cleared = (record.entries as Array<Record<string, unknown>>).find(
       (e) => e.name === "notes" && e.type === "text",
     );
     expect(cleared).toBeUndefined();
+
+    await cleanup.cleanup();
+  });
+
+  it("round-trips a rating: add with rating, update preserves notes, null clears", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const box = await createTestBox(ctx, cleanup, { name: "Box" });
+    const recipe = await createTestRecipe(ctx, box.id, cleanup, { name: "Curry" });
+
+    const eventId = await recipes.addCookingLogEvent(box.id, recipe.id, user.id, { notes: "Spicy!", rating: 4 });
+    cleanup.track("recipe_events", eventId);
+
+    let events = await recipes.getCookingLogEvents(box.id, recipe.id);
+    expect(events[0].rating).toBe(4);
+
+    // Rating-only update leaves notes untouched.
+    await recipes.updateCookingLogEvent(eventId, { rating: 5 });
+    events = await recipes.getCookingLogEvents(box.id, recipe.id);
+    expect(events[0].rating).toBe(5);
+    const notesEntry = events[0].entries.find((e) => e.name === "notes" && e.type === "text");
+    expect(notesEntry?.type === "text" && notesEntry.value).toBe("Spicy!");
+
+    // Notes-only update leaves the rating untouched.
+    await recipes.updateCookingLogEvent(eventId, { notes: "Even better reheated" });
+    events = await recipes.getCookingLogEvents(box.id, recipe.id);
+    expect(events[0].rating).toBe(5);
+
+    // null clears the rating entry entirely.
+    await recipes.updateCookingLogEvent(eventId, { rating: null });
+    events = await recipes.getCookingLogEvents(box.id, recipe.id);
+    expect(events[0].rating).toBeUndefined();
+    expect(events[0].entries.find((e) => e.name === "rating")).toBeUndefined();
+
+    await cleanup.cleanup();
+  });
+
+  it("rejects out-of-range and non-integer ratings", async () => {
+    const user = await createTestUser(ctx);
+    const cleanup = new TestCleanup();
+    cleanup.bind(ctx.pb);
+
+    const box = await createTestBox(ctx, cleanup, { name: "Box" });
+    const recipe = await createTestRecipe(ctx, box.id, cleanup, { name: "Toast" });
+
+    await expect(
+      recipes.addCookingLogEvent(box.id, recipe.id, user.id, { rating: 6 }),
+    ).rejects.toThrow(/rating/);
+    await expect(
+      recipes.addCookingLogEvent(box.id, recipe.id, user.id, { rating: 0 }),
+    ).rejects.toThrow(/rating/);
+    await expect(
+      recipes.addCookingLogEvent(box.id, recipe.id, user.id, { rating: 3.5 }),
+    ).rejects.toThrow(/rating/);
+
+    const eventId = await recipes.addCookingLogEvent(box.id, recipe.id, user.id, { rating: 3 });
+    cleanup.track("recipe_events", eventId);
+    await expect(recipes.updateCookingLogEvent(eventId, { rating: 42 })).rejects.toThrow(/rating/);
 
     await cleanup.cleanup();
   });

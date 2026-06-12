@@ -1,7 +1,7 @@
 import { CheckCircleOutlined, DeleteOutlined, DiffOutlined, EditOutlined } from '@ant-design/icons';
 import { useContext, useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { Button, Input, Popconfirm, Spin, Tooltip } from 'antd';
+import { Button, Input, Popconfirm, Rate, Spin, Tooltip } from 'antd';
 import { Context } from '../context';
 import { getAppUserFromState, getRecipeFromState } from '../state';
 import { getRecipeData } from '../storage';
@@ -33,6 +33,21 @@ function withNotes(event: CookingLogEvent, notes: string): CookingLogEvent {
     ? [...filtered, { name: 'notes', type: 'text', value: trimmed }]
     : filtered;
   return { ...event, entries };
+}
+
+/**
+ * Apply a rating edit to the local copy of an event: replace any existing
+ * "rating" number entry, drop it when cleared (null). Keeps the derived
+ * `rating` field and entries[] in sync with the post-write row.
+ */
+function withRating(event: CookingLogEvent, rating: number | null): CookingLogEvent {
+  const filtered = event.entries.filter(
+    (e) => !(e.name === 'rating' && e.type === 'number'),
+  );
+  const entries: LifeEntry[] = rating
+    ? [...filtered, { name: 'rating', type: 'number', value: rating, unit: 'stars' }]
+    : filtered;
+  return { ...event, entries, rating: rating ?? undefined };
 }
 
 const LogContainer = styled.div`
@@ -86,6 +101,16 @@ const LogNote = styled.p<{ $editable?: boolean }>`
       border-radius: var(--radius-sm);
     }
   `}
+`
+
+const StarRow = styled(Rate)`
+  font-size: var(--font-size-base);
+  margin-top: var(--space-xs);
+  /* Keep disabled (read-only) stars full-color — they're a display, not a
+     greyed-out control. */
+  &.ant-rate-disabled .ant-rate-star {
+    cursor: default;
+  }
 `
 
 const AddNoteHint = styled.span`
@@ -178,7 +203,7 @@ function CookingLog(props: RecipeCardProps) {
 
   const handleSaveEdit = async (eventId: string, newNote: string) => {
     try {
-      await recipesBackend.updateCookingLogEvent(eventId, newNote);
+      await recipesBackend.updateCookingLogEvent(eventId, { notes: newNote });
       // Update local state — keep entries[] in sync with the backend so the
       // rerender matches the post-write row exactly.
       setEvents(prev => prev.map(e => (e.id === eventId ? withNotes(e, newNote) : e)));
@@ -186,6 +211,20 @@ function CookingLog(props: RecipeCardProps) {
     } catch (error) {
       console.error('Failed to update note:', error);
       message.error('Failed to update note');
+    }
+  };
+
+  // Tapping the star row on your own entry sets the rating immediately
+  // (no edit mode); tapping the current star again clears it (antd Rate
+  // reports 0 on clear → null at the backend).
+  const handleRate = async (eventId: string, value: number) => {
+    const rating = value === 0 ? null : value;
+    try {
+      await recipesBackend.updateCookingLogEvent(eventId, { rating });
+      setEvents(prev => prev.map(e => (e.id === eventId ? withRating(e, rating) : e)));
+    } catch (error) {
+      console.error('Failed to update rating:', error);
+      message.error('Failed to update rating');
     }
   };
 
@@ -235,6 +274,18 @@ function CookingLog(props: RecipeCardProps) {
                 <LogMeta>
                   {getUserName(event.createdBy)} made this on {formatDate(event.timestamp)}
                 </LogMeta>
+                {/* Star row: interactive on your own entries (tap to set,
+                    tap the same star to clear), read-only display on others'
+                    rated entries, hidden on others' unrated ones. */}
+                {(editable || event.rating !== undefined) && (
+                  <Tooltip title={editable ? 'Rate this cook (tap again to clear)' : undefined}>
+                    <StarRow
+                      value={event.rating ?? 0}
+                      disabled={!editable}
+                      onChange={(v) => handleRate(event.id, v)}
+                    />
+                  </Tooltip>
+                )}
                 {isEditing ? (
                   <NoteInput
                     autoFocus

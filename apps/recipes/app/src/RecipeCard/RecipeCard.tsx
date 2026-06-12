@@ -18,7 +18,7 @@ import { useRecipesBackend } from '@kirkl/shared';
 import { Divider, RecipeActionGroup } from '../StyledComponents';
 import ByLine from './Byline';
 import Tags from './Tags';
-import { Button, Dropdown, Menu, Input, Modal } from 'antd';
+import { Button, Dropdown, Menu, Input, Modal, Rate } from 'antd';
 import { MoreOutlined, CheckCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import { useContext, useState } from 'react';
 import { Context } from '../context';
@@ -102,6 +102,8 @@ function QuickMadeIt(props: RecipeCardProps) {
   const user = getAppUserFromState(state, authUser?.uid);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [note, setNote] = useState('');
+  // 0 = unset (antd Rate's cleared value); 1–5 = chosen rating.
+  const [rating, setRating] = useState(0);
   const [loading, setLoading] = useState(false);
 
   if (!user) return null;
@@ -109,8 +111,12 @@ function QuickMadeIt(props: RecipeCardProps) {
   const handleMadeIt = async () => {
     setLoading(true);
     try {
-      await recipesBackend.addCookingLogEvent(boxId, recipeId, user.id, { notes: note.trim() || undefined });
+      await recipesBackend.addCookingLogEvent(boxId, recipeId, user.id, {
+        notes: note.trim() || undefined,
+        rating: rating || undefined,
+      });
       setNote('');
+      setRating(0);
       setIsModalOpen(false);
       message.success('Added to cooking log!');
     } finally {
@@ -134,7 +140,9 @@ function QuickMadeIt(props: RecipeCardProps) {
         okText="Save"
         confirmLoading={loading}
       >
-        <p>Add an optional note about how it went:</p>
+        <p>How was it? (optional — tap a star again to clear)</p>
+        <Rate value={rating} onChange={setRating} />
+        <p style={{ marginTop: 'var(--space-md)' }}>Add an optional note about how it went:</p>
         <Input.TextArea
           value={note}
           onChange={(e) => setNote(e.target.value)}

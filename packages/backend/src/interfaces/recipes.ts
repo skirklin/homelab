@@ -56,8 +56,13 @@ export interface RecipesBackend {
   // --- Cooking log ---
 
   getCookingLogEvents(boxId: string, recipeId: string): Promise<CookingLogEvent[]>;
-  addCookingLogEvent(boxId: string, recipeId: string, userId: string, options?: { notes?: string; timestamp?: Date }): Promise<string>;
-  updateCookingLogEvent(eventId: string, notes: string): Promise<void>;
+  /** `rating` is an optional 1–5 integer (stored as a number entry in entries[]). */
+  addCookingLogEvent(boxId: string, recipeId: string, userId: string, options?: { notes?: string; rating?: number; timestamp?: Date }): Promise<string>;
+  /**
+   * Patch a cooking-log entry. `notes`: empty string clears, undefined leaves
+   * unchanged. `rating`: 1–5 sets, null clears, undefined leaves unchanged.
+   */
+  updateCookingLogEvent(eventId: string, updates: { notes?: string; rating?: number | null }): Promise<void>;
   deleteCookingLogEvent(eventId: string): Promise<void>;
 
   /**

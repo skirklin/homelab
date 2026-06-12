@@ -65,6 +65,29 @@ function notesEntries(notes?: string): LifeEntry[] {
   return trimmed ? [{ name: "notes", type: "text", value: trimmed }] : [];
 }
 
+/** Cooking-log rating: stored as a number entry `{name:"rating", value, unit:"stars"}`. */
+function ratingEntries(rating?: number | null): LifeEntry[] {
+  if (rating === undefined || rating === null) return [];
+  assertValidRating(rating);
+  return [{ name: "rating", type: "number", value: rating, unit: "stars" }];
+}
+
+function assertValidRating(rating: number): void {
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw new Error(`rating must be an integer between 1 and 5, got ${rating}`);
+  }
+}
+
+/** Derive the 1–5 rating from a row's entries[]; out-of-range legacy junk → undefined. */
+function ratingFromEntries(entries: LifeEntry[]): number | undefined {
+  for (const e of entries) {
+    if (e.name === "rating" && e.type === "number" && Number.isInteger(e.value) && e.value >= 1 && e.value <= 5) {
+      return e.value;
+    }
+  }
+  return undefined;
+}
+
 // --- Record → domain type mappers ---
 
 function userFromRecord(r: RecordModel | RawRecord): RecipesUser {
@@ -123,12 +146,14 @@ function snapshotFromRecord(r: RecordModel | RawRecord): RecipeData | undefined 
 
 function eventFromRecord(r: RecordModel | RawRecord): CookingLogEvent {
   const x = r as Record<string, unknown>;
+  const entries = entriesFromRecord(r);
   return {
     id: r.id,
     subjectId: x.subject_id as string,
     timestamp: new Date(x.timestamp as string),
     endTime: x.end_time ? new Date(x.end_time as string) : undefined,
-    entries: entriesFromRecord(r),
+    entries,
+    rating: ratingFromEntries(entries),
     labels: labelsFromRecord(r),
     recipeSnapshot: snapshotFromRecord(r),
     createdBy: (x.created_by as string) || "",
@@ -330,8 +355,10 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
     }
   }
 
-  async addCookingLogEvent(boxId: string, recipeId: string, userId: string, options?: { notes?: string; timestamp?: Date }): Promise<string> {
+  async addCookingLogEvent(boxId: string, recipeId: string, userId: string, options?: { notes?: string; rating?: number; timestamp?: Date }): Promise<string> {
     const id = newId();
+    // Validate up front so a bad rating fails before any write is queued.
+    const ratingEntry = ratingEntries(options?.rating);
     // Snapshot the recipe.data at cook time so the UI can later diff it
     // against the live recipe. Prefer the wpb cache (already populated by
     // an active recipes subscription) to avoid a round-trip; fall back to
@@ -357,19 +384,30 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
       subject_id: recipeId,
       timestamp: (options?.timestamp ?? new Date()).toISOString(),
       created_by: userId,
-      entries: notesEntries(options?.notes),
+      entries: [...notesEntries(options?.notes), ...ratingEntry],
       recipe_snapshot: snapshot ?? null,
     });
     return id;
   }
 
-  async updateCookingLogEvent(eventId: string, notes: string): Promise<void> {
+  async updateCookingLogEvent(eventId: string, updates: { notes?: string; rating?: number | null }): Promise<void> {
+    // Validate up front so a bad rating fails before the read.
+    if (typeof updates.rating === "number") assertValidRating(updates.rating);
     const record = await this.pb().collection("recipe_events").getOne(eventId);
-    // Replace any existing "notes" text entry, preserve any others.
-    const existing = entriesFromRecord(record).filter(
-      (e) => !(e.name === "notes" && e.type === "text"),
-    );
-    const entries = [...existing, ...notesEntries(notes)];
+    // Replace only the entries being edited, preserve any others.
+    let entries = entriesFromRecord(record);
+    if (updates.notes !== undefined) {
+      entries = [
+        ...entries.filter((e) => !(e.name === "notes" && e.type === "text")),
+        ...notesEntries(updates.notes),
+      ];
+    }
+    if (updates.rating !== undefined) {
+      entries = [
+        ...entries.filter((e) => !(e.name === "rating" && e.type === "number")),
+        ...ratingEntries(updates.rating),
+      ];
+    }
     await this.wpb.collection("recipe_events").update(eventId, { entries });
   }
 

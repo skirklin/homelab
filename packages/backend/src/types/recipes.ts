@@ -66,7 +66,9 @@ export interface PendingChanges {
 /**
  * A persisted recipe_events row. Same unified shape as LifeEvent and
  * TaskCompletion — entries[] is the canonical place for per-cook data.
- * Today we only write a single text entry named "notes".
+ * Today we write a text entry named "notes" and optionally a number entry
+ * named "rating" (1–5, unit "stars"). `rating` below is derived from that
+ * entry by the mapper — entries[] stays the storage of record.
  *
  * `recipeSnapshot` captures the full recipe.data blob at the moment the
  * entry was created. The UI uses it to diff "the recipe as it was when I
@@ -83,6 +85,8 @@ export interface CookingLogEvent {
   /** Reserved for interval cooks (e.g. multi-session bakes); unused today. */
   endTime?: Date;
   entries: LifeEntry[];
+  /** 1–5 star rating, derived from the "rating" number entry. */
+  rating?: number;
   labels?: Record<string, string>;
   recipeSnapshot?: RecipeData;
   createdBy: string;

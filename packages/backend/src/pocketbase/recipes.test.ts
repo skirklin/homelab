@@ -169,7 +169,7 @@ describe("PocketBaseRecipesBackend — recipe snapshots", () => {
     const snapshotBefore = (stub.col("recipe_events").records.get(eventId) as unknown as Record<string, unknown>).recipe_snapshot;
     expect(snapshotBefore).toEqual(originalData);
 
-    await recipes.updateCookingLogEvent(eventId, "v2");
+    await recipes.updateCookingLogEvent(eventId, { notes: "v2" });
     await drain();
 
     // Snapshot is unchanged; notes are updated.
@@ -252,5 +252,99 @@ describe("PocketBaseRecipesBackend — recipe snapshots", () => {
     expect(ev.recipe_snapshot).toBeNull();
     const entries = ev.entries as Array<{ name: string; value: string }>;
     expect(entries.find((e) => e.name === "notes")?.value).toBe("logged but recipe gone");
+  });
+});
+
+describe("PocketBaseRecipesBackend — cooking-log ratings", () => {
+  function makeBackend(stub: ReturnType<typeof makeStubPb>) {
+    const wpb = wrapPocketBase(() => stub.pb);
+    const mirror = createMirror(() => stub.pb, wpb);
+    return new PocketBaseRecipesBackend(() => stub.pb, wpb, mirror);
+  }
+
+  it("addCookingLogEvent stores the rating as a number entry and getCookingLogEvents derives it", async () => {
+    const stub = makeStubPb();
+    seedRecipe(stub, "R1", "B1", { name: "Pancakes" });
+    const recipes = makeBackend(stub);
+
+    const eventId = await recipes.addCookingLogEvent("B1", "R1", "u1", { notes: "great", rating: 4 });
+    await drain();
+
+    const raw = stub.col("recipe_events").records.get(eventId) as unknown as Record<string, unknown>;
+    const entries = raw.entries as Array<Record<string, unknown>>;
+    expect(entries).toContainEqual({ name: "rating", type: "number", value: 4, unit: "stars" });
+    expect(entries.find((e) => e.name === "notes")?.value).toBe("great");
+
+    const events = await recipes.getCookingLogEvents("B1", "R1");
+    expect(events[0].rating).toBe(4);
+  });
+
+  it("updateCookingLogEvent patches rating and notes independently; null clears", async () => {
+    const stub = makeStubPb();
+    seedRecipe(stub, "R1", "B1", { name: "Pancakes" });
+    const recipes = makeBackend(stub);
+
+    const eventId = await recipes.addCookingLogEvent("B1", "R1", "u1", { notes: "v1", rating: 2 });
+    await drain();
+
+    // Rating-only update preserves notes.
+    await recipes.updateCookingLogEvent(eventId, { rating: 5 });
+    await drain();
+    let raw = stub.col("recipe_events").records.get(eventId) as unknown as Record<string, unknown>;
+    let entries = raw.entries as Array<Record<string, unknown>>;
+    expect(entries.find((e) => e.name === "rating")?.value).toBe(5);
+    expect(entries.find((e) => e.name === "notes")?.value).toBe("v1");
+
+    // Notes-only update preserves rating.
+    await recipes.updateCookingLogEvent(eventId, { notes: "v2" });
+    await drain();
+    raw = stub.col("recipe_events").records.get(eventId) as unknown as Record<string, unknown>;
+    entries = raw.entries as Array<Record<string, unknown>>;
+    expect(entries.find((e) => e.name === "rating")?.value).toBe(5);
+    expect(entries.find((e) => e.name === "notes")?.value).toBe("v2");
+
+    // Null clears the rating entry; notes survive.
+    await recipes.updateCookingLogEvent(eventId, { rating: null });
+    await drain();
+    raw = stub.col("recipe_events").records.get(eventId) as unknown as Record<string, unknown>;
+    entries = raw.entries as Array<Record<string, unknown>>;
+    expect(entries.find((e) => e.name === "rating")).toBeUndefined();
+    expect(entries.find((e) => e.name === "notes")?.value).toBe("v2");
+  });
+
+  it("rejects invalid ratings before any write", async () => {
+    const stub = makeStubPb();
+    seedRecipe(stub, "R1", "B1", { name: "Pancakes" });
+    const recipes = makeBackend(stub);
+
+    await expect(recipes.addCookingLogEvent("B1", "R1", "u1", { rating: 0 })).rejects.toThrow(/rating/);
+    await expect(recipes.addCookingLogEvent("B1", "R1", "u1", { rating: 6 })).rejects.toThrow(/rating/);
+    await expect(recipes.addCookingLogEvent("B1", "R1", "u1", { rating: 2.5 })).rejects.toThrow(/rating/);
+    expect(stub.col("recipe_events").records.size).toBe(0);
+
+    const eventId = await recipes.addCookingLogEvent("B1", "R1", "u1", { rating: 3 });
+    await drain();
+    await expect(recipes.updateCookingLogEvent(eventId, { rating: -1 })).rejects.toThrow(/rating/);
+  });
+
+  it("legacy rows without a rating entry map to rating undefined", async () => {
+    const stub = makeStubPb();
+    seedRecipe(stub, "R1", "B1", { name: "Pancakes" });
+    stub.col("recipe_events").records.set("legacy", {
+      id: "legacy",
+      collectionId: "recipe_events",
+      collectionName: "recipe_events",
+      created: "",
+      updated: "",
+      box: "B1",
+      subject_id: "R1",
+      timestamp: new Date("2024-01-01").toISOString(),
+      entries: [{ name: "notes", type: "text", value: "old cook" }],
+      created_by: "u1",
+    } as unknown as RecordModel);
+    const recipes = makeBackend(stub);
+
+    const events = await recipes.getCookingLogEvents("B1", "R1");
+    expect(events[0].rating).toBeUndefined();
   });
 });
