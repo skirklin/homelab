@@ -239,7 +239,7 @@ const SESSION_REMINDERS = {
   },
   evening: {
     title: "Evening wind-down",
-    body: "Wind-down time. Three quick reflections.",
+    body: "Wind-down time. A few quick reflections.",
   },
   weekly: {
     title: "Weekly review",

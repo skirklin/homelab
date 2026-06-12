@@ -68,8 +68,9 @@ export const SESSIONS: Session[] = [
       {
         id: "intention",
         type: "text",
-        label: "One thing that matters today",
-        placeholder: "What feels worth your attention.",
+        label: "What's the plan for today?",
+        hint: "What are you doing, and when? Worth a glance at your calendar.",
+        placeholder: "Priorities, rough timing, the shape of the day.",
       },
       {
         id: "energy",
@@ -96,8 +97,8 @@ export const SESSIONS: Session[] = [
         // morning (no nudge, no "you skipped").
         id: "intention_followup",
         type: "text",
-        label: "How did that go?",
-        hint: "This morning, what mattered to you was: “{context}”",
+        label: "How did the plan hold up?",
+        hint: "This morning's plan: “{context}”",
         placeholder: "How did it turn out? Honest beats tidy.",
         optional: true,
         contextKey: "morning_intention",
