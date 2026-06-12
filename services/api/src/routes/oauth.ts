@@ -243,7 +243,38 @@ oauth.get("/authorize", async (c) => {
 
   if (!user) {
     const pbUrl = process.env.PB_PUBLIC_URL || "https://api.kirkl.in";
-    return c.html(htmlPage(`
+    return c.html(renderLoginPage(clientName, hidden, pbUrl));
+  }
+
+  return c.html(htmlPage(`
+    <h1>Authorize ${clientName}</h1>
+    <p class="muted">Signed in as <strong>${escapeHtml(user.email)}</strong>.</p>
+    <div class="box">
+      <p><strong>${clientName}</strong> is requesting:</p>
+      <ul>${scopeList}</ul>
+      <p class="muted" style="margin-top:.75rem">After you approve, the auth code will be sent to:</p>
+      <p style="word-break:break-all"><code>${escapeHtml(parsed.redirect_uri)}</code></p>
+      <p class="muted" style="margin-top:.5rem;font-size:.8rem">⚠️ Only approve if this URL belongs to the app you're connecting. Loopback (<code>localhost</code>) is normal for desktop apps; <code>https://claude.ai/...</code> is normal for Claude mobile/web.</p>
+    </div>
+    <form method="POST" action="/oauth/authorize">
+      ${hidden}
+      <div class="row">
+        <button type="submit" name="decision" value="deny" class="danger">Deny</button>
+        <button type="submit" name="decision" value="approve" class="primary">Approve</button>
+      </div>
+    </form>
+  `));
+});
+
+/**
+ * Login page shown on GET /oauth/authorize when there is no valid session.
+ * Exported for unit tests: the inline <script> here must never contain a
+ * literal closing-script sequence, or the browser truncates the script
+ * mid-source (see oauth-login-page.test.ts).
+ * `clientName` and `hidden` are pre-escaped HTML fragments.
+ */
+export function renderLoginPage(clientName: string, hidden: string, pbUrl: string): string {
+  return htmlPage(`
       <h1>Sign in to homelab</h1>
       <p class="muted"><strong>${clientName}</strong> wants to access your homelab data.</p>
       <button id="google-signin" class="google" type="button">
@@ -269,7 +300,10 @@ oauth.get("/authorize", async (c) => {
           try {
             // Use the same PB instance the home app uses; PB orchestrates the popup
             // and returns the session token.
-            // \\u003C escaping defends against any pbUrl that contains </script>.
+            // The \\u003C escaping defends against any pbUrl containing a
+            // closing script tag. (Never spell that tag literally here: the
+            // HTML parser ends a script element at the first such sequence,
+            // even inside a JS comment.)
             const pb = new PocketBase(${JSON.stringify(pbUrl).replace(/</g, "\\u003c")});
             const authData = await pb.collection("users").authWithOAuth2({ provider: "google" });
             // Hand the token to our server, which validates it and sets the session cookie.
@@ -290,28 +324,8 @@ oauth.get("/authorize", async (c) => {
         });
       })();
       </script>
-    `));
-  }
-
-  return c.html(htmlPage(`
-    <h1>Authorize ${clientName}</h1>
-    <p class="muted">Signed in as <strong>${escapeHtml(user.email)}</strong>.</p>
-    <div class="box">
-      <p><strong>${clientName}</strong> is requesting:</p>
-      <ul>${scopeList}</ul>
-      <p class="muted" style="margin-top:.75rem">After you approve, the auth code will be sent to:</p>
-      <p style="word-break:break-all"><code>${escapeHtml(parsed.redirect_uri)}</code></p>
-      <p class="muted" style="margin-top:.5rem;font-size:.8rem">⚠️ Only approve if this URL belongs to the app you're connecting. Loopback (<code>localhost</code>) is normal for desktop apps; <code>https://claude.ai/...</code> is normal for Claude mobile/web.</p>
-    </div>
-    <form method="POST" action="/oauth/authorize">
-      ${hidden}
-      <div class="row">
-        <button type="submit" name="decision" value="deny" class="danger">Deny</button>
-        <button type="submit" name="decision" value="approve" class="primary">Approve</button>
-      </div>
-    </form>
-  `));
-});
+  `);
+}
 
 // Bridge endpoint used by the Google sign-in script on /oauth/authorize:
 // the page completes PocketBase's popup-based OAuth flow client-side, then
