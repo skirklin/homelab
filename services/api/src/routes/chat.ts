@@ -182,12 +182,19 @@ chatRoutes.post("/messages", handler(async (c) => {
       ? body.body.slice(0, 100) + "..."
       : body.body;
     const path = pushPathForThread(threadId);
+    // Life-specific deep links (`/chat`, `/observations/:id`) ONLY resolve
+    // correctly on life.kirkl.in. The SW click handler intentionally
+    // refuses cross-origin navigation (PB auth is per-origin — opening
+    // life.kirkl.in from a kirkl.in/home.kirkl.in SW would cold-load an
+    // empty authStore and look like a sign-out). So we hard-pin to
+    // life.kirkl.in and let the push silently no-op if no life sub exists
+    // (better than misdelivering to a wrong-origin SW that 404s the path).
     sendPushToUser(pb, userId, {
       title: "New message",
       body: truncated,
       buildUrl: () => path,
     }, {
-      preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"],
+      preferredOrigins: ["https://life.kirkl.in"],
     }).catch((err) => console.error("chat push failed:", err));
   }
 
