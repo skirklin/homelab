@@ -2354,28 +2354,36 @@ dataRoutes.get("/life/trackables", handler(async (c) => {
   return c.json({ log: log.id, trackables: manifest.trackables });
 }));
 
-// Add a trackable to the caller's manifest.
+// Add a vocab row to the caller's manifest.
 dataRoutes.post("/life/trackables", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const body = await c.req.json<{
     id?: string;
     label?: string;
+    shape?: string;
     group?: string;
     hidden?: boolean;
-    fields?: unknown;
+    defaultUnit?: unknown;
+    defaultAmount?: unknown;
+    defaultDuration?: unknown;
+    ratingLabel?: unknown;
     pinned?: unknown;
   }>();
-  if (typeof body.id !== "string" || typeof body.label !== "string") {
-    return c.json({ error: "id and label are required strings" }, 400);
+  if (typeof body.id !== "string" || typeof body.label !== "string" || typeof body.shape !== "string") {
+    return c.json({ error: "id, label, and shape are required strings" }, 400);
   }
   const out = await applyManifestMutation(pb, userId, (cur) =>
     addTrackableOp(cur, {
       id: body.id as string,
       label: body.label as string,
+      shape: body.shape as string,
       group: body.group,
       hidden: body.hidden,
-      fields: body.fields,
+      defaultUnit: body.defaultUnit,
+      defaultAmount: body.defaultAmount,
+      defaultDuration: body.defaultDuration,
+      ratingLabel: body.ratingLabel,
       pinned: body.pinned,
     }),
   );
@@ -2383,7 +2391,7 @@ dataRoutes.post("/life/trackables", handler(async (c) => {
   return c.json({ trackables: out.manifest.trackables }, 201);
 }));
 
-// Patch a trackable. id/field.key are immutable (enforced in the pure op).
+// Patch a trackable. id and shape are immutable (enforced in the pure op).
 dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -2391,20 +2399,28 @@ dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
   const body = await c.req.json<{
     id?: string;
     label?: string;
+    shape?: string;
     group?: string | null;
     hidden?: boolean;
-    fields?: unknown;
+    defaultUnit?: unknown;
+    defaultAmount?: unknown;
+    defaultDuration?: unknown;
+    ratingLabel?: unknown;
     pinned?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
-    // Forward `id` so the pure op enforces id-immutability — a caller passing a
-    // differing `id` must be rejected, not silently ignored.
+    // Forward `id`/`shape` so the pure op enforces immutability — a caller
+    // passing a differing value must be rejected, not silently ignored.
     updateTrackableOp(cur, trackableId, {
       id: body.id,
       label: body.label,
+      shape: body.shape,
       group: body.group,
       hidden: body.hidden,
-      fields: body.fields,
+      defaultUnit: body.defaultUnit,
+      defaultAmount: body.defaultAmount,
+      defaultDuration: body.defaultDuration,
+      ratingLabel: body.ratingLabel,
       pinned: body.pinned,
     }),
   );

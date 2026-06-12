@@ -548,40 +548,29 @@ server.tool(
   },
 );
 
-// --- Life trackable manifest tools ---
+// --- Life trackable (vocabulary) tools ---
 //
-// A "trackable" is a data-defined thing the user logs (e.g. Water, Mood,
-// Movement). These tools manage the caller's own per-user manifest
+// A "trackable" is a vocab row: a data-defined THING the user logs (coffee,
+// vyvanse, run, mood). Each row has a SHAPE (took|did|happened|rated) that
+// decides which entries[] a new event carries; the thing's `id` is the event
+// subject_id. These tools manage the caller's own per-user manifest
 // (life_logs.manifest); they always operate on the authenticated caller's log
 // — there is no log-id parameter, so cross-user edits are impossible.
 //
-// IMMUTABILITY: a trackable's `id` and each field's `key` are the join keys
-// that link historical life_events. They can NEVER be renamed/removed/retyped
-// (that would silently orphan history). add_life_trackable sets them once;
-// update_life_trackable may add NEW fields and edit cosmetic field props
-// (label/unit/options/scale/default) but rejects any id change or any change
-// to an existing field's key/type.
-
-const typedFieldSchema = z.object({
-  key: z.string().describe("IMMUTABLE entry name / label key (slug: [a-z0-9_-]). The history join key."),
-  type: z.enum(["number", "rating", "text", "category", "bool"]).describe("Field type. number|rating|text|bool → entries[]; category → labels{}."),
-  label: z.string().optional().describe("Display label (editable)"),
-  unit: z.string().optional().describe("For number fields: storage-canonical unit (min, mg, oz, ct, …)"),
-  scale: z.number().optional().describe("For rating fields: top of the scale (default 5)"),
-  options: z.array(z.string()).optional().describe("For category fields: the selectable values (REQUIRED for category)"),
-  defaultValue: z.number().optional().describe("Pre-filled value in the log form"),
-  optional: z.boolean().optional().describe("When true the field may be omitted from a logged event"),
-});
+// IMMUTABILITY: `id` (the history join key) and `shape` (the entries[]
+// contract for new events) can NEVER change. add_life_trackable sets them
+// once; update_life_trackable patches everything else (label, group,
+// defaults, ratingLabel, hidden, pinned).
 
 const quickPayloadSchema = z.object({
   label: z.string().optional().describe("Chip label shown on the dashboard"),
-  entries: z.array(lifeEntrySchema).describe("Replayed entries[]. Each entry's `name` MUST equal a measurement field.key of the trackable."),
-  labels: z.record(z.string()).optional().describe("Replayed labels{}. Each key MUST equal a category field.key of the trackable."),
+  entries: z.array(lifeEntrySchema).describe("Replayed entries[] — number entries only (measurement values; text is never a stable quick-action)."),
+  labels: z.record(z.string()).optional().describe("Replayed labels{} (legacy category-era labels are carried through verbatim)."),
 });
 
 server.tool(
   "list_life_trackables",
-  "List the caller's life trackables (the per-user manifest). Each has id, label, optional group/hidden, fields[] (typed), and optional pinned[] quick-actions.",
+  "List the caller's life trackables (the per-user vocabulary). Each has id, label, shape (took|did|happened|rated), optional group (semantic rollup), prefill defaults (defaultUnit/defaultAmount/defaultDuration), optional ratingLabel, hidden, and pinned[] quick-actions.",
   {},
   async () => {
     const data = await api("/life/trackables");
@@ -591,13 +580,17 @@ server.tool(
 
 server.tool(
   "add_life_trackable",
-  "Create a new life trackable in the caller's manifest. `id` is an IMMUTABLE slug (becomes the events subject_id; the history join key) and must be unique. Each field's `key` is also immutable. category fields require options[].",
+  "Create a new vocab row in the caller's manifest. `id` is an IMMUTABLE slug (becomes the events subject_id; the history join key) and must be unique. `shape` is also IMMUTABLE: took (amount+unit), did (duration + optional rating + notes), happened (count 1), rated (1..5).",
   {
     id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-]); becomes the events subject_id"),
     label: z.string().describe("Display label"),
-    group: z.string().optional().describe("Dashboard group (e.g. body, mind)"),
+    shape: z.enum(["took", "did", "happened", "rated"]).describe("IMMUTABLE shape — decides the entries[] a new event carries"),
+    group: z.string().optional().describe("Semantic rollup (e.g. walk/run/bike share group 'exercise')"),
     hidden: z.boolean().optional().describe("Hide from the dashboard (history preserved)"),
-    fields: z.array(typedFieldSchema).describe("At least one typed field"),
+    defaultUnit: z.string().optional().describe("took: prefill unit (mg, oz, drinks, …)"),
+    defaultAmount: z.number().optional().describe("took: prefill amount"),
+    defaultDuration: z.number().optional().describe("did: prefill duration in MINUTES"),
+    ratingLabel: z.string().optional().describe("did: label for the optional 1–5 rating ('intensity', 'quality'); omit to not offer one"),
     pinned: z.array(quickPayloadSchema).optional().describe("Manual quick-action favorites"),
   },
   async (args) => {
@@ -608,13 +601,16 @@ server.tool(
 
 server.tool(
   "update_life_trackable",
-  "Patch a trackable's label/group/hidden/fields/pinned (pass only what changes). The trackable `id` is IMMUTABLE and cannot change. Existing field `key`s are IMMUTABLE: you may APPEND new fields and edit cosmetic props (label/unit/options/scale/default), but removing or retyping an existing field key is rejected (it orphans history).",
+  "Patch a trackable's label/group/hidden/defaults/ratingLabel/pinned (pass only what changes). `id` and `shape` are IMMUTABLE and cannot change (history join key + entries[] contract). null clears group/defaultUnit/defaultAmount/defaultDuration/ratingLabel.",
   {
     id: z.string().describe("The trackable id to update (immutable; identifies which trackable)"),
     label: z.string().optional(),
     group: z.string().nullable().optional().describe("New group; null clears it"),
     hidden: z.boolean().optional(),
-    fields: z.array(typedFieldSchema).optional().describe("Replacement fields[] — must include every existing key with an unchanged type; may add new fields"),
+    defaultUnit: z.string().nullable().optional().describe("took: prefill unit; null clears"),
+    defaultAmount: z.number().nullable().optional().describe("took: prefill amount; null clears"),
+    defaultDuration: z.number().nullable().optional().describe("did: prefill duration in MINUTES; null clears"),
+    ratingLabel: z.string().nullable().optional().describe("did: rating display label; null clears"),
     pinned: z.array(quickPayloadSchema).optional().describe("Replacement pinned[] (whole-replace; [] clears)"),
   },
   async ({ id, ...patch }) => {
@@ -645,7 +641,7 @@ server.tool(
 
 server.tool(
   "add_life_pin",
-  "Add a pinned quick-action to a trackable. The pin's entries[].name MUST equal the trackable's measurement field.keys and any labels{} keys MUST equal its category field.keys, so a replayed pin writes a history-compatible event. Appends to the existing pins.",
+  "Add a pinned quick-action to a trackable. The pin's entries[] must be number entries with the value/unit shape the trackable's shape writes (e.g. took → {name:'amount', unit:'mg'}; rated → {name:'rating', unit:'rating', scale}), so a replayed pin writes a history-compatible event. Appends to the existing pins.",
   {
     id: z.string().describe("The trackable id"),
     pin: quickPayloadSchema.describe("The quick-action payload to pin"),
