@@ -1,7 +1,8 @@
 /**
- * P2 — the runtime trackable source is the per-user manifest, not the
- * hardcoded TRACKABLES. `useTrackables()` reads `state.log.manifest.trackables`
- * and falls back to the default starter set when the manifest is absent.
+ * The runtime vocabulary source is the per-user manifest. `useTrackables()`
+ * reads `state.log.manifest.trackables` (vocab rows: id + shape + prefill
+ * hints) and falls back to the default starter set when the manifest is
+ * absent or empty.
  */
 import { describe, it, expect } from "vitest";
 import { renderHook, act } from "@testing-library/react";
@@ -9,7 +10,7 @@ import type { ReactNode } from "react";
 import { DEFAULT_LIFE_MANIFEST } from "@homelab/backend";
 import type { LifeManifest } from "@homelab/backend";
 import { LifeProvider, useLifeContext } from "../life-context";
-import { useTrackables, primaryField, fieldUnit } from "./trackables";
+import { useTrackables } from "./trackables";
 import type { LifeLog } from "../types";
 
 function makeLog(manifest: LifeManifest | null): LifeLog {
@@ -47,24 +48,19 @@ describe("useTrackables", () => {
     );
   });
 
-  it("reads a custom trackable id from state.log.manifest (not the hardcoded list)", () => {
+  it("reads vocab rows from state.log.manifest (not any hardcoded list)", () => {
     const custom: LifeManifest = {
       trackables: [
-        {
-          id: "meditation_xyz",
-          label: "Meditation",
-          fields: [{ key: "duration", type: "number", unit: "min", defaultValue: 10 }],
-        },
+        { id: "meditation_xyz", label: "Meditation", shape: "did", defaultDuration: 10 },
       ],
     };
     const { result } = renderTrackables();
-    // Inject the log with the custom manifest.
     act(() => {
       result.current.dispatch({ type: "SET_LOG", log: makeLog(custom) });
     });
     expect(result.current.trackables.map((t) => t.id)).toEqual(["meditation_xyz"]);
-    // The hardcoded "vyvanse" is NOT present — proves we read the manifest.
-    expect(result.current.trackables.some((t) => t.id === "vyvanse")).toBe(false);
+    expect(result.current.trackables[0].shape).toBe("did");
+    expect(result.current.trackables.some((t) => t.id === "water")).toBe(false);
   });
 
   it("falls back to default when the manifest has an empty trackables array", () => {
@@ -73,25 +69,5 @@ describe("useTrackables", () => {
       result.current.dispatch({ type: "SET_LOG", log: makeLog({ trackables: [] }) });
     });
     expect(result.current.trackables.length).toBe(DEFAULT_LIFE_MANIFEST.trackables.length);
-  });
-});
-
-describe("primaryField / fieldUnit", () => {
-  it("primaryField skips category fields", () => {
-    const f = primaryField({
-      id: "movement",
-      label: "Movement",
-      fields: [
-        { key: "kind", type: "category", options: ["a"] },
-        { key: "duration", type: "number", unit: "min" },
-      ],
-    });
-    expect(f?.key).toBe("duration");
-  });
-
-  it("fieldUnit returns 'rating' for rating fields, the unit for number fields", () => {
-    expect(fieldUnit({ key: "r", type: "rating", scale: 5 })).toBe("rating");
-    expect(fieldUnit({ key: "v", type: "number", unit: "oz" })).toBe("oz");
-    expect(fieldUnit({ key: "c", type: "number" })).toBe("ct");
   });
 });
