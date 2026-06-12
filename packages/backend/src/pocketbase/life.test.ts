@@ -55,7 +55,7 @@ function makeLogBackend(opts: { owned?: Record<string, unknown> | null } = {}): 
 }
 
 describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () => {
-  it("seeds the default type-demo manifest on create, with the expected field types", async () => {
+  it("seeds the default shape-demo manifest on create, covering every shape", async () => {
     const { backend, createSpy } = makeLogBackend({ owned: null });
     const log = await backend.getOrCreateLog("user-new");
 
@@ -69,22 +69,19 @@ describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () =>
     // And the mapped LifeLog surfaces it.
     expect(log.manifest).not.toBeNull();
     const byId = Object.fromEntries(log.manifest!.trackables.map((t) => [t.id, t]));
-    // One trackable per field type.
-    expect(byId.water.fields[0]).toMatchObject({ type: "number", unit: "oz" });
-    expect(byId.mood.fields[0]).toMatchObject({ type: "rating", scale: 5 });
-    expect(byId.note.fields[0]).toMatchObject({ type: "text" });
-    expect(byId.movement.fields.map((f) => f.type)).toEqual(["category", "number"]);
-    expect(byId.floss.fields[0]).toMatchObject({ type: "bool" });
+    // One trackable per shape.
+    expect(byId.water).toMatchObject({ shape: "took", defaultUnit: "oz", defaultAmount: 8 });
+    expect(byId.exercise).toMatchObject({ shape: "did", defaultDuration: 30, ratingLabel: "intensity" });
+    expect(byId.floss).toMatchObject({ shape: "happened" });
+    expect(byId.mood).toMatchObject({ shape: "rated" });
 
-    const types = new Set(
-      log.manifest!.trackables.flatMap((t) => t.fields.map((f) => f.type)),
-    );
-    expect(types).toEqual(new Set(["number", "rating", "text", "category", "bool"]));
+    const shapes = new Set(log.manifest!.trackables.map((t) => t.shape));
+    expect(shapes).toEqual(new Set(["took", "did", "happened", "rated"]));
   });
 
   it("preserves an existing log's manifest (does NOT re-seed or overwrite)", async () => {
     const existingManifest = {
-      trackables: [{ id: "custom", label: "Custom", fields: [{ key: "count", type: "number" }] }],
+      trackables: [{ id: "custom", label: "Custom", shape: "took" }],
     };
     const { backend, createSpy } = makeLogBackend({
       owned: { id: "log-existing", manifest: existingManifest },
@@ -128,8 +125,8 @@ function makePinBackend(opts: { manifest?: unknown } = {}): {
 describe("PocketBaseLifeBackend.setTrackablePins — read-modify-write of manifest.pinned[]", () => {
   const manifest = {
     trackables: [
-      { id: "edibles", label: "Edibles", fields: [{ key: "dose", type: "number", unit: "mg" }] },
-      { id: "coffee", label: "Coffee", fields: [{ key: "volume", type: "number", unit: "oz" }] },
+      { id: "edibles", label: "Edibles", shape: "took", defaultUnit: "mg" },
+      { id: "coffee", label: "Coffee", shape: "took", defaultUnit: "oz" },
     ],
   };
 

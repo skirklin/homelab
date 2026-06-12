@@ -1,21 +1,20 @@
 /**
- * Default life-tracker manifest for NEW users.
+ * Default life-tracker vocabulary for NEW users.
  *
- * A MINIMAL type-demo starter set — one trackable per field type — copied into
+ * A MINIMAL starter set — one trackable per SHAPE — copied into
  * `life_logs.manifest` on first `getOrCreateLog`. Generically named (Water,
- * Mood, Note, Movement, Floss) so a brand-new user gets a working dashboard
- * that demonstrates every input shape, not the system owner's personal 17.
+ * Exercise, Floss, Mood) so a brand-new user gets a working dashboard that
+ * demonstrates every shape widget, not the system owner's personal list.
  *
- * Field-type coverage:
- *   - number   → Water (oz), Movement.minutes (min)
- *   - rating   → Mood (scale 5)
- *   - text     → Note
- *   - category → Movement.kind (labels[kind])
- *   - bool     → Floss
+ * Shape coverage:
+ *   - took     → Water (8 oz)
+ *   - did      → Exercise (30 min, optional intensity rating)
+ *   - happened → Floss
+ *   - rated    → Mood
  *
  * Importable by both the seeding path (packages/backend/.../pocketbase/life.ts)
- * and tests. The PB backfill migration mirrors scott's 1:1 translation
- * separately in goja JS — this module is ONLY the new-user starter set.
+ * and tests. The PB shape migration rewrites EXISTING manifests separately in
+ * goja JS — this module is ONLY the new-user starter set.
  */
 import type { LifeManifest } from "./types/life";
 
@@ -24,39 +23,30 @@ export const DEFAULT_LIFE_MANIFEST: LifeManifest = {
     {
       id: "water",
       label: "Water",
+      shape: "took",
       group: "body",
-      fields: [{ key: "volume", type: "number", unit: "oz", defaultValue: 8 }],
+      defaultUnit: "oz",
+      defaultAmount: 8,
     },
     {
-      id: "mood",
-      label: "Mood",
-      group: "mind",
-      fields: [{ key: "rating", type: "rating", scale: 5 }],
-    },
-    {
-      id: "note",
-      label: "Note",
-      group: "mind",
-      fields: [{ key: "text", type: "text" }],
-    },
-    {
-      id: "movement",
-      label: "Movement",
+      id: "exercise",
+      label: "Exercise",
+      shape: "did",
       group: "body",
-      fields: [
-        {
-          key: "kind",
-          type: "category",
-          options: ["walk", "run", "bike", "lift", "yoga", "other"],
-        },
-        { key: "duration", type: "number", unit: "min", defaultValue: 30 },
-      ],
+      defaultDuration: 30,
+      ratingLabel: "intensity",
     },
     {
       id: "floss",
       label: "Floss",
+      shape: "happened",
       group: "body",
-      fields: [{ key: "done", type: "bool", defaultValue: 1 }],
+    },
+    {
+      id: "mood",
+      label: "Mood",
+      shape: "rated",
+      group: "mind",
     },
   ],
 };

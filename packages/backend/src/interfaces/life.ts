@@ -12,8 +12,34 @@ import type {
   LifeEntry,
   QuickPayload,
   LifeManifest,
-  TypedField,
+  TrackableShape,
 } from "../types/life";
+
+/** Vocab-row creation input (see LifeManifestTrackable). */
+export interface AddTrackableInput {
+  id: string;
+  label: string;
+  shape: TrackableShape;
+  group?: string;
+  hidden?: boolean;
+  defaultUnit?: string;
+  defaultAmount?: number;
+  defaultDuration?: number;
+  ratingLabel?: string;
+  pinned?: QuickPayload[];
+}
+
+/** Vocab-row patch (id + shape are immutable; null clears nullable hints). */
+export interface UpdateTrackablePatch {
+  label?: string;
+  group?: string | null;
+  hidden?: boolean;
+  defaultUnit?: string | null;
+  defaultAmount?: number | null;
+  defaultDuration?: number | null;
+  ratingLabel?: string | null;
+  pinned?: QuickPayload[];
+}
 
 export interface LifeBackend {
   // --- Log ---
@@ -64,21 +90,18 @@ export interface LifeBackend {
    */
   mutateManifest(logId: string, mutate: (current: LifeManifest) => LifeManifest): Promise<LifeManifest>;
 
-  /** Add a new trackable. Validates id slug/uniqueness, fields, and pins. */
-  addTrackable(
-    logId: string,
-    input: { id: string; label: string; group?: string; hidden?: boolean; fields: TypedField[]; pinned?: QuickPayload[] },
-  ): Promise<LifeManifest>;
+  /** Add a new vocab row. Validates id slug/uniqueness, shape, defaults, pins. */
+  addTrackable(logId: string, input: AddTrackableInput): Promise<LifeManifest>;
 
   /**
-   * Patch an existing trackable's label/group/hidden/fields/pinned. Rejects any
-   * `id` change and any rename/removal/retype of an existing `field.key` (the
-   * history join keys); adding new fields is allowed. Pass only the fields to change.
+   * Patch an existing trackable's label/group/hidden/defaults/ratingLabel/
+   * pinned. Rejects any `id` or `shape` change (history join key + entries[]
+   * contract). Pass only the keys to change; null clears nullable hints.
    */
   updateTrackable(
     logId: string,
     trackableId: string,
-    patch: { label?: string; group?: string | null; hidden?: boolean; fields?: TypedField[]; pinned?: QuickPayload[] },
+    patch: UpdateTrackablePatch,
   ): Promise<LifeManifest>;
 
   /**

@@ -15,33 +15,18 @@ export interface SampleSchedule {
 }
 
 /**
- * One field of a data-defined trackable. Maps onto the unified life_events
- * shape per the manifest design (see apps/life/ROADMAP.md §2):
+ * The four event-recording shapes. A shape implies the input fields and the
+ * canonical entries[] a NEW event carries (readers must stay name-agnostic —
+ * history uses older names like dose/volume/drinks/intensity):
  *
- *   - `number` | `rating` | `text` | `bool` → a `life_events.entries[]` entry
- *     whose `name` is this field's `key`.
- *   - `category` → a `life_events.labels[key]` string value (NOT an entry).
- *
- * `key` is IMMUTABLE — it is the join key that links historical events to the
- * trackable. Renaming it silently orphans history; the P4 MCP layer enforces
- * this. Everything else (label, unit, options, defaults, order) is editable.
+ *   took     → [{name:"amount",   type:"number", value, unit}]
+ *   did      → [{name:"duration", type:"number", value, unit:"min"},
+ *               optional {name:"rating", type:"number", unit:"rating", scale:5},
+ *               optional {name:"notes",  type:"text"}]
+ *   happened → [{name:"count",    type:"number", value:1, unit:"ct"}]
+ *   rated    → [{name:"rating",   type:"number", unit:"rating", scale:N}]
  */
-export interface TypedField {
-  /** IMMUTABLE entry name / label key — the history join key. */
-  key: string;
-  type: "number" | "rating" | "text" | "category" | "bool";
-  label?: string;
-  /** For `number` fields — storage-canonical unit ("min", "mg", "oz", "ct", …). */
-  unit?: string;
-  /** For `rating` fields — top of the scale (default 5). */
-  scale?: number;
-  /** For `category` fields — the selectable values, written into labels[key]. */
-  options?: string[];
-  /** Pre-filled value in the log form (canonical unit for numbers). */
-  defaultValue?: number;
-  /** When true the field may be omitted from a logged event. */
-  optional?: boolean;
-}
+export type TrackableShape = "took" | "did" | "happened" | "rated";
 
 /**
  * A replayable quick-action payload: the exact entries[]/labels{} a one-tap
@@ -56,23 +41,36 @@ export interface QuickPayload {
 }
 
 /**
- * A per-user, data-defined trackable. Stored in `life_logs.manifest.trackables`.
- * Generic over field types — no code references any specific `id`. Replaces the
- * hardcoded `Trackable` in apps/life/app/src/trackables.ts as the runtime
- * source (P2); that file survives only as the default-template seed.
+ * A vocabulary row: a per-user, data-defined "thing" the user logs. Stored in
+ * `life_logs.manifest.trackables`. The thing IS the event subject
+ * (thing-as-subject): `id` becomes `life_events.subject_id`, so existing
+ * history needs no migration when the input UI changes.
  *
- * `id` is IMMUTABLE — it becomes `life_events.subject_id` and is the history
- * join key. Removing a trackable from the manifest never deletes events; events
- * persist and re-link if a trackable with the same id is re-added.
+ * `id` and `shape` are IMMUTABLE — `id` is the history join key, and `shape`
+ * decides which entries[] a new event carries (changing it would fork the
+ * series' shape mid-history). Everything else is a prefill/display hint.
+ * Removing a trackable from the manifest never deletes events; events persist
+ * and re-link if a trackable with the same id is re-added.
  */
 export interface LifeManifestTrackable {
   /** IMMUTABLE — becomes subject_id; the history join key. */
   id: string;
   label: string;
+  /** IMMUTABLE — which of the four shape widgets logs this thing. */
+  shape: TrackableShape;
+  /** Semantic rollup (e.g. walk/run/bike share group "exercise"). */
   group?: string;
+  /** Prefill hint: unit for `took` amounts ("mg", "oz", "drinks", …). */
+  defaultUnit?: string;
+  /** Prefill hint: amount for `took`. */
+  defaultAmount?: number;
+  /** Prefill hint: duration in minutes for `did`. */
+  defaultDuration?: number;
+  /** Display label for the `did` shape's optional 1–5 rating ("intensity",
+   *  "quality"). Absent → the rating input is not offered for this thing. */
+  ratingLabel?: string;
   hidden?: boolean;
-  fields: TypedField[];
-  /** Manual quick-action favorites, shown first on the log card. */
+  /** Manual quick-action favorites, shown first in the quick row / sheet. */
   pinned?: QuickPayload[];
 }
 
