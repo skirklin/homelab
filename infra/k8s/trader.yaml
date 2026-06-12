@@ -32,6 +32,18 @@ spec:
               value: prod
             - name: KALSHI_DATA_DIR
               value: /data
+            # Read-only Kalshi key for the live portfolio card (balance/positions; it
+            # cannot place orders). The secret is created imperatively on the cluster —
+            # never committed — and everything is optional: without it the pod still
+            # runs and the card degrades to "unavailable".
+            - name: KALSHI_PROD_RO_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kalshi-prod-ro
+                  key: key-id
+                  optional: true
+            - name: KALSHI_PROD_RO_KEY_PATH
+              value: /secrets/kalshi-prod-ro/key.pem
           readinessProbe:
             httpGet:
               path: /api/meta
@@ -41,6 +53,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+              readOnly: true
+            - name: kalshi-ro
+              mountPath: /secrets/kalshi-prod-ro
               readOnly: true
           resources:
             requests:
@@ -54,6 +69,10 @@ spec:
           hostPath:
             path: /home/scott/trader-data
             type: Directory # fail loudly if the publish target was never created
+        - name: kalshi-ro
+          secret:
+            secretName: kalshi-prod-ro
+            optional: true
 ---
 apiVersion: v1
 kind: Service
