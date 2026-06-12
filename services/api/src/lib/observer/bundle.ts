@@ -384,7 +384,7 @@ function renderMorningSession(event: LifeEventRecord): string | null {
 
   const lines: string[] = ["*Morning session.*"];
   if (gratitude) lines.push(`Grateful for: ${gratitude}`);
-  if (intention) lines.push(`Intention: ${intention}`);
+  if (intention) lines.push(`Plan for the day: ${intention}`);
   for (const o of others) lines.push(`${humanize(o.name)}: ${o.value}`);
   return lines.join(" ");
 }
@@ -402,7 +402,7 @@ function renderEveningSession(event: LifeEventRecord): string | null {
   const lines: string[] = ["*Evening session.*"];
   if (win) lines.push(`Win: ${win}`);
   if (lesson) lines.push(`Lesson: ${lesson}`);
-  if (followup) lines.push(`On the morning intention: ${followup}`);
+  if (followup) lines.push(`On the morning plan: ${followup}`);
   for (const o of others) lines.push(`${humanize(o.name)}: ${o.value}`);
   return lines.join(" ");
 }
