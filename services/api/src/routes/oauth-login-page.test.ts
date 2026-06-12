@@ -51,12 +51,28 @@ function assertWellFormedScripts(html: string) {
 
 describe("oauth login page HTML", () => {
   it("serves well-formed inline scripts", () => {
-    const html = renderLoginPage("Claude", "", "https://api.kirkl.in");
+    const html = renderLoginPage("Claude", "", "https://api.kirkl.in", "kirkl.in");
     assertWellFormedScripts(html);
   });
 
   it("stays well-formed for a hostile pbUrl containing a closing script tag", () => {
-    const html = renderLoginPage("Claude", "", 'https://evil</script><script>alert(1)</script>');
+    const html = renderLoginPage("Claude", "", 'https://evil</script><script>alert(1)</script>', "kirkl.in");
     assertWellFormedScripts(html);
+  });
+
+  it("links to signup in a new tab so the in-progress OAuth flow isn't lost", () => {
+    const html = renderLoginPage("Claude", "", "https://api.kirkl.in", "kirkl.in");
+    expect(html).toContain(
+      '<a href="https://kirkl.in" target="_blank" rel="noopener">Sign up at kirkl.in</a>',
+    );
+    expect(html).toContain("No account yet?");
+    expect(html).toContain("then come back here and sign in");
+  });
+
+  it("HTML-escapes a hostile domain and stays well-formed", () => {
+    const hostile = 'evil"><script>alert(1)</script>';
+    const html = renderLoginPage("Claude", "", "https://api.kirkl.in", hostile);
+    assertWellFormedScripts(html);
+    expect(html).not.toContain('href="https://evil"><script>');
   });
 });

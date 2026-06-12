@@ -9,6 +9,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import PocketBase from "pocketbase";
 
+import { DOMAIN } from "../config";
 import { getAdminPb } from "../lib/pb";
 import {
   ACCESS_TOKEN_TTL_SEC,
@@ -243,7 +244,7 @@ oauth.get("/authorize", async (c) => {
 
   if (!user) {
     const pbUrl = process.env.PB_PUBLIC_URL || "https://api.kirkl.in";
-    return c.html(renderLoginPage(clientName, hidden, pbUrl));
+    return c.html(renderLoginPage(clientName, hidden, pbUrl, DOMAIN));
   }
 
   return c.html(htmlPage(`
@@ -272,8 +273,11 @@ oauth.get("/authorize", async (c) => {
  * literal closing-script sequence, or the browser truncates the script
  * mid-source (see oauth-login-page.test.ts).
  * `clientName` and `hidden` are pre-escaped HTML fragments.
+ * `signupDomain` is the bare app domain (config DOMAIN, e.g. "kirkl.in");
+ * escaped here before interpolation.
  */
-export function renderLoginPage(clientName: string, hidden: string, pbUrl: string): string {
+export function renderLoginPage(clientName: string, hidden: string, pbUrl: string, signupDomain: string): string {
+  const domain = escapeHtml(signupDomain);
   return htmlPage(`
       <h1>Sign in to homelab</h1>
       <p class="muted"><strong>${clientName}</strong> wants to access your homelab data.</p>
@@ -288,6 +292,7 @@ export function renderLoginPage(clientName: string, hidden: string, pbUrl: strin
         <input name="password" type="password" placeholder="password" autocomplete="current-password" required>
         <button type="submit" class="primary">Sign in</button>
       </form>
+      <p class="muted">No account yet? <a href="https://${domain}" target="_blank" rel="noopener">Sign up at ${domain}</a> first, then come back here and sign in.</p>
       <script src="/oauth/static/pocketbase.umd.js" integrity="${PB_SDK_SRI}"></script>
       <script>
       (function() {
