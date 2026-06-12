@@ -74,5 +74,9 @@ describe("oauth login page HTML", () => {
     const html = renderLoginPage("Claude", "", "https://api.kirkl.in", hostile);
     assertWellFormedScripts(html);
     expect(html).not.toContain('href="https://evil"><script>');
+    // Positive pin on the escaped form: catches a partial escapeHtml
+    // regression (e.g. quotes left unescaped) that the negative check
+    // and well-formedness assertions would both miss.
+    expect(html).toContain('href="https://evil&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
   });
 });
