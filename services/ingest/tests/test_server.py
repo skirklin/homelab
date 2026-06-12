@@ -304,6 +304,117 @@ def test_closed_metadata_survives_account_reupsert(server):
     assert updated.metadata["closed_as_of"] == "2026-04-30"
 
 
+def test_net_worth_history_zeroes_closed_performance_account(server):
+    """An account WITH performance_history must drop to 0 at closed_as_of.
+
+    Regression: history used to source such accounts only from
+    performance_history (the $0 balances row from close was excluded by the
+    NOT IN subquery), so the forward-fill carried the last real balance
+    forever while the headline net worth showed 0.
+    """
+    from money.models import Balance
+
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    db.insert_performance(acct.id, date(2026, 3, 1), 150000.0, 100000.0, 50000.0)
+    db.insert_performance(acct.id, date(2026, 3, 31), 157810.73, 100000.0, 57810.73)
+    # An open account with a later balance creates series dates after the close
+    other = db.get_or_create_account(
+        name="Checking",
+        account_type=AccountType.CHECKING,
+        institution="ally",
+        external_id="c1",
+        profile="scott@ally",
+    )
+    db.insert_balance(
+        Balance(account_id=other.id, as_of=date(2026, 6, 1), balance=100.0, source="ally")
+    )
+
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+
+    series = {s["date"]: s for s in _get(port, "/api/net-worth/history")["series"]}
+    # History before the close date is unchanged
+    assert series["2026-03-01"]["net_worth"] == pytest.approx(150000.0)
+    assert series["2026-03-31"]["net_worth"] == pytest.approx(157810.73)
+    # On closed_as_of itself the account is 0 (matching the $0 balance row)
+    assert series["2026-04-30"]["net_worth"] == 0.0
+    # After the close only the open account remains
+    assert series["2026-06-01"]["net_worth"] == pytest.approx(100.0)
+
+
+def test_performance_series_zeroes_closed_account_at_close_date(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    db.insert_performance(acct.id, date(2026, 3, 1), 150000.0, 100000.0, 50000.0)
+    db.insert_performance(acct.id, date(2026, 3, 31), 157810.73, 100000.0, 57810.73)
+
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+
+    series = _get(port, "/api/performance")["series"]
+    by_date = {s["date"]: s for s in series if s["account_id"] == acct.id}
+    assert by_date["2026-03-31"]["balance"] == pytest.approx(157810.73)
+    assert by_date["2026-04-30"]["balance"] == 0.0
+    assert by_date["2026-04-30"]["invested"] == 0.0
+    assert by_date["2026-04-30"]["earned"] == 0.0
+
+
+def _insert_holding(db, account_id, value, asset_class, symbol):
+    from money.models import Holding
+
+    db.insert_holdings_batch([
+        Holding(
+            account_id=account_id,
+            as_of=date(2026, 3, 31),
+            name=symbol,
+            shares=10.0,
+            value=value,
+            source="fidelity",
+            symbol=symbol,
+            asset_class=asset_class,
+        )
+    ])
+
+
+def test_allocation_excludes_closed_accounts(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    other = db.get_or_create_account(
+        name="Brokerage",
+        account_type=AccountType.BROKERAGE,
+        institution="wealthfront",
+        external_id="b1",
+        profile="scott@wealthfront",
+    )
+    _insert_holding(db, acct.id, 157810.73, "US Stocks", "FXAIX")
+    _insert_holding(db, other.id, 5000.0, "Bonds", "BND")
+
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+
+    allocation = _get(port, "/api/allocation")["allocation"]
+    assert sum(a["value"] for a in allocation) == pytest.approx(5000.0)
+    institutions = {i for a in allocation for i in a["by_institution"]}
+    assert "fidelity" not in institutions
+
+
+def test_holdings_excludes_closed_accounts(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    other = db.get_or_create_account(
+        name="Brokerage",
+        account_type=AccountType.BROKERAGE,
+        institution="wealthfront",
+        external_id="b1",
+        profile="scott@wealthfront",
+    )
+    _insert_holding(db, acct.id, 157810.73, "US Stocks", "FXAIX")
+    _insert_holding(db, other.id, 5000.0, "Bonds", "BND")
+
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+
+    holdings = _get(port, "/api/holdings")["holdings"]
+    assert [h["symbol"] for h in holdings] == ["BND"]
+
+
 def test_sync_status_closed_accounts_never_stale(server, monkeypatch):
     port, db, _ = server
     from money import config as config_mod

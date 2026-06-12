@@ -236,6 +236,34 @@ class IngestHandler(BaseHTTPRequestHandler):
             )
         self._json_response(200, {"balances": series})
 
+    # Filters out accounts marked closed via Database.close_account().
+    _OPEN_ACCOUNTS_FILTER = (
+        "account_id NOT IN "
+        "(SELECT id FROM accounts WHERE json_extract(metadata, '$.closed'))"
+    )
+
+    def _zero_closed_accounts(
+        self, account_data: dict[str, list[tuple[str, float, float, float]]]
+    ) -> None:
+        """End each closed account's series with a $0 point at closed_as_of.
+
+        History before the close date is untouched; from closed_as_of onward
+        the forward-fill carries 0 (matching the $0 balance row that
+        Database.close_account writes), so over-time views agree with the
+        headline net worth.
+        """
+        rows = self.db.conn.execute(
+            """SELECT id, json_extract(metadata, '$.closed_as_of') AS closed_as_of
+               FROM accounts WHERE json_extract(metadata, '$.closed')"""
+        ).fetchall()
+        for row in rows:
+            aid = row["id"]
+            closed_as_of = row["closed_as_of"]
+            if closed_as_of and aid in account_data:
+                account_data[aid] = [
+                    p for p in account_data[aid] if p[0] < closed_as_of
+                ] + [(closed_as_of, 0.0, 0.0, 0.0)]
+
     def _handle_net_worth_history(self) -> None:
         from urllib.parse import parse_qs, urlparse
 
@@ -360,6 +388,11 @@ class IngestHandler(BaseHTTPRequestHandler):
                         account_data[aid] = []
                     account_data[aid] = backfill + account_data[aid]
 
+        # Closed accounts: drop to 0 at closed_as_of instead of forward-filling
+        # the last real balance forever (performance_history accounts never see
+        # the $0 balances row, so this is the only closure signal here)
+        self._zero_closed_accounts(account_data)
+
         # Collect all unique dates and forward-fill each account
         all_dates: set[str] = set()
         for points in account_data.values():
@@ -467,6 +500,9 @@ class IngestHandler(BaseHTTPRequestHandler):
                     row["earned"] or 0.0,
                 )
             )
+
+        # Closed accounts: series ends at 0 on closed_as_of
+        self._zero_closed_accounts(account_data)
 
         # Collect all dates and apply forward-fill (LOCF)
         all_dates: set[str] = set()
@@ -747,7 +783,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         """Return asset allocation breakdown across all investment accounts."""
         from money.benchmarks import normalize_asset_class
 
-        rows = self.db.conn.execute("""
+        rows = self.db.conn.execute(f"""
             SELECT COALESCE(h.asset_class, 'Unclassified') as asset_class,
                    SUM(h.value) as total_value,
                    COUNT(*) as position_count,
@@ -757,6 +793,7 @@ class IngestHandler(BaseHTTPRequestHandler):
             WHERE h.as_of = (SELECT MAX(h2.as_of) FROM holdings h2
                              WHERE h2.account_id = h.account_id)
               AND h.value > 0.01
+              AND h.{self._OPEN_ACCOUNTS_FILTER}
             GROUP BY asset_class, a.institution
             ORDER BY total_value DESC
         """).fetchall()
@@ -881,7 +918,7 @@ class IngestHandler(BaseHTTPRequestHandler):
         account_id = params.get("account_id", [None])[0]
         institution = params.get("institution", [None])[0]
 
-        query = """
+        query = f"""
             SELECT h.symbol, h.name, h.asset_class, h.shares, h.value,
                    h.as_of, a.name as account_name, a.institution
             FROM holdings h
@@ -890,6 +927,7 @@ class IngestHandler(BaseHTTPRequestHandler):
                 SELECT MAX(h2.as_of) FROM holdings h2
                 WHERE h2.account_id = h.account_id
             )
+              AND h.{self._OPEN_ACCOUNTS_FILTER}
         """
         conditions: list[str] = []
         query_params: list[str] = []

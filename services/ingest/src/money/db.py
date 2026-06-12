@@ -300,9 +300,12 @@ class Database:
         """Mark an account closed and zero its balance from as_of.
 
         Sets metadata.closed / metadata.closed_as_of and inserts a $0 manual
-        balance row so net_worth() and its history stop carrying the last
-        real balance forward (e.g. after a 401k rollover). Returns the
-        updated account, or None if the account doesn't exist.
+        balance row so net_worth() stops carrying the last real balance
+        forward (e.g. after a 401k rollover). The HTTP layer reads the
+        metadata too: over-time series (net-worth history, performance) zero
+        the account from closed_as_of onward, and current-state aggregates
+        (allocation, holdings) drop it entirely. Returns the updated
+        account, or None if the account doesn't exist.
         """
         account = self.get_account(account_id)
         if account is None:
