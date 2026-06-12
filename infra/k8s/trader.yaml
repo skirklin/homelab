@@ -1,0 +1,85 @@
+# Kalshi trader dashboard — read-only replica, tailnet-only.
+#
+# The desk (kalshi-trader repo) lives on Scott's workstation and one-way publishes
+# its data here via scripts/publish_dashboard.sh (rsync to ~scott/trader-data on the
+# node). This pod just serves that copy: the volume is mounted read-only, the image
+# carries no Kalshi credentials, and there is no public (Caddy) route — positions and
+# strategy stay off the open internet. Image is built and pushed by the trader repo,
+# not by deploy.sh (it has no build entry here by design).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trader
+  namespace: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trader
+  template:
+    metadata:
+      labels:
+        app: trader
+    spec:
+      containers:
+        - name: trader
+          image: localhost:30500/homelab/trader:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: KALSHI_ENV
+              value: prod
+            - name: KALSHI_DATA_DIR
+              value: /data
+          readinessProbe:
+            httpGet:
+              path: /api/meta
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+      volumes:
+        - name: data
+          hostPath:
+            path: /home/scott/trader-data
+            type: Directory # fail loudly if the publish target was never created
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trader
+  namespace: homelab
+spec:
+  type: ClusterIP
+  selector:
+    app: trader
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trader
+  namespace: homelab
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: trader
+      port:
+        number: 8000
+  tls:
+    - hosts:
+        - trader

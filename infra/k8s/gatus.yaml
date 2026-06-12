@@ -173,6 +173,13 @@ data:
         conditions:
           - "[STATUS] == 200"
 
+      - name: trader
+        group: internal
+        url: http://trader.homelab.svc.cluster.local:8000/api/meta
+        interval: 60s
+        conditions:
+          - "[STATUS] == 200"
+
 ---
 apiVersion: apps/v1
 kind: Deployment

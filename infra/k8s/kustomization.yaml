@@ -9,6 +9,7 @@ resources:
   - pocketbase.yaml
   - apps.yaml
   - ingest.yaml
+  - trader.yaml
   - api.yaml
   - coach.yaml
   - beszel.yaml
