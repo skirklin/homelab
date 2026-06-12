@@ -48,7 +48,7 @@ function AppContent() {
   useEffect(() => {
     Promise.all([fetchAccounts(), fetchNetWorthSummary()])
       .then(([accts, nw]) => {
-        setAccounts(accts)
+        setAccounts(accts.filter((a) => !a.closed))
         setNetWorth(nw)
         setLoading(false)
       })

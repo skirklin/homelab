@@ -2261,6 +2261,22 @@ server.tool(
   },
 );
 
+server.tool(
+  "close_money_account",
+  "Mark a financial account as closed and zero its balance from the given date. Use for accounts that no longer appear in syncs (rolled over or closed at the institution) so net worth stops carrying the stale balance forward. The only exposed money write.",
+  {
+    account_id: z.string().describe("The money account id to close"),
+    as_of: z.string().describe("Close date (YYYY-MM-DD); a $0 balance is recorded on this date"),
+  },
+  async ({ account_id, as_of }) => {
+    const data = await apiRaw(`/money/accounts/${account_id}/close`, {
+      method: "POST",
+      body: JSON.stringify({ as_of }),
+    });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
   return server;
 }
 

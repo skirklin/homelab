@@ -100,7 +100,8 @@ export function Investments() {
   useEffect(() => {
     Promise.all([fetchAccounts(), fetchGrants()]).then(([accts, grants]) => {
       const withPerf: AccountWithPerf[] = accts
-        .filter((a) => a.latest_balance != null
+        .filter((a) => !a.closed
+          && a.latest_balance != null
           && !['checking', 'credit_card'].includes(a.account_type))
         .map((a) => ({
           ...a,

@@ -10,6 +10,8 @@ export interface Account {
   balance_as_of: string | null
   total_invested: number | null
   total_earned: number | null
+  closed: boolean
+  closed_as_of: string | null
 }
 
 export interface BalancePoint {

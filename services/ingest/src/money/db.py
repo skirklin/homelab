@@ -296,6 +296,30 @@ class Database:
         rows = self.conn.execute("SELECT * FROM accounts ORDER BY name").fetchall()
         return [_row_to_account(r) for r in rows]
 
+    def close_account(self, account_id: str, as_of: date) -> Account | None:
+        """Mark an account closed and zero its balance from as_of.
+
+        Sets metadata.closed / metadata.closed_as_of and inserts a $0 manual
+        balance row so net_worth() and its history stop carrying the last
+        real balance forward (e.g. after a 401k rollover). Returns the
+        updated account, or None if the account doesn't exist.
+        """
+        account = self.get_account(account_id)
+        if account is None:
+            return None
+        account.metadata["closed"] = True
+        account.metadata["closed_as_of"] = as_of.isoformat()
+        account.updated_at = datetime.now()
+        self.conn.execute(
+            "UPDATE accounts SET metadata = ?, updated_at = ? WHERE id = ?",
+            (account.metadata_json, account.updated_at.isoformat(), account_id),
+        )
+        self.conn.commit()
+        self.insert_balance(
+            Balance(account_id=account_id, as_of=as_of, balance=0.0, source="manual")
+        )
+        return account
+
     # -- Balances --
 
     def insert_balance(self, balance: Balance) -> None:

@@ -2,14 +2,16 @@
 
 import json
 import tempfile
-from datetime import date
+from datetime import date, datetime, timedelta
 from http.server import HTTPServer
 from threading import Thread
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 
 from money.db import Database
+from money.models import AccountType
 from money.server import IngestHandler
 from money.storage import LocalStore
 
@@ -194,3 +196,142 @@ def test_cookies_endpoint_stores_cookies(server):
     stored = json.loads(path.read_text())
     assert len(stored["cookies"]) == 2
     assert stored["cookies"][0]["name"] == "session_id"
+
+
+# -- Close account --
+
+
+def _make_synced_account(db, balance=157810.73, as_of=date(2026, 3, 31)):
+    """An institution-synced account with one real balance row."""
+    from money.models import Balance
+
+    acct = db.get_or_create_account(
+        name="401k",
+        account_type=AccountType.FOUR_OH_ONE_K,
+        institution="fidelity",
+        external_id="x401k",
+        profile="scott@fidelity",
+    )
+    db.insert_balance(
+        Balance(account_id=acct.id, as_of=as_of, balance=balance, source="fidelity")
+    )
+    return acct
+
+
+def test_close_account_sets_metadata_and_zero_balance(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    assert db.net_worth(date(2026, 5, 31)) == pytest.approx(157810.73)
+
+    result = _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+    assert result["closed"] is True
+    assert result["closed_as_of"] == "2026-04-30"
+
+    updated = db.get_account(acct.id)
+    assert updated.metadata["closed"] is True
+    assert updated.metadata["closed_as_of"] == "2026-04-30"
+
+    bal = db.get_latest_balance(acct.id, date(2026, 5, 31))
+    assert bal.balance == 0.0
+    assert bal.as_of == date(2026, 4, 30)
+    assert bal.source == "manual"
+
+    # Net worth self-corrects from the close date; history before it is intact
+    assert db.net_worth(date(2026, 5, 31)) == 0.0
+    assert db.net_worth(date(2026, 4, 15)) == pytest.approx(157810.73)
+
+
+def test_close_account_double_close_overwrites(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+    result = _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-05-15"})
+    assert result["closed_as_of"] == "2026-05-15"
+    assert db.get_account(acct.id).metadata["closed_as_of"] == "2026-05-15"
+
+
+def test_close_account_unknown_id_404(server):
+    port, _, _ = server
+    with pytest.raises(HTTPError) as exc:
+        _post(port, "/api/accounts/nope/close", {"as_of": "2026-04-30"})
+    assert exc.value.code == 404
+
+
+def test_close_account_bad_date_400(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    for body in ({}, {"as_of": "not-a-date"}, {"as_of": 20260430}):
+        with pytest.raises(HTTPError) as exc:
+            _post(port, f"/api/accounts/{acct.id}/close", body)
+        assert exc.value.code == 400
+
+
+def test_closed_surfaced_in_accounts_listing(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+
+    accounts = _get(port, "/api/accounts")["accounts"]
+    assert accounts[0]["closed"] is False
+    assert accounts[0]["closed_as_of"] is None
+
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+
+    accounts = _get(port, "/api/accounts")["accounts"]
+    assert accounts[0]["closed"] is True
+    assert accounts[0]["closed_as_of"] == "2026-04-30"
+
+
+def test_closed_metadata_survives_account_reupsert(server):
+    port, db, _ = server
+    acct = _make_synced_account(db)
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+
+    # A future sync re-upserting the account must not clobber metadata
+    _post(port, "/ingest", {
+        "institution": "fidelity",
+        "accounts": [
+            {
+                "name": "401k",
+                "account_type": "401k",
+                "external_id": "x401k",
+                "balance": 1234.56,
+            },
+        ],
+    })
+
+    updated = db.get_account(acct.id)
+    assert updated.metadata["closed"] is True
+    assert updated.metadata["closed_as_of"] == "2026-04-30"
+
+
+def test_sync_status_closed_accounts_never_stale(server, monkeypatch):
+    port, db, _ = server
+    from money import config as config_mod
+
+    cfg = config_mod.AppConfig(
+        institutions={"fidelity": config_mod.InstitutionConfig(label="Fidelity")},
+        logins={
+            "scott@fidelity": config_mod.LoginConfig(
+                person="scott", institution="fidelity",
+            ),
+        },
+        people={"scott": config_mod.PersonConfig(name="Scott")},
+    )
+    monkeypatch.setattr(config_mod, "load_config", lambda: cfg)
+
+    acct = _make_synced_account(db)
+    # Last successful sync 10 days ago -> stale while the account is open
+    db.insert_sync("s1", "fidelity", "scott@fidelity", "2026-01-01T00:00:00")
+    db.complete_sync(
+        "s1", 1, 0, 1, 0, (datetime.now() - timedelta(days=10)).isoformat()
+    )
+
+    status = _get(port, "/api/sync-status")["statuses"][0]
+    assert status["is_stale"] is True
+    assert status["account_count"] == 1
+
+    _post(port, f"/api/accounts/{acct.id}/close", {"as_of": "2026-04-30"})
+
+    status = _get(port, "/api/sync-status")["statuses"][0]
+    assert status["is_stale"] is False
+    assert status["account_count"] == 0

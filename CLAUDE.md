@@ -168,8 +168,8 @@ All trackable tools operate on the authenticated caller's own life log — there
 - `update_invite` — change expiry on an existing invite
 - `delete_invite` — revoke an invite
 
-**Money (read-only, proxied to the ingest service):**
-- `list_money_accounts` — all financial accounts with current balances
+**Money (proxied to the ingest service; read-only except one write):**
+- `list_money_accounts` — all financial accounts with current balances (includes `closed` / `closed_as_of`)
 - `list_money_balances` — balance snapshots (optionally by account)
 - `list_money_transactions` — transaction history with filters (account, category, date range)
 - `get_money_net_worth_summary` — current net worth, broken down by category/institution
@@ -180,8 +180,9 @@ All trackable tools operate on the authenticated caller's own life log — there
 - `get_money_allocation` — asset allocation breakdown
 - `list_money_recurring` — detected recurring transactions / subscriptions
 - `list_money_institutions` / `list_money_people` — lookup tables
+- `close_money_account` — mark an account closed + record a $0 balance at the close date (for accounts that vanish from syncs after a rollover/closure). **This is the single exposed money write.**
 
-Writes are deliberately not exposed — money mutations are infrequent and risky to delegate. To migrate money fully to PocketBase, see [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md).
+All other writes are deliberately not exposed — money mutations are infrequent and risky to delegate. To migrate money fully to PocketBase, see [`services/ingest/MIGRATION.md`](services/ingest/MIGRATION.md).
 
 ### Activity field guide
 

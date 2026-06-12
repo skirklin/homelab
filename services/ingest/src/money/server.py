@@ -198,6 +198,8 @@ class IngestHandler(BaseHTTPRequestHandler):
                     "balance_as_of": bal.as_of.isoformat() if bal else None,
                     "total_invested": perf["invested"] if perf else None,
                     "total_earned": perf["earned"] if perf else None,
+                    "closed": bool(acct.metadata.get("closed")),
+                    "closed_as_of": acct.metadata.get("closed_as_of"),
                 }
             )
         self._json_response(200, {"accounts": result})
@@ -607,11 +609,14 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._json_response(200, {"statuses": []})
             return
 
-        # Get account counts per profile
+        # Get open-account counts per profile. Closed accounts
+        # (metadata.closed, see _handle_close_account) are excluded:
+        # a closed account is never stale.
         account_rows = self.db.conn.execute("""
             SELECT profile, institution, COUNT(DISTINCT id) as account_count
             FROM accounts
             WHERE institution IS NOT NULL
+              AND COALESCE(json_extract(metadata, '$.closed'), 0) != 1
             GROUP BY profile, institution
         """).fetchall()
 
@@ -651,12 +656,14 @@ class IngestHandler(BaseHTTPRequestHandler):
             inst_label = (inst_config.label if inst_config else inst_id) or inst_id
             url = inst_config.url if inst_config else None
 
-            # Compute staleness from sync timestamp
+            # Compute staleness from sync timestamp. A login whose accounts
+            # are all closed (count == 0) is never stale — there's nothing
+            # left to sync.
             if last_sync:
                 sync_dt = datetime.fromisoformat(last_sync)
                 seconds_ago = (datetime.now() - sync_dt).total_seconds()
                 days_stale = seconds_ago / 86400
-                is_stale = days_stale > 3
+                is_stale = days_stale > 3 and count > 0
             else:
                 seconds_ago = None
                 days_stale = None
@@ -1753,6 +1760,12 @@ class IngestHandler(BaseHTTPRequestHandler):
         ):
             self._handle_update_balance()
             return
+        if (
+            self.path.startswith("/api/accounts/")
+            and self.path.endswith("/close")
+        ):
+            self._handle_close_account()
+            return
         if self.path == "/api/suggestions/generate" or self.path == "/api/suggestions/reclassify":
             self._handle_generate_suggestions()
             return
@@ -2226,6 +2239,8 @@ class IngestHandler(BaseHTTPRequestHandler):
             "balance_history": balance_history,
             "transaction_count": transaction_count,
             "holding_count": holding_count,
+            "closed": bool(account.metadata.get("closed")),
+            "closed_as_of": account.metadata.get("closed_as_of"),
         })
 
     def _handle_create_account(self) -> None:
@@ -2333,6 +2348,54 @@ class IngestHandler(BaseHTTPRequestHandler):
             "account_id": account_id,
             "balance": value_float,
             "as_of": as_of.isoformat(),
+        })
+
+    def _handle_close_account(self) -> None:
+        """Mark an account closed: metadata.closed + a $0 balance at as_of.
+
+        For accounts that stop appearing in syncs (rollover, closure) —
+        without this the last real balance is carried forward forever by
+        net_worth() and the accounts listing.
+        """
+        # Path: /api/accounts/<id>/close
+        account_id = self.path.split("/")[3]
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body: dict[str, Any] = {}
+        if content_length > 0:
+            try:
+                raw = json.loads(self.rfile.read(content_length))
+            except json.JSONDecodeError as e:
+                self._json_response(400, {"error": f"invalid JSON: {e}"})
+                return
+            if isinstance(raw, dict):
+                body = raw
+
+        as_of_str = body.get("as_of")
+        if not as_of_str or not isinstance(as_of_str, str):
+            self._json_response(400, {"error": "missing 'as_of' (YYYY-MM-DD)"})
+            return
+        try:
+            as_of = date.fromisoformat(as_of_str)
+        except ValueError:
+            self._json_response(400, {"error": f"invalid 'as_of' date: {as_of_str!r}"})
+            return
+
+        account = self.db.close_account(account_id, as_of)
+        if account is None:
+            self._json_response(404, {"error": "account not found"})
+            return
+
+        bal = self.db.get_latest_balance(account.id, date.today())
+        self._json_response(200, {
+            "id": account.id,
+            "name": account.name,
+            "institution": account.institution,
+            "account_type": account.account_type.value,
+            "closed": True,
+            "closed_as_of": as_of.isoformat(),
+            "latest_balance": bal.balance if bal else None,
+            "balance_as_of": bal.as_of.isoformat() if bal else None,
         })
 
     def _handle_rename_account(self) -> None:
@@ -2688,7 +2751,7 @@ def _process_ingest(
                 )
             )
             balances_recorded += 1
-            log.info("  Balance: $%,.2f", balance_float)
+            log.info("  Balance: $%.2f", balance_float)
 
     db.insert_ingestion_record(
         IngestionRecord(

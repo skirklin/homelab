@@ -76,6 +76,7 @@ export function Accounts() {
   const statusMap = new Map(statuses.map((s) => [s.login_id, s]))
 
   const rows: AccountRow[] = accounts
+    .filter((a) => !a.closed)
     .map((a) => {
       const s = a.profile ? statusMap.get(a.profile) : undefined
       const secondsAgo = s?.seconds_ago ?? null

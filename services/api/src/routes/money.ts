@@ -6,8 +6,10 @@
  * existing api/MCP infrastructure (auth, OAuth, request shape) a way to
  * reach that data without each consumer needing to know about ingest.
  *
- * Read-only. Writes are deliberately not exposed — money mutations are
- * infrequent, sensitive, and not a good fit for AI delegation.
+ * Read-only, with one deliberate exception: POST /accounts/:id/close
+ * (see below). All other writes are deliberately not exposed — money
+ * mutations are infrequent, sensitive, and not a good fit for AI
+ * delegation.
  *
  * The interim story: see `services/ingest/MIGRATION.md` for the eventual
  * "move data to PocketBase" plan. This proxy is a small thing that lets
@@ -56,3 +58,28 @@ moneyRoutes.get("/recurring", (c) => forward(c, "/api/recurring"));
 moneyRoutes.get("/institutions", (c) => forward(c, "/api/institutions"));
 moneyRoutes.get("/people", (c) => forward(c, "/api/people"));
 moneyRoutes.get("/last-sync", (c) => forward(c, "/api/last-sync"));
+
+// The single deliberate write: mark an account closed (sets metadata.closed
+// and inserts a $0 balance at the close date so net worth self-corrects).
+// Needed for accounts that stop appearing in syncs (rollover/closure).
+// Keep this the only mutation until the PB migration ships.
+moneyRoutes.post("/accounts/:id/close", async (c) => {
+  const url = `${ingestBase()}/api/accounts/${c.req.param("id")}/close`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(await c.req.json()),
+    });
+    const body = await res.text();
+    return new Response(body, {
+      status: res.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    return c.json(
+      { error: "ingest unreachable", detail: String(err) },
+      502,
+    );
+  }
+});
