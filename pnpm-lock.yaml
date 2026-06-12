@@ -964,6 +964,9 @@ importers:
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
 packages:
 
