@@ -178,7 +178,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-06-08 | NO-OP | Day 7 waiting: all built work on main awaiting deploy; C4 blocked on Scott's input; no observations to evaluate. |
 | 2026-06-09 | NO-OP | Day 11 waiting: all built work on main awaiting deploy; 2 dirty worktrees from another session have in-flight thread_id work; C4 blocked on Scott's input. |
 | 2026-06-11 | NO-OP | Day 13 waiting: Phase 0 + C1–C3 + D1–D3 all on main awaiting deploy; C4 blocked on Scott's input; 5 worktrees from other sessions active. |
-| 2026-06-12 | DISPATCH morning-prompt rework + chat reply | **Deploy is LIVE** (chat_messages in prod with thread_id). Found unresolved 6/8 user message in pm thread: replace "one thing that matters" with a plan-for-the-day prompt (priorities, what/when, calendar). Dispatched worktree agent (keep `id: "intention"` join key, fix evening follow-up + SESSION_REMINDERS drift); replied in pm thread. Tomorrow: review/merge + check for first weekly observation. |
+| 2026-06-12 | DISPATCH morning-prompt rework + chat reply | **Deploy is LIVE** (chat_messages in prod with thread_id). Found unresolved 6/8 user message in pm thread: replace "one thing that matters" with a plan-for-the-day prompt (priorities, what/when, calendar). Dispatched worktree agent (keep `id: "intention"` join key, fix evening follow-up + SESSION_REMINDERS drift); replied in pm thread. Built (`2528404`), critically reviewed (0 blockers), MERGED to main same tick; worktree reaped. New wording: "What's the plan for today?" + evening "How did the plan hold up?". Pending deploy of life+api. Tomorrow: nudge deploy + check for first weekly observation. |
 
 ## Decision log
 
