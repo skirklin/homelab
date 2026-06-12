@@ -91,6 +91,47 @@ function patchNotesEntries(existing: unknown, nextNotes: string | undefined): un
   return [...filtered, { name: "notes", type: "text", value: trimmed }];
 }
 
+/**
+ * Read the 1–5 "rating" number entry from a unified event row's entries[].
+ * Stored as `{name:"rating", type:"number", value, unit:"stars"}`; surfaced
+ * as a flat integer at the API boundary, like notes. Out-of-range or
+ * malformed values read as undefined.
+ */
+function ratingFromEntries(entries: unknown): number | undefined {
+  if (!Array.isArray(entries)) return undefined;
+  for (const e of entries) {
+    if (
+      e && typeof e === "object" &&
+      (e as Record<string, unknown>).name === "rating" &&
+      (e as Record<string, unknown>).type === "number" &&
+      isValidRating((e as Record<string, unknown>).value)
+    ) {
+      return (e as Record<string, unknown>).value as number;
+    }
+  }
+  return undefined;
+}
+
+function isValidRating(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 5;
+}
+
+/**
+ * Build the entries[] patch for a rating edit: drop any existing "rating"
+ * number entry, append a new one unless `nextRating` is null (clear).
+ * Caller validates the value; preserves any other entries.
+ */
+function patchRatingEntries(existing: unknown[], nextRating: number | null): unknown[] {
+  const filtered = existing.filter(
+    (e) =>
+      !(e && typeof e === "object" &&
+        (e as Record<string, unknown>).name === "rating" &&
+        (e as Record<string, unknown>).type === "number"),
+  );
+  if (nextRating === null) return filtered;
+  return [...filtered, { name: "rating", type: "number", value: nextRating, unit: "stars" }];
+}
+
 /** travel_notes subject scopes — kept in sync with the migration's enum. */
 const NOTE_SUBJECT_TYPES = ["activity", "day", "trip"] as const;
 
@@ -879,6 +920,7 @@ dataRoutes.get("/recipes/:id/cooking-log", handler(async (c) => {
     id: e.id,
     timestamp: e.timestamp,
     notes: notesFromEntries(e.entries),
+    rating: ratingFromEntries(e.entries),
     recipe_snapshot: normalizeSnapshot(e.recipe_snapshot),
     created_by: e.created_by,
     created: e.created,
@@ -903,24 +945,29 @@ dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
   if (!(await userOwnsRecipeBox(pb, recipe.box as string, userId))) {
     return c.json({ error: "access denied" }, 403);
   }
-  const body = await c.req.json<{ notes?: string; timestamp?: string }>().catch(
-    () => ({} as { notes?: string; timestamp?: string }),
+  const body = await c.req.json<{ notes?: string; rating?: unknown; timestamp?: string }>().catch(
+    () => ({} as { notes?: string; rating?: unknown; timestamp?: string }),
   );
+  if (body.rating !== undefined && !isValidRating(body.rating)) {
+    return c.json({ error: "rating must be an integer between 1 and 5" }, 400);
+  }
   const snapshot = normalizeSnapshot(recipe.data);
+  const entries = patchNotesEntries([], body.notes);
   const record = await pb.collection("recipe_events").create({
     box: recipe.box,
     subject_id: id,
     timestamp: body.timestamp ?? new Date().toISOString(),
     created_by: userId,
-    entries: patchNotesEntries([], body.notes),
+    entries: body.rating === undefined ? entries : patchRatingEntries(entries, body.rating),
     recipe_snapshot: snapshot ?? null,
   });
   return c.json({ id: record.id, timestamp: record.timestamp }, 201);
 }));
 
-// Update notes and/or timestamp on a cooking log entry. Empty-string notes
-// clears the notes. Timestamp lets callers fix a wrong-day cook entry without
-// delete + re-add. Authorization flows through the event's parent box.
+// Update notes, rating, and/or timestamp on a cooking log entry. Empty-string
+// notes clears the notes; null rating clears the rating. Timestamp lets
+// callers fix a wrong-day cook entry without delete + re-add. Authorization
+// flows through the event's parent box.
 dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -930,10 +977,19 @@ dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
   if (!(await userOwnsRecipeBox(pb, record.box as string, userId))) {
     return c.json({ error: "access denied" }, 403);
   }
-  const body = await c.req.json<{ notes?: string; timestamp?: string }>();
+  const body = await c.req.json<{ notes?: string; rating?: unknown; timestamp?: string }>();
+  if (body.rating !== undefined && body.rating !== null && !isValidRating(body.rating)) {
+    return c.json({ error: "rating must be an integer between 1 and 5, or null to clear" }, 400);
+  }
   const update: Record<string, unknown> = {};
+  let entries = Array.isArray(record.entries) ? (record.entries as unknown[]) : [];
   if (body.notes !== undefined) {
-    update.entries = patchNotesEntries(record.entries, body.notes);
+    entries = patchNotesEntries(entries, body.notes);
+    update.entries = entries;
+  }
+  if (body.rating !== undefined) {
+    entries = patchRatingEntries(entries, body.rating as number | null);
+    update.entries = entries;
   }
   if (body.timestamp !== undefined) update.timestamp = body.timestamp;
   if (Object.keys(update).length === 0) return c.json({ error: "no fields provided" }, 400);
@@ -942,6 +998,7 @@ dataRoutes.patch("/cooking-log/:eventId", handler(async (c) => {
     id: updated.id,
     timestamp: updated.timestamp,
     notes: notesFromEntries(updated.entries),
+    rating: ratingFromEntries(updated.entries),
   });
 }));
 

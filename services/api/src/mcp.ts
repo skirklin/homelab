@@ -1133,7 +1133,7 @@ server.tool(
 
 server.tool(
   "list_cooking_log",
-  "List cooking log entries (notes, timestamps) for a recipe, newest first",
+  "List cooking log entries (notes, 1-5 star rating, timestamps) for a recipe, newest first",
   { recipeId: z.string().describe("The recipe record ID") },
   async ({ recipeId }) => {
     const result = await api(`/recipes/${recipeId}/cooking-log`);
@@ -1143,16 +1143,17 @@ server.tool(
 
 server.tool(
   "add_cooking_log_entry",
-  "Record that a recipe was cooked, optionally with notes. Defaults timestamp to now.",
+  "Record that a recipe was cooked, optionally with notes and a 1-5 star rating. Defaults timestamp to now.",
   {
     recipeId: z.string().describe("The recipe record ID"),
     notes: z.string().optional().describe("Optional notes about this cooking session"),
+    rating: z.number().int().min(1).max(5).optional().describe("Optional 1-5 star rating for this cook"),
     timestamp: z.string().optional().describe("ISO timestamp (defaults to now)"),
   },
-  async ({ recipeId, notes, timestamp }) => {
+  async ({ recipeId, notes, rating, timestamp }) => {
     const result = await api(`/recipes/${recipeId}/cooking-log`, {
       method: "POST",
-      body: JSON.stringify({ notes, timestamp }),
+      body: JSON.stringify({ notes, rating, timestamp }),
     });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
@@ -1160,10 +1161,11 @@ server.tool(
 
 server.tool(
   "update_cooking_log_entry",
-  "Edit notes and/or timestamp on a cooking log entry. Pass empty-string notes to clear; pass timestamp to fix a wrong-day entry.",
+  "Edit notes, rating, and/or timestamp on a cooking log entry. Pass empty-string notes to clear notes; pass null rating to clear the rating; pass timestamp to fix a wrong-day entry. Omitted fields are left unchanged.",
   {
     eventId: z.string().describe("The cooking log event ID"),
     notes: z.string().optional(),
+    rating: z.number().int().min(1).max(5).nullable().optional().describe("1-5 star rating; null clears"),
     timestamp: z.string().optional().describe("ISO datetime to overwrite when the recipe was cooked"),
   },
   async ({ eventId, ...body }) => {
