@@ -391,6 +391,9 @@ export class PocketBaseRecipesBackend implements RecipesBackend {
   }
 
   async updateCookingLogEvent(eventId: string, updates: { notes?: string; rating?: number | null }): Promise<void> {
+    // Nothing to change — skip the read AND the write (an empty patch would
+    // otherwise still rewrite entries[] and bump the record's `updated`).
+    if (updates.notes === undefined && updates.rating === undefined) return;
     // Validate up front so a bad rating fails before the read.
     if (typeof updates.rating === "number") assertValidRating(updates.rating);
     const record = await this.pb().collection("recipe_events").getOne(eventId);

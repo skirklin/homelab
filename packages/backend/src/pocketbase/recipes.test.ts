@@ -312,6 +312,25 @@ describe("PocketBaseRecipesBackend — cooking-log ratings", () => {
     expect(entries.find((e) => e.name === "notes")?.value).toBe("v2");
   });
 
+  it("updateCookingLogEvent with an empty patch is a no-op (no read, no write)", async () => {
+    const stub = makeStubPb();
+    seedRecipe(stub, "R1", "B1", { name: "Pancakes" });
+    const recipes = makeBackend(stub);
+
+    const eventId = await recipes.addCookingLogEvent("B1", "R1", "u1", { notes: "v1", rating: 2 });
+    await drain();
+    const before = stub.col("recipe_events").records.get(eventId);
+
+    await recipes.updateCookingLogEvent(eventId, {});
+    await drain();
+    // Same object — no write happened (a write would have replaced/bumped it).
+    expect(stub.col("recipe_events").records.get(eventId)).toBe(before);
+
+    // The read is skipped too: an empty patch on a nonexistent id resolves
+    // instead of failing the getOne.
+    await expect(recipes.updateCookingLogEvent("does-not-exist", {})).resolves.toBeUndefined();
+  });
+
   it("rejects invalid ratings before any write", async () => {
     const stub = makeStubPb();
     seedRecipe(stub, "R1", "B1", { name: "Pancakes" });
