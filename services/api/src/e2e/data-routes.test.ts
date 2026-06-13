@@ -575,6 +575,98 @@ describe("Recipes", () => {
       token: userToken,
     });
   });
+
+  it("cooking-log rating: POST stores it, GET returns it, PATCH edits/clears it, invalid values 400", async () => {
+    // Invalid ratings are rejected before any write.
+    for (const bad of [0, 6, 3.5, "great"]) {
+      const rejected = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+        method: "POST",
+        token: userToken,
+        body: { rating: bad },
+      });
+      expect(rejected.status).toBe(400);
+    }
+
+    const created = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      method: "POST",
+      token: userToken,
+      body: { notes: "Tasty", rating: 4 },
+    });
+    expect(created.status).toBe(201);
+    const eventId = created.data.id as string;
+
+    const list = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      token: userToken,
+    });
+    const row = (list.data as any[]).find((e) => e.id === eventId);
+    expect(row.rating).toBe(4);
+    expect(row.notes).toBe("Tasty");
+
+    // Rating-only PATCH leaves notes untouched.
+    const patched = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: { rating: 5 },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.data.rating).toBe(5);
+    expect(patched.data.notes).toBe("Tasty");
+
+    // Notes-only PATCH leaves the rating untouched.
+    const notesPatch = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: { notes: "Tastier" },
+    });
+    expect(notesPatch.status).toBe(200);
+    expect(notesPatch.data.rating).toBe(5);
+
+    // Invalid rating on PATCH → 400, row unchanged.
+    const badPatch = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: { rating: 42 },
+    });
+    expect(badPatch.status).toBe(400);
+
+    // null clears.
+    const cleared = await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "PATCH",
+      token: userToken,
+      body: { rating: null },
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.data.rating).toBeUndefined();
+
+    // Cleanup
+    await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "DELETE",
+      token: userToken,
+    });
+  });
+
+  it("cooking-log POST treats rating: null as omitted (parity with PATCH's null-clears)", async () => {
+    const created = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      method: "POST",
+      token: userToken,
+      body: { notes: "No rating yet", rating: null },
+    });
+    expect(created.status).toBe(201);
+    const eventId = created.data.id as string;
+
+    const list = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      token: userToken,
+    });
+    const row = (list.data as any[]).find((e) => e.id === eventId);
+    expect(row.notes).toBe("No rating yet");
+    expect(row.rating).toBeUndefined();
+
+    // Cleanup
+    await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "DELETE",
+      token: userToken,
+    });
+  });
 });
 
 // ==========================================

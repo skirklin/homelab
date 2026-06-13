@@ -1,7 +1,7 @@
 import { CheckCircleOutlined, DeleteOutlined, DiffOutlined, EditOutlined } from '@ant-design/icons';
-import { useContext, useState, useEffect } from 'react';
+import { useContext, useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
-import { Button, Input, Popconfirm, Spin, Tooltip } from 'antd';
+import { Button, Input, Popconfirm, Rate, Spin, Tooltip } from 'antd';
 import { Context } from '../context';
 import { getAppUserFromState, getRecipeFromState } from '../state';
 import { getRecipeData } from '../storage';
@@ -33,6 +33,21 @@ function withNotes(event: CookingLogEvent, notes: string): CookingLogEvent {
     ? [...filtered, { name: 'notes', type: 'text', value: trimmed }]
     : filtered;
   return { ...event, entries };
+}
+
+/**
+ * Apply a rating edit to the local copy of an event: replace any existing
+ * "rating" number entry, drop it when cleared (null). Keeps the derived
+ * `rating` field and entries[] in sync with the post-write row.
+ */
+function withRating(event: CookingLogEvent, rating: number | null): CookingLogEvent {
+  const filtered = event.entries.filter(
+    (e) => !(e.name === 'rating' && e.type === 'number'),
+  );
+  const entries: LifeEntry[] = rating
+    ? [...filtered, { name: 'rating', type: 'number', value: rating, unit: 'stars' }]
+    : filtered;
+  return { ...event, entries, rating: rating ?? undefined };
 }
 
 const LogContainer = styled.div`
@@ -88,6 +103,16 @@ const LogNote = styled.p<{ $editable?: boolean }>`
   `}
 `
 
+const StarRow = styled(Rate)`
+  font-size: var(--font-size-base);
+  margin-top: var(--space-xs);
+  /* Keep disabled (read-only) stars full-color — they're a display, not a
+     greyed-out control. */
+  &.ant-rate-disabled .ant-rate-star {
+    cursor: default;
+  }
+`
+
 const AddNoteHint = styled.span`
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
@@ -137,7 +162,35 @@ function CookingLog(props: RecipeCardProps) {
   const [events, setEvents] = useState<CookingLogEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Draft text of the open note editor (controlled input). Lives in state —
+  // not just the DOM — so a star tap can coalesce the in-progress note into
+  // its own write (see handleRate).
+  const [draft, setDraft] = useState('');
   const [diffEventId, setDiffEventId] = useState<string | null>(null);
+
+  // Serialize all cooking-log writes through one promise chain. The backend's
+  // updateCookingLogEvent is a read-modify-write of the full entries[] array,
+  // so two overlapping updates to the same entry both read the pre-write row
+  // and the second write silently drops the first one's field server-side
+  // (note-save-on-blur vs star-tap was the live case). Chaining makes every
+  // write read its predecessor's result. The chain swallows rejections so one
+  // failed write can't poison later ones; callers get the un-swallowed
+  // promise back for their own error handling.
+  const updateChain = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueueUpdate = (eventId: string, patch: { notes?: string; rating?: number | null }): Promise<void> => {
+    const run = updateChain.current.then(() => recipesBackend.updateCookingLogEvent(eventId, patch));
+    updateChain.current = run.catch(() => undefined);
+    return run;
+  };
+
+  // Set on mousedown of an entry's star row while that same entry's note
+  // editor is open. mousedown fires before the editor's blur, so the blur
+  // handler can tell "focus left because of a star tap on this entry" apart
+  // from a normal blur — it skips its own save and lets handleRate coalesce
+  // notes + rating into ONE updateCookingLogEvent call. One-shot: the blur
+  // consumes (clears) it, so an aborted tap (mousedown, no click) can't
+  // suppress a later, unrelated save.
+  const starTapWhileEditing = useRef<string | null>(null);
 
   const currentUser = getAppUserFromState(state, authUser?.uid);
   // Pull the live recipe to compare against snapshots. The diff is "snapshot
@@ -172,13 +225,14 @@ function CookingLog(props: RecipeCardProps) {
     return currentUser?.id === event.createdBy;
   };
 
-  const handleStartEdit = (eventId: string) => {
+  const handleStartEdit = (eventId: string, currentNotes: string) => {
+    setDraft(currentNotes);
     setEditingId(eventId);
   };
 
   const handleSaveEdit = async (eventId: string, newNote: string) => {
     try {
-      await recipesBackend.updateCookingLogEvent(eventId, newNote);
+      await enqueueUpdate(eventId, { notes: newNote });
       // Update local state — keep entries[] in sync with the backend so the
       // rerender matches the post-write row exactly.
       setEvents(prev => prev.map(e => (e.id === eventId ? withNotes(e, newNote) : e)));
@@ -186,6 +240,29 @@ function CookingLog(props: RecipeCardProps) {
     } catch (error) {
       console.error('Failed to update note:', error);
       message.error('Failed to update note');
+    }
+  };
+
+  // Tapping the star row on your own entry sets the rating immediately
+  // (no edit mode); tapping the current star again clears it (antd Rate
+  // reports 0 on clear → null at the backend). When that entry's note editor
+  // is open, the tap also commits the draft note — coalesced with the rating
+  // into a single write so the two fields can never race each other.
+  const handleRate = async (eventId: string, value: number) => {
+    const rating = value === 0 ? null : value;
+    const editingThis = editingId === eventId;
+    try {
+      if (editingThis) {
+        await enqueueUpdate(eventId, { notes: draft, rating });
+        setEvents(prev => prev.map(e => (e.id === eventId ? withRating(withNotes(e, draft), rating) : e)));
+        setEditingId(null);
+      } else {
+        await enqueueUpdate(eventId, { rating });
+        setEvents(prev => prev.map(e => (e.id === eventId ? withRating(e, rating) : e)));
+      }
+    } catch (error) {
+      console.error('Failed to update rating:', error);
+      message.error(editingThis ? 'Failed to save note and rating' : 'Failed to update rating');
     }
   };
 
@@ -235,28 +312,65 @@ function CookingLog(props: RecipeCardProps) {
                 <LogMeta>
                   {getUserName(event.createdBy)} made this on {formatDate(event.timestamp)}
                 </LogMeta>
+                {/* Star row: interactive on your own entries (tap to set,
+                    tap the same star to clear), read-only display on others'
+                    rated entries, hidden on others' unrated ones. */}
+                {(editable || event.rating !== undefined) && (
+                  <Tooltip title={editable ? 'Rate this cook (tap again to clear)' : undefined}>
+                    <span
+                      onMouseDown={() => {
+                        // mousedown precedes the note editor's blur — flag it
+                        // so the blur skips its save and handleRate coalesces
+                        // notes + rating into one write. Only when the textarea
+                        // actually has focus: otherwise no blur will fire to
+                        // consume the flag, and a stale flag would suppress a
+                        // later legitimate save.
+                        if (editingId === event.id && document.activeElement?.tagName === "TEXTAREA") {
+                          starTapWhileEditing.current = event.id;
+                        }
+                      }}
+                    >
+                      <StarRow
+                        value={event.rating ?? 0}
+                        disabled={!editable}
+                        onChange={(v) => handleRate(event.id, v)}
+                      />
+                    </span>
+                  </Tooltip>
+                )}
                 {isEditing ? (
                   <NoteInput
                     autoFocus
                     autoSize
-                    defaultValue={notes}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
                     placeholder="Add a note about how it turned out..."
-                    onBlur={(e) => handleSaveEdit(event.id, e.target.value)}
+                    onBlur={() => {
+                      if (starTapWhileEditing.current === event.id) {
+                        // Focus left because of a star tap on this entry:
+                        // skip this save — handleRate writes {notes, rating}
+                        // as one coalesced update. Consume the flag so an
+                        // aborted tap can't suppress the next real blur.
+                        starTapWhileEditing.current = null;
+                        return;
+                      }
+                      handleSaveEdit(event.id, draft);
+                    }}
                     onKeyUp={(e) => {
                       if (e.key === 'Escape') {
-                        handleSaveEdit(event.id, e.currentTarget.value);
+                        handleSaveEdit(event.id, draft);
                       }
                     }}
                   />
                 ) : notes ? (
                   <LogNote
                     $editable={editable}
-                    onClick={editable ? () => handleStartEdit(event.id) : undefined}
+                    onClick={editable ? () => handleStartEdit(event.id, notes) : undefined}
                   >
                     "{notes}"
                   </LogNote>
                 ) : editable ? (
-                  <AddNoteHint onClick={() => handleStartEdit(event.id)}>
+                  <AddNoteHint onClick={() => handleStartEdit(event.id, notes)}>
                     Click to add a note
                   </AddNoteHint>
                 ) : null}
@@ -293,7 +407,7 @@ function CookingLog(props: RecipeCardProps) {
                       type="text"
                       size="small"
                       icon={<EditOutlined />}
-                      onClick={() => handleStartEdit(event.id)}
+                      onClick={() => handleStartEdit(event.id, notes)}
                     />
                     <Popconfirm
                       title="Delete this entry?"
