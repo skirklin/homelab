@@ -50,15 +50,17 @@ async function makeUser(suffix: string): Promise<{ id: string; pb: PocketBase }>
   return { id: user.id, pb };
 }
 
-/** Wait up to `timeoutMs` for predicate to become true. */
+/** Wait up to `timeoutMs` for predicate to become true. The predicate is
+ * awaited — src/e2e is excluded from tsc, so a sync-only signature would
+ * silently accept an async predicate (always-truthy Promise → no polling). */
 async function waitFor(
-  predicate: () => boolean,
+  predicate: () => boolean | Promise<boolean>,
   timeoutMs = 4000,
   intervalMs = 25,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error(`waitFor timed out after ${timeoutMs}ms`);
