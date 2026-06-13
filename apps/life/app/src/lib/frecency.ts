@@ -12,10 +12,11 @@
  *     A half-life of ~21 days means a log from 3 weeks ago counts half as much
  *     as one today, so habits drift with the user. Ties break on most-recent.
  *   - Distinctness key (`payloadKey`) = the SUBJECT plus the measurement
- *     values (number entries: name+value+unit) plus the categorical labels,
- *     normalized + sorted so order doesn't matter. TEXT entries are
- *     intentionally excluded from keys AND from replay — free-form notes are
- *     never a stable quick-action.
+ *     values (number entries: value+unit — NOT the entry name, mirroring the
+ *     name-agnostic readers over historical names dose/volume/drinks/...)
+ *     plus the categorical labels, normalized + sorted so order doesn't
+ *     matter. TEXT entries are intentionally excluded from keys AND from
+ *     replay — free-form notes are never a stable quick-action.
  *   - Discrete repeated values (5mg, 8oz) cluster and surface. Continuous
  *     values (every sleep duration a different number) each score ~1 and never
  *     form a dominant chip — intended; pins cover those shortcuts.
@@ -40,7 +41,10 @@ export interface FrecencyOptions {
 /**
  * Canonical, order-insensitive identity for a quick-action. Keyed on the
  * SUBJECT (which thing the replay targets) plus the measurement values
- * (number/bool entries) and category labels; text entries never participate.
+ * (number/bool entries as value:unit — the entry NAME is deliberately
+ * excluded, matching the name-agnostic readers: a pre-migration pin
+ * `dose=5:mg` and a canonical-name event `amount=5:mg` are the SAME
+ * quick-action) and category labels; text entries never participate.
  */
 export function payloadKey(
   subjectId: string,
@@ -48,8 +52,8 @@ export function payloadKey(
 ): string {
   const entryParts: string[] = [];
   for (const e of payload.entries) {
-    if (e.type === "number") entryParts.push(`${e.name}=${e.value}:${e.unit}`);
-    else if (e.type === "bool") entryParts.push(`${e.name}=${e.value ? "1" : "0"}:bool`);
+    if (e.type === "number") entryParts.push(`${e.value}:${e.unit}`);
+    else if (e.type === "bool") entryParts.push(`${e.value ? "1" : "0"}:bool`);
     // text entries are free-form — never part of the identity.
   }
   entryParts.sort();

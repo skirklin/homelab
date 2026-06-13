@@ -136,25 +136,28 @@ describe("transformManifest — production manifest", () => {
     expect(next).not.toBeNull();
     const rows = byId(next!.trackables);
 
-    // took: other single number fields
-    expect(rows.vyvanse).toEqual({ id: "vyvanse", label: "Vyvanse", shape: "took", group: "medical", defaultUnit: "mg", defaultAmount: 30 });
-    expect(rows.ibuprofin).toEqual({ id: "ibuprofin", label: "Ibuprofin", shape: "took", group: "medical", defaultUnit: "mg", defaultAmount: 400, hidden: true });
-    expect(rows.alcohol).toEqual({ id: "alcohol", label: "Alcohol", shape: "took", group: "consumables", defaultUnit: "drinks", defaultAmount: 1 });
+    // took: other single number fields. Legacy layout groups (medical,
+    // consumables, ...) are dropped — group is now a semantic rollup.
+    expect(rows.vyvanse).toEqual({ id: "vyvanse", label: "Vyvanse", shape: "took", defaultUnit: "mg", defaultAmount: 30 });
+    expect(rows.ibuprofin).toEqual({ id: "ibuprofin", label: "Ibuprofin", shape: "took", defaultUnit: "mg", defaultAmount: 400, hidden: true });
+    expect(rows.alcohol).toEqual({ id: "alcohol", label: "Alcohol", shape: "took", defaultUnit: "drinks", defaultAmount: 1 });
     expect(rows.edibles).toMatchObject({ shape: "took", defaultUnit: "mg", defaultAmount: 5 });
     expect(rows.edibles.pinned).toHaveLength(3); // pins preserved as-is
     expect(rows.coffee).toMatchObject({ shape: "took", defaultUnit: "oz", defaultAmount: 8 });
     expect(rows.coffee.pinned).toHaveLength(1);
 
     // happened: ct counters with defaultValue 1 (hidden preserved)
-    expect(rows.vitamins).toEqual({ id: "vitamins", label: "Vitamins", shape: "happened", group: "medical", hidden: true });
+    expect(rows.vitamins).toEqual({ id: "vitamins", label: "Vitamins", shape: "happened", hidden: true });
     for (const id of ["poop", "wank", "sex", "floss"]) {
       expect(rows[id].shape).toBe("happened");
     }
     expect(rows.sex.label).toBe("Boink");
 
     // did: sleep keeps its pins, inherits duration default, gains
-    // ratingLabel "quality" (sleep_quality merges into it later).
+    // ratingLabel "quality" (sleep_quality merges into it later). Its old
+    // "time-based" layout group is dropped like the rest.
     expect(rows.sleep).toMatchObject({ shape: "did", defaultDuration: 480, ratingLabel: "quality" });
+    expect(rows.sleep.group).toBeUndefined();
     expect(rows.sleep.pinned).toHaveLength(3);
 
     // rated: singles; sleep_quality additionally hidden.
@@ -163,12 +166,28 @@ describe("transformManifest — production manifest", () => {
     expect(rows.content).toMatchObject({ shape: "rated", hidden: true });
   });
 
+  it("drops ALL legacy layout groups — only exploded husks + children carry a group (their own rollup)", () => {
+    const next = transform.transformManifest(prodManifest())!;
+    const groups = new Set(next.trackables.filter((t) => t.group !== undefined).map((t) => t.group));
+    // No medical/consumables/bio/time-based/ratings junk rollups survive.
+    expect([...groups].sort()).toEqual(["exercise", "focus"]);
+    for (const t of next.trackables) {
+      if (t.group !== undefined) {
+        // group is always a trackable id (the rollup parent), never a layout bucket.
+        expect(["exercise", "focus"]).toContain(t.group);
+      }
+    }
+  });
+
   it("explodes exercise into per-thing did rows grouped under 'exercise'", () => {
     const next = transform.transformManifest(prodManifest())!;
     const rows = byId(next.trackables);
 
-    // Kept husk: hidden, still did-shaped, retains defaults.
-    expect(rows.exercise).toMatchObject({ shape: "did", hidden: true, defaultDuration: 30, ratingLabel: "intensity" });
+    // Kept husk: hidden, still did-shaped, retains defaults, and joins its
+    // OWN rollup (group "exercise", NOT the legacy "time-based" layout group)
+    // so historical subjectId:"exercise" events appear in "exercise (all)"
+    // from day one.
+    expect(rows.exercise).toMatchObject({ shape: "did", hidden: true, defaultDuration: 30, ratingLabel: "intensity", group: "exercise" });
 
     for (const [id, label] of [["walk", "walk"], ["run", "run"], ["bike", "bike"], ["pt", "PT"], ["lift", "lift"], ["yoga", "yoga"], ["other", "other"]] as const) {
       expect(rows[id]).toEqual({
@@ -181,7 +200,7 @@ describe("transformManifest — production manifest", () => {
     const next = transform.transformManifest(prodManifest())!;
     const rows = byId(next.trackables);
 
-    expect(rows.focus).toMatchObject({ shape: "did", hidden: true, defaultDuration: 25 });
+    expect(rows.focus).toMatchObject({ shape: "did", hidden: true, defaultDuration: 25, group: "focus" });
     expect(rows.focus.ratingLabel).toBeUndefined();
 
     for (const [id, label] of [["chinese", "chinese"], ["coding", "coding"], ["learning", "learning"], ["trip-planning", "trip planning"]] as const) {
@@ -219,11 +238,27 @@ describe("transformManifest — generic / edge rules", () => {
     })!;
     const rows = byId(next.trackables);
     expect(rows.water).toMatchObject({ shape: "took", defaultUnit: "oz", defaultAmount: 8 });
+    expect(rows.water.group).toBeUndefined(); // legacy "body" layout group dropped
     expect(rows.mood.shape).toBe("rated");
     expect(rows.note.shape).toBe("happened"); // text-only fallback
-    expect(rows.movement).toMatchObject({ shape: "did", hidden: true });
+    expect(rows.movement).toMatchObject({ shape: "did", hidden: true, group: "movement" });
     expect(rows.walk).toMatchObject({ shape: "did", group: "movement", defaultDuration: 30 });
     expect(rows.floss.shape).toBe("happened"); // bool → happened
+  });
+
+  it("drops junk rows (null / non-object / missing id) instead of throwing", () => {
+    const next = transform.transformManifest({
+      trackables: [
+        null,
+        { id: "water", label: "Water", fields: [{ key: "volume", type: "number", unit: "oz", defaultValue: 8 }] },
+        { label: "No id", fields: [{ key: "count", type: "number", unit: "ct" }] },
+        42,
+        { id: 7, label: "Numeric id", fields: [] },
+      ],
+    })!;
+    expect(next).not.toBeNull();
+    expect(next.trackables).toHaveLength(1);
+    expect(next.trackables[0]).toMatchObject({ id: "water", shape: "took", defaultUnit: "oz", defaultAmount: 8 });
   });
 
   it("a ct field with a non-1 default is a took, not a happened", () => {

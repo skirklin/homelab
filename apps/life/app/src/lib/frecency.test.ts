@@ -3,7 +3,8 @@
  *
  * A quick-action is a replayable (subjectId, payload) pair. Asserts:
  *   - payloadKey INCLUDES the subjectId (same values on different things are
- *     distinct actions) and excludes text entries
+ *     distinct actions), excludes text entries, and is NAME-AGNOSTIC over
+ *     entry names (dose=5:mg ≡ amount=5:mg, mirroring the readers)
  *   - eventToPayload strips text entries (excluded from replay) + provenance
  *     labels
  *   - ranking: more-frequent + more-recent payloads rank higher; decay
@@ -66,6 +67,15 @@ describe("payloadKey", () => {
     const a = payloadKey("vyvanse", { entries: num("amount", 30, "mg") });
     const b = payloadKey("ibuprofin", { entries: num("amount", 30, "mg") });
     expect(a).not.toBe(b);
+  });
+
+  it("is NAME-AGNOSTIC — a legacy entry name and the canonical one with the same value:unit collapse", () => {
+    // Pre-migration history/pins say dose=5:mg; new shape-model events say
+    // amount=5:mg. The readers treat them as the same measurement, so the
+    // quick-action identity must too.
+    const legacy = payloadKey("edibles", { entries: num("dose", 5, "mg") });
+    const canonical = payloadKey("edibles", { entries: num("amount", 5, "mg") });
+    expect(legacy).toBe(canonical);
   });
 
   it("distinguishes different values, units, and labels", () => {
@@ -255,6 +265,25 @@ describe("globalFrecentActions (cross-thing)", () => {
     expect(out.some((a) => !a.pinned && payloadKey(a.trackable.id, a.payload) === key10)).toBe(true);
     const key5 = payloadKey("edibles", { entries: num("dose", 5, "mg") });
     expect(out.filter((a) => payloadKey(a.trackable.id, a.payload) === key5)).toHaveLength(1);
+  });
+
+  it("dedups an old-name pin against its canonical-name frecency twin — ONE chip, the pin wins", () => {
+    // Pin predates the shape migration (entry name "dose"); fresh events use
+    // the canonical name "amount". Same value:unit → same quick-action: the
+    // pin renders, the frecency twin is suppressed.
+    const withOldNamePin: LifeManifestTrackable = {
+      ...edibles,
+      pinned: [{ label: "5mg", entries: num("dose", 5, "mg") }],
+    };
+    const events = [
+      ev("edibles", num("amount", 5, "mg"), day(1)),
+      ev("edibles", num("amount", 5, "mg"), day(2)),
+      ev("edibles", num("amount", 5, "mg"), day(3)),
+    ];
+    const out = globalFrecentActions(events, [withOldNamePin], { now: NOW, limit: 5 });
+    expect(out).toHaveLength(1);
+    expect(out[0].pinned).toBe(true);
+    expect(out[0].payload.entries).toEqual(num("dose", 5, "mg"));
   });
 
   it("NEVER trims pins, even past the limit; frecency only fills leftover slots", () => {

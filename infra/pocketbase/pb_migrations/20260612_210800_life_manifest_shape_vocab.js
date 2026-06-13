@@ -18,7 +18,10 @@
  *     defaultDuration inherited; a companion rating field (e.g. exercise
  *     "intensity") becomes ratingLabel on each exploded row. The ORIGINAL row
  *     is KEPT but hidden:true (its events get rewritten to per-thing ids by a
- *     separate later script — this migration never touches events).
+ *     separate later script — this migration never touches events). The kept
+ *     husk ALSO gets group = old trackable id, so its historical events show
+ *     up in the "<thing> (all)" rollup alongside the exploded children from
+ *     day one.
  *   - single rating field             → "rated"
  *   - single bool field               → "happened"
  *   - number field, unit "min"        → "did" (id "sleep" additionally gets
@@ -27,8 +30,14 @@
  *   - any other number field          → "took" (defaultUnit = unit,
  *                                       defaultAmount = defaultValue)
  *   - anything else (text-only, no fields) → "happened" fallback
- *   - `hidden` and `pinned` preserved as-is; `group` preserved on
- *     non-exploded rows (it is now a semantic rollup, not a layout group)
+ *   - `hidden` and `pinned` preserved as-is. Legacy `group` values are
+ *     DROPPED everywhere: the old groups (medical/consumables/bio/time-based)
+ *     were layout buckets, and in the new model `group` is a semantic rollup
+ *     ("walk + run + bike = exercise (all)") — a "consumables (all)" rollup
+ *     summing mg + oz + drinks would be junk. Only exploded children and
+ *     their kept husk get a `group` (= the old trackable id).
+ *   - junk rows (null, non-object, missing/non-string `id`) are dropped —
+ *     never a thrown TypeError, which would abort PB startup mid-migration
  *   - special: `sleep_quality` additionally becomes hidden:true (its history
  *     will be merged into sleep events by a separate later script)
  *
@@ -76,7 +85,7 @@ function slugifyTrackableId(label) {
     .slice(0, 64);
 }
 
-/** Copy hidden/pinned (and optionally group) from an old row onto a new one. */
+/** Copy hidden/pinned from an old row onto a new one (legacy group is dropped). */
 function carryCommon(oldT, row) {
   if (oldT.hidden) row.hidden = true;
   if (Array.isArray(oldT.pinned) && oldT.pinned.length > 0) row.pinned = oldT.pinned;
@@ -90,6 +99,11 @@ function carryCommon(oldT, row) {
  * ids (fallback `<oldId>-<slug>`; skip if even that is taken).
  */
 function transformTrackable(t, takenIds) {
+  // Junk guard: a null/non-object row, or one without a string id, cannot be
+  // transformed (and is unrenderable anyway) — drop it rather than throw,
+  // which would abort PB startup mid-migration.
+  if (!t || typeof t !== "object" || typeof t.id !== "string") return [];
+
   // Already new-model (has shape, no field schema) → pass through.
   if (typeof t.shape === "string" && !Array.isArray(t.fields)) return [t];
 
@@ -112,9 +126,10 @@ function transformTrackable(t, takenIds) {
     var out = [];
     // Keep the original row, hidden, as a did-shaped husk: its historical
     // events still aggregate until the later event-rewrite script splits
-    // them onto the per-thing ids.
-    var kept = { id: t.id, label: t.label, shape: "did" };
-    if (typeof t.group === "string") kept.group = t.group;
+    // them onto the per-thing ids. It joins its OWN rollup (group = its id,
+    // alongside the exploded children) so those historical events appear in
+    // the "<thing> (all)" rollup from day one — NOT the legacy layout group.
+    var kept = { id: t.id, label: t.label, shape: "did", group: t.id };
     if (typeof duration.defaultValue === "number") kept.defaultDuration = duration.defaultValue;
     if (rating) kept.ratingLabel = rating.key;
     if (Array.isArray(t.pinned) && t.pinned.length > 0) kept.pinned = t.pinned;
@@ -142,8 +157,9 @@ function transformTrackable(t, takenIds) {
   }
 
   // --- Single-thing rows ------------------------------------------------
+  // NOTE: the legacy `group` is deliberately NOT carried — old groups were
+  // layout buckets (medical/consumables/...), not semantic rollups.
   var row2 = { id: t.id, label: t.label };
-  if (typeof t.group === "string") row2.group = t.group;
   carryCommon(t, row2);
   takenIds[t.id] = true;
 

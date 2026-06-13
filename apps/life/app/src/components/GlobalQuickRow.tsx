@@ -10,7 +10,7 @@
 import { useMemo } from "react";
 import styled from "styled-components";
 import type { LifeManifestTrackable, QuickPayload, LifeEvent } from "@homelab/backend";
-import { globalFrecentActions, type GlobalAction } from "../lib/frecency";
+import { globalFrecentActions, payloadKey, type GlobalAction } from "../lib/frecency";
 import { useLogEvent } from "../lib/useLogEvent";
 import { formatEntry } from "../lib/format";
 
@@ -93,7 +93,7 @@ export function GlobalQuickRow({ trackables, events, userId, logId, timestamp, l
     <Row data-testid="global-quick-row">
       {actions.map((action) => (
         <Chip
-          key={`${action.trackable.id}:${actionValue(action.payload)}`}
+          key={`${action.pinned ? "p" : "f"}:${payloadKey(action.trackable.id, action.payload)}`}
           $pinned={action.pinned}
           disabled={!logId}
           onClick={() => log(action)}
