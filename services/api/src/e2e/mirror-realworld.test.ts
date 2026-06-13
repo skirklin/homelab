@@ -42,10 +42,19 @@ async function makeUser(suffix: string): Promise<{ id: string; pb: PocketBase }>
   return { id: user.id, pb };
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 5000, intervalMs = 25): Promise<void> {
+// NOTE: the predicate is AWAITED. src/e2e is excluded from tsc (tsconfig
+// `exclude`), so a sync-only signature here would silently accept an async
+// predicate whose returned Promise is always truthy — waitFor would return
+// immediately without polling. That exact bug made A2's "PB has the record"
+// wait a no-op, letting the cleanup delete race the replayed create POST.
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 5000,
+  intervalMs = 25,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error(`waitFor timed out after ${timeoutMs}ms`);
