@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Input, Empty } from "antd";
+import { Input, Empty, Button } from "antd";
 import {
   SunOutlined,
   MoonOutlined,
@@ -17,8 +17,10 @@ import {
   Section,
   SectionTitle,
   useUrlParam,
+  useAuth,
 } from "@kirkl/shared";
 import { useLifeContext } from "../life-context";
+import { useLogEvent } from "../lib/useLogEvent";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEntry } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
@@ -54,6 +56,18 @@ const Chip = styled.button<{ $active: boolean }>`
 
 const SearchWrap = styled.div`
   margin-bottom: var(--space-md);
+`;
+
+const ComposeWrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+`;
+
+const ComposeActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
 `;
 
 const OnThisDayRow = styled.div`
@@ -249,6 +263,30 @@ export function Journal() {
   // Entries subscription is mounted once in LifeRoutesInner so every route
   // inherits today's events from a single feed.
 
+  // Freeform compose box. Writes a `subject_id: "journal"` event with a single
+  // `body` text entry — the renderer below reads exactly that name. useLogEvent
+  // gives us the Undo toast + error handling for free.
+  const { user } = useAuth();
+  const logEvent = useLogEvent();
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const saveJournal = useCallback(async () => {
+    const body = draft.trim();
+    if (!body || !user?.uid || !state.log?.id) return;
+    setSaving(true);
+    const id = await logEvent({
+      logId: state.log.id,
+      userId: user.uid,
+      subjectId: "journal",
+      entries: [{ name: "body", type: "text", value: body }],
+      label: "journal entry",
+      labels: { source: "manual" },
+    });
+    setSaving(false);
+    if (id) setDraft("");
+  }, [draft, user?.uid, state.log?.id, logEvent]);
+
   // Filter chips + search live in the URL so a refresh or shared link
   // (`/journal?filter=morning&q=foo`) round-trips. Defaults aren't written.
   const [filter, setFilter] = useUrlParam<FilterKey>("filter", {
@@ -369,6 +407,29 @@ export function Journal() {
         menuItems={menuItems}
       />
       <PageContainer>
+        <Section>
+          <SectionTitle>New entry</SectionTitle>
+          <ComposeWrap>
+            <Input.TextArea
+              autoSize={{ minRows: 3, maxRows: 12 }}
+              placeholder="Write whatever's on your mind…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void saveJournal();
+                }
+              }}
+            />
+            <ComposeActions>
+              <Button type="primary" loading={saving} disabled={!draft.trim()} onClick={saveJournal}>
+                Save entry
+              </Button>
+            </ComposeActions>
+          </ComposeWrap>
+        </Section>
+
         {onThisDay.length > 0 && (
           <Section>
             <SectionTitle>On this day</SectionTitle>
