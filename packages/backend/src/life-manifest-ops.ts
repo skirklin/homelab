@@ -1,16 +1,17 @@
 /**
- * Canonical validation + mutation helpers for the per-user life trackable
+ * Canonical validation + mutation helpers for the per-user life vocabulary
  * manifest (`life_logs.manifest`). These are PURE functions over a
  * `LifeManifest`: each takes the current manifest and a request, validates it,
  * and returns the next manifest — or throws `ManifestError` with a stable
  * `code`. They never touch PocketBase.
  *
- * Why a separate module: the P4 MCP tools (services/api/src/routes/data.ts) and
- * the future P5 in-app editor must enforce IDENTICAL rules — especially the
- * IMMUTABILITY of `trackable.id` and `field.key`, which are the join keys that
- * link `life_events` history. Renaming either silently orphans history
- * (apps/life/ROADMAP.md "Risks & open questions"). Centralizing the policy here
- * means there is one place that decides what a legal mutation is.
+ * Why a separate module: the MCP tools (services/api/src/routes/data.ts) and
+ * the in-app create path must enforce IDENTICAL rules — especially the
+ * IMMUTABILITY of `trackable.id` (the subject_id history join key) and
+ * `trackable.shape` (the entries[] contract for new events). Renaming an id
+ * silently orphans history; changing a shape forks a series' entry shape
+ * mid-history. Centralizing the policy here means there is one place that
+ * decides what a legal mutation is.
  *
  * Mutation discipline (mirrors `setTrackablePins`): every op does a structural
  * read-modify-write that touches ONLY the targeted trackable and otherwise
@@ -20,15 +21,13 @@
 import type {
   LifeManifest,
   LifeManifestTrackable,
-  TypedField,
+  TrackableShape,
   QuickPayload,
   LifeEntry,
 } from "./types/life";
 
-/** Field types whose value lands in `life_events.entries[]`. */
-const ENTRY_FIELD_TYPES = ["number", "rating", "text", "bool"] as const;
-/** Every legal field type. `category` → `life_events.labels[key]`. */
-const ALL_FIELD_TYPES = ["number", "rating", "text", "category", "bool"] as const;
+/** Every legal shape, in display order. */
+export const TRACKABLE_SHAPES = ["took", "did", "happened", "rated"] as const;
 
 /** Stable error codes so callers can map to HTTP status / messages. */
 export type ManifestErrorCode =
@@ -36,10 +35,10 @@ export type ManifestErrorCode =
   | "duplicate_id"
   | "not_found"
   | "invalid_label"
-  | "invalid_field"
+  | "invalid_shape"
   | "immutable_id"
-  | "immutable_field_key"
-  | "field_removed"
+  | "immutable_shape"
+  | "invalid_default"
   | "invalid_pin"
   | "invalid_pin_entry"
   | "invalid_order";
@@ -53,7 +52,7 @@ export class ManifestError extends Error {
   }
 }
 
-/** A trackable id / field key must be a slug: lower-kebab, starts alnum. */
+/** A trackable id must be a slug: lower-kebab, starts alnum. */
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
 function isSlug(s: unknown): s is string {
@@ -61,212 +60,117 @@ function isSlug(s: unknown): s is string {
 }
 
 /**
- * Validate one `TypedField` in isolation (shape, not cross-field rules).
- * `category` requires a non-empty `options[]`; `number` may carry a `unit`;
- * `rating` may carry a numeric `scale`. The `key` must be a slug (it becomes
- * an entry name / label key in history).
+ * Derive a vocab id slug from a free-form label ("PT" → "pt",
+ * "trip planning" → "trip-planning"). Lowercases, collapses whitespace to
+ * "-", strips everything outside [a-z0-9_-], trims leading/trailing
+ * separators. Returns "" when nothing survives — callers must reject that.
+ * Shared by the in-app "create new thing" path and the manifest migration's
+ * category-explosion rule, so both produce identical ids.
  */
-export function validateField(raw: unknown): TypedField {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new ManifestError("invalid_field", "field must be an object");
-  }
-  const f = raw as Record<string, unknown>;
-  if (!isSlug(f.key)) {
-    throw new ManifestError(
-      "invalid_field",
-      `field.key must be a slug (lower-kebab, [a-z0-9_-], <=64 chars); got ${JSON.stringify(f.key)}`,
-    );
-  }
-  if (typeof f.type !== "string" || !ALL_FIELD_TYPES.includes(f.type as never)) {
-    throw new ManifestError(
-      "invalid_field",
-      `field.type must be one of ${ALL_FIELD_TYPES.join("|")}; got ${JSON.stringify(f.type)} (key="${f.key}")`,
-    );
-  }
-  const type = f.type as TypedField["type"];
-  const out: TypedField = { key: f.key, type };
-
-  if (type === "category") {
-    if (!Array.isArray(f.options) || f.options.length === 0 || !f.options.every((o) => typeof o === "string")) {
-      throw new ManifestError(
-        "invalid_field",
-        `category field "${f.key}" requires a non-empty options[] of strings`,
-      );
-    }
-    out.options = f.options as string[];
-  } else if (f.options !== undefined) {
-    throw new ManifestError(
-      "invalid_field",
-      `options[] is only valid on category fields (key="${f.key}", type="${type}")`,
-    );
-  }
-
-  if (type === "rating" && f.scale !== undefined) {
-    if (typeof f.scale !== "number" || !Number.isFinite(f.scale) || f.scale < 2) {
-      throw new ManifestError("invalid_field", `rating field "${f.key}" scale must be a number >= 2`);
-    }
-    out.scale = f.scale;
-  }
-
-  if (type === "number" && f.unit !== undefined) {
-    if (typeof f.unit !== "string" || f.unit.length === 0) {
-      throw new ManifestError("invalid_field", `number field "${f.key}" unit must be a non-empty string`);
-    }
-    out.unit = f.unit;
-  }
-
-  if (f.label !== undefined) {
-    if (typeof f.label !== "string") throw new ManifestError("invalid_field", `field.label must be a string (key="${f.key}")`);
-    out.label = f.label;
-  }
-  if (f.defaultValue !== undefined) {
-    if (typeof f.defaultValue !== "number") {
-      throw new ManifestError("invalid_field", `field.defaultValue must be a number (key="${f.key}")`);
-    }
-    out.defaultValue = f.defaultValue;
-  }
-  if (f.optional !== undefined) {
-    if (typeof f.optional !== "boolean") throw new ManifestError("invalid_field", `field.optional must be a boolean (key="${f.key}")`);
-    out.optional = f.optional;
-  }
-  return out;
+export function slugifyTrackableId(label: string): string {
+  return label
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_-]/g, "")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, 64);
 }
 
-/** Validate a fields[] array: non-empty, unique keys, each field legal. */
-function validateFields(raw: unknown): TypedField[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw new ManifestError("invalid_field", "fields[] must be a non-empty array");
+function isShape(s: unknown): s is TrackableShape {
+  return typeof s === "string" && (TRACKABLE_SHAPES as readonly string[]).includes(s);
+}
+
+function validateOptionalString(
+  value: unknown,
+  name: string,
+  code: ManifestErrorCode,
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new ManifestError(code, `${name} must be a non-empty string`);
   }
-  const out = raw.map(validateField);
-  const seen = new Set<string>();
-  for (const f of out) {
-    if (seen.has(f.key)) {
-      throw new ManifestError("invalid_field", `duplicate field.key "${f.key}" within a trackable`);
-    }
-    seen.add(f.key);
+  return value;
+}
+
+function validateOptionalNumber(value: unknown, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new ManifestError("invalid_default", `${name} must be a finite number > 0`);
   }
-  return out;
+  return value;
 }
 
 /**
- * Validate ONE pin entry's full shape against the field it names, returning a
- * typed `LifeEntry`. This is the authoritative gate for raw-HTTP callers (the
- * data.ts pinned routes pass `pinned: unknown` straight through); the MCP layer
- * has its own `lifeEntrySchema`, but the pure op must not rely on it. The shape
- * mirrors the `LifeEntry` discriminated union in types/life.ts:
- *   number → { name, type:"number", value:number, unit:non-empty string, scale? }
- *   text   → { name, type:"text",   value:string }
- *   bool   → { name, type:"bool",   value:boolean }
+ * Validate ONE pin entry's full shape, returning a typed `LifeEntry`. This is
+ * the authoritative gate for raw-HTTP callers (the data.ts pinned routes pass
+ * `pinned: unknown` straight through); the MCP layer has its own
+ * `lifeEntrySchema`, but the pure op must not rely on it.
  *
- * A `rating` field is special: the live write path (apps/life EventLogger +
- * aggregationFor) emits it as a NUMBER entry with `unit:"rating"` and a `scale`,
- * so aggregation buckets by unit. A pin for a rating field MUST carry exactly
- * that shape — any other unit would replay into the wrong aggregation bucket and
- * fragment history. We force unit:"rating", scale:<field.scale ?? 5>, and
- * value in 1..scale.
+ * Pins are replayable measurement payloads, so only NUMBER entries are legal:
+ * text is free-form (never a stable quick-action) and the shape model writes
+ * no bool entries. A `unit:"rating"` entry is forced into the canonical live
+ * write shape (scale defaulting to 5, value in 1..scale) so a replayed pin
+ * lands in the same aggregation bucket as a manually logged rating.
  */
-function validatePinEntry(raw: unknown, field: TypedField, ctx: string): LifeEntry {
+function validatePinEntry(raw: unknown, ctx: string): LifeEntry {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ManifestError("invalid_pin_entry", `${ctx} must be an object`);
   }
   const e = raw as Record<string, unknown>;
-  const name = field.key;
+  if (typeof e.name !== "string" || e.name.length === 0) {
+    throw new ManifestError("invalid_pin_entry", `${ctx}.name must be a non-empty string`);
+  }
+  if (e.type !== "number") {
+    throw new ManifestError(
+      "invalid_pin_entry",
+      `${ctx} must be {type:"number"} — pins replay measurement values only; got ${JSON.stringify(e.type)}`,
+    );
+  }
+  if (typeof e.value !== "number" || !Number.isFinite(e.value)) {
+    throw new ManifestError("invalid_pin_entry", `${ctx} value must be a finite number; got ${JSON.stringify(e.value)}`);
+  }
+  if (typeof e.unit !== "string" || e.unit.length === 0) {
+    throw new ManifestError("invalid_pin_entry", `${ctx} must carry a non-empty unit string; got ${JSON.stringify(e.unit)}`);
+  }
 
-  // rating → number entry with unit:"rating" (the live write shape).
-  if (field.type === "rating") {
-    const scale = field.scale ?? 5;
-    if (e.type !== "number") {
-      throw new ManifestError(
-        "invalid_pin_entry",
-        `${ctx} names rating field "${name}" so it must be {type:"number"}; got ${JSON.stringify(e.type)}`,
-      );
+  if (e.unit === "rating") {
+    let scale = 5;
+    if (e.scale !== undefined) {
+      if (typeof e.scale !== "number" || !Number.isFinite(e.scale) || e.scale < 2) {
+        throw new ManifestError("invalid_pin_entry", `${ctx} scale must be a number >= 2; got ${JSON.stringify(e.scale)}`);
+      }
+      scale = e.scale;
     }
-    if (typeof e.value !== "number" || !Number.isFinite(e.value) || e.value < 1 || e.value > scale) {
+    if (e.value < 1 || e.value > scale) {
       throw new ManifestError(
         "invalid_pin_entry",
         `${ctx} rating value must be a number in 1..${scale}; got ${JSON.stringify(e.value)}`,
       );
     }
-    if (e.unit !== "rating") {
-      throw new ManifestError(
-        "invalid_pin_entry",
-        `${ctx} names rating field "${name}" so it must carry unit:"rating" (aggregation buckets by unit); got ${JSON.stringify(e.unit)}`,
-      );
-    }
-    return { name, type: "number", value: e.value, unit: "rating", scale };
+    return { name: e.name, type: "number", value: e.value, unit: "rating", scale };
   }
 
-  // number entry.
-  if (field.type === "number") {
-    if (e.type !== "number") {
-      throw new ManifestError(
-        "invalid_pin_entry",
-        `${ctx} names number field "${name}" so it must be {type:"number"}; got ${JSON.stringify(e.type)}`,
-      );
+  const out: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
+  if (e.scale !== undefined) {
+    if (typeof e.scale !== "number" || !Number.isFinite(e.scale)) {
+      throw new ManifestError("invalid_pin_entry", `${ctx} scale must be a number; got ${JSON.stringify(e.scale)}`);
     }
-    if (typeof e.value !== "number" || !Number.isFinite(e.value)) {
-      throw new ManifestError("invalid_pin_entry", `${ctx} number value must be a finite number; got ${JSON.stringify(e.value)}`);
-    }
-    if (typeof e.unit !== "string" || e.unit.length === 0) {
-      throw new ManifestError("invalid_pin_entry", `${ctx} number entry must carry a non-empty unit string; got ${JSON.stringify(e.unit)}`);
-    }
-    const out: LifeEntry = { name, type: "number", value: e.value, unit: e.unit };
-    if (e.scale !== undefined) {
-      if (typeof e.scale !== "number" || !Number.isFinite(e.scale)) {
-        throw new ManifestError("invalid_pin_entry", `${ctx} scale must be a number; got ${JSON.stringify(e.scale)}`);
-      }
-      out.scale = e.scale;
-    }
-    return out;
+    out.scale = e.scale;
   }
-
-  // text entry.
-  if (field.type === "text") {
-    if (e.type !== "text") {
-      throw new ManifestError(
-        "invalid_pin_entry",
-        `${ctx} names text field "${name}" so it must be {type:"text"}; got ${JSON.stringify(e.type)}`,
-      );
-    }
-    if (typeof e.value !== "string") {
-      throw new ManifestError("invalid_pin_entry", `${ctx} text value must be a string; got ${JSON.stringify(e.value)}`);
-    }
-    return { name, type: "text", value: e.value };
-  }
-
-  // bool entry.
-  if (field.type === "bool") {
-    if (e.type !== "bool") {
-      throw new ManifestError(
-        "invalid_pin_entry",
-        `${ctx} names bool field "${name}" so it must be {type:"bool"}; got ${JSON.stringify(e.type)}`,
-      );
-    }
-    if (typeof e.value !== "boolean") {
-      throw new ManifestError("invalid_pin_entry", `${ctx} bool value must be a boolean; got ${JSON.stringify(e.value)}`);
-    }
-    return { name, type: "bool", value: e.value };
-  }
-
-  // Unreachable: only entry-typed fields reach here (callers filter by name).
-  throw new ManifestError("invalid_pin_entry", `${ctx} names a non-measurement field "${name}"`);
+  return out;
 }
 
 /**
- * Validate a `pinned[]` payload list against a trackable's fields. A pin is a
- * replayable quick-action; its `entries[].name` / `labels` keys MUST be real
- * field keys of the trackable so a replayed pin writes a history-compatible
- * event. We require: measurement entries name an entry-typed field AND carry the
- * exact value/unit shape that field's history events use (see validatePinEntry);
- * label keys name a category field.
+ * Validate a `pinned[]` payload list. A pin is a replayable quick-action: its
+ * `entries[]` must be well-shaped number entries (see validatePinEntry) so a
+ * replayed pin writes a history-compatible event. `labels{}` (if present) is
+ * carried through verbatim — legacy pins may still carry category-era labels
+ * and replaying them keeps the historical series coherent.
  */
-export function validatePins(raw: unknown, fields: TypedField[]): QuickPayload[] {
+export function validatePins(raw: unknown): QuickPayload[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) throw new ManifestError("invalid_pin", "pinned must be an array");
-  const entryFieldByKey = new Map(
-    fields.filter((f) => ENTRY_FIELD_TYPES.includes(f.type as never)).map((f) => [f.key, f]),
-  );
-  const categoryKeys = new Set(fields.filter((f) => f.type === "category").map((f) => f.key));
 
   return raw.map((p, i) => {
     if (!p || typeof p !== "object" || Array.isArray(p)) {
@@ -276,37 +180,20 @@ export function validatePins(raw: unknown, fields: TypedField[]): QuickPayload[]
     if (!Array.isArray(pin.entries) || pin.entries.length === 0) {
       throw new ManifestError("invalid_pin", `pinned[${i}].entries must be a non-empty array`);
     }
-    const entries: LifeEntry[] = pin.entries.map((e, j) => {
-      if (!e || typeof e !== "object") throw new ManifestError("invalid_pin", `pinned[${i}] has a malformed entry`);
-      const name = (e as Record<string, unknown>).name;
-      if (typeof name !== "string") {
-        throw new ManifestError("invalid_pin", `pinned[${i}].entries[${j}].name must be a string`);
-      }
-      const field = entryFieldByKey.get(name);
-      if (!field) {
-        throw new ManifestError(
-          "invalid_pin",
-          `pinned[${i}] entry name "${name}" must match a measurement field.key of the trackable`,
-        );
-      }
-      return validatePinEntry(e, field, `pinned[${i}].entries[${j}]`);
-    });
+    const entries: LifeEntry[] = pin.entries.map((e, j) => validatePinEntry(e, `pinned[${i}].entries[${j}]`));
     if (pin.labels !== undefined) {
       if (!pin.labels || typeof pin.labels !== "object" || Array.isArray(pin.labels)) {
         throw new ManifestError("invalid_pin", `pinned[${i}].labels must be an object`);
       }
-      for (const k of Object.keys(pin.labels as object)) {
-        if (!categoryKeys.has(k)) {
-          throw new ManifestError(
-            "invalid_pin",
-            `pinned[${i}] label key "${k}" must match a category field.key of the trackable`,
-          );
+      for (const [k, v] of Object.entries(pin.labels as object)) {
+        if (typeof v !== "string") {
+          throw new ManifestError("invalid_pin", `pinned[${i}].labels["${k}"] must be a string`);
         }
       }
     }
     const out: QuickPayload = { entries };
     if (typeof pin.label === "string") out.label = pin.label;
-    if (pin.labels) out.labels = pin.labels as Record<string, string>;
+    if (pin.labels && Object.keys(pin.labels as object).length > 0) out.labels = pin.labels as Record<string, string>;
     return out;
   });
 }
@@ -317,18 +204,22 @@ export function emptyManifest(): LifeManifest {
 }
 
 /**
- * ADD a new trackable. Validates the id slug + uniqueness, label, fields, and
- * any pins. Returns the next manifest with the trackable appended (manifest
- * order = dashboard order). Never mutates `current`.
+ * ADD a new vocab row. Validates the id slug + uniqueness, label, shape, the
+ * prefill defaults, and any pins. Returns the next manifest with the trackable
+ * appended (manifest order = display order). Never mutates `current`.
  */
 export function addTrackable(
   current: LifeManifest,
   input: {
     id: string;
     label: string;
+    shape: string;
     group?: string;
     hidden?: boolean;
-    fields: unknown;
+    defaultUnit?: unknown;
+    defaultAmount?: unknown;
+    defaultDuration?: unknown;
+    ratingLabel?: unknown;
     pinned?: unknown;
   },
 ): LifeManifest {
@@ -341,27 +232,37 @@ export function addTrackable(
   if (typeof input.label !== "string" || input.label.trim().length === 0) {
     throw new ManifestError("invalid_label", "label must be a non-empty string");
   }
-  const fields = validateFields(input.fields);
-  const next: LifeManifestTrackable = { id: input.id, label: input.label, fields };
-  if (input.group !== undefined) next.group = input.group;
+  if (!isShape(input.shape)) {
+    throw new ManifestError(
+      "invalid_shape",
+      `shape must be one of ${TRACKABLE_SHAPES.join("|")}; got ${JSON.stringify(input.shape)}`,
+    );
+  }
+  const next: LifeManifestTrackable = { id: input.id, label: input.label, shape: input.shape };
+  const group = validateOptionalString(input.group, "group", "invalid_label");
+  if (group !== undefined) next.group = group;
   if (input.hidden !== undefined) next.hidden = !!input.hidden;
-  const pins = validatePins(input.pinned, fields);
+  const defaultUnit = validateOptionalString(input.defaultUnit, "defaultUnit", "invalid_default");
+  if (defaultUnit !== undefined) next.defaultUnit = defaultUnit;
+  const defaultAmount = validateOptionalNumber(input.defaultAmount, "defaultAmount");
+  if (defaultAmount !== undefined) next.defaultAmount = defaultAmount;
+  const defaultDuration = validateOptionalNumber(input.defaultDuration, "defaultDuration");
+  if (defaultDuration !== undefined) next.defaultDuration = defaultDuration;
+  const ratingLabel = validateOptionalString(input.ratingLabel, "ratingLabel", "invalid_label");
+  if (ratingLabel !== undefined) next.ratingLabel = ratingLabel;
+  const pins = validatePins(input.pinned);
   if (pins.length > 0) next.pinned = pins;
   return { trackables: [...current.trackables, next] };
 }
 
 /**
- * UPDATE an existing trackable. Patches only the provided keys
- * (label/group/hidden/fields/pinned). ENFORCES immutability:
+ * UPDATE an existing trackable. Patches only the provided keys. ENFORCES
+ * immutability:
  *   - `id` cannot change (it is the subject_id history join key).
- *   - an existing `field.key` cannot be renamed, and a field with history-
- *     bearing semantics cannot be removed/altered. Policy: the new fields[]
- *     must be a SUPERSET of the existing keys — every existing key must still
- *     be present, with an unchanged `type` (the entry-vs-label storage shape is
- *     part of the join contract). Adding brand-new fields is allowed; reordering
- *     is allowed; editing a field's label/unit/options/scale/default is allowed.
- *     Removing or retyping an existing key is rejected (`field_removed` /
- *     `immutable_field_key`) because it would orphan history.
+ *   - `shape` cannot change (it is the entries[] contract for new events;
+ *     changing it would fork the series' shape mid-history).
+ * Everything else (label/group/hidden/defaults/ratingLabel/pinned) is freely
+ * editable; nullable fields clear with `null`.
  */
 export function updateTrackable(
   current: LifeManifest,
@@ -369,9 +270,13 @@ export function updateTrackable(
   patch: {
     id?: string;
     label?: string;
+    shape?: string;
     group?: string | null;
     hidden?: boolean;
-    fields?: unknown;
+    defaultUnit?: unknown;
+    defaultAmount?: unknown;
+    defaultDuration?: unknown;
+    ratingLabel?: unknown;
     pinned?: unknown;
   },
 ): LifeManifest {
@@ -383,6 +288,12 @@ export function updateTrackable(
     throw new ManifestError(
       "immutable_id",
       `trackable id is immutable (it is the subject_id history join key); cannot rename "${trackableId}" → "${patch.id}"`,
+    );
+  }
+  if (patch.shape !== undefined && patch.shape !== existing.shape) {
+    throw new ManifestError(
+      "immutable_shape",
+      `trackable shape is immutable (it is the entries[] contract for new events); cannot change "${existing.shape}" → "${patch.shape}"`,
     );
   }
 
@@ -401,32 +312,26 @@ export function updateTrackable(
   }
   if (patch.hidden !== undefined) next.hidden = !!patch.hidden;
 
-  let effectiveFields = existing.fields;
-  if (patch.fields !== undefined) {
-    const proposed = validateFields(patch.fields);
-    const proposedByKey = new Map(proposed.map((f) => [f.key, f]));
-    // Immutability: every existing key must survive with the same type.
-    for (const old of existing.fields) {
-      const repl = proposedByKey.get(old.key);
-      if (!repl) {
-        throw new ManifestError(
-          "field_removed",
-          `field.key "${old.key}" cannot be removed — it is a history join key. Hide the trackable or add new fields instead.`,
-        );
-      }
-      if (repl.type !== old.type) {
-        throw new ManifestError(
-          "immutable_field_key",
-          `field.key "${old.key}" cannot change type ("${old.type}" → "${repl.type}") — the entry-vs-label storage shape is part of the history contract.`,
-        );
-      }
-    }
-    next.fields = proposed;
-    effectiveFields = proposed;
+  // Nullable prefill hints: null/"" clears, otherwise validate + set.
+  if (patch.defaultUnit !== undefined) {
+    if (patch.defaultUnit === null || patch.defaultUnit === "") delete next.defaultUnit;
+    else next.defaultUnit = validateOptionalString(patch.defaultUnit, "defaultUnit", "invalid_default");
+  }
+  if (patch.defaultAmount !== undefined) {
+    if (patch.defaultAmount === null) delete next.defaultAmount;
+    else next.defaultAmount = validateOptionalNumber(patch.defaultAmount, "defaultAmount");
+  }
+  if (patch.defaultDuration !== undefined) {
+    if (patch.defaultDuration === null) delete next.defaultDuration;
+    else next.defaultDuration = validateOptionalNumber(patch.defaultDuration, "defaultDuration");
+  }
+  if (patch.ratingLabel !== undefined) {
+    if (patch.ratingLabel === null || patch.ratingLabel === "") delete next.ratingLabel;
+    else next.ratingLabel = validateOptionalString(patch.ratingLabel, "ratingLabel", "invalid_label");
   }
 
   if (patch.pinned !== undefined) {
-    const pins = validatePins(patch.pinned, effectiveFields);
+    const pins = validatePins(patch.pinned);
     if (pins.length > 0) next.pinned = pins;
     else delete next.pinned;
   }
@@ -476,15 +381,15 @@ export function reorderTrackables(current: LifeManifest, orderedIds: unknown): L
 }
 
 /**
- * Set a trackable's `pinned[]` wholesale (validated against its fields). Used
- * by the pin add/remove MCP tools, which compute the full next list. Mirrors
- * the existing `setTrackablePins` backend method but as a pure manifest op.
+ * Set a trackable's `pinned[]` wholesale (validated). Used by the pin
+ * add/remove MCP tools, which compute the full next list. Mirrors the existing
+ * `setTrackablePins` backend method but as a pure manifest op.
  */
 export function setPins(current: LifeManifest, trackableId: string, pinned: unknown): LifeManifest {
   const idx = current.trackables.findIndex((t) => t.id === trackableId);
   if (idx === -1) throw new ManifestError("not_found", `no trackable with id "${trackableId}"`);
   const t = current.trackables[idx];
-  const pins = validatePins(pinned, t.fields);
+  const pins = validatePins(pinned);
   const next: LifeManifestTrackable = { ...t };
   if (pins.length > 0) next.pinned = pins;
   else delete next.pinned;

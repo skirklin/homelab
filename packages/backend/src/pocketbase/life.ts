@@ -13,8 +13,8 @@
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
-import type { LifeBackend } from "../interfaces/life";
-import type { LifeLog, LifeEvent, LifeEntry, LifeManifest, QuickPayload, TypedField } from "../types/life";
+import type { LifeBackend, AddTrackableInput, UpdateTrackablePatch } from "../interfaces/life";
+import type { LifeLog, LifeEvent, LifeEntry, LifeManifest, QuickPayload } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
 import { defaultLifeManifest } from "../life-manifest-default";
@@ -197,17 +197,14 @@ export class PocketBaseLifeBackend implements LifeBackend {
     return next;
   }
 
-  addTrackable(
-    logId: string,
-    input: { id: string; label: string; group?: string; hidden?: boolean; fields: TypedField[]; pinned?: QuickPayload[] },
-  ): Promise<LifeManifest> {
+  addTrackable(logId: string, input: AddTrackableInput): Promise<LifeManifest> {
     return this.mutateManifest(logId, (cur) => addTrackableOp(cur, input));
   }
 
   updateTrackable(
     logId: string,
     trackableId: string,
-    patch: { label?: string; group?: string | null; hidden?: boolean; fields?: TypedField[]; pinned?: QuickPayload[] },
+    patch: UpdateTrackablePatch,
   ): Promise<LifeManifest> {
     return this.mutateManifest(logId, (cur) => updateTrackableOp(cur, trackableId, patch));
   }

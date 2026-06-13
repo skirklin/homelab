@@ -1,13 +1,13 @@
 /**
- * Controlled value-field primitives shared by the add (EventLogger) and edit
- * (EntriesPopover) surfaces, so a sleep duration entered in either place looks
+ * Controlled value-field primitives shared by the add (ShapeSheet) and edit
+ * (EntriesList) surfaces, so a sleep duration entered in either place looks
  * and behaves the same.
  *
  * Each primitive is purely controlled — it owns no commit policy. The caller
  * decides whether to debounce, accumulate in local state, or fire immediately:
  *
- *   - EntriesPopover wraps these with debounce + commit-to-backend on change.
- *   - EventLogger wraps them with local React state and only writes on Submit.
+ *   - EntriesList wraps these with debounce + commit-to-backend on change.
+ *   - ShapeSheet wraps them with local React state and only writes on Log.
  *
  * Design intent (the previous cramped add form was the symptom this fixes):
  *   - Stack label / input / unit toggle vertically so the InputNumber claims
@@ -129,7 +129,7 @@ export interface DurationFieldEditorProps {
   saving?: boolean;
 }
 
-/** Mirrors EntriesPopover's old heuristic — historical events stored "in hours"
+/** Heuristic — historical events stored "in hours"
  *  show as a tidy 5-minute multiple (8h, 8h 30m); ad-hoc minute logs (47, 13)
  *  don't. */
 export function pickDurationDisplayUnit(minutes: number): "hours" | "minutes" {

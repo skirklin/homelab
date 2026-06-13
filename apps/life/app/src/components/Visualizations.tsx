@@ -16,8 +16,7 @@ import {
   Area,
 } from "recharts";
 import { useLifeContext } from "../life-context";
-import type { LifeManifestTrackable } from "@homelab/backend";
-import { useTrackables, primaryField, fieldUnit } from "../lib/trackables";
+import { useTrackables } from "../lib/trackables";
 import type { LogEntry } from "../types";
 import { aggregationFor } from "../lib/format";
 
@@ -46,7 +45,7 @@ const Title = styled.h1`
   flex: 1;
 `;
 
-const TrackableSelect = styled(Select)`
+const SeriesSelect = styled(Select)`
   min-width: 220px;
 `;
 
@@ -167,25 +166,81 @@ const ChartContainer = styled.div`
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-interface DayData {
-  date: Date;
-  count: number;
-  /** Aggregated value (per the trackable's aggregation) for the day. */
-  value: number;
+// --- Series model ----------------------------------------------------------
+//
+// A chartable series is a set of subjectIds: one THING (a vocab row, or an
+// unknown subjectId found in history — degrade, don't drop), or a GROUP
+// rollup over every vocab row sharing a `group` (walk/run/bike → "exercise").
+
+interface Series {
+  /** Select value. Things use their id; groups use `group:<name>`. */
+  key: string;
+  label: string;
+  subjectIds: string[];
+}
+
+const GROUP_PREFIX = "group:";
+
+function buildSeries(trackables: ReturnType<typeof useTrackables>, entries: LogEntry[]): Series[] {
+  const out: Series[] = [];
+  const known = new Set<string>();
+  const byGroup = new Map<string, string[]>();
+
+  for (const t of trackables) {
+    known.add(t.id);
+    out.push({ key: t.id, label: t.label, subjectIds: [t.id] });
+    if (t.group) {
+      const list = byGroup.get(t.group);
+      if (list) list.push(t.id);
+      else byGroup.set(t.group, [t.id]);
+    }
+  }
+
+  // Group rollups — only when the rollup actually aggregates >1 thing.
+  for (const [group, ids] of byGroup) {
+    if (ids.length < 2) continue;
+    out.push({ key: `${GROUP_PREFIX}${group}`, label: `${group} (all)`, subjectIds: ids });
+  }
+
+  // Unknown subjectIds in history (vocab row deleted): chart under the raw id.
+  const unknown = new Set<string>();
+  for (const e of entries) {
+    if (!known.has(e.subjectId)) unknown.add(e.subjectId);
+  }
+  for (const id of [...unknown].sort()) {
+    out.push({ key: id, label: id, subjectIds: [id] });
+  }
+
+  return out;
 }
 
 /**
- * Collect the primary numeric values for a trackable from a set of events.
- * The trackable's primary field `key` is the entry name carrying its main
- * number; we pull every matching value across events with that subject_id.
+ * The unit a series charts in, derived from its DATA (name-agnostic — history
+ * predates the shape model): the first non-rating number unit seen, else
+ * "rating" when only ratings exist, else "ct".
  */
-function collectValues(events: LogEntry[], trackable: LifeManifestTrackable): number[] {
-  const name = primaryField(trackable)?.key ?? "count";
+function seriesUnit(entries: LogEntry[], subjectIds: Set<string>): string {
+  let sawRating = false;
+  for (const e of entries) {
+    if (!subjectIds.has(e.subjectId)) continue;
+    for (const entry of e.entries) {
+      if (entry.type !== "number") continue;
+      if (entry.unit === "rating") {
+        sawRating = true;
+        continue;
+      }
+      return entry.unit;
+    }
+  }
+  return sawRating ? "rating" : "ct";
+}
+
+/** Every numeric value carrying `unit` across the given events. */
+function collectUnitValues(events: LogEntry[], unit: string): number[] {
   const out: number[] = [];
   for (const ev of events) {
-    if (ev.subjectId !== trackable.id) continue;
-    for (const entry of ev.entries) {
-      if (entry.type === "number" && entry.name === name) out.push(entry.value);
+    for (const e of ev.entries) {
+      if (e.type === "number" && e.unit === unit) out.push(e.value);
     }
   }
   return out;
@@ -200,8 +255,18 @@ function aggregateValues(values: number[], unit: string): number {
   return values.reduce((a, b) => a + b, 0);
 }
 
-function getMonthData(entries: LogEntry[], trackable: LifeManifestTrackable, year: number, month: number): DayData[] {
-  const unit = fieldUnit(primaryField(trackable));
+interface DayData {
+  date: Date;
+  count: number;
+  /** Aggregated value (per the unit's aggregation) for the day. */
+  value: number;
+}
+
+function eventsInRange(entries: LogEntry[], subjectIds: Set<string>, lo: Date, hi: Date): LogEntry[] {
+  return entries.filter((e) => subjectIds.has(e.subjectId) && e.timestamp >= lo && e.timestamp <= hi);
+}
+
+function getMonthData(entries: LogEntry[], subjectIds: Set<string>, unit: string, year: number, month: number): DayData[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
@@ -214,22 +279,18 @@ function getMonthData(entries: LogEntry[], trackable: LifeManifestTrackable, yea
     const date = new Date(year, month, day);
     const dayStart = new Date(year, month, day, 0, 0, 0, 0);
     const dayEnd = new Date(year, month, day, 23, 59, 59, 999);
-
-    const dayEvents = entries.filter(
-      (e) => e.subjectId === trackable.id && e.timestamp >= dayStart && e.timestamp <= dayEnd,
-    );
+    const dayEvents = eventsInRange(entries, subjectIds, dayStart, dayEnd);
     data.push({
       date,
       count: dayEvents.length,
-      value: aggregateValues(collectValues(dayEvents, trackable), unit),
+      value: aggregateValues(collectUnitValues(dayEvents, unit), unit),
     });
   }
   return data;
 }
 
-function getLast30DaysData(entries: LogEntry[], trackable: LifeManifestTrackable): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: LogEntry[], subjectIds: Set<string>, unit: string): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
-  const unit = fieldUnit(primaryField(trackable));
   const today = new Date();
 
   for (let i = 29; i >= 0; i--) {
@@ -238,22 +299,18 @@ function getLast30DaysData(entries: LogEntry[], trackable: LifeManifestTrackable
     date.setHours(0, 0, 0, 0);
     const dayEnd = new Date(date);
     dayEnd.setHours(23, 59, 59, 999);
-
-    const dayEvents = entries.filter(
-      (e) => e.subjectId === trackable.id && e.timestamp >= date && e.timestamp <= dayEnd,
-    );
+    const dayEvents = eventsInRange(entries, subjectIds, date, dayEnd);
     data.push({
       date: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      value: aggregateValues(collectValues(dayEvents, trackable), unit),
+      value: aggregateValues(collectUnitValues(dayEvents, unit), unit),
       count: dayEvents.length,
     });
   }
   return data;
 }
 
-function getWeeklyData(entries: LogEntry[], trackable: LifeManifestTrackable): { week: string; value: number; count: number }[] {
+function getWeeklyData(entries: LogEntry[], subjectIds: Set<string>, unit: string): { week: string; value: number; count: number }[] {
   const data: { week: string; value: number; count: number }[] = [];
-  const unit = fieldUnit(primaryField(trackable));
   const today = new Date();
 
   for (let w = 11; w >= 0; w--) {
@@ -265,13 +322,10 @@ function getWeeklyData(entries: LogEntry[], trackable: LifeManifestTrackable): {
     weekEnd.setDate(weekEnd.getDate() + 6);
     weekEnd.setHours(23, 59, 59, 999);
 
-    const weekEvents = entries.filter(
-      (e) => e.subjectId === trackable.id && e.timestamp >= weekStart && e.timestamp <= weekEnd,
-    );
-
+    const weekEvents = eventsInRange(entries, subjectIds, weekStart, weekEnd);
     data.push({
       week: weekStart.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      value: aggregateValues(collectValues(weekEvents, trackable), unit),
+      value: aggregateValues(collectUnitValues(weekEvents, unit), unit),
       count: weekEvents.length,
     });
   }
@@ -280,22 +334,23 @@ function getWeeklyData(entries: LogEntry[], trackable: LifeManifestTrackable): {
 
 function CalendarHeatMap({
   entries,
-  trackable,
+  subjectIds,
+  unit,
   viewDate,
   onMonthChange,
 }: {
   entries: LogEntry[];
-  trackable: LifeManifestTrackable;
+  subjectIds: Set<string>;
+  unit: string;
   viewDate: Date;
   onMonthChange: (date: Date) => void;
 }) {
-  const unit = fieldUnit(primaryField(trackable));
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
   const monthData = useMemo(
-    () => getMonthData(entries, trackable, year, month),
-    [entries, trackable, year, month],
+    () => getMonthData(entries, subjectIds, unit, year, month),
+    [entries, subjectIds, unit, year, month],
   );
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -369,11 +424,10 @@ function CalendarHeatMap({
   );
 }
 
-function TrendChart({ entries, trackable }: { entries: LogEntry[]; trackable: LifeManifestTrackable }) {
-  const unit = fieldUnit(primaryField(trackable));
+function TrendChart({ entries, subjectIds, unit }: { entries: LogEntry[]; subjectIds: Set<string>; unit: string }) {
   const data = useMemo(
-    () => getLast30DaysData(entries, trackable),
-    [entries, trackable],
+    () => getLast30DaysData(entries, subjectIds, unit),
+    [entries, subjectIds, unit],
   );
 
   const nonZero = data.filter((d) => d.value > 0).map((d) => d.value);
@@ -426,10 +480,10 @@ function TrendChart({ entries, trackable }: { entries: LogEntry[]; trackable: Li
   );
 }
 
-function WeeklyChart({ entries, trackable }: { entries: LogEntry[]; trackable: LifeManifestTrackable }) {
+function WeeklyChart({ entries, subjectIds, unit }: { entries: LogEntry[]; subjectIds: Set<string>; unit: string }) {
   const data = useMemo(
-    () => getWeeklyData(entries, trackable),
-    [entries, trackable],
+    () => getWeeklyData(entries, subjectIds, unit),
+    [entries, subjectIds, unit],
   );
 
   return (
@@ -478,12 +532,11 @@ export function Visualizations() {
   const { state } = useLifeContext();
   const navigate = useNavigate();
   const trackables = useTrackables();
-  // Both the selected trackable and the calendar month live in the URL so
-  // refresh + share-link round-trip the exact view. Defaults (first trackable,
+  // Both the selected series and the calendar month live in the URL so
+  // refresh + share-link round-trip the exact view. Defaults (first series,
   // current month) aren't written to keep the URL clean. The raw param is kept
-  // verbatim; membership is validated against the manifest in the body below
-  // (the parse closure can't read the per-render manifest).
-  const [selectedId, setSelectedId] = useUrlParam<string | null>("trackable", {
+  // verbatim; membership is validated against the series list below.
+  const [selectedKey, setSelectedKey] = useUrlParam<string | null>("trackable", {
     parse: (raw) => raw,
     serialize: (v) => v,
     default: null,
@@ -507,41 +560,42 @@ export function Visualizations() {
   });
   const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
 
-  // Unified shape — read entries directly. No more normalization adapter; the
-  // 20260522 migration rewrote every legacy row in place.
   const allEntries: LogEntry[] = useMemo(() => Array.from(state.entries.values()), [state.entries]);
 
-  const selectedValid = selectedId && trackables.some((t) => t.id === selectedId) ? selectedId : null;
-  const currentId = selectedValid || trackables[0]?.id;
-  const trackable = trackables.find((t) => t.id === currentId);
+  // Things (vocab rows + unknown history subjects) and group rollups.
+  const series = useMemo(() => buildSeries(trackables, allEntries), [trackables, allEntries]);
 
-  if (!trackable) {
+  const selectedValid = selectedKey && series.some((s) => s.key === selectedKey) ? selectedKey : null;
+  const currentKey = selectedValid || series[0]?.key;
+  const current = series.find((s) => s.key === currentKey);
+
+  const subjectIds = useMemo(() => new Set(current?.subjectIds ?? []), [current]);
+  const unit = useMemo(() => seriesUnit(allEntries, subjectIds), [allEntries, subjectIds]);
+
+  if (!current) {
     return (
       <Container>
         <Header>
           <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
           <Title>Insights</Title>
         </Header>
-        <Empty description="No trackables configured" />
+        <Empty description="Nothing to chart yet" />
       </Container>
     );
   }
 
-  const options = trackables.map((t) => ({
-    value: t.id,
-    label: t.group ? `${t.group} › ${t.label}` : t.label,
-  }));
+  const options = series.map((s) => ({ value: s.key, label: s.label }));
 
   const tabItems = [
     {
       key: "trend",
       label: "Daily Trend",
-      children: <TrendChart entries={allEntries} trackable={trackable} />,
+      children: <TrendChart entries={allEntries} subjectIds={subjectIds} unit={unit} />,
     },
     {
       key: "weekly",
       label: "Weekly",
-      children: <WeeklyChart entries={allEntries} trackable={trackable} />,
+      children: <WeeklyChart entries={allEntries} subjectIds={subjectIds} unit={unit} />,
     },
     {
       key: "calendar",
@@ -549,7 +603,8 @@ export function Visualizations() {
       children: (
         <CalendarHeatMap
           entries={allEntries}
-          trackable={trackable}
+          subjectIds={subjectIds}
+          unit={unit}
           viewDate={viewDate}
           onMonthChange={setViewDate}
         />
@@ -562,10 +617,12 @@ export function Visualizations() {
       <Header>
         <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
         <Title>Insights</Title>
-        <TrackableSelect
-          value={currentId}
-          onChange={(value) => setSelectedId(value as string)}
+        <SeriesSelect
+          value={currentKey}
+          onChange={(value) => setSelectedKey(value as string)}
           options={options}
+          showSearch
+          optionFilterProp="label"
         />
       </Header>
 

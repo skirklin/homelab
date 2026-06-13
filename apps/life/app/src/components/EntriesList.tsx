@@ -1,5 +1,8 @@
 /**
- * Per-day entries popover, opened by tapping a tracker card's value badge.
+ * Inline-editable list of logged events (one row per event), used inside the
+ * shape bottom-sheet to show "today's entries for the chosen thing" with
+ * edit + delete. Adapted from the old EntriesPopover machinery — the popover
+ * wrapper died with the per-trackable cards; the row editors live on.
  *
  * Each row inline-edits one logged event:
  *   - TimePicker for the event's timestamp (commits on change).
@@ -10,25 +13,23 @@
  *
  * On save error we revert the row's UI state to the last known good value and
  * surface a toast. We never restructure the entries array (no add/remove of
- * sub-entries) — that's EventLogger's job. The set of entries on an event is
- * fixed at log-time by the manifest; editing changes their values.
+ * sub-entries) — the set of entries on an event is fixed at log-time by its
+ * shape; editing changes their values. Mis-taps are handled by delete here
+ * plus the post-log Undo toast.
  */
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
-import { Popover, Button, TimePicker, Switch } from "antd";
+import { Button, TimePicker, Switch } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import type { LifeEvent, LifeEntry } from "@homelab/backend";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
 import { NumberFieldEditor, DurationFieldEditor, TextFieldEditor } from "./EntryFields";
 
-const EntryList = styled.div`
+const List = styled.div`
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
-  max-height: 280px;
-  overflow-y: auto;
-  min-width: 220px;
 `;
 
 const EntryRow = styled.div`
@@ -37,10 +38,8 @@ const EntryRow = styled.div`
   gap: 4px;
   padding: var(--space-xs);
   border-radius: var(--radius-sm);
-
-  &:hover {
-    background: var(--color-bg-muted);
-  }
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
 `;
 
 const TopLine = styled.div`
@@ -72,29 +71,26 @@ const DeleteButton = styled(Button)`
 const EmptyMessage = styled.div`
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  padding: var(--space-sm);
+  padding: var(--space-xs) 0;
 `;
-
-interface EntriesPopoverProps {
-  events: LifeEvent[];
-  logId: string | undefined;
-  children: React.ReactNode;
-}
 
 const DEBOUNCE_MS = 500;
 
-export function EntriesPopover({ events, logId, children }: EntriesPopoverProps) {
+interface EntriesListProps {
+  events: LifeEvent[];
+  /** Rendered when events is empty; pass null to render nothing. */
+  emptyText?: string | null;
+}
+
+export function EntriesList({ events, emptyText = "Nothing logged yet" }: EntriesListProps) {
   const life = useLifeBackend();
   const { message } = useFeedback();
-  const [open, setOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (eventId: string) => {
-    if (!logId) return;
     setDeletingId(eventId);
     try {
       await life.deleteEvent(eventId);
-      if (events.length === 1) setOpen(false);
     } catch (err) {
       console.error("Failed to delete:", err);
       message.error("Failed to delete");
@@ -103,10 +99,12 @@ export function EntriesPopover({ events, logId, children }: EntriesPopoverProps)
     }
   };
 
-  const content = events.length === 0 ? (
-    <EmptyMessage>No entries</EmptyMessage>
-  ) : (
-    <EntryList>
+  if (events.length === 0) {
+    return emptyText ? <EmptyMessage>{emptyText}</EmptyMessage> : null;
+  }
+
+  return (
+    <List>
       {events.map((event) => (
         <EditableEntryRow
           key={event.id}
@@ -115,20 +113,7 @@ export function EntriesPopover({ events, logId, children }: EntriesPopoverProps)
           onDelete={() => handleDelete(event.id)}
         />
       ))}
-    </EntryList>
-  );
-
-  return (
-    <Popover
-      content={content}
-      title="Entries"
-      trigger="click"
-      open={open}
-      onOpenChange={setOpen}
-      placement="bottom"
-    >
-      {children}
-    </Popover>
+    </List>
   );
 }
 
@@ -142,7 +127,7 @@ interface EditableEntryRowProps {
 
 function EditableEntryRow({ event, deleting, onDelete }: EditableEntryRowProps) {
   return (
-    <EntryRow>
+    <EntryRow data-testid="entry-row">
       <TopLine>
         <TimestampEditor event={event} />
         <DeleteButton
@@ -152,6 +137,7 @@ function EditableEntryRow({ event, deleting, onDelete }: EditableEntryRowProps) 
           icon={<DeleteOutlined />}
           loading={deleting}
           onClick={onDelete}
+          aria-label="Delete entry"
         />
       </TopLine>
       {event.entries.length > 0 && (

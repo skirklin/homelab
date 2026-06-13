@@ -306,7 +306,7 @@ describe("P2 generic field-driven write path round-trips through aggregation", (
     const log = await life.getOrCreateLog(user.id);
     cleanup.track("life_logs", log.id);
 
-    // Two exercise events, shaped exactly as the generic EventLogger writes:
+    // Two exercise events shaped like pre-redesign history writes:
     // duration (number/min) + intensity (rating) entries, category in labels.
     const e1 = await life.addEvent(
       log.id,

@@ -148,17 +148,17 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 
 **Life (read):**
 - `list_life_entries` — recent entries (optional days filter)
-- `list_life_trackables` — the caller's per-user trackable manifest (id, label, group, hidden, fields, pinned)
+- `list_life_trackables` — the caller's per-user trackable vocab rows (id, label, shape, group, defaultUnit/defaultAmount/defaultDuration, ratingLabel, hidden, pinned)
 
 **Life (write):**
 - `add_life_entry` — log a widget event (data shape varies per widget type)
 - `update_life_entry` — change timestamp, merge data, or set notes
 - `delete_life_entry` — delete an entry
-- `add_life_trackable` — create a trackable (immutable slug `id`, `label`, optional `group`/`hidden`, typed `fields[]`; category fields need `options`)
-- `update_life_trackable` — patch label/group/hidden/fields/pinned. `id` and existing `field.key`/type are IMMUTABLE (history join keys); you may append new fields but never rename/remove/retype one
+- `add_life_trackable` — create a vocab row (`{id, label, shape: took|did|happened|rated, group?, defaultUnit?, defaultAmount?, defaultDuration?, ratingLabel?, hidden?}`). `id` (the events subject_id / history join key) AND `shape` (the entries[] contract) are IMMUTABLE
+- `update_life_trackable` — patch label/group/hidden/defaults/ratingLabel/pinned. `id` and `shape` are IMMUTABLE; there is no `fields[]` anymore — the shape decides what a new event carries
 - `remove_life_trackable` — drop a trackable from the manifest. Manifest-only — NEVER deletes `life_events`; events re-link if the same id is re-added
 - `reorder_life_trackables` — set trackable order (dashboard renders in manifest order)
-- `add_life_pin` / `remove_life_pin` — manage a trackable's pinned quick-actions; a pin's `entries[].name`/`labels` keys must match the trackable's field keys so it replays as a history-compatible event
+- `add_life_pin` / `remove_life_pin` — manage a trackable's pinned quick-actions; a pin just replays its `entries[]` (+ optional `labels`) as a new event. Use the canonical entry names the trackable's shape writes (took → `amount`, did → `duration`/`rating`, rated → `rating`, happened → `count`) — readers are name-agnostic over legacy names, but new pins should be canonical
 
 All trackable tools operate on the authenticated caller's own life log — there is no log-id parameter, so cross-user edits are impossible.
 

@@ -1,9 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { Modal, Segmented, Button, TimePicker, Switch } from "antd";
+import { Modal, Button, TimePicker, Switch } from "antd";
 import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import styled from "styled-components";
-import { useDisplaySettings, type WidgetSize } from "../display-settings";
 import { useLifeContext } from "../life-context";
 import type { LifeLog } from "../types";
 import { RANDOM_SAMPLES } from "../manifest";
@@ -127,7 +126,6 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: SettingsModalProps) {
-  const { widgetSize, setWidgetSize } = useDisplaySettings();
   const user = useUserBackend();
   const life = useLifeBackend();
   const { message } = useFeedback();
@@ -251,22 +249,6 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
       onCancel={onClose}
       footer={null}
     >
-      <SettingRow>
-        <div>
-          <SettingLabel>Widget Size</SettingLabel>
-          <SettingDescription>Adjust the size of tracker widgets</SettingDescription>
-        </div>
-        <Segmented
-          value={widgetSize}
-          onChange={(v) => setWidgetSize(v as WidgetSize)}
-          options={[
-            { label: "Compact", value: "compact" },
-            { label: "Normal", value: "normal" },
-            { label: "Large", value: "comfortable" },
-          ]}
-        />
-      </SettingRow>
-
       <Section>
         <SectionTitle>
           <span>Random check-ins</span>

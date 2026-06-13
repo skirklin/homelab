@@ -24,12 +24,13 @@ export type {
 } from "./types/travel";
 export type {
   LifeLog, LifeEvent, LifeEntry, SampleSchedule,
-  LifeManifest, LifeManifestTrackable, TypedField, QuickPayload,
+  LifeManifest, LifeManifestTrackable, TrackableShape, QuickPayload,
 } from "./types/life";
 export { DEFAULT_LIFE_MANIFEST, defaultLifeManifest } from "./life-manifest-default";
 export {
   ManifestError,
-  validateField,
+  TRACKABLE_SHAPES,
+  slugifyTrackableId,
   validatePins,
   emptyManifest,
   addTrackable,
@@ -39,6 +40,7 @@ export {
   setPins,
 } from "./life-manifest-ops";
 export type { ManifestErrorCode } from "./life-manifest-ops";
+export type { AddTrackableInput, UpdateTrackablePatch } from "./interfaces/life";
 export type { ClaudeObservation } from "./types/observer";
 export type {
   ChatMessage,

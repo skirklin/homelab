@@ -1,21 +1,23 @@
 /**
- * Frecency over life_events history (P3 quick-entry).
+ * Frecency over life_events history (quick-entry chips).
  *
- * A quick-action is a replayable `QuickPayload = {entries[], labels{}}`. This
- * module ranks the DISTINCT payloads a user has logged for a trackable by
- * recency-weighted frequency, so the one-tap chips surface the values they
- * actually repeat (doses, counts, oz, categories). Pure derivation — ZERO
- * storage; pins (manual favorites) are layered on top by the caller.
+ * A quick-action is a replayable `(subjectId, QuickPayload)` pair. This module
+ * ranks the DISTINCT payloads a user has logged by recency-weighted frequency,
+ * so the one-tap chips surface the values they actually repeat (doses, counts,
+ * oz). Pure derivation — ZERO storage; pins (manual favorites) are layered on
+ * top by the caller.
  *
  * Design:
- *   - score(payload) = Σ over its occurrences of 0.5 ^ (ageDays / halfLife).
+ *   - score(action) = Σ over its occurrences of 0.5 ^ (ageDays / halfLife).
  *     A half-life of ~21 days means a log from 3 weeks ago counts half as much
  *     as one today, so habits drift with the user. Ties break on most-recent.
- *   - Distinctness key (`payloadKey`) = the measurement values (number/bool
- *     entries: name+value+unit) plus the categorical labels, normalized + sorted
- *     so order doesn't matter. TEXT entries are intentionally ignored — free-form
- *     notes are never a stable quick-action.
- *   - Discrete repeated values (5mg, 8oz, "run") cluster and surface. Continuous
+ *   - Distinctness key (`payloadKey`) = the SUBJECT plus the measurement
+ *     values (number entries: value+unit — NOT the entry name, mirroring the
+ *     name-agnostic readers over historical names dose/volume/drinks/...)
+ *     plus the categorical labels, normalized + sorted so order doesn't
+ *     matter. TEXT entries are intentionally excluded from keys AND from
+ *     replay — free-form notes are never a stable quick-action.
+ *   - Discrete repeated values (5mg, 8oz) cluster and surface. Continuous
  *     values (every sleep duration a different number) each score ~1 and never
  *     form a dominant chip — intended; pins cover those shortcuts.
  */
@@ -37,27 +39,36 @@ export interface FrecencyOptions {
 }
 
 /**
- * Canonical, order-insensitive identity for a quick-action payload. Two
- * payloads with the same measurement values (number/bool entries) and category
- * labels collapse to the same key regardless of entry/label order or any text
- * entries. This is the distinctness dimension for clustering.
+ * Canonical, order-insensitive identity for a quick-action. Keyed on the
+ * SUBJECT (which thing the replay targets) plus the measurement values
+ * (number/bool entries as value:unit — the entry NAME is deliberately
+ * excluded, matching the name-agnostic readers: a pre-migration pin
+ * `dose=5:mg` and a canonical-name event `amount=5:mg` are the SAME
+ * quick-action) and category labels; text entries never participate.
  */
-export function payloadKey(payload: { entries: LifeEntry[]; labels?: Record<string, string> }): string {
+export function payloadKey(
+  subjectId: string,
+  payload: { entries: LifeEntry[]; labels?: Record<string, string> },
+): string {
   const entryParts: string[] = [];
   for (const e of payload.entries) {
-    if (e.type === "number") entryParts.push(`${e.name}=${e.value}:${e.unit}`);
-    else if (e.type === "bool") entryParts.push(`${e.name}=${e.value ? "1" : "0"}:bool`);
+    if (e.type === "number") entryParts.push(`${e.value}:${e.unit}`);
+    else if (e.type === "bool") entryParts.push(`${e.value ? "1" : "0"}:bool`);
     // text entries are free-form — never part of the identity.
   }
   entryParts.sort();
   const labelParts = Object.entries(payload.labels ?? {})
     .map(([k, v]) => `${k}:${v}`)
     .sort();
-  return `E[${entryParts.join("|")}]L[${labelParts.join("|")}]`;
+  return `${subjectId}::E[${entryParts.join("|")}]L[${labelParts.join("|")}]`;
 }
 
-/** Strip an event down to a replayable measurement+category payload. */
-function eventToPayload(ev: LifeEvent): QuickPayload {
+/**
+ * Strip an event down to a replayable measurement payload. Text entries are
+ * dropped (excluded from replay — a replayed note would duplicate free-form
+ * prose); provenance labels (source/tz) are dropped too.
+ */
+export function eventToPayload(ev: LifeEvent): QuickPayload {
   const entries: LifeEntry[] = [];
   for (const e of ev.entries) {
     if (e.type === "number") {
@@ -67,11 +78,9 @@ function eventToPayload(ev: LifeEvent): QuickPayload {
     } else if (e.type === "bool") {
       entries.push({ name: e.name, type: "bool", value: e.value });
     }
-    // text dropped — not replayable as a quick-action.
   }
   const payload: QuickPayload = { entries };
   if (ev.labels) {
-    // Carry category-style labels only (skip provenance like source/tz).
     const labels: Record<string, string> = {};
     for (const [k, v] of Object.entries(ev.labels)) {
       if (k === "source" || k === "tz") continue;
@@ -93,27 +102,20 @@ interface Bucket {
   lastTs: number;
 }
 
-/**
- * Rank the distinct quick-action payloads for a single trackable by frecency.
- * Empty-payload events (no number/bool entries) are skipped — nothing to replay.
- */
-export function frecentPayloads(
+function bucketize(
   events: LifeEvent[],
-  trackable: LifeManifestTrackable,
-  options: FrecencyOptions = {},
-): QuickPayload[] {
-  const now = options.now ?? new Date();
-  const halfLife = options.halfLifeDays ?? DEFAULT_HALF_LIFE_DAYS;
-  const limit = options.limit ?? 4;
-  const excluded = new Set((options.exclude ?? []).map(payloadKey));
-
+  subjectId: string,
+  now: Date,
+  halfLife: number,
+  excludedKeys: Set<string>,
+): Map<string, Bucket> {
   const buckets = new Map<string, Bucket>();
   for (const ev of events) {
-    if (ev.subjectId !== trackable.id) continue;
+    if (ev.subjectId !== subjectId) continue;
     const payload = eventToPayload(ev);
     if (payload.entries.length === 0) continue; // no replayable measurement
-    const key = payloadKey(payload);
-    if (excluded.has(key)) continue;
+    const key = payloadKey(subjectId, payload);
+    if (excludedKeys.has(key)) continue;
     const w = decayWeight(ev.timestamp, now, halfLife);
     const existing = buckets.get(key);
     if (existing) {
@@ -123,14 +125,30 @@ export function frecentPayloads(
       buckets.set(key, { payload, score: w, lastTs: ev.timestamp.getTime() });
     }
   }
+  return buckets;
+}
 
-  return [...buckets.values()]
+/**
+ * Rank the distinct quick-action payloads for ONE thing by frecency.
+ * Empty-payload events (no number/bool entries) are skipped — nothing to replay.
+ */
+export function frecentPayloads(
+  events: LifeEvent[],
+  subjectId: string,
+  options: FrecencyOptions = {},
+): QuickPayload[] {
+  const now = options.now ?? new Date();
+  const halfLife = options.halfLifeDays ?? DEFAULT_HALF_LIFE_DAYS;
+  const limit = options.limit ?? 4;
+  const excluded = new Set((options.exclude ?? []).map((p) => payloadKey(subjectId, p)));
+
+  return [...bucketize(events, subjectId, now, halfLife, excluded).values()]
     .sort((a, b) => (b.score - a.score) || (b.lastTs - a.lastTs))
     .slice(0, limit)
     .map((b) => b.payload);
 }
 
-/** One cross-trackable quick-action for the global dashboard row. */
+/** One cross-thing quick-action for the global dashboard row. */
 export interface GlobalAction {
   trackable: LifeManifestTrackable;
   payload: QuickPayload;
@@ -139,9 +157,10 @@ export interface GlobalAction {
 }
 
 /**
- * Aggregate the most-frecent actions across all (non-hidden) trackables for the
- * global quick-log row. Pins come first (stable, flagged), then frecency fills
- * the remaining slots, deduped against the pins.
+ * Aggregate the most-frecent actions across all (non-hidden) vocab rows for
+ * the global quick-log row. ALL pins come first (stable, in vocab order,
+ * flagged, NEVER trimmed — they are deliberate favorites), then frecency
+ * fills any remaining slots up to `limit`, deduped against the pins.
  */
 export function globalFrecentActions(
   events: LifeEvent[],
@@ -150,51 +169,34 @@ export function globalFrecentActions(
 ): GlobalAction[] {
   const now = options.now ?? new Date();
   const halfLife = options.halfLifeDays ?? DEFAULT_HALF_LIFE_DAYS;
-  const limit = options.limit ?? 6;
+  const limit = options.limit ?? 8;
   const visible = trackables.filter((t) => !t.hidden);
 
-  // Pins first — stable, in trackable order, deduped within each trackable.
-  const pinnedActions: GlobalAction[] = [];
+  // Pins first — stable, in vocab order, deduped within each trackable.
+  const out: GlobalAction[] = [];
   const seen = new Set<string>();
   for (const t of visible) {
     for (const p of t.pinned ?? []) {
-      const key = `${t.id}::${payloadKey(p)}`;
+      const key = payloadKey(t.id, p);
       if (seen.has(key)) continue;
       seen.add(key);
-      pinnedActions.push({ trackable: t, payload: p, pinned: true });
+      out.push({ trackable: t, payload: p, pinned: true });
     }
   }
 
-  // Frecency across all visible trackables, excluding each trackable's pins.
+  // Frecency across all visible things, excluding each thing's pins.
   const candidates: Array<GlobalAction & { score: number; lastTs: number }> = [];
   for (const t of visible) {
-    const bucketed = new Map<string, Bucket>();
-    const pinKeys = new Set((t.pinned ?? []).map(payloadKey));
-    for (const ev of events) {
-      if (ev.subjectId !== t.id) continue;
-      const payload = eventToPayload(ev);
-      if (payload.entries.length === 0) continue;
-      const key = payloadKey(payload);
-      if (pinKeys.has(key)) continue;
-      const w = decayWeight(ev.timestamp, now, halfLife);
-      const existing = bucketed.get(key);
-      if (existing) {
-        existing.score += w;
-        existing.lastTs = Math.max(existing.lastTs, ev.timestamp.getTime());
-      } else {
-        bucketed.set(key, { payload, score: w, lastTs: ev.timestamp.getTime() });
-      }
-    }
-    for (const b of bucketed.values()) {
+    const pinKeys = new Set((t.pinned ?? []).map((p) => payloadKey(t.id, p)));
+    for (const b of bucketize(events, t.id, now, halfLife, pinKeys).values()) {
       candidates.push({ trackable: t, payload: b.payload, pinned: false, score: b.score, lastTs: b.lastTs });
     }
   }
   candidates.sort((a, b) => (b.score - a.score) || (b.lastTs - a.lastTs));
 
-  const out: GlobalAction[] = [...pinnedActions];
   for (const c of candidates) {
     if (out.length >= limit) break;
     out.push({ trackable: c.trackable, payload: c.payload, pinned: false });
   }
-  return out.slice(0, limit);
+  return out;
 }

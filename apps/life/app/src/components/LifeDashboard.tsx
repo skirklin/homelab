@@ -10,7 +10,6 @@ import {
   PageContainer,
   SectionTitle,
   Section,
-  WidgetGrid,
   AppHeader,
   useFeedback,
   SyncDot,
@@ -29,15 +28,17 @@ const TitleWithStatus = styled.div`
   gap: 8px;
 `;
 import { useLifeContext } from "../life-context";
-import { EventLogger } from "./EventLogger";
 import { GlobalQuickRow } from "./GlobalQuickRow";
+import { ShapeCard } from "./ShapeCard";
+import { ShapeSheet } from "./ShapeSheet";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
 import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
 import { Hint } from "./Hint";
 import { RANDOM_SAMPLES, SESSIONS, sessionSubjectId, sessionPath, type Session } from "../manifest";
-import { useTrackables, GROUP_ORDER } from "../lib/trackables";
-import type { LifeManifestTrackable } from "@homelab/backend";
+import { useTrackables } from "../lib/trackables";
+import { SHAPE_ORDER } from "../lib/shapes";
+import type { TrackableShape } from "@homelab/backend";
 import {
   initializeMessaging,
   requestNotificationPermission,
@@ -196,19 +197,10 @@ const SessionRow = styled.div<{ $hasPrimary: boolean }>`
   gap: var(--space-xs);
 `;
 
-const GroupSection = styled.div`
-  margin-bottom: var(--space-sm);
-
-  &:last-child { margin-bottom: 0; }
-`;
-
-const GroupLabel = styled.div`
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-xs);
-  min-height: 1em; /* keep spacing consistent for unlabeled "more" group */
+const ShapeGrid = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xs);
 `;
 
 const SessionCard = styled.button<{ $size: "primary" | "secondary"; $muted: boolean }>`
@@ -311,6 +303,8 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // realtime subscription is future work alongside C3 (push nudge).
   const [chatUnread, setChatUnread] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  // Which shape's bottom sheet is open (null = closed).
+  const [openShape, setOpenShape] = useState<TrackableShape | null>(null);
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
@@ -513,20 +507,10 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // inherits today's events from a single feed.
   const allEntries = Array.from(state.entries.values());
 
-  // Trackables come from the per-user manifest (falls back to the default
-  // starter set). Group them for layout — unknown groups (or trackables
-  // without a group) fall through to "more". `hidden` trackables are kept in
-  // the manifest (so historical events still aggregate) but skipped here.
+  // The vocabulary comes from the per-user manifest (falls back to the
+  // default starter set). Layout is by SHAPE (four cards), not by group —
+  // `group` is a semantic rollup for trends, not a layout section.
   const trackables = useTrackables();
-  const grouped = trackables.filter((t) => !t.hidden).reduce<Record<string, LifeManifestTrackable[]>>((acc, t) => {
-    const key = t.group ?? "more";
-    (acc[key] ??= []).push(t);
-    return acc;
-  }, {});
-  const groupKeys: string[] = [
-    ...GROUP_ORDER.filter((k) => grouped[k]?.length),
-    ...Object.keys(grouped).filter((k) => !(GROUP_ORDER as readonly string[]).includes(k)),
-  ];
 
   // Streaks — recompute when entries change (Map identity flips on each
   // SET_ENTRIES dispatch, so the dep is stable enough).
@@ -1029,31 +1013,36 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
           >
             <GlobalQuickRow
               trackables={trackables}
-              entries={allEntries}
+              events={allEntries}
               userId={user?.uid ?? ""}
               logId={state.log?.id}
               timestamp={getSelectedTimestamp()}
             />
-            {groupKeys.map((key) => (
-              <GroupSection key={key}>
-                <GroupLabel>{key === "more" ? "" : key}</GroupLabel>
-                <WidgetGrid>
-                  {grouped[key].map((trackable) => (
-                    <EventLogger
-                      key={trackable.id}
-                      trackable={trackable}
-                      entries={allEntries}
-                      userId={user?.uid ?? ""}
-                      logId={state.log?.id}
-                      timestamp={getSelectedTimestamp()}
-                    />
-                  ))}
-                </WidgetGrid>
-              </GroupSection>
-            ))}
+            <ShapeGrid>
+              {SHAPE_ORDER.map((shape) => (
+                <ShapeCard
+                  key={shape}
+                  shape={shape}
+                  trackables={trackables}
+                  events={allEntries}
+                  day={selectedDate}
+                  onOpen={setOpenShape}
+                />
+              ))}
+            </ShapeGrid>
           </SwipeContainer>
         </Section>
       </PageContainer>
+
+      <ShapeSheet
+        shape={openShape}
+        onClose={() => setOpenShape(null)}
+        trackables={trackables}
+        events={allEntries}
+        userId={user?.uid ?? ""}
+        logId={state.log?.id}
+        day={selectedDate}
+      />
 
       <SampleResponseModal
         open={showSampleModal}
