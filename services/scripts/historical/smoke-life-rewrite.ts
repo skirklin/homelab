@@ -16,7 +16,7 @@
  * Test PB superuser creds default to the docker-compose.test.yml values;
  * override with PB_ADMIN_EMAIL / PB_ADMIN_PASSWORD if yours differ.
  */
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import PocketBase from "pocketbase";
@@ -62,7 +62,8 @@ async function addEvent(seed: Seed): Promise<string> {
   return rec.id;
 }
 
-// Day A (2026-03-04 LA): one sleep + one quality -> attach.
+// Day A (2026-03-04 LA): one sleep + one quality (with labels) -> attach,
+// labels merged onto the sleep event.
 const sleepA = await addEvent({
   subject_id: "sleep",
   timestamp: "2026-03-04 14:00:00.000Z",
@@ -72,6 +73,7 @@ const qualA = await addEvent({
   subject_id: "sleep_quality",
   timestamp: "2026-03-04 16:00:00.000Z",
   entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }],
+  labels: { mood: "groggy" },
 });
 // Day B (2026-03-05 LA): quality only -> create.
 const qualB = await addEvent({
@@ -95,8 +97,33 @@ const qualC = await addEvent({
   timestamp: "2026-03-06 17:00:00.000Z",
   entries: [{ name: "rating", type: "number", value: 5, unit: "rating", scale: 5 }],
 });
+// Day D (2026-03-07 LA): quality only, on a 10-point scale -> create must
+// carry scale 10 verbatim (not hardcode 5).
+const qualD = await addEvent({
+  subject_id: "sleep_quality",
+  timestamp: "2026-03-07 16:00:00.000Z",
+  entries: [{ name: "rating", type: "number", value: 7, unit: "rating", scale: 10 }],
+});
+// Day E (2026-03-08 LA): sleep already carrying a DIFFERENT rating + a
+// quality -> conflict; merge --apply must leave both untouched and exit 2
+// with the loud trailer.
+const sleepE = await addEvent({
+  subject_id: "sleep",
+  timestamp: "2026-03-08 14:00:00.000Z",
+  entries: [
+    { name: "duration", type: "number", value: 400, unit: "min" },
+    { name: "rating", type: "number", value: 2, unit: "rating", scale: 5 },
+  ],
+});
+const qualE = await addEvent({
+  subject_id: "sleep_quality",
+  timestamp: "2026-03-08 16:00:00.000Z",
+  entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }],
+});
 // Category subjects: exercise w/ category+intensity, focus w/ multi-word
-// category, exercise WITHOUT category (must stay untouched).
+// category, exercise WITHOUT category (must stay untouched + exit 2), and
+// a SELF-NAMED category ("Exercise" on subject exercise) whose rerun must
+// report already-converted instead of missing-category.
 const exPt = await addEvent({
   subject_id: "exercise",
   timestamp: "2026-03-04 18:00:00.000Z",
@@ -118,18 +145,32 @@ const exNoCat = await addEvent({
   entries: [{ name: "duration", type: "number", value: 20, unit: "min" }],
   labels: { source: "manual" },
 });
-console.log("  Seeded 9 events");
+const exSelf = await addEvent({
+  subject_id: "exercise",
+  timestamp: "2026-03-06 18:00:00.000Z",
+  entries: [
+    { name: "duration", type: "number", value: 40, unit: "min" },
+    { name: "intensity", type: "number", value: 3, unit: "rating", scale: 5 },
+  ],
+  labels: { category: "Exercise" },
+});
+console.log("  Seeded 13 events");
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function runScript(script: string, extraArgs: string[]): string {
-  const out = execFileSync(
+function runScript(script: string, extraArgs: string[], expectedExit = 0): string {
+  const res = spawnSync(
     "pnpm",
     ["exec", "tsx", join(here, script), "--log", log.id, "--pb-url", pbUrl, ...extraArgs],
     { cwd: join(here, ".."), env: { ...process.env, PB_ADMIN_EMAIL: adminEmail, PB_ADMIN_PASSWORD: adminPassword }, encoding: "utf8" },
   );
+  const out = `${res.stdout ?? ""}${res.stderr ?? ""}`;
+  if ((res.status ?? -1) !== expectedExit) {
+    console.error(out);
+    throw new Error(`${script} ${extraArgs.join(" ")} exited ${res.status}, expected ${expectedExit}`);
+  }
   return out;
 }
 
@@ -162,16 +203,34 @@ runScript("split-category-subjects.ts", []);
 const afterDry = await fetchAll();
 check("dry-run changed nothing", JSON.stringify([...before].sort()) === JSON.stringify([...afterDry].sort()));
 
+// --log without a value must hard-error, never silently mean "all logs".
+console.log("");
+console.log("  --- arg validation ---");
+for (const script of ["merge-sleep-quality.ts", "split-category-subjects.ts"]) {
+  const bad = spawnSync(
+    "pnpm",
+    ["exec", "tsx", join(here, script), "--pb-url", pbUrl, "--log"],
+    { cwd: join(here, ".."), env: { ...process.env, PB_ADMIN_EMAIL: adminEmail, PB_ADMIN_PASSWORD: adminPassword }, encoding: "utf8" },
+  );
+  check(
+    `${script}: --log without value exits 1`,
+    bad.status === 1 && `${bad.stderr}`.includes("--log requires a value"),
+    `status=${bad.status}`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Apply script 1 and verify
 // ---------------------------------------------------------------------------
 
 console.log("");
-console.log("  --- merge-sleep-quality --apply ---");
-runScript("merge-sleep-quality.ts", ["--apply"]);
+console.log("  --- merge-sleep-quality --apply (exit 2: day-E conflict left) ---");
+const mergeOut = runScript("merge-sleep-quality.ts", ["--apply"], 2);
+check("merge --apply with a conflict exits 2 with a loud trailer", mergeOut.includes("UNRESOLVED EVENT(S)"));
 let state = await fetchAll();
 
 check("day A: rating 4 attached to sleep", ratingOf(state.get(sleepA)?.entries ?? []) === 4);
+check("day A: quality labels merged onto sleep", state.get(sleepA)?.labels?.mood === "groggy");
 check("day A: quality deleted", !state.has(qualA));
 check("day B: quality deleted", !state.has(qualB));
 const createdB = [...state.values()].filter(
@@ -181,9 +240,18 @@ check("day B: sleep created with rating only", createdB.length === 1);
 check("day C: rating 5 attached to NIGHT sleep", ratingOf(state.get(nightC)?.entries ?? []) === 5);
 check("day C: nap untouched", ratingOf(state.get(napC)?.entries ?? []) === undefined);
 check("day C: quality deleted", !state.has(qualC));
+check("day D: quality deleted", !state.has(qualD));
+const createdD = [...state.values()].filter(
+  (r) =>
+    r.subject_id === "sleep" &&
+    r.entries.some((e: any) => e.name === "rating" && e.value === 7 && e.scale === 10),
+);
+check("day D: created sleep carries the 10-point scale verbatim", createdD.length === 1);
+check("day E: conflicting sleep untouched (rating stays 2)", ratingOf(state.get(sleepE)?.entries ?? []) === 2);
+check("day E: conflicting quality NOT deleted", state.has(qualE));
 
-console.log("  --- merge-sleep-quality --apply (rerun, must no-op) ---");
-runScript("merge-sleep-quality.ts", ["--apply"]);
+console.log("  --- merge-sleep-quality --apply (rerun, must no-op, conflict persists -> exit 2) ---");
+runScript("merge-sleep-quality.ts", ["--apply"], 2);
 const rerun1 = await fetchAll();
 check("script 1 rerun is a no-op", JSON.stringify([...state].sort()) === JSON.stringify([...rerun1].sort()));
 
@@ -192,8 +260,9 @@ check("script 1 rerun is a no-op", JSON.stringify([...state].sort()) === JSON.st
 // ---------------------------------------------------------------------------
 
 console.log("");
-console.log("  --- split-category-subjects --apply ---");
-runScript("split-category-subjects.ts", ["--apply"]);
+console.log("  --- split-category-subjects --apply (exit 2: missing-category left) ---");
+const splitOut = runScript("split-category-subjects.ts", ["--apply"], 2);
+check("split --apply with leftovers exits 2 with a loud trailer", splitOut.includes("UNRESOLVED EVENT(S)"));
 state = await fetchAll();
 
 const pt = state.get(exPt);
@@ -205,9 +274,15 @@ check("focus/trip planning: subject is trip-planning", trip?.subject_id === "tri
 check("focus/trip planning: labels now empty", trip?.labels == null || Object.keys(trip.labels).length === 0);
 const noCat = state.get(exNoCat);
 check("exercise w/o category: untouched", noCat?.subject_id === "exercise" && JSON.stringify(noCat?.labels) === JSON.stringify({ source: "manual" }));
+const self = state.get(exSelf);
+check("exercise/Exercise: stays subject exercise, intensity renamed, label gone",
+  self?.subject_id === "exercise" && ratingOf(self?.entries ?? []) === 3 &&
+  !(self?.entries ?? []).some((e: any) => e.name === "intensity") &&
+  (self?.labels == null || self.labels.category === undefined));
 
-console.log("  --- split-category-subjects --apply (rerun, must no-op) ---");
-runScript("split-category-subjects.ts", ["--apply"]);
+console.log("  --- split-category-subjects --apply (rerun: no-op, already-converted reported) ---");
+const rerunOut = runScript("split-category-subjects.ts", ["--apply"], 2);
+check("rerun reports the self-named category as already-converted", rerunOut.includes("already converted"));
 const rerun2 = await fetchAll();
 check("script 2 rerun is a no-op", JSON.stringify([...state].sort()) === JSON.stringify([...rerun2].sort()));
 

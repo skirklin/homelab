@@ -211,8 +211,12 @@ does not touch it. Prompt-content customization is explicitly **deferred**.
   Water [number/oz], Mood [rating], Note [text], Movement [category + number],
   Floss [bool/count]). **Not** the current personal 17.
 - **Existing log (scott's):** a PB migration backfills today's hardcoded
-  `TRACKABLES` → generic single-field trackables **1:1, preserving ids** (no
-  forced merges of sleep/sleep_quality, no history discontinuity).
+  `TRACKABLES` → generic single-field trackables **1:1, preserving ids**.
+  (The backfill itself didn't merge anything; in 2026-06 sleep_quality WAS
+  then deliberately folded into sleep — and exercise/focus split into
+  per-thing subjects — by the one-shot history rewrites under
+  [services/scripts/historical/](../../services/scripts/historical/):
+  `merge-sleep-quality.ts` + `split-category-subjects.ts`.)
 - `TRACKABLES` in [trackables.ts](app/src/trackables.ts) **stops being the
   runtime source**; it survives only as the default-template module / seed for
   the backfill.

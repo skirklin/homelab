@@ -79,7 +79,7 @@ export async function fetchEvents(
   subjectIds.forEach((s, i) => (params[`s${i}`] = s));
   const records = await pb.collection("life_events").getFullList({
     filter: pb.filter(`log = {:logId} && (${subjectClause})`, params),
-    sort: "timestamp",
+    sort: "timestamp,id", // id tiebreak keeps pagination stable across pages
     $autoCancel: false,
   });
   return records.map((r) => ({

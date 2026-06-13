@@ -4,21 +4,27 @@
  * the sleep event itself; the separate sleep_quality trackable goes away).
  *
  * Per log, per local day (owner's timezone, default America/Los_Angeles):
- *   - rating folds into the day's LONGEST sleep event as
- *     { name: "rating", type: "number", value: 1-5, unit: "rating", scale: 5 },
- *     then the sleep_quality event is DELETED;
- *   - if the target sleep already has a rating entry → reported as a
- *     conflict, nothing changes (unless the rating is identical — then the
- *     quality event is just deleted, which heals an interrupted prior run);
+ *   - the rating folds into the day's LONGEST sleep event as a `rating`
+ *     entry (unit/scale carried verbatim from the source entry; defaults
+ *     unit "rating" / scale 5 only when absent), then the sleep_quality
+ *     event is DELETED;
+ *   - non-rating entries (e.g. notes), labels, and end_time on the quality
+ *     event ride along onto the sleep event so deleting loses nothing;
+ *     a same-key label or entry with a DIFFERING value on the sleep event
+ *     is a conflict — nothing is ever clobbered or silently dropped;
+ *   - if the target sleep already has a rating entry → conflict, nothing
+ *     changes — unless EVERYTHING the quality event carries (rating incl.
+ *     unit/scale, extras, labels, end_time) is already present deep-equal
+ *     on the target, in which case the quality event is just deleted
+ *     (heals a prior run that crashed between PATCH and DELETE);
  *   - if the day has no sleep event → a sleep event is CREATED at the
- *     quality event's timestamp carrying only the rating (no duration);
- *   - non-rating entries on the quality event (e.g. notes) ride along onto
- *     the sleep event so deleting loses nothing.
+ *     quality event's timestamp carrying the rating + extras + labels +
+ *     end_time (no duration).
  *
  * Idempotent: sleep_quality events are the work queue; once deleted, reruns
  * find nothing to do. Crash-safe ordering (write sleep first, delete quality
- * second) means a rerun after a mid-run crash sees the identical rating and
- * plans delete-only.
+ * second) means a rerun after a mid-run crash sees its data already on the
+ * target and plans delete-only.
  *
  * Usage
  * -----
@@ -29,7 +35,11 @@
  *   --pb-url     = PB base URL (default: $PB_URL or https://api.kirkl.in).
  *   --dry-run    = default; prints the per-day plan, changes nothing.
  *   --apply      = write for real.
+ *
+ * Exit codes: 0 = clean, 1 = errors (bad args, apply failures),
+ * 2 = --apply finished but left conflicts/skips untouched (review needed).
  */
+import { takeFlag, takeOpt } from "./lib/cli";
 import {
   type SleepMergeAction,
   planSleepMerge,
@@ -37,34 +47,30 @@ import {
 import { connectAdmin, fetchEvents, resolveLogs } from "./lib/pb-admin";
 
 // ---------------------------------------------------------------------------
-// CLI (same takeOpt/takeFlag shape as recover-life-events.ts)
+// CLI
 // ---------------------------------------------------------------------------
 
 const argv = process.argv.slice(2);
+const USAGE = "Usage: pnpm tsx historical/merge-sleep-quality.ts [--log <id>] [--pb-url <url>] [--dry-run | --apply]";
 
-function takeOpt(name: string): string | undefined {
-  const i = argv.indexOf(name);
-  if (i < 0) return undefined;
-  const val = argv[i + 1];
-  argv.splice(i, 2);
-  return val;
+let onlyLogId: string | undefined;
+let apply = false;
+let dryRun = true;
+let pbUrl = "";
+try {
+  onlyLogId = takeOpt(argv, "--log");
+  apply = takeFlag(argv, "--apply");
+  dryRun = takeFlag(argv, "--dry-run") || !apply;
+  pbUrl = takeOpt(argv, "--pb-url") || process.env.PB_URL || `https://api.${process.env.DOMAIN || "kirkl.in"}`;
+} catch (err: any) {
+  console.error(err.message);
+  console.error(USAGE);
+  process.exit(1);
 }
-
-function takeFlag(name: string): boolean {
-  const i = argv.indexOf(name);
-  if (i < 0) return false;
-  argv.splice(i, 1);
-  return true;
-}
-
-const onlyLogId = takeOpt("--log");
-const apply = takeFlag("--apply");
-const dryRun = takeFlag("--dry-run") || !apply;
-const pbUrl = takeOpt("--pb-url") || process.env.PB_URL || `https://api.${process.env.DOMAIN || "kirkl.in"}`;
 
 if (argv.length > 0) {
   console.error(`Unknown args: ${argv.join(" ")}`);
-  console.error("Usage: pnpm tsx historical/merge-sleep-quality.ts [--log <id>] [--pb-url <url>] [--dry-run | --apply]");
+  console.error(USAGE);
   process.exit(1);
 }
 
@@ -88,7 +94,9 @@ function describe(a: SleepMergeAction): string {
   switch (a.kind) {
     case "attach":
       return `attach       quality=${a.qualityId} -> sleep=${a.sleepId} (rating ${a.rating}${
-        a.carried.length > 0 ? `, carried: ${a.carried.join(",")}` : ""})`;
+        a.carried.length > 0 ? `, carried: ${a.carried.join(",")}` : ""}${
+        a.newLabels ? `, +labels ${JSON.stringify(a.newLabels)}` : ""}${
+        a.newEndTime ? `, +end_time ${a.newEndTime}` : ""})`;
     case "create":
       return `create       quality=${a.qualityId} -> NEW sleep @ ${a.event.timestamp} (rating ${a.rating}, no duration)`;
     case "delete-only":
@@ -140,7 +148,15 @@ for (const log of logs) {
   for (const a of actions) {
     try {
       if (a.kind === "attach") {
-        await pb.collection("life_events").update(a.sleepId, { entries: a.newEntries }, { $autoCancel: false });
+        await pb.collection("life_events").update(
+          a.sleepId,
+          {
+            entries: a.newEntries,
+            ...(a.newLabels ? { labels: a.newLabels } : {}),
+            ...(a.newEndTime ? { end_time: a.newEndTime } : {}),
+          },
+          { $autoCancel: false },
+        );
         await pb.collection("life_events").delete(a.qualityId, { $autoCancel: false });
       } else if (a.kind === "create") {
         await pb.collection("life_events").create(
@@ -148,6 +164,7 @@ for (const log of logs) {
             log: log.id,
             subject_id: a.event.subject_id,
             timestamp: a.event.timestamp,
+            ...(a.event.end_time ? { end_time: a.event.end_time } : {}),
             entries: a.event.entries,
             ...(a.event.labels ? { labels: a.event.labels } : {}),
             ...(a.event.created_by ? { created_by: a.event.created_by } : {}),
@@ -185,4 +202,14 @@ if (dryRun) {
   console.log("");
   console.log("  Dry run: no changes written. Pass --apply to commit.");
 }
-process.exit(totals.errors > 0 ? 1 : 0);
+
+const unresolved = totals.conflict + totals.skip;
+if (!dryRun && unresolved > 0) {
+  console.log("");
+  console.log("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+  console.log(`  !!  APPLY FINISHED WITH ${unresolved} UNRESOLVED EVENT(S)`);
+  console.log("  !!  (conflicts + skips above were left untouched —");
+  console.log("  !!   review the per-day plan and resolve them by hand)");
+  console.log("  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+}
+process.exit(totals.errors > 0 ? 1 : !dryRun && unresolved > 0 ? 2 : 0);

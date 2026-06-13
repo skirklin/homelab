@@ -102,14 +102,48 @@ describe("sleepDurationMinutes", () => {
 });
 
 describe("extractRating", () => {
-  it("prefers the entry named rating", () => {
-    expect(extractRating(quality("q", "2026-03-04 08:00:00.000Z", 4))).toBe(4);
+  it("prefers the entry named rating and carries its unit/scale", () => {
+    expect(extractRating(quality("q", "2026-03-04 08:00:00.000Z", 4))).toEqual({
+      kind: "rating",
+      rating: { value: 4, unit: "rating", scale: 5 },
+      extras: [],
+    });
   });
-  it("falls back to a single numeric entry", () => {
+  it("carries a non-default scale verbatim (4/10 is not 4/5)", () => {
+    const e = ev({ id: "q", entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 10 }] });
+    expect(extractRating(e)).toMatchObject({ kind: "rating", rating: { value: 4, unit: "rating", scale: 10 } });
+  });
+  it("leaves unit/scale absent when the source entry has none", () => {
+    const e = ev({ id: "q", entries: [{ name: "rating", type: "number", value: 4 }] });
+    expect(extractRating(e)).toEqual({
+      kind: "rating",
+      rating: { value: 4, unit: undefined, scale: undefined },
+      extras: [],
+    });
+  });
+  it("excludes the rating's source entry from extras", () => {
+    const e = quality("q", "2026-03-04 08:00:00.000Z", 4, [{ name: "notes", type: "text", value: "ok" }]);
+    const r = extractRating(e);
+    if (r.kind !== "rating") throw new Error("unreachable");
+    expect(r.extras).toEqual([{ name: "notes", type: "text", value: "ok" }]);
+  });
+  it("falls back to a single unitless integer 1-5 entry", () => {
     const e = ev({ id: "q", entries: [{ name: "value", type: "number", value: 3 }] });
-    expect(extractRating(e)).toBe(3);
+    expect(extractRating(e)).toMatchObject({ kind: "rating", rating: { value: 3 } });
   });
-  it("refuses ambiguous events (two numerics, none named rating)", () => {
+  it("falls back to a single entry with unit rating regardless of value", () => {
+    const e = ev({ id: "q", entries: [{ name: "value", type: "number", value: 7, unit: "rating", scale: 10 }] });
+    expect(extractRating(e)).toMatchObject({ kind: "rating", rating: { value: 7, unit: "rating", scale: 10 } });
+  });
+  it("flags a single numeric that does not look like a rating", () => {
+    const minutes = ev({ id: "q", entries: [{ name: "duration", type: "number", value: 300, unit: "min" }] });
+    expect(extractRating(minutes)).toMatchObject({ kind: "not-rating" });
+    const big = ev({ id: "q", entries: [{ name: "value", type: "number", value: 9 }] });
+    expect(extractRating(big)).toMatchObject({ kind: "not-rating" });
+    const frac = ev({ id: "q", entries: [{ name: "value", type: "number", value: 3.7 }] });
+    expect(extractRating(frac)).toMatchObject({ kind: "not-rating" });
+  });
+  it("reports none for ambiguous events (two numerics, none named rating)", () => {
     const e = ev({
       id: "q",
       entries: [
@@ -117,7 +151,7 @@ describe("extractRating", () => {
         { name: "b", type: "number", value: 4 },
       ],
     });
-    expect(extractRating(e)).toBeUndefined();
+    expect(extractRating(e)).toMatchObject({ kind: "none" });
   });
 });
 
@@ -236,6 +270,192 @@ describe("planSleepMerge", () => {
     const other = ev({ id: "x", subject_id: "mood", timestamp: "2026-03-04 16:00:00.000Z" });
     expect(planSleepMerge([s, other], LA)).toEqual([]);
   });
+
+  // --- labels (finding 1) ---
+
+  it("merges quality labels onto the attach target", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432);
+    const q = ev({
+      id: "q1",
+      subject_id: "sleep_quality",
+      timestamp: "2026-03-04 16:00:00.000Z",
+      entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }],
+      labels: { mood: "groggy" },
+    });
+    const [a] = planSleepMerge([s, q], LA);
+    if (a.kind !== "attach") throw new Error(`expected attach, got ${a.kind}`);
+    expect(a.newLabels).toEqual({ mood: "groggy" });
+  });
+
+  it("merges quality labels into existing target labels (disjoint keys)", () => {
+    const s = { ...sleep("s1", "2026-03-04 14:00:00.000Z", 432), labels: { source: "watch" } };
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 4), labels: { mood: "groggy" } };
+    const [a] = planSleepMerge([s, q], LA);
+    if (a.kind !== "attach") throw new Error(`expected attach, got ${a.kind}`);
+    expect(a.newLabels).toEqual({ source: "watch", mood: "groggy" });
+  });
+
+  it("omits newLabels when the quality's labels are already on the target", () => {
+    const s = { ...sleep("s1", "2026-03-04 14:00:00.000Z", 432), labels: { mood: "groggy" } };
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 4), labels: { mood: "groggy" } };
+    const [a] = planSleepMerge([s, q], LA);
+    if (a.kind !== "attach") throw new Error(`expected attach, got ${a.kind}`);
+    expect(a.newLabels).toBeUndefined();
+  });
+
+  it("conflicts on a label key clash with a differing value", () => {
+    const s = { ...sleep("s1", "2026-03-04 14:00:00.000Z", 432), labels: { mood: "rested" } };
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 4), labels: { mood: "groggy" } };
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({
+      kind: "conflict",
+      reason: expect.stringContaining('label "mood"'),
+    });
+  });
+
+  it("preserves quality labels on the create path", () => {
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 3), labels: { mood: "groggy" } };
+    const [a] = planSleepMerge([q], LA);
+    if (a.kind !== "create") throw new Error(`expected create, got ${a.kind}`);
+    expect(a.event.labels).toEqual({ mood: "groggy" });
+  });
+
+  // --- end_time (finding 1) ---
+
+  it("carries a quality end_time onto a target sleep that has none", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432);
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 4), end_time: "2026-03-04 16:30:00.000Z" };
+    const [a] = planSleepMerge([s, q], LA);
+    if (a.kind !== "attach") throw new Error(`expected attach, got ${a.kind}`);
+    expect(a.newEndTime).toBe("2026-03-04 16:30:00.000Z");
+  });
+
+  it("conflicts when the quality end_time differs from the sleep's", () => {
+    const s = ev({
+      id: "s1",
+      subject_id: "sleep",
+      timestamp: "2026-03-04 14:00:00.000Z",
+      end_time: "2026-03-04 21:00:00.000Z",
+      entries: [{ name: "duration", type: "number", value: 420, unit: "min" }],
+    });
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 4), end_time: "2026-03-04 16:30:00.000Z" };
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({
+      kind: "conflict",
+      reason: expect.stringContaining("end_time"),
+    });
+  });
+
+  it("carries the quality end_time onto a created sleep", () => {
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 3), end_time: "2026-03-04 16:30:00.000Z" };
+    const [a] = planSleepMerge([q], LA);
+    if (a.kind !== "create") throw new Error(`expected create, got ${a.kind}`);
+    expect(a.event.end_time).toBe("2026-03-04 16:30:00.000Z");
+  });
+
+  // --- rating unit/scale (finding 2) ---
+
+  it("attaches with the source entry's unit/scale, not hardcoded 5", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432);
+    const q = ev({
+      id: "q1",
+      subject_id: "sleep_quality",
+      timestamp: "2026-03-04 16:00:00.000Z",
+      entries: [{ name: "rating", type: "number", value: 7, unit: "rating", scale: 10 }],
+    });
+    const [a] = planSleepMerge([s, q], LA);
+    if (a.kind !== "attach") throw new Error(`expected attach, got ${a.kind}`);
+    expect(a.newEntries).toContainEqual({ name: "rating", type: "number", value: 7, unit: "rating", scale: 10 });
+  });
+
+  it("never treats a 4/10 as identical to a 4/5 (conflict, not delete-only)", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432, [
+      { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+    ]);
+    const q = ev({
+      id: "q1",
+      subject_id: "sleep_quality",
+      timestamp: "2026-03-04 16:00:00.000Z",
+      entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 10 }],
+    });
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({ kind: "conflict" });
+  });
+
+  it("treats an absent scale as the default 5 for the identity check", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432, [
+      { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+    ]);
+    const q = ev({
+      id: "q1",
+      subject_id: "sleep_quality",
+      timestamp: "2026-03-04 16:00:00.000Z",
+      entries: [{ name: "rating", type: "number", value: 4 }],
+    });
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({ kind: "delete-only" });
+  });
+
+  it("conflicts (not skips) on a lone numeric that does not look like a rating", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432);
+    const q = ev({
+      id: "q1",
+      subject_id: "sleep_quality",
+      timestamp: "2026-03-04 16:00:00.000Z",
+      entries: [{ name: "duration", type: "number", value: 300, unit: "min" }],
+    });
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({ kind: "conflict", sleepId: "s1" });
+  });
+
+  // --- crash-rerun self-heal (finding 3) ---
+
+  it("heals a crash between PATCH and DELETE even with extras and labels", () => {
+    // A prior run attached rating + notes + labels to the sleep, then died
+    // before deleting the quality event. The rerun must plan delete-only.
+    const s = ev({
+      id: "s1",
+      subject_id: "sleep",
+      timestamp: "2026-03-04 14:00:00.000Z",
+      entries: [
+        { name: "duration", type: "number", value: 432, unit: "min" },
+        { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+        { name: "notes", type: "text", value: "restless" },
+      ],
+      labels: { mood: "groggy" },
+    });
+    const q = ev({
+      id: "q1",
+      subject_id: "sleep_quality",
+      timestamp: "2026-03-04 16:00:00.000Z",
+      entries: [
+        { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+        { name: "notes", type: "text", value: "restless" },
+      ],
+      labels: { mood: "groggy" },
+    });
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({ kind: "delete-only", qualityId: "q1", sleepId: "s1" });
+  });
+
+  it("does NOT heal when an extra differs from what's on the target", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432, [
+      { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+      { name: "notes", type: "text", value: "restless" },
+    ]);
+    const q = quality("q1", "2026-03-04 16:00:00.000Z", 4, [{ name: "notes", type: "text", value: "different" }]);
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({ kind: "conflict" });
+  });
+
+  it("does NOT heal when the quality's labels are missing on the target", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432, [
+      { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+    ]);
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 4), labels: { mood: "groggy" } };
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({ kind: "conflict" });
+  });
+
+  it("does NOT heal when the quality carries an end_time the target lacks", () => {
+    const s = sleep("s1", "2026-03-04 14:00:00.000Z", 432, [
+      { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
+    ]);
+    const q = { ...quality("q1", "2026-03-04 16:00:00.000Z", 4), end_time: "2026-03-04 16:30:00.000Z" };
+    expect(planSleepMerge([s, q], LA)[0]).toMatchObject({ kind: "conflict" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -249,6 +469,12 @@ describe("slugifyCategory", () => {
   });
   it("trims and collapses whitespace runs", () => {
     expect(slugifyCategory(" Trail  Running ")).toBe("trail-running");
+  });
+  it("strips non-alphanumerics into single dashes, trimming the ends", () => {
+    expect(slugifyCategory("Run & Lift")).toBe("run-lift");
+    expect(slugifyCategory("Cardio (HIIT)")).toBe("cardio-hiit");
+    expect(slugifyCategory("__weird--stuff!!")).toBe("weird-stuff");
+    expect(slugifyCategory("&&&")).toBe("");
   });
 });
 
@@ -309,5 +535,36 @@ describe("planCategorySplit", () => {
       }),
     );
     expect(a).toMatchObject({ kind: "conflict" });
+  });
+
+  it("rewrites a self-named category once, then reports already-converted on rerun", () => {
+    // First pass: category "Exercise" on subject `exercise` — slug equals
+    // the subject, so the rewrite only strips the label + renames intensity.
+    const original = base({
+      entries: [
+        { name: "duration", type: "number", value: 30, unit: "min" },
+        { name: "intensity", type: "number", value: 3, unit: "rating", scale: 5 },
+      ],
+      labels: { category: "Exercise" },
+    });
+    const first = planCategorySplit(original);
+    expect(first).toMatchObject({ kind: "rewrite", newSubjectId: "exercise", renamedIntensity: true });
+    if (first.kind !== "rewrite") throw new Error("unreachable");
+    // Rerun sees the rewritten shape: same subject, no category, rating present.
+    const rerun = planCategorySplit(
+      base({ entries: first.entries, labels: first.labels, subject_id: first.newSubjectId }),
+    );
+    expect(rerun).toMatchObject({ kind: "already-converted" });
+  });
+
+  it("still reports missing-category when there is no rating signature", () => {
+    // No category and no rating entry: could be untouched data — stay loud.
+    expect(
+      planCategorySplit(base({ entries: [{ name: "duration", type: "number", value: 20, unit: "min" }], labels: null })),
+    ).toMatchObject({ kind: "missing-category" });
+    // intensity still present = definitely never rewritten.
+    expect(
+      planCategorySplit(base({ entries: [{ name: "intensity", type: "number", value: 2 }], labels: null })),
+    ).toMatchObject({ kind: "missing-category" });
   });
 });
