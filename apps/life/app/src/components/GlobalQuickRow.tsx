@@ -1,19 +1,17 @@
 /**
- * Cross-trackable quick-log row (P3). Replaces the lost PWA home-screen
- * jumplist with an in-app one: the most-frecent actions + pins across all
- * (non-hidden) trackables, one tap to log. Compact and unobtrusive — it sits
- * above the per-trackable grid and quietly renders nothing when there's no
- * history and no pins yet (a fresh log).
+ * Global quick-row — the PRIMARY input surface at the top of the dashboard.
  *
- * Each chip shows the trackable label + the action's value ("Edibles 5mg",
- * "Coffee 8 oz · ...") so it's unambiguous which trackable a tap targets.
+ * Chips are replayable (subjectId, payload) actions: ALL pins (vocab order,
+ * never trimmed) then global frecency fills to ~8. A tap replays the exact
+ * payload (entries + labels) as a NEW event — logging always appends, and the
+ * post-log toast carries Undo (useLogEvent). Text/notes entries never ride in
+ * a chip (excluded from frecency keys and replay).
  */
-import { useCallback, useMemo, useState } from "react";
+import { useMemo } from "react";
 import styled from "styled-components";
-import { useFeedback, useLifeBackend } from "@kirkl/shared";
-import type { LifeManifestTrackable, QuickPayload } from "@homelab/backend";
-import type { LogEntry } from "../types";
+import type { LifeManifestTrackable, QuickPayload, LifeEvent } from "@homelab/backend";
 import { globalFrecentActions, type GlobalAction } from "../lib/frecency";
+import { useLogEvent } from "../lib/useLogEvent";
 import { formatEntry } from "../lib/format";
 
 const Row = styled.div`
@@ -30,7 +28,7 @@ const Chip = styled.button<{ $pinned: boolean }>`
   border: 1px solid ${(p) => (p.$pinned ? "var(--color-primary)" : "var(--color-border)")};
   background: ${(p) => (p.$pinned ? "var(--color-primary-light)" : "var(--color-bg)")};
   border-radius: 999px;
-  padding: 4px 12px;
+  padding: 5px 13px;
   font-size: var(--font-size-xs);
   cursor: pointer;
   color: var(--color-text);
@@ -48,10 +46,10 @@ const ChipValue = styled.span`
   color: var(--color-text-secondary);
 `;
 
-/** Value-only label for the action ("5mg", "8 oz · run"). */
+/** Value-only label for the action ("5 mg", "8 oz · run"). */
 function actionValue(payload: QuickPayload): string {
   if (payload.label) return payload.label;
-  const measured = payload.entries.filter((e) => e.type === "number" || e.type === "bool");
+  const measured = payload.entries.filter((e) => e.type !== "text");
   const valuePart = measured.map(formatEntry).join(" ");
   const cat = payload.labels ? Object.values(payload.labels)[0] : undefined;
   return cat ? `${valuePart} · ${cat}` : valuePart;
@@ -59,41 +57,35 @@ function actionValue(payload: QuickPayload): string {
 
 interface GlobalQuickRowProps {
   trackables: LifeManifestTrackable[];
-  entries: LogEntry[];
+  events: LifeEvent[];
   userId: string;
   logId: string | undefined;
   /** If set, log against this timestamp (backfilling a past day). */
   timestamp?: Date;
-  /** Max chips. */
+  /** Target chip count (pins always all render; frecency fills to this). */
   limit?: number;
 }
 
-export function GlobalQuickRow({ trackables, entries, userId, logId, timestamp, limit = 6 }: GlobalQuickRowProps) {
-  const { message } = useFeedback();
-  const life = useLifeBackend();
-  const [saving, setSaving] = useState(false);
+export function GlobalQuickRow({ trackables, events, userId, logId, timestamp, limit = 8 }: GlobalQuickRowProps) {
+  const logEvent = useLogEvent();
 
   const actions = useMemo<GlobalAction[]>(
-    () => globalFrecentActions(entries, trackables, { limit }),
-    [entries, trackables, limit],
+    () => globalFrecentActions(events, trackables, { limit }),
+    [events, trackables, limit],
   );
 
-  const log = useCallback(async (action: GlobalAction) => {
+  const log = async (action: GlobalAction) => {
     if (!logId || !userId) return;
-    setSaving(true);
-    try {
-      await life.addEvent(logId, action.trackable.id, action.payload.entries, userId, {
-        timestamp,
-        labels: action.payload.labels,
-      });
-      message.success(`Logged ${action.trackable.label}`);
-    } catch (err) {
-      console.error("Quick-log failed:", err);
-      message.error("Failed to log");
-    } finally {
-      setSaving(false);
-    }
-  }, [logId, userId, timestamp, life, message]);
+    await logEvent({
+      logId,
+      userId,
+      subjectId: action.trackable.id,
+      entries: action.payload.entries,
+      labels: action.payload.labels,
+      timestamp,
+      label: `${action.trackable.label} ${actionValue(action.payload)}`.trim(),
+    });
+  };
 
   if (actions.length === 0) return null;
 
@@ -103,7 +95,7 @@ export function GlobalQuickRow({ trackables, entries, userId, logId, timestamp, 
         <Chip
           key={`${action.trackable.id}:${actionValue(action.payload)}`}
           $pinned={action.pinned}
-          disabled={saving || !logId}
+          disabled={!logId}
           onClick={() => log(action)}
           data-testid="global-quick-chip"
         >

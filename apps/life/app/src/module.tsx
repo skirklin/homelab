@@ -9,7 +9,6 @@ import styled from "styled-components";
 import { useAuth, NotFound } from "@kirkl/shared";
 import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "@kirkl/shared";
-import { DisplaySettingsProvider } from "./display-settings";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { SessionRunner } from "./components/SessionRunner";
 import { useEntriesSubscription } from "./subscription";
@@ -71,40 +70,38 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   }
 
   return (
-    <DisplaySettingsProvider>
-      <Routes>
-        <Route path="/" element={<LifeDashboard embedded={embedded} />} />
-        <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
-        <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
-        <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
-        <Route path="/insights" element={
-          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-            <Visualizations />
-          </Suspense>
-        } />
-        <Route path="/journal" element={
-          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-            <Journal />
-          </Suspense>
-        } />
-        <Route path="/observations" element={
-          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-            <Observations />
-          </Suspense>
-        } />
-        <Route path="/observations/:id" element={
-          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-            <ObservationDetail />
-          </Suspense>
-        } />
-        <Route path="/chat" element={
-          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-            <Chat />
-          </Suspense>
-        } />
-        <Route path="*" element={<NotFound homePath="/" />} />
-      </Routes>
-    </DisplaySettingsProvider>
+    <Routes>
+      <Route path="/" element={<LifeDashboard embedded={embedded} />} />
+      <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
+      <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
+      <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
+      <Route path="/insights" element={
+        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+          <Visualizations />
+        </Suspense>
+      } />
+      <Route path="/journal" element={
+        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+          <Journal />
+        </Suspense>
+      } />
+      <Route path="/observations" element={
+        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+          <Observations />
+        </Suspense>
+      } />
+      <Route path="/observations/:id" element={
+        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+          <ObservationDetail />
+        </Suspense>
+      } />
+      <Route path="/chat" element={
+        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+          <Chat />
+        </Suspense>
+      } />
+      <Route path="*" element={<NotFound homePath="/" />} />
+    </Routes>
   );
 }
 
