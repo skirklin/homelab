@@ -321,8 +321,13 @@ function CookingLog(props: RecipeCardProps) {
                       onMouseDown={() => {
                         // mousedown precedes the note editor's blur — flag it
                         // so the blur skips its save and handleRate coalesces
-                        // notes + rating into one write.
-                        if (editingId === event.id) starTapWhileEditing.current = event.id;
+                        // notes + rating into one write. Only when the textarea
+                        // actually has focus: otherwise no blur will fire to
+                        // consume the flag, and a stale flag would suppress a
+                        // later legitimate save.
+                        if (editingId === event.id && document.activeElement?.tagName === "TEXTAREA") {
+                          starTapWhileEditing.current = event.id;
+                        }
                       }}
                     >
                       <StarRow
