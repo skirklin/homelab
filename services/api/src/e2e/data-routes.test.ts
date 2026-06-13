@@ -644,6 +644,29 @@ describe("Recipes", () => {
       token: userToken,
     });
   });
+
+  it("cooking-log POST treats rating: null as omitted (parity with PATCH's null-clears)", async () => {
+    const created = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      method: "POST",
+      token: userToken,
+      body: { notes: "No rating yet", rating: null },
+    });
+    expect(created.status).toBe(201);
+    const eventId = created.data.id as string;
+
+    const list = await apiReq(`/data/recipes/${recipe1Id}/cooking-log`, {
+      token: userToken,
+    });
+    const row = (list.data as any[]).find((e) => e.id === eventId);
+    expect(row.notes).toBe("No rating yet");
+    expect(row.rating).toBeUndefined();
+
+    // Cleanup
+    await apiReq(`/data/cooking-log/${eventId}`, {
+      method: "DELETE",
+      token: userToken,
+    });
+  });
 });
 
 // ==========================================

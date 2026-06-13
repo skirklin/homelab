@@ -948,7 +948,11 @@ dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
   const body = await c.req.json<{ notes?: string; rating?: unknown; timestamp?: string }>().catch(
     () => ({} as { notes?: string; rating?: unknown; timestamp?: string }),
   );
-  if (body.rating !== undefined && !isValidRating(body.rating)) {
+  // PATCH accepts `rating: null` as "clear the rating"; on create there is
+  // nothing to clear, so null degrades to "no rating" instead of a 400 —
+  // callers can use one payload shape for both verbs.
+  const rating = body.rating === null ? undefined : body.rating;
+  if (rating !== undefined && !isValidRating(rating)) {
     return c.json({ error: "rating must be an integer between 1 and 5" }, 400);
   }
   const snapshot = normalizeSnapshot(recipe.data);
@@ -958,7 +962,7 @@ dataRoutes.post("/recipes/:id/cooking-log", handler(async (c) => {
     subject_id: id,
     timestamp: body.timestamp ?? new Date().toISOString(),
     created_by: userId,
-    entries: body.rating === undefined ? entries : patchRatingEntries(entries, body.rating),
+    entries: rating === undefined ? entries : patchRatingEntries(entries, rating),
     recipe_snapshot: snapshot ?? null,
   });
   return c.json({ id: record.id, timestamp: record.timestamp }, 201);
