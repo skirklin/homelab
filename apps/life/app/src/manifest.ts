@@ -19,7 +19,13 @@ export type { SampleSchedule, LifeLog };
 export interface SessionPrompt {
   /** Key in the resulting event's entries. Don't rename without a migration. */
   id: string;
-  type: "text" | "rating" | "number" | "checkbox";
+  /**
+   * `sleep` is special: the step collects duration + optional quality rating
+   * + optional notes and the runner writes them as ONE merged `sleep` event
+   * (canonical did-shape entries) — never folded into the session event,
+   * never split into a separate `sleep_quality` event.
+   */
+  type: "text" | "rating" | "number" | "checkbox" | "sleep";
   label: string;
   /** Optional sub-label / hint shown under the prompt. */
   hint?: string;
@@ -59,6 +65,12 @@ export const SESSIONS: Session[] = [
     title: "Morning",
     greeting: "Good morning. A few questions before the day gets going.",
     prompts: [
+      {
+        id: "sleep",
+        type: "sleep",
+        label: "How did you sleep?",
+        hint: "Skip if you'd rather not log it.",
+      },
       {
         id: "gratitude",
         type: "text",

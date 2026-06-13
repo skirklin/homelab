@@ -2,7 +2,7 @@
  * Small secondary text primitive — local to the life app.
  *
  * Default: small/secondary (matches the dashboard session hints).
- * `$muted`: extra-small/muted (matches the EventLogger "N logged today" hint).
+ * `$muted`: extra-small/muted (for de-emphasized inline annotations).
  *
  * Positional concerns (margins, font-weight tweaks) live at the callsite as
  * inline styles rather than as props on this primitive.
