@@ -31,6 +31,7 @@ import { useLifeContext } from "../life-context";
 import { GlobalQuickRow } from "./GlobalQuickRow";
 import { ShapeCard } from "./ShapeCard";
 import { ShapeSheet } from "./ShapeSheet";
+import { DayTimeline } from "./DayTimeline";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
 import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
@@ -1030,6 +1031,13 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
                 />
               ))}
             </ShapeGrid>
+            <DayTimeline
+              trackables={trackables}
+              events={allEntries}
+              day={selectedDate}
+              journalTarget={journalTarget}
+              onOpenShape={setOpenShape}
+            />
           </SwipeContainer>
         </Section>
       </PageContainer>
