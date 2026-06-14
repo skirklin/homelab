@@ -10,7 +10,7 @@
  * days open the shape sheet against that day; a populated day opens an edit
  * surface (one event → EventEditModal; several → a day modal).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { LifeManifestTrackable, LifeEvent, LifeEntry, LifeGoal } from "@homelab/backend";
@@ -100,6 +100,15 @@ describe("HabitBoard", () => {
   beforeEach(() => {
     addEvent.mockClear();
     messageOpen.mockClear();
+    // Pin "now" so the calendar's real-today anchor (and thus which days are
+    // past/future and in-window) is deterministic regardless of when the suite
+    // runs. 2026-06-14 is a Sunday → the test fixture days 6/8..6/13 are all in
+    // the current+prior week, in the past, and inside the 6-week goal window.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2026, 6, 14, 12));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows the empty state pointing at Claude when there are no goals or trackables", () => {
@@ -272,9 +281,10 @@ describe("HabitBoard", () => {
   });
 
   it("backfill: a future cell is inert (no log, no sheet)", async () => {
-    const { onOpenShape } = renderBoard({ goals: [flossDaily], events: [], day: at(2026, 6, 10) });
+    // Real today is pinned to Sun 6/14; Mon 6/15 is a future cell in this week.
+    const { onOpenShape } = renderBoard({ goals: [flossDaily], events: [] });
     const row = screen.getByTestId("habit-row");
-    await userEvent.click(cellIn(row, "2026-06-12")); // future
+    await userEvent.click(cellIn(row, "2026-06-15"));
     expect(addEvent).not.toHaveBeenCalled();
     expect(onOpenShape).not.toHaveBeenCalled();
   });

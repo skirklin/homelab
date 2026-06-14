@@ -305,6 +305,13 @@ export function HabitBoard({
   // ONE O(events) pass feeds every calendar cell — no per-cell event scans.
   const index = useMemo(() => buildDayIndex(events, tz), [events, tz]);
 
+  // The calendar always anchors on the REAL today (marker + future cutoff +
+  // history window), independent of the DateNav's viewed `day`. The viewed day
+  // still drives goal STATUS evaluation (value/target/streak) below, so a
+  // calendar tap and the status can describe different days — by design: the
+  // grid is for browsing/backfilling history, the status row for the chosen day.
+  const realToday = useMemo(() => new Date(), [events]);
+
   const visibleGoals = useMemo(() => goals.filter((g) => !g.hidden), [goals]);
 
   const goalRows = useMemo<GoalRow[]>(() => {
@@ -478,7 +485,7 @@ export function HabitBoard({
                     weeks={GOAL_WEEKS}
                     index={index}
                     tz={tz}
-                    today={day}
+                    today={realToday}
                     onTapDay={(date, evts) => void handleTapDay(subjectIds, thing, goal, date, evts)}
                   />
                 </Card>
@@ -508,7 +515,7 @@ export function HabitBoard({
                     weeks={TRACKABLE_WEEKS}
                     index={index}
                     tz={tz}
-                    today={day}
+                    today={realToday}
                     onTapDay={(date, evts) => void handleTapDay([t.id], t, undefined, date, evts)}
                   />
                 </TrackableRow>
