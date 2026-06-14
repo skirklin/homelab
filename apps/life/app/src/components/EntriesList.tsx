@@ -80,9 +80,15 @@ interface EntriesListProps {
   events: LifeEvent[];
   /** Rendered when events is empty; pass null to render nothing. */
   emptyText?: string | null;
+  /**
+   * Fired after an event is successfully deleted. Optional + backward-compatible
+   * — the ShapeSheet usage omits it. The single-event EventEditModal wires it to
+   * close itself (deleting the only row leaves nothing to edit).
+   */
+  onDeleted?: (eventId: string) => void;
 }
 
-export function EntriesList({ events, emptyText = "Nothing logged yet" }: EntriesListProps) {
+export function EntriesList({ events, emptyText = "Nothing logged yet", onDeleted }: EntriesListProps) {
   const life = useLifeBackend();
   const { message } = useFeedback();
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -91,6 +97,7 @@ export function EntriesList({ events, emptyText = "Nothing logged yet" }: Entrie
     setDeletingId(eventId);
     try {
       await life.deleteEvent(eventId);
+      onDeleted?.(eventId);
     } catch (err) {
       console.error("Failed to delete:", err);
       message.error("Failed to delete");
