@@ -26,7 +26,10 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
  *   hourly counters — high-volume interval records (steps/distance/calories)
  *                    aggregated into ONE event per local hour, with an
  *                    additive high-water-mark upsert so re-posts never double
- *                    count.
+ *                    count. The hwm is end_time-based, so the stored total is a
+ *                    lower bound under RESTATEMENT (a corrected record sharing
+ *                    an end instant past the hwm is dropped, not reconciled) —
+ *                    fine for a single-device append-style feed.
  *
  * `heart_rate` is ignored entirely (tens of thousands of raw samples).
  */
@@ -35,6 +38,11 @@ import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 export function round(value: number, digits = 0): number {
   const f = 10 ** digits;
   return Math.round(value * f) / f;
+}
+
+/** A finite number, or null (rejects non-numbers, NaN, Infinity). */
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 export const KG_TO_LB = 2.20462;
@@ -59,11 +67,28 @@ export type HourBucket = {
 };
 
 /**
+ * Canonicalize an ISO instant to its UTC `toISOString()` form, or "" if
+ * unparseable. The high-water-mark guard compares end_times LEXICALLY, which
+ * is only sound if every value is the same format/zone — normalizing here
+ * removes that silent assumption (mixed `Z`/`+00:00`/precision can't mis-order).
+ */
+function canonInstant(iso: string): string {
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? "" : new Date(t).toISOString();
+}
+
+/**
  * Pure: bucket interval records by their local-hour-start in `timeZone`.
  * `valueOf` extracts the additive value (null skips a record). Only records
  * whose `end_time` is strictly past `sinceHwm` are folded in — that's the
  * high-water-mark guard that makes re-posts/delta-syncs accumulate without
- * double counting. Returns one HourBucket per non-empty local hour.
+ * double counting. `end_time`s are canonicalized so the lexical compare is
+ * order-safe regardless of the source's ISO formatting.
+ *
+ * NOTE: end_time is treated as a unique high-water key — a distinct record
+ * sharing an end instant at/before the hwm is dropped (undercount, never
+ * double count). Fine for a single-device personal feed; flagged for clarity.
+ * Returns one HourBucket per non-empty local hour.
  */
 export function bucketHourly(
   records: Record<string, unknown>[],
@@ -75,10 +100,10 @@ export function bucketHourly(
   for (const r of records) {
     const startTime = r.start_time as string;
     if (!startTime) continue;
-    const endTime = (r.end_time as string) || startTime;
-    if (endTime <= sinceHwm) continue; // already counted
+    const endTime = canonInstant((r.end_time as string) || startTime);
+    if (!endTime || endTime <= sinceHwm) continue; // unparseable or already counted
     const value = valueOf(r);
-    if (value === null) continue;
+    if (value === null || !Number.isFinite(value)) continue;
     const localHour = formatInTimeZone(new Date(startTime), timeZone, "yyyy-MM-dd'T'HH:00:00");
     let b = buckets.get(localHour);
     if (!b) {
@@ -273,75 +298,81 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
 
   for (const r of arr("weight")) {
     const time = r.time as string;
-    if (!time || typeof r.kilograms !== "number") continue;
+    const kg = num(r.kilograms);
+    if (!time || kg === null) continue;
     await create1to1({
       subject: "weight",
       sourceId: `hc:weight:${time}`,
       timestamp: time,
-      entries: [{ name: "amount", type: "number", value: round(r.kilograms * KG_TO_LB, 1), unit: "lb" }],
+      entries: [{ name: "amount", type: "number", value: round(kg * KG_TO_LB, 1), unit: "lb" }],
     });
   }
 
   for (const r of arr("resting_heart_rate")) {
     const time = r.time as string;
-    if (!time || typeof r.bpm !== "number") continue;
+    const bpm = num(r.bpm);
+    if (!time || bpm === null) continue;
     await create1to1({
       subject: "resting_hr",
       sourceId: `hc:resting_hr:${time}`,
       timestamp: time,
-      entries: [{ name: "amount", type: "number", value: r.bpm, unit: "bpm" }],
+      entries: [{ name: "amount", type: "number", value: bpm, unit: "bpm" }],
     });
   }
 
   for (const r of arr("respiratory_rate")) {
     const time = r.time as string;
-    if (!time || typeof r.rate !== "number") continue;
+    const rate = num(r.rate);
+    if (!time || rate === null) continue;
     await create1to1({
       subject: "respiratory_rate",
       sourceId: `hc:respiratory_rate:${time}`,
       timestamp: time,
-      entries: [{ name: "amount", type: "number", value: round(r.rate, 1), unit: "br/min" }],
+      entries: [{ name: "amount", type: "number", value: round(rate, 1), unit: "br/min" }],
     });
   }
 
   for (const r of arr("body_fat")) {
     const time = r.time as string;
-    if (!time || typeof r.percentage !== "number") continue;
+    const pct = num(r.percentage);
+    if (!time || pct === null) continue;
     await create1to1({
       subject: "body_fat",
       sourceId: `hc:body_fat:${time}`,
       timestamp: time,
-      entries: [{ name: "amount", type: "number", value: round(r.percentage, 1), unit: "%" }],
+      entries: [{ name: "amount", type: "number", value: round(pct, 1), unit: "%" }],
     });
   }
 
   for (const r of arr("sleep")) {
     const end = r.session_end_time as string;
-    if (!end || typeof r.duration_seconds !== "number") continue;
+    const durSec = num(r.duration_seconds);
+    if (!end || durSec === null) continue;
     // Start = first stage's start_time if present, else end minus duration.
     const stages = Array.isArray(r.stages) ? (r.stages as Record<string, unknown>[]) : [];
     const start =
       (stages[0]?.start_time as string) ||
-      new Date(new Date(end).getTime() - r.duration_seconds * 1000).toISOString();
+      new Date(new Date(end).getTime() - durSec * 1000).toISOString();
     await create1to1({
       subject: "sleep",
       sourceId: `hc:sleep:${end}`,
       timestamp: start,
       endTime: end,
-      entries: [{ name: "duration", type: "number", value: round(r.duration_seconds / 60), unit: "min" }],
+      entries: [{ name: "duration", type: "number", value: round(durSec / 60), unit: "min" }],
     });
   }
 
   for (const r of arr("exercise")) {
     const start = r.start_time as string;
-    if (!start || typeof r.duration_seconds !== "number") continue;
+    const durSec = num(r.duration_seconds);
+    if (!start || durSec === null) continue;
     await create1to1({
       subject: "exercise",
       sourceId: `hc:exercise:${start}`,
       timestamp: start,
       endTime: (r.end_time as string) || undefined,
       labels: { category: exerciseCategory(r.type) },
-      entries: [{ name: "duration", type: "number", value: round(r.duration_seconds / 60), unit: "min" }],
+      entries: [{ name: "duration", type: "number", value: round(durSec / 60), unit: "min" }],
     });
   }
 
@@ -387,9 +418,12 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
       }
 
       // Fold in only records past the stored high-water mark for this hour.
-      const prevHwm =
+      // Canonicalize the stored hwm too so the lexical compare is consistent
+      // even if an older row stored a differently-formatted instant.
+      const rawHwm =
         (existing.labels && typeof existing.labels === "object" && (existing.labels as Record<string, string>).hwm) ||
         "";
+      const prevHwm = rawHwm ? canonInstant(rawHwm) : "";
       const delta = bucketHourly(records, timeZone, opts.valueOf, prevHwm).get(localHour);
       if (!delta || (delta.sum === 0 && delta.hwm === prevHwm)) {
         skipped++;
@@ -416,7 +450,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     subject: "steps",
     unit: "ct",
     digits: 0,
-    valueOf: (r) => (typeof r.count === "number" ? r.count : null),
+    valueOf: (r) => num(r.count),
     finalize: (sum) => sum,
   });
   await aggregateHourly({
@@ -424,7 +458,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     subject: "distance",
     unit: "mi",
     digits: 2,
-    valueOf: (r) => (typeof r.meters === "number" ? r.meters : null),
+    valueOf: (r) => num(r.meters),
     finalize: (sum) => metersToMiles(sum),
   });
   await aggregateHourly({
@@ -432,7 +466,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     subject: "calories",
     unit: "kcal",
     digits: 1,
-    valueOf: (r) => (typeof r.calories === "number" ? r.calories : null),
+    valueOf: (r) => num(r.calories),
     finalize: (sum) => round(sum, 1),
   });
 
