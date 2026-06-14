@@ -105,6 +105,21 @@ describe("TrackerCalendar", () => {
     expect(cell("2026-06-08").getAttribute("data-kind")).toBe("filled");
   });
 
+  it("a WEEKLY at_most cap never colors a single day 'over' (breach is per-week, not per-day)", () => {
+    // "≤ 3 drinks/week": a day with 3 drinks is NOT a per-day breach — comparing
+    // one day's sum to the weekly target would mis-flag the cell. Logged days are
+    // neutral "filled"; the weekly breach lives in the status row.
+    const weeklyCap: LifeGoal = { id: "wcap", label: "Drinks/wk", scope: { thing: "drink" }, kind: "at_most", metric: "sum", unit: "drinks", target: 3, period: "week" };
+    const index = buildDayIndex(
+      [ev("drink", num("drinks", 3, "drinks"), "2026-06-09T18:00:00.000Z")],
+      PT,
+    );
+    render(
+      <TrackerCalendar subjectIds={["drink"]} goal={weeklyCap} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    expect(cell("2026-06-09").getAttribute("data-kind")).toBe("filled");
+  });
+
   it("tapping a populated non-future cell fires onTapDay with that day's events", async () => {
     const onTapDay = vi.fn();
     const event = ev("water", num("amount", 8, "oz"), "2026-06-09T18:00:00.000Z");

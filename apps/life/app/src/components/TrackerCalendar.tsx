@@ -105,7 +105,12 @@ function cellState(
   if (!logged) return "empty";
   if (!goal) return "filled";
   if (goal.kind === "at_most") {
-    // A cap is a daily ceiling: over when the day's summed quantity exceeds it.
+    // The "over" overlay is a per-DAY breach signal, so it only makes sense for
+    // a daily cap. For a weekly (or otherwise non-day) cap, comparing a single
+    // day's quantity to the *period* target would mis-flag cells — the weekly
+    // breach lives in the status row, so a logged day is just neutral "filled".
+    if (goal.period !== "day") return "filled";
+    // A daily cap is a per-day ceiling: over when the day's quantity exceeds it.
     // `sum` metric sums by unit; for count/days caps fall back to event count.
     const value =
       goal.metric === "sum" && goal.unit
