@@ -4,16 +4,18 @@
  * It swipes with the day (lives inside <SwipeContainer>) so it tracks
  * `selectedDate`, not always "today".
  *
- * It is a READ surface plus a tap that reuses the existing shape sheet: tapping
- * a thing's row opens that shape's bottom sheet (the editor for that thing/day).
- * Rows whose shape can't be resolved (deleted vocab, session events) are
- * non-interactive. The full Journal lives at /journal; the footer links there.
+ * It is a READ surface plus a tap that opens the single-event edit modal:
+ * tapping an event's row opens `EventEditModal` for that exact event (edit
+ * timestamp/values, or delete). Session rows are non-interactive (they're
+ * composite prompt entries, not single-shape events); deleted-vocab rows ARE
+ * editable — the event still has entries worth editing/deleting. The full
+ * Journal lives at /journal; the footer links there.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import dayjs from "dayjs";
-import type { LifeEvent, LifeManifestTrackable, TrackableShape } from "@homelab/backend";
+import type { LifeEvent, LifeManifestTrackable } from "@homelab/backend";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import {
   aggregateEvents,
@@ -21,6 +23,7 @@ import {
   formatAggregate,
   labelFor,
 } from "../lib/shapes";
+import { EventEditModal } from "./EventEditModal";
 
 // ---------------------------------------------------------------------------
 // Styled
@@ -138,8 +141,11 @@ interface TimelineRow {
   time: string;
   thing: string;
   value: string;
-  /** Shape to open on tap; null when the row is non-interactive. */
-  shape: TrackableShape | null;
+  /**
+   * The event to open in the edit modal on tap; null for session rows, which
+   * stay non-interactive (composite prompt entries, not single-shape events).
+   */
+  event: LifeEvent | null;
 }
 
 function isSameDay(a: Date, b: Date): boolean {
@@ -161,8 +167,6 @@ export interface DayTimelineProps {
   day: Date;
   /** Pre-computed `journal[?date=…]` target reused for the "+N more" / footer. */
   journalTarget: string;
-  /** Opens a shape's bottom sheet (the edit path). */
-  onOpenShape: (shape: TrackableShape) => void;
 }
 
 export function DayTimeline({
@@ -170,9 +174,12 @@ export function DayTimeline({
   events,
   day,
   journalTarget,
-  onOpenShape,
 }: DayTimelineProps) {
   const navigate = useNavigate();
+  // Self-contained edit-modal state: tapping an event row opens it for that one
+  // event. The backend (via EntriesList) handles the write; the subscription
+  // refreshes this list.
+  const [editing, setEditing] = useState<LifeEvent | null>(null);
 
   // Header text: "Today's log" for the current day, else the day's label +
   // " log" (Journal phrasing: Yesterday / "Mon, May 5"). The " log" suffix
@@ -202,19 +209,19 @@ export function DayTimeline({
           time: formatTime(ev.timestamp),
           thing: `${session.title} session`,
           value: "",
-          shape: null,
+          event: null,
         };
       }
-      // Resolve shape from the trackable; unknown subjectId (deleted vocab) has
-      // no shape → non-interactive, but still degrades to the raw id as label.
-      const trackable = trackables.find((t) => t.id === ev.subjectId);
+      // Every non-session event is editable — including deleted-vocab rows,
+      // which still carry entries worth editing/deleting and degrade to the raw
+      // id as label.
       return {
         id: ev.id,
         time: formatTime(ev.timestamp),
         thing: labelFor(trackables, ev.subjectId),
         // Single-event summary — reuses the same formatting as the cards.
         value: formatAggregate(aggregateEvents([ev])),
-        shape: trackable?.shape ?? null,
+        event: ev,
       };
     });
   }, [events, day, trackables]);
@@ -234,10 +241,10 @@ export function DayTimeline({
           {visible.map((r) => (
             <Row
               key={r.id}
-              $interactive={r.shape !== null}
-              disabled={r.shape === null}
+              $interactive={r.event !== null}
+              disabled={r.event === null}
               data-testid="day-timeline-row"
-              onClick={r.shape !== null ? () => onOpenShape(r.shape as TrackableShape) : undefined}
+              onClick={r.event ? () => setEditing(r.event) : undefined}
             >
               <Time>{r.time}</Time>
               <Thing>{r.thing}</Thing>
@@ -252,6 +259,11 @@ export function DayTimeline({
           </Footer>
         </List>
       )}
+      <EventEditModal
+        event={editing}
+        trackables={trackables}
+        onClose={() => setEditing(null)}
+      />
     </Wrap>
   );
 }

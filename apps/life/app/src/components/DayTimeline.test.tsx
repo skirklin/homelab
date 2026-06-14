@@ -1,12 +1,13 @@
 /**
  * The inline "Today" timeline on the dashboard: a chronological, newest-first
- * peek at the viewed day's events. Read surface + a tap that resolves a row's
- * trackable to its shape and opens that shape's sheet. Unknown subjectIds
- * degrade to the raw id and are non-interactive; session events render as
- * labeled, non-interactive rows; an empty day shows a quiet hint.
+ * peek at the viewed day's events. Read surface + a tap that opens the
+ * single-event edit modal for that exact event. Session events render as
+ * labeled, NON-interactive rows; unknown subjectIds degrade to the raw id but
+ * ARE editable (the event still has entries worth editing/deleting); an empty
+ * day shows a quiet hint.
  */
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { LifeManifestTrackable, LifeEvent, LifeEntry } from "@homelab/backend";
@@ -15,6 +16,19 @@ const navigate = vi.fn();
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
   return { ...actual, useNavigate: () => navigate };
+});
+
+const deleteEvent = vi.fn().mockResolvedValue(undefined);
+const updateEvent = vi.fn().mockResolvedValue(undefined);
+vi.mock("@kirkl/shared", async () => {
+  const actual = await vi.importActual<typeof import("@kirkl/shared")>("@kirkl/shared");
+  return {
+    ...actual,
+    useFeedback: () => ({
+      message: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), open: vi.fn(), destroy: vi.fn() },
+    }),
+    useLifeBackend: () => ({ deleteEvent, updateEvent }),
+  };
 });
 
 import { DayTimeline } from "./DayTimeline";
@@ -49,7 +63,6 @@ const TODAY = new Date();
 TODAY.setHours(0, 0, 0, 0);
 
 function renderTimeline(props: Partial<React.ComponentProps<typeof DayTimeline>> = {}) {
-  const onOpenShape = props.onOpenShape ?? vi.fn();
   render(
     <MemoryRouter>
       <DayTimeline
@@ -57,14 +70,16 @@ function renderTimeline(props: Partial<React.ComponentProps<typeof DayTimeline>>
         events={props.events ?? []}
         day={props.day ?? TODAY}
         journalTarget={props.journalTarget ?? "journal"}
-        onOpenShape={onOpenShape}
       />
     </MemoryRouter>,
   );
-  return { onOpenShape };
 }
 
 describe("DayTimeline", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("filters to the viewed day and sorts newest-first", () => {
     const other = new Date(TODAY);
     other.setDate(other.getDate() - 3);
@@ -93,13 +108,42 @@ describe("DayTimeline", () => {
     expect(screen.getByText("×1")).toBeInTheDocument(); // happened → count summary
   });
 
-  it("tapping a row resolves the trackable's shape and opens that sheet", async () => {
+  it("tapping a row opens the single-event edit modal for that event", async () => {
     const user = userEvent.setup();
-    const { onOpenShape } = renderTimeline({
+    renderTimeline({
       events: [ev("run", num("duration", 30, "min"), TODAY, 17)],
     });
     await user.click(screen.getByTestId("day-timeline-row"));
-    expect(onOpenShape).toHaveBeenCalledWith("did");
+    // Modal title carries the thing label + time; the inline editor row shows.
+    expect(await screen.findByText(/Edit · Run/)).toBeInTheDocument();
+    expect(screen.getByTestId("entry-row")).toBeInTheDocument();
+  });
+
+  it("editing a value in the modal calls updateEvent with the right id", async () => {
+    const user = userEvent.setup();
+    const event = ev("run", num("duration", 30, "min"), TODAY, 17);
+    renderTimeline({ events: [event] });
+    await user.click(screen.getByTestId("day-timeline-row"));
+    await screen.findByTestId("entry-row");
+    // Bump the rated/duration field — duration editor surfaces a spinbutton.
+    const input = screen.getByRole("spinbutton");
+    await user.clear(input);
+    await user.type(input, "45");
+    await waitFor(() => expect(updateEvent).toHaveBeenCalled(), { timeout: 2000 });
+    expect(updateEvent.mock.calls[0][0]).toBe(event.id);
+  });
+
+  it("deleting from the modal closes it and the row is gone after the event leaves", async () => {
+    const user = userEvent.setup();
+    renderTimeline({
+      events: [ev("run", num("duration", 30, "min"), TODAY, 17)],
+    });
+    await user.click(screen.getByTestId("day-timeline-row"));
+    await screen.findByTestId("entry-row");
+    await user.click(screen.getByRole("button", { name: "Delete entry" }));
+    await waitFor(() => expect(deleteEvent).toHaveBeenCalled());
+    // Modal closed: the inline editor row is no longer in the document.
+    await waitFor(() => expect(screen.queryByTestId("entry-row")).not.toBeInTheDocument());
   });
 
   it("caps at 7 rows and surfaces a '+N more' footer", () => {
@@ -124,28 +168,29 @@ describe("DayTimeline", () => {
     expect(navigate).toHaveBeenCalledWith("journal?date=2026-06-12");
   });
 
-  it("degrades an unknown subjectId to the raw id and makes the row non-interactive", async () => {
+  it("degrades an unknown subjectId to the raw id but keeps the row editable", async () => {
     const user = userEvent.setup();
-    const { onOpenShape } = renderTimeline({
+    renderTimeline({
       events: [ev("deleted_thing", num("amount", 1, "ct"), TODAY, 9)],
     });
     const row = screen.getByTestId("day-timeline-row");
     expect(row).toHaveTextContent("deleted_thing");
-    expect(row).toBeDisabled();
+    expect(row).not.toBeDisabled();
     await user.click(row);
-    expect(onOpenShape).not.toHaveBeenCalled();
+    // The modal opens with the raw id as the label (degrade, don't drop).
+    expect(await screen.findByText(/Edit · deleted_thing/)).toBeInTheDocument();
   });
 
   it("renders session events as labeled, non-interactive rows", async () => {
     const user = userEvent.setup();
-    const { onOpenShape } = renderTimeline({
+    renderTimeline({
       events: [ev("morning_session", [{ name: "intention", type: "text", value: "ship it" }], TODAY, 7)],
     });
     const row = screen.getByTestId("day-timeline-row");
     expect(row).toHaveTextContent("Morning session");
     expect(row).toBeDisabled();
     await user.click(row);
-    expect(onOpenShape).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("entry-row")).not.toBeInTheDocument();
   });
 
   it("shows a quiet empty hint and no list when nothing was logged", () => {

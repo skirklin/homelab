@@ -153,7 +153,6 @@ export function Today() {
                 events={allEntries}
                 day={selectedDate}
                 journalTarget={journalTarget}
-                onOpenShape={setOpenShape}
               />
             ) : (
               <HabitBoard
