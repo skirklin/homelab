@@ -278,6 +278,34 @@ describe("HabitBoard", () => {
     expect(stamps).toEqual([a.timestamp.getTime(), b.timestamp.getTime()].sort());
   });
 
+  it("toggle off: a partial delete failure still shows Undo, and Undo restores the full day", async () => {
+    // Regression: Promise.all rejected on the first failed delete, stranding the
+    // already-succeeded deletes with no Undo affordance (user saw only "Failed to
+    // remove"). With allSettled, ANY success still surfaces the Undo toast, and
+    // Undo re-creates the full original day from the in-memory snapshot.
+    const a = ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 9));
+    const b = ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 21));
+    // First delete succeeds, second rejects.
+    deleteEvent
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("network"));
+    renderBoard({ goals: [flossDaily], events: [a, b], day: at(2026, 6, 10) });
+    const row = screen.getByTestId("habit-row");
+    await userEvent.click(cellIn(row, "2026-06-08"));
+    expect(deleteEvent).toHaveBeenCalledTimes(2);
+    // The Undo toast still appears despite the partial failure.
+    expect(messageOpen).toHaveBeenCalledTimes(1);
+    const content = messageOpen.mock.calls[0][0].content;
+    const { getByText } = render(content);
+    expect(getByText(/Removed 2 entries/)).toBeInTheDocument();
+    // Undo re-creates the FULL original day (both events), regardless of which
+    // delete failed — a clean inverse from the snapshot.
+    await userEvent.click(getByText("Undo"));
+    expect(addEvent).toHaveBeenCalledTimes(2);
+    const stamps = addEvent.mock.calls.map((c) => c[4].timestamp.getTime()).sort();
+    expect(stamps).toEqual([a.timestamp.getTime(), b.timestamp.getTime()].sort());
+  });
+
   it("long-press: a multi-event `happened` day opens the day-events editor (no toggle)", async () => {
     renderBoard({
       goals: [flossDaily],

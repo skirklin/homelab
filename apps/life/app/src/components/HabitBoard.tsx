@@ -441,10 +441,20 @@ export function HabitBoard({
     async (thing: LifeManifestTrackable, dayEvts: LifeEvent[]) => {
       if (dayEvts.length === 0 || !logId || !userId) return;
       const snapshot = dayEvts; // captured before delete
-      try {
-        await Promise.all(snapshot.map((e) => life.deleteEvent(e.id)));
-      } catch (err) {
-        console.error("Failed to remove entries:", err);
+      // allSettled, not all: a rejection on one delete must not strand the
+      // already-succeeded deletes with no Undo affordance. If ANY delete
+      // succeeded we still surface the Undo toast — Undo re-creates the full
+      // original day from the in-memory snapshot, so it's a clean inverse
+      // regardless of which deletes failed. Only when every delete fails do we
+      // show the plain error toast (nothing was removed, nothing to undo).
+      const results = await Promise.allSettled(snapshot.map((e) => life.deleteEvent(e.id)));
+      const anySucceeded = results.some((r) => r.status === "fulfilled");
+      if (!anySucceeded) {
+        const firstErr = results.find((r) => r.status === "rejected");
+        console.error(
+          "Failed to remove entries:",
+          firstErr && firstErr.status === "rejected" ? firstErr.reason : undefined,
+        );
         message.error("Failed to remove");
         return;
       }

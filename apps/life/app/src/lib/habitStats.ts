@@ -145,7 +145,12 @@ export interface StreakStats {
   longest: number;
 }
 
-/** Safety bound so a corrupt clock can't loop forever (~3 years of days). */
+/**
+ * Window bound for the streak walk (~3 years of days). The walk only ever looks
+ * back this many periods from today — older history can't extend the longest
+ * streak in practice, and clamping the START here (not the end) keeps the cap
+ * away from today so the current streak is never truncated.
+ */
 const MAX_PERIODS = 1100;
 
 /**
@@ -172,11 +177,28 @@ export function computeStreaks(
   const firstStart = periodStart(earliest);
   const todayStart = periodStart(today);
 
+  // Clamp the walk's START to at most MAX_PERIODS periods before today, in the
+  // walk's period unit. This guarantees the iteration cap bites the OLD end of
+  // the range, so the recent run / current streak (anchored at today) is never
+  // truncated for habits older than ~MAX_PERIODS periods (the forward walk would
+  // otherwise hit the cap before reaching today). A window this size still
+  // captures the longest streak for any realistic habit.
+  const periodMs = weekly ? 7 * DAY_MS : DAY_MS;
+  const clampStart = periodStart(new Date(todayStart.getTime() - MAX_PERIODS * periodMs));
+  let cursor = firstStart.getTime() > clampStart.getTime() ? firstStart : clampStart;
+
+  // Hard iteration ceiling: at most MAX_PERIODS periods span clampStart..today,
+  // plus a small margin so a DST re-snap of clampStart can't leave the cap biting
+  // one period short of today and zeroing a valid current streak.
+  const maxIterations = MAX_PERIODS + 4;
+
   let longest = 0;
   let run = 0;
   let current = 0;
-  let cursor = firstStart;
-  for (let i = 0; i < MAX_PERIODS; i++) {
+  for (let i = 0; i < maxIterations; i++) {
+    // A future-dated earliest event lands beyond today: stop before evaluating
+    // so a single future period can't inflate `longest`/`current`.
+    if (cursor.getTime() > todayStart.getTime()) break;
     const met = periodMet(subjectIds, goal, cursor, tz, events, index);
     if (met) {
       run += 1;
@@ -189,7 +211,6 @@ export function computeStreaks(
       current = run;
       break;
     }
-    if (cursor.getTime() > todayStart.getTime()) break;
     cursor = stepNext(cursor);
   }
   return { current, longest };

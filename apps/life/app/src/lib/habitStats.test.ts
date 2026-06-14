@@ -99,6 +99,36 @@ describe("computeStreaks (daily)", () => {
     const index = buildDayIndex(events, PT);
     expect(computeStreaks(["walk"], null, index, events, PT, TODAY)).toEqual({ current: 2, longest: 2 });
   });
+
+  it("a habit far older than the walk cap (~1100 days) still reports the current streak", () => {
+    // Regression: the forward walk used to hit MAX_PERIODS before reaching today
+    // for a habit whose earliest event is >1100 days back, truncating `current`
+    // to 0 and `longest` along with it. With the START clamped, the recent run is
+    // preserved. Earliest = 2023-01-01 (~1255 days before 2026-06-10), plus a
+    // clean 3-day run ending today.
+    const events = [
+      ev("floss", ct(), "2023-01-01T17:00:00.000Z"), // ancient first event
+      ev("floss", ct(), "2026-06-08T17:00:00.000Z"),
+      ev("floss", ct(), "2026-06-09T17:00:00.000Z"),
+      ev("floss", ct(), "2026-06-10T17:00:00.000Z"),
+    ];
+    const index = buildDayIndex(events, PT);
+    const s = computeStreaks(["floss"], flossDaily, index, events, PT, TODAY);
+    expect(s.current).toBe(3);
+    expect(s.longest).toBeGreaterThanOrEqual(s.current);
+    expect(s.current).not.toBe(0);
+  });
+
+  it("a future-dated only event yields {current:0, longest:0}, not longest:1", () => {
+    // Regression: `met` was evaluated for the first period before the
+    // `cursor > today` break check, so a single future event inflated longest to 1.
+    const events = [ev("floss", ct(), "2026-06-20T17:00:00.000Z")]; // 10 days after today
+    const index = buildDayIndex(events, PT);
+    expect(computeStreaks(["floss"], flossDaily, index, events, PT, TODAY)).toEqual({
+      current: 0,
+      longest: 0,
+    });
+  });
 });
 
 describe("computeStreaks (weekly)", () => {
