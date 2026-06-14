@@ -39,6 +39,7 @@ import {
   stripParentPointers,
 } from "../lib/authz";
 import { canonicalSlotTime } from "../lib/slot-time";
+import { safeTz } from "../lib/notifications/tz";
 
 export const dataRoutes = new Hono<AppEnv>();
 
@@ -2645,6 +2646,18 @@ dataRoutes.get("/life/goals/progress", handler(async (c) => {
     return c.json({ error: "date must be a valid ISO datetime" }, 400);
   }
 
+  // Resolve the log OWNER's timezone so server-side progress matches the
+  // dashboard exactly (the pod runs UTC; the browser runs local — the evaluator
+  // must compute every boundary in the owner's tz, not the runtime tz). Same
+  // fallback the life notifier uses.
+  let timeZone = "America/Los_Angeles";
+  try {
+    const owner = await pb.collection("users").getOne(log.owner as string);
+    timeZone = safeTz(owner.timezone, "America/Los_Angeles");
+  } catch {
+    // owner unreadable → keep the fallback
+  }
+
   // Pull the log's events into the LifeEvent shape the evaluator expects. The
   // evaluator only reads subjectId/timestamp/entries, but we build full rows so
   // the contract stays honest if it grows.
@@ -2668,7 +2681,7 @@ dataRoutes.get("/life/goals/progress", handler(async (c) => {
   }));
 
   const progress = goals.map((goal) => {
-    const p = evaluateGoal(goal, events, manifest.trackables, refDate);
+    const p = evaluateGoal(goal, events, manifest.trackables, timeZone, refDate);
     return {
       id: goal.id,
       label: goal.label,
