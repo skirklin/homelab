@@ -37,6 +37,7 @@ import { observerRoutes } from "./routes/observer";
 import { chatRoutes } from "./routes/chat";
 import { oauthRoutes } from "./routes/oauth";
 import { healthIngestHandler } from "./routes/health-ingest";
+import { screentimeIngestHandler } from "./routes/screentime-ingest";
 import { startScheduler } from "./lib/notifications/scheduler";
 import { SUPPORTED_SCOPES } from "./lib/oauth";
 const app = new Hono<AppEnv>();
@@ -199,6 +200,11 @@ app.use("*", authMiddleware);
 // Health Connect ingest: maps the phone companion's Health Connect payload
 // into the caller's own life_events. Authed (above) — see routes/health-ingest.ts.
 app.post("/health/ingest", healthIngestHandler);
+
+// Screen-time ingest: maps the phone companion's per-day screen-time totals
+// into the caller's own life_events (upsert-replace). Authed (above) — see
+// routes/screentime-ingest.ts.
+app.post("/screentime/ingest", screentimeIngestHandler);
 
 // Mount route groups
 app.route("/recipes", recipesRoutes);

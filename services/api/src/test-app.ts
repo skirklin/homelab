@@ -18,6 +18,7 @@ export type AppEnv = {
 
 import { authMiddleware } from "./middleware/auth";
 import { healthIngestHandler } from "./routes/health-ingest";
+import { screentimeIngestHandler } from "./routes/screentime-ingest";
 import { recipesRoutes } from "./routes/recipes";
 import { aiRoutes } from "./routes/ai";
 import { sharingRoutes } from "./routes/sharing";
@@ -37,6 +38,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.use("*", authMiddleware);
 
 app.post("/health/ingest", healthIngestHandler);
+app.post("/screentime/ingest", screentimeIngestHandler);
 app.route("/recipes", recipesRoutes);
 app.route("/ai", aiRoutes);
 app.route("/sharing", sharingRoutes);

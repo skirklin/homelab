@@ -1,31 +1,20 @@
 import type { Context } from "hono";
-import type PocketBase from "pocketbase";
-import { ClientResponseError } from "pocketbase";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 import { safeTz } from "../lib/notifications/tz";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import {
+  type EnsureSpec,
+  ensureTrackables,
+  findBySourceId,
+  getOrCreateOwnLifeLog,
+  isUniqueViolation,
+  num,
+  round,
+} from "./life-ingest-shared";
 
-/**
- * True iff `err` is a PocketBase unique-index/constraint violation: a 400
- * ClientResponseError whose field-level validation map reports
- * `validation_not_unique` (PB's code for a UNIQUE-index conflict). Used so a
- * concurrent / client-retried insert that loses the create race is handled
- * gracefully (treat-as-exists) instead of 500ing — WITHOUT blanket-swallowing
- * unrelated errors, which must still propagate.
- */
-function isUniqueViolation(err: unknown): boolean {
-  if (!(err instanceof ClientResponseError)) return false;
-  if (err.status !== 400) return false;
-  // PB shape: { data: { data: { <field>: { code: "validation_not_unique" } } } }
-  const fields = (err.response as { data?: Record<string, { code?: string }> } | undefined)?.data;
-  if (fields && typeof fields === "object") {
-    for (const k of Object.keys(fields)) {
-      if (fields[k]?.code === "validation_not_unique") return true;
-    }
-  }
-  return false;
-}
+// Re-export the shared numeric util the unit tests import from this module.
+export { round };
 
 /**
  * Phase-2 Health Connect mapper.
@@ -56,17 +45,6 @@ function isUniqueViolation(err: unknown): boolean {
  * `heart_rate` is ignored entirely (tens of thousands of raw samples).
  */
 
-/** Round to `digits` decimal places. */
-export function round(value: number, digits = 0): number {
-  const f = 10 ** digits;
-  return Math.round(value * f) / f;
-}
-
-/** A finite number, or null (rejects non-numbers, NaN, Infinity). */
-function num(v: unknown): number | null {
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
-}
-
 export const KG_TO_LB = 2.20462;
 export const M_TO_MI = 1609.344;
 
@@ -77,16 +55,6 @@ export function kgToLb(kilograms: number): number {
 export function metersToMiles(meters: number): number {
   return round(meters / M_TO_MI, 2);
 }
-
-/** A local-hour aggregation bucket (raw, pre-finalize). */
-export type HourBucket = {
-  /** Local wall-clock hour-start key, e.g. "2026-06-14T07:00:00". */
-  localHour: string;
-  /** Sum of the records' raw values in this bucket. */
-  sum: number;
-  /** Max end_time among the bucket's records (high-water mark). */
-  hwm: string;
-};
 
 /**
  * Canonicalize an ISO instant to its UTC `toISOString()` form, or "" if
@@ -100,51 +68,10 @@ function canonInstant(iso: string): string {
 }
 
 /**
- * Pure: bucket interval records by their local-hour-start in `timeZone`.
- * `valueOf` extracts the additive value (null skips a record). Only records
- * whose `end_time` is strictly past `sinceHwm` are folded in — that's the
- * high-water-mark guard that makes re-posts/delta-syncs accumulate without
- * double counting. `end_time`s are canonicalized so the lexical compare is
- * order-safe regardless of the source's ISO formatting.
- *
- * NOTE: end_time is treated as a unique high-water key — a distinct record
- * sharing an end instant at/before the hwm is dropped (undercount, never
- * double count). Fine for a single-device personal feed; flagged for clarity.
- * Returns one HourBucket per non-empty local hour.
- */
-export function bucketHourly(
-  records: Record<string, unknown>[],
-  timeZone: string,
-  valueOf: (r: Record<string, unknown>) => number | null,
-  sinceHwm = "",
-): Map<string, HourBucket> {
-  const buckets = new Map<string, HourBucket>();
-  for (const r of records) {
-    const startTime = r.start_time as string;
-    if (!startTime) continue;
-    const startMs = new Date(startTime).getTime();
-    if (Number.isNaN(startMs)) continue; // unparseable start_time — don't reach formatInTimeZone
-    const endTime = canonInstant((r.end_time as string) || startTime);
-    if (!endTime || endTime <= sinceHwm) continue; // unparseable or already counted
-    const value = valueOf(r);
-    if (value === null || !Number.isFinite(value)) continue;
-    const localHour = formatInTimeZone(new Date(startMs), timeZone, "yyyy-MM-dd'T'HH:00:00");
-    let b = buckets.get(localHour);
-    if (!b) {
-      b = { localHour, sum: 0, hwm: sinceHwm };
-      buckets.set(localHour, b);
-    }
-    b.sum += value;
-    if (endTime > b.hwm) b.hwm = endTime;
-  }
-  return buckets;
-}
-
-/**
  * A local-hour group carrying the records that fell in it (pre-fold). Bucketing
  * the FULL record array exactly ONCE into these groups, then folding each group
- * against a per-hour hwm, avoids re-running `bucketHourly` over the whole array
- * for every touched hour (the old O(N²) shape that could time out a backfill).
+ * against a per-hour hwm, avoids the old O(N²) shape that re-scanned the whole
+ * array for every touched hour (which could time out a backfill).
  */
 export type HourGroup = {
   localHour: string;
@@ -195,9 +122,9 @@ export function groupHourly(
 /**
  * Pure: fold a single hour's pre-grouped records, counting only those whose
  * canonical `end_time` is strictly past `sinceHwm`. Returns the additive sum
- * and the new high-water mark. Mirrors `bucketHourly`'s hwm semantics exactly
- * (lexical compare on canonical instants), but operates on already-grouped
- * records so no full-array re-bucket is needed for the update path.
+ * and the new high-water mark. The hwm guard is a lexical compare on canonical
+ * instants, operating on already-grouped records so no full-array re-bucket is
+ * needed for the update path.
  */
 export function foldGroup(group: HourGroup, sinceHwm = ""): { sum: number; hwm: string } {
   let sum = 0;
@@ -251,15 +178,6 @@ function exerciseCategory(type: unknown): string {
   return (typeof type === "string" && EXERCISE_TYPE_NAMES[type]) || "Workout";
 }
 
-/** Default trackable rows the mapper ensures exist before writing. */
-type EnsureSpec = {
-  id: string;
-  label: string;
-  shape: "took" | "did";
-  group: string;
-  defaultUnit?: string;
-};
-
 // `took` subjects we may write; auto-added with a sensible label/group/unit.
 // `sleep`/`exercise` are added only if absent (`did` shape), never overwritten.
 const ENSURE_SPECS: EnsureSpec[] = [
@@ -273,86 +191,6 @@ const ENSURE_SPECS: EnsureSpec[] = [
   { id: "sleep", label: "Sleep", shape: "did", group: "body" },
   { id: "exercise", label: "Exercise", shape: "did", group: "activity" },
 ];
-
-type ManifestTrackable = { id: string; shape: string; [k: string]: unknown };
-type Manifest = { trackables: ManifestTrackable[]; goals?: unknown[] };
-
-/** Coerce a PB manifest JSON value into a Manifest, defaulting to empty. */
-function manifestOf(raw: unknown): Manifest {
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    const m = raw as Record<string, unknown>;
-    if (Array.isArray(m.trackables)) {
-      return {
-        trackables: m.trackables as ManifestTrackable[],
-        goals: Array.isArray(m.goals) ? (m.goals as unknown[]) : undefined,
-      };
-    }
-  }
-  return { trackables: [] };
-}
-
-/** Resolve the caller's OWN life log, creating it if absent. */
-async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
-  const logs = await pb.collection("life_logs").getList(1, 1, {
-    filter: pb.filter("owner = {:uid}", { uid: userId }),
-    sort: "created",
-  });
-  if (logs.items.length > 0) return logs.items[0];
-  return pb.collection("life_logs").create({ name: "Life Log", owner: userId });
-}
-
-/**
- * Append any still-missing ENSURE_SPECS to the log's manifest, append-only,
- * with optimistic concurrency. PocketBase has no native row-version guard, so
- * we re-read the manifest each attempt, append only ids that are STILL missing
- * (never touching existing trackables or goals), update, then VERIFY by
- * re-reading that our appended ids survived. If a concurrent writer clobbered
- * them (lost-update), we retry against the now-fresh manifest. After
- * `maxAttempts` we propagate (fail loud) rather than risk a silent overwrite.
- *
- * `log` is the already-fetched record from getOrCreateOwnLifeLog; we re-fetch
- * inside the loop so the first attempt also works off the freshest read.
- */
-async function ensureTrackables(
-  pb: PocketBase,
-  log: { id: string },
-  maxAttempts = 3,
-): Promise<void> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const fresh = await pb.collection("life_logs").getOne(log.id);
-    const manifest = manifestOf(fresh.manifest);
-    const existingIds = new Set(manifest.trackables.map((t) => t.id));
-    const missing = ENSURE_SPECS.filter((s) => !existingIds.has(s.id));
-    if (missing.length === 0) return; // nothing to do — already converged
-    for (const spec of missing) {
-      const t: ManifestTrackable = { id: spec.id, label: spec.label, shape: spec.shape };
-      if (spec.group) t.group = spec.group;
-      if (spec.defaultUnit) t.defaultUnit = spec.defaultUnit;
-      manifest.trackables.push(t);
-    }
-    try {
-      await pb.collection("life_logs").update(log.id, { manifest });
-    } catch (err) {
-      lastErr = err;
-      continue; // transient/conflict — re-read and retry
-    }
-    // Verify our appends survived a possible concurrent overwrite.
-    const after = manifestOf((await pb.collection("life_logs").getOne(log.id)).manifest);
-    const afterIds = new Set(after.trackables.map((t) => t.id));
-    if (missing.every((s) => afterIds.has(s.id))) return; // converged
-    lastErr = new Error("manifest ensure clobbered by concurrent write; retrying");
-  }
-  throw lastErr ?? new Error("ensureTrackables: failed to converge after retries");
-}
-
-/** Find a life_event by (log, source_id), or null. */
-async function findBySourceId(pb: PocketBase, logId: string, sourceId: string) {
-  const list = await pb.collection("life_events").getList(1, 1, {
-    filter: pb.filter("log = {:log} && source_id = {:sid}", { log: logId, sid: sourceId }),
-  });
-  return list.items[0] ?? null;
-}
 
 type LifeEntry = { name: string; type: "number"; value: number; unit: string };
 
@@ -387,7 +225,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
   // untouched), and updates. On a version/conflict error we retry against the
   // fresh manifest; after a few failed attempts we fail loud rather than risk a
   // silent overwrite.
-  await ensureTrackables(pb, log);
+  await ensureTrackables(pb, log, ENSURE_SPECS);
 
   const written: Record<string, number> = {};
   let skipped = 0;
