@@ -521,7 +521,7 @@ function DaySlide({
             </SlotTime>
             <SlotContent>
               <SlotBody>
-                <SlotName style={{ color: "#1677ff" }}>{"✈"} {f.activity?.name || f.activityId}</SlotName>
+                <SlotName style={{ color: "#1677ff" }}>{"✈"} {f.activity?.name ?? "Unknown activity"}</SlotName>
                 {f.activity?.description && <SlotDescClamp>{f.activity.description}</SlotDescClamp>}
                 {f.dayNote && (
                   <DayNote><DayNoteLabel>For this day:</DayNoteLabel>{f.dayNote}</DayNote>
@@ -588,7 +588,7 @@ function DaySlide({
             <SlotBody>
               <SlotName>
                 {activity?.category === "Hiking" && <span style={{ marginRight: 4 }}>🥾</span>}
-                {activity?.name || slot.activityId}
+                {activity?.name ?? "Unknown activity"}
                 {actUrl && (
                   <ExternalLink href={actUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "#8c8c8c", marginLeft: 4, fontSize: 11 }}>
                     <EnvironmentOutlined />
@@ -825,7 +825,52 @@ export function DayView() {
     }
   }, [days.length, activeIndex, emblaApi]);
 
-  if (state.loading) {
+  // AutoHeight pins the Embla container to slide heights snapshotted ONCE at
+  // init. When a slide grows after init — async drive-time/weather badges, lazy
+  // SlotPhoto images, or activities arriving late and turning ID rows into full
+  // cards — the surplus is clipped by the viewport's `overflow: hidden` and
+  // becomes unreachable, because Embla's own ResizeObserver only re-inits on a
+  // WIDTH change (the horizontal axis), never on height growth. Watch each slide
+  // for a real height delta and reInit (rAF-debounced) so AutoHeight re-measures
+  // and re-pins the container to the taller content. The height-delta guard plus
+  // rAF coalescing prevent a reInit→resize→reInit runaway.
+  useEffect(() => {
+    if (!emblaApi) return;
+    const lastHeights = new Map<Element, number>();
+    let rafId: number | null = null;
+
+    const ro = new ResizeObserver((entries) => {
+      let changed = false;
+      for (const entry of entries) {
+        const h = entry.contentRect.height;
+        const prev = lastHeights.get(entry.target);
+        if (prev === undefined || Math.abs(prev - h) > 0.5) {
+          lastHeights.set(entry.target, h);
+          changed = true;
+        }
+      }
+      // Only reInit on a genuine height delta, and coalesce bursts into one rAF
+      // so a reInit's own layout churn can't re-trigger a reInit storm.
+      if (!changed || rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        emblaApi.reInit();
+      });
+    });
+
+    for (const slide of emblaApi.slideNodes()) ro.observe(slide);
+
+    return () => {
+      ro.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, [emblaApi]);
+
+  // Gate on activitiesLoaded too: trips and activities ride independent mirror
+  // subscriptions that resolve out of order, so `loading` (cleared on trips
+  // arrival) can be false while activityMap is still empty — which would paint
+  // raw PocketBase IDs in place of slot/flight activity names.
+  if (state.loading || !state.activitiesLoaded) {
     return (
       <WideContainer>
         <Spin size="large" style={{ display: "block", margin: "40px auto" }} />

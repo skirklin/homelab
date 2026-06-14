@@ -19,6 +19,10 @@ export interface TravelState {
   log: TravelLog | null;
   trips: Map<string, Trip>;
   activities: Map<string, Activity>;
+  /** True once activities have replayed at least once. Trips and activities ride
+      independent mirror subscriptions that resolve out of order, so `loading`
+      (cleared on trips arrival) is not a safe gate for activity-dependent UI. */
+  activitiesLoaded: boolean;
   itineraries: Map<string, Itinerary>;
   /** Per-user feedback notes for the whole log; filtered by subject in the UI. */
   notes: Map<string, TravelNote>;
@@ -52,7 +56,7 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
     case "SET_ACTIVITIES": {
       const newActivities = new Map<string, Activity>();
       for (const activity of action.activities) newActivities.set(activity.id, activity);
-      return { ...state, activities: newActivities };
+      return { ...state, activities: newActivities, activitiesLoaded: true };
     }
 
     case "SET_ITINERARIES": {
@@ -73,6 +77,7 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
         log: null,
         trips: new Map(),
         activities: new Map(),
+        activitiesLoaded: false,
         itineraries: new Map(),
         notes: new Map(),
       };
@@ -91,6 +96,7 @@ const initialState: TravelState = {
   log: null,
   trips: new Map(),
   activities: new Map(),
+  activitiesLoaded: false,
   itineraries: new Map(),
   notes: new Map(),
   loading: true,
