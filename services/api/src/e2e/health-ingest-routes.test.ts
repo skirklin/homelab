@@ -199,6 +199,36 @@ describe("POST /health/ingest (Phase-2 mapper)", () => {
     }
   });
 
+  it("skips a malformed counter record (unparseable start_time) without 500ing", async () => {
+    const before = await ownEvents();
+    const beforeCount = before.length;
+    const { status, data } = await ingest({
+      token: apiToken,
+      body: {
+        timestamp: "2026-06-15T00:00:00Z",
+        source: "health-connect",
+        // One unparseable start_time (must be skipped, not crash) + one valid
+        // record in a brand-new local hour (must be written).
+        steps: [
+          { count: 999, start_time: "not-a-date", end_time: "2026-06-15T01:01:00Z" },
+          { count: 42, start_time: "2026-06-15T18:00:00Z", end_time: "2026-06-15T18:05:00Z" },
+        ],
+      },
+    });
+    expect(status).toBe(200);
+    expect(data.ok).toBe(true);
+    // The malformed record is counted as skipped; the valid one writes a steps row.
+    expect(data.skipped).toBeGreaterThan(0);
+    expect(data.written.steps).toBe(1);
+
+    const after = await ownEvents();
+    expect(after.length).toBe(beforeCount + 1);
+    // The written value reflects ONLY the valid record (42), not the malformed one.
+    const newRow = after.find((e) => !before.some((b) => b.id === e.id));
+    expect(newRow!.subject_id).toBe("steps");
+    expect(newRow!.entries[0].value).toBe(42);
+  });
+
   it("is idempotent: re-posting the same payload creates no duplicates and does not double counters", async () => {
     const before = await ownEvents();
     const beforeCount = before.length;

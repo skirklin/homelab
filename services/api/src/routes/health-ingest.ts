@@ -1,9 +1,31 @@
 import type { Context } from "hono";
 import type PocketBase from "pocketbase";
+import { ClientResponseError } from "pocketbase";
 import type { AppEnv } from "../index";
 import { handler } from "../lib/handler";
 import { safeTz } from "../lib/notifications/tz";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+
+/**
+ * True iff `err` is a PocketBase unique-index/constraint violation: a 400
+ * ClientResponseError whose field-level validation map reports
+ * `validation_not_unique` (PB's code for a UNIQUE-index conflict). Used so a
+ * concurrent / client-retried insert that loses the create race is handled
+ * gracefully (treat-as-exists) instead of 500ing — WITHOUT blanket-swallowing
+ * unrelated errors, which must still propagate.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  if (!(err instanceof ClientResponseError)) return false;
+  if (err.status !== 400) return false;
+  // PB shape: { data: { data: { <field>: { code: "validation_not_unique" } } } }
+  const fields = (err.response as { data?: Record<string, { code?: string }> } | undefined)?.data;
+  if (fields && typeof fields === "object") {
+    for (const k of Object.keys(fields)) {
+      if (fields[k]?.code === "validation_not_unique") return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Phase-2 Health Connect mapper.
@@ -100,11 +122,13 @@ export function bucketHourly(
   for (const r of records) {
     const startTime = r.start_time as string;
     if (!startTime) continue;
+    const startMs = new Date(startTime).getTime();
+    if (Number.isNaN(startMs)) continue; // unparseable start_time — don't reach formatInTimeZone
     const endTime = canonInstant((r.end_time as string) || startTime);
     if (!endTime || endTime <= sinceHwm) continue; // unparseable or already counted
     const value = valueOf(r);
     if (value === null || !Number.isFinite(value)) continue;
-    const localHour = formatInTimeZone(new Date(startTime), timeZone, "yyyy-MM-dd'T'HH:00:00");
+    const localHour = formatInTimeZone(new Date(startMs), timeZone, "yyyy-MM-dd'T'HH:00:00");
     let b = buckets.get(localHour);
     if (!b) {
       b = { localHour, sum: 0, hwm: sinceHwm };
@@ -114,6 +138,76 @@ export function bucketHourly(
     if (endTime > b.hwm) b.hwm = endTime;
   }
   return buckets;
+}
+
+/**
+ * A local-hour group carrying the records that fell in it (pre-fold). Bucketing
+ * the FULL record array exactly ONCE into these groups, then folding each group
+ * against a per-hour hwm, avoids re-running `bucketHourly` over the whole array
+ * for every touched hour (the old O(N²) shape that could time out a backfill).
+ */
+export type HourGroup = {
+  localHour: string;
+  /** Records in this hour, each with its canonical end_time precomputed. */
+  records: { value: number; endTime: string }[];
+};
+
+/**
+ * Pure: bucket interval records by local-hour-start ONCE, retaining each
+ * hour's records (value + canonical end_time) so per-hour folding can be done
+ * without re-scanning the full array. Records with no `start_time`, an
+ * unparseable `start_time`/`end_time`, or a non-finite value are skipped
+ * (counted as malformed by the caller). One HourGroup per non-empty hour.
+ */
+export function groupHourly(
+  records: Record<string, unknown>[],
+  timeZone: string,
+  valueOf: (r: Record<string, unknown>) => number | null,
+): { groups: Map<string, HourGroup>; skipped: number } {
+  const groups = new Map<string, HourGroup>();
+  let skipped = 0;
+  for (const r of records) {
+    const startTime = r.start_time as string;
+    if (!startTime) continue; // missing start: drop silently (matches no-value drop)
+    const startMs = new Date(startTime).getTime();
+    if (Number.isNaN(startMs)) {
+      skipped++; // unparseable start_time — count as malformed, never reach formatInTimeZone
+      continue;
+    }
+    const endTime = canonInstant((r.end_time as string) || startTime);
+    if (!endTime) {
+      skipped++; // unparseable end_time
+      continue;
+    }
+    const value = valueOf(r);
+    if (value === null || !Number.isFinite(value)) continue; // no/invalid value: drop
+    const localHour = formatInTimeZone(new Date(startMs), timeZone, "yyyy-MM-dd'T'HH:00:00");
+    let g = groups.get(localHour);
+    if (!g) {
+      g = { localHour, records: [] };
+      groups.set(localHour, g);
+    }
+    g.records.push({ value, endTime });
+  }
+  return { groups, skipped };
+}
+
+/**
+ * Pure: fold a single hour's pre-grouped records, counting only those whose
+ * canonical `end_time` is strictly past `sinceHwm`. Returns the additive sum
+ * and the new high-water mark. Mirrors `bucketHourly`'s hwm semantics exactly
+ * (lexical compare on canonical instants), but operates on already-grouped
+ * records so no full-array re-bucket is needed for the update path.
+ */
+export function foldGroup(group: HourGroup, sinceHwm = ""): { sum: number; hwm: string } {
+  let sum = 0;
+  let hwm = sinceHwm;
+  for (const rec of group.records) {
+    if (rec.endTime <= sinceHwm) continue; // already counted
+    sum += rec.value;
+    if (rec.endTime > hwm) hwm = rec.endTime;
+  }
+  return { sum, hwm };
 }
 
 /**
@@ -207,6 +301,51 @@ async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
   return pb.collection("life_logs").create({ name: "Life Log", owner: userId });
 }
 
+/**
+ * Append any still-missing ENSURE_SPECS to the log's manifest, append-only,
+ * with optimistic concurrency. PocketBase has no native row-version guard, so
+ * we re-read the manifest each attempt, append only ids that are STILL missing
+ * (never touching existing trackables or goals), update, then VERIFY by
+ * re-reading that our appended ids survived. If a concurrent writer clobbered
+ * them (lost-update), we retry against the now-fresh manifest. After
+ * `maxAttempts` we propagate (fail loud) rather than risk a silent overwrite.
+ *
+ * `log` is the already-fetched record from getOrCreateOwnLifeLog; we re-fetch
+ * inside the loop so the first attempt also works off the freshest read.
+ */
+async function ensureTrackables(
+  pb: PocketBase,
+  log: { id: string },
+  maxAttempts = 3,
+): Promise<void> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const fresh = await pb.collection("life_logs").getOne(log.id);
+    const manifest = manifestOf(fresh.manifest);
+    const existingIds = new Set(manifest.trackables.map((t) => t.id));
+    const missing = ENSURE_SPECS.filter((s) => !existingIds.has(s.id));
+    if (missing.length === 0) return; // nothing to do — already converged
+    for (const spec of missing) {
+      const t: ManifestTrackable = { id: spec.id, label: spec.label, shape: spec.shape };
+      if (spec.group) t.group = spec.group;
+      if (spec.defaultUnit) t.defaultUnit = spec.defaultUnit;
+      manifest.trackables.push(t);
+    }
+    try {
+      await pb.collection("life_logs").update(log.id, { manifest });
+    } catch (err) {
+      lastErr = err;
+      continue; // transient/conflict — re-read and retry
+    }
+    // Verify our appends survived a possible concurrent overwrite.
+    const after = manifestOf((await pb.collection("life_logs").getOne(log.id)).manifest);
+    const afterIds = new Set(after.trackables.map((t) => t.id));
+    if (missing.every((s) => afterIds.has(s.id))) return; // converged
+    lastErr = new Error("manifest ensure clobbered by concurrent write; retrying");
+  }
+  throw lastErr ?? new Error("ensureTrackables: failed to converge after retries");
+}
+
 /** Find a life_event by (log, source_id), or null. */
 async function findBySourceId(pb: PocketBase, logId: string, sourceId: string) {
   const list = await pb.collection("life_events").getList(1, 1, {
@@ -240,21 +379,15 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
   }
 
   // ---- Ensure trackables exist (append-only; never clobber existing) ----
-  const manifest = manifestOf(log.manifest);
-  const existingIds = new Set(manifest.trackables.map((t) => t.id));
-  let manifestChanged = false;
-  for (const spec of ENSURE_SPECS) {
-    if (existingIds.has(spec.id)) continue;
-    const t: ManifestTrackable = { id: spec.id, label: spec.label, shape: spec.shape };
-    if (spec.group) t.group = spec.group;
-    if (spec.defaultUnit) t.defaultUnit = spec.defaultUnit;
-    manifest.trackables.push(t);
-    existingIds.add(spec.id);
-    manifestChanged = true;
-  }
-  if (manifestChanged) {
-    await pb.collection("life_logs").update(logId, { manifest });
-  }
+  // Optimistic read-modify-write with a small retry loop: a blind whole-document
+  // update would last-writer-win over a concurrent life-app manifest edit (the
+  // recipe_boxes corruption failure shape). Each attempt RE-READS the current
+  // manifest, appends ONLY the still-missing trackable specs (existing ids are
+  // never modified — id+shape are immutable — and goals are carried through
+  // untouched), and updates. On a version/conflict error we retry against the
+  // fresh manifest; after a few failed attempts we fail loud rather than risk a
+  // silent overwrite.
+  await ensureTrackables(pb, log);
 
   const written: Record<string, number> = {};
   let skipped = 0;
@@ -264,6 +397,13 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
 
   // ---- 1:1 events ----
   // Insert only if a row with (log, source_id) doesn't already exist.
+  //
+  // source_id scheme: `hc:<subject>:<instant>` keyed on the record's own
+  // timestamp. ACCEPTED ASSUMPTION: two DISTINCT records of the same subject
+  // that share an instant (e.g. two weigh-ins recorded at the exact same time)
+  // collide on source_id, so the later one is skipped (deduped). Acceptable for
+  // a single-device personal feed where same-instant duplicates are
+  // restatements, not genuinely independent readings.
   async function create1to1(opts: {
     subject: string;
     sourceId: string;
@@ -287,7 +427,18 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     };
     if (opts.endTime) payload.end_time = opts.endTime;
     if (opts.labels && Object.keys(opts.labels).length > 0) payload.labels = opts.labels;
-    await pb.collection("life_events").create(payload);
+    try {
+      await pb.collection("life_events").create(payload);
+    } catch (err) {
+      // A concurrent/retried post raced us past the find-by-source_id check and
+      // inserted first → the partial unique (log, source_id) index rejects ours.
+      // Treat as already-exists (skip), don't 500. Other errors propagate.
+      if (isUniqueViolation(err)) {
+        skipped++;
+        return;
+      }
+      throw err;
+    }
     bump(opts.subject);
   }
 
@@ -394,40 +545,23 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     const records = arr(opts.arrayKey);
     if (records.length === 0) return;
 
-    // Bucket the full set once (sinceHwm="") to discover every touched hour
-    // and its full sum (used for the create path).
-    const fullBuckets = bucketHourly(records, timeZone, opts.valueOf);
-    for (const [localHour, full] of fullBuckets) {
-      const sourceId = `hc:${opts.subject}:${localHour}`;
-      const existing = await findBySourceId(pb, logId, sourceId);
-      // UTC instant of the local-hour start = the event timestamp.
-      const timestamp = fromZonedTime(localHour, timeZone).toISOString();
+    // Bucket the full set ONCE into per-hour groups carrying their records.
+    // Every touched hour then folds against its own stored hwm off this single
+    // grouping — no per-hour re-bucket of the full array (the old O(N²) shape).
+    const { groups, skipped: malformed } = groupHourly(records, timeZone, opts.valueOf);
+    skipped += malformed; // unparseable start_time/end_time count as skipped
 
-      if (!existing) {
-        await pb.collection("life_events").create({
-          log: logId,
-          subject_id: opts.subject,
-          source_id: sourceId,
-          timestamp,
-          created_by: userId,
-          entries: [{ name: "amount", type: "number", value: opts.finalize(full.sum), unit: opts.unit }],
-          labels: { hwm: full.hwm },
-        });
-        bump(opts.subject);
-        continue;
-      }
-
-      // Fold in only records past the stored high-water mark for this hour.
-      // Canonicalize the stored hwm too so the lexical compare is consistent
-      // even if an older row stored a differently-formatted instant.
-      const rawHwm =
-        (existing.labels && typeof existing.labels === "object" && (existing.labels as Record<string, string>).hwm) ||
-        "";
+    // Fold this hour's group into an existing row by its stored hwm and update
+    // (or skip if nothing new). Shared by the found-path and the lost-create
+    // race (re-read) path so both apply identical hwm/fold semantics.
+    const foldIntoExisting = async (group: HourGroup, existing: { id: string; labels?: unknown; entries?: unknown }) => {
+      const labels = existing.labels as Record<string, string> | null | undefined;
+      const rawHwm = (labels && typeof labels === "object" && labels.hwm) || "";
       const prevHwm = rawHwm ? canonInstant(rawHwm) : "";
-      const delta = bucketHourly(records, timeZone, opts.valueOf, prevHwm).get(localHour);
-      if (!delta || (delta.sum === 0 && delta.hwm === prevHwm)) {
+      const delta = foldGroup(group, prevHwm);
+      if (delta.sum === 0 && delta.hwm === prevHwm) {
         skipped++;
-        continue; // nothing new past the hwm — leave untouched
+        return; // nothing new past the hwm — leave untouched
       }
       const existingValue =
         Array.isArray(existing.entries) && existing.entries[0] && typeof existing.entries[0].value === "number"
@@ -442,6 +576,42 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
         labels: { hwm: delta.hwm },
       });
       bump(opts.subject);
+    };
+
+    for (const [localHour, group] of groups) {
+      const sourceId = `hc:${opts.subject}:${localHour}`;
+      const existing = await findBySourceId(pb, logId, sourceId);
+      // UTC instant of the local-hour start = the event timestamp.
+      const timestamp = fromZonedTime(localHour, timeZone).toISOString();
+
+      if (existing) {
+        await foldIntoExisting(group, existing);
+        continue;
+      }
+
+      // No row yet → create the full-hour total (sinceHwm="").
+      const full = foldGroup(group);
+      try {
+        await pb.collection("life_events").create({
+          log: logId,
+          subject_id: opts.subject,
+          source_id: sourceId,
+          timestamp,
+          created_by: userId,
+          entries: [{ name: "amount", type: "number", value: opts.finalize(full.sum), unit: opts.unit }],
+          labels: { hwm: full.hwm },
+        });
+        bump(opts.subject);
+      } catch (err) {
+        // A concurrent post created this hour's row between our find and create.
+        // Re-read it and apply the SAME additive-fold/hwm update so this call's
+        // records still accumulate (rather than being dropped). Other errors
+        // propagate.
+        if (!isUniqueViolation(err)) throw err;
+        const now = await findBySourceId(pb, logId, sourceId);
+        if (now) await foldIntoExisting(group, now);
+        else skipped++; // vanished again (delete race) — nothing to fold into
+      }
     }
   }
 
