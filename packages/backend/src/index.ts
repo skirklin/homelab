@@ -25,6 +25,7 @@ export type {
 export type {
   LifeLog, LifeEvent, LifeEntry, SampleSchedule,
   LifeManifest, LifeManifestTrackable, TrackableShape, QuickPayload,
+  LifeGoal, LifeGoalScope, LifeGoalKind, LifeGoalMetric,
 } from "./types/life";
 export { DEFAULT_LIFE_MANIFEST, defaultLifeManifest } from "./life-manifest-default";
 export {
@@ -40,7 +41,18 @@ export {
   setPins,
 } from "./life-manifest-ops";
 export type { ManifestErrorCode } from "./life-manifest-ops";
-export type { AddTrackableInput, UpdateTrackablePatch } from "./interfaces/life";
+export {
+  addGoal,
+  updateGoal,
+  removeGoal,
+  manifestGoals,
+  GOAL_KINDS,
+  GOAL_METRICS,
+  GOAL_PERIODS,
+} from "./life-goal-ops";
+export type {
+  AddTrackableInput, UpdateTrackablePatch, AddGoalInput, UpdateGoalPatch,
+} from "./interfaces/life";
 export type { ClaudeObservation } from "./types/observer";
 export type {
   ChatMessage,

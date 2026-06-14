@@ -13,7 +13,32 @@ import type {
   QuickPayload,
   LifeManifest,
   TrackableShape,
+  LifeGoalScope,
+  LifeGoalKind,
+  LifeGoalMetric,
 } from "../types/life";
+
+/** Goal-definition creation input (see LifeGoal + life-goal-ops validation). */
+export interface AddGoalInput {
+  id: string;
+  label: string;
+  scope: LifeGoalScope;
+  kind: LifeGoalKind;
+  metric: LifeGoalMetric;
+  target: number;
+  unit?: string;
+  period: "day" | "week";
+  hidden?: boolean;
+}
+
+/** Goal patch (id/scope/kind/metric are immutable; only these are editable). */
+export interface UpdateGoalPatch {
+  label?: string;
+  target?: number;
+  unit?: string;
+  period?: "day" | "week";
+  hidden?: boolean;
+}
 
 /** Vocab-row creation input (see LifeManifestTrackable). */
 export interface AddTrackableInput {
@@ -113,6 +138,23 @@ export interface LifeBackend {
 
   /** Reorder trackables. `orderedIds` must be a permutation of the current ids. */
   reorderTrackables(logId: string, orderedIds: string[]): Promise<LifeManifest>;
+
+  // --- Goals (thin interpretive layer over events; manifest-only) ---
+
+  /**
+   * Add a goal to the log's `manifest.goals[]`. Validates the full shape +
+   * id uniqueness (see life-goal-ops). Manifest-only — never touches events.
+   */
+  addGoal(logId: string, input: AddGoalInput): Promise<LifeManifest>;
+
+  /**
+   * Patch a goal's label/target/unit/period/hidden. `id`, `scope`, `kind`, and
+   * `metric` are IMMUTABLE (they define what the goal measures).
+   */
+  updateGoal(logId: string, goalId: string, patch: UpdateGoalPatch): Promise<LifeManifest>;
+
+  /** Remove a goal from the manifest. Manifest-only — never touches events. */
+  removeGoal(logId: string, goalId: string): Promise<LifeManifest>;
 
   // --- Events ---
 
