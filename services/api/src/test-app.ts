@@ -17,6 +17,7 @@ export type AppEnv = {
 };
 
 import { authMiddleware } from "./middleware/auth";
+import { ingestCaptureHandler } from "./routes/health-ingest";
 import { recipesRoutes } from "./routes/recipes";
 import { aiRoutes } from "./routes/ai";
 import { sharingRoutes } from "./routes/sharing";
@@ -35,6 +36,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 // Auth required
 app.use("*", authMiddleware);
 
+app.post("/health/ingest", ingestCaptureHandler);
 app.route("/recipes", recipesRoutes);
 app.route("/ai", aiRoutes);
 app.route("/sharing", sharingRoutes);

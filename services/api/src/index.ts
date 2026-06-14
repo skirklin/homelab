@@ -36,6 +36,7 @@ import { notificationRoutes } from "./routes/notifications";
 import { observerRoutes } from "./routes/observer";
 import { chatRoutes } from "./routes/chat";
 import { oauthRoutes } from "./routes/oauth";
+import { ingestCaptureHandler } from "./routes/health-ingest";
 import { startScheduler } from "./lib/notifications/scheduler";
 import { SUPPORTED_SCOPES } from "./lib/oauth";
 const app = new Hono<AppEnv>();
@@ -194,6 +195,11 @@ app.get("/sharing/list-info/:collection/:listId", async (c) => {
 
 // All other routes require auth
 app.use("*", authMiddleware);
+
+// TEMPORARY Phase-1 capture endpoint for the Health Connect companion app.
+// Authed (above), observation-only — see routes/health-ingest.ts.
+// TODO: remove after Phase-1 schema verification.
+app.post("/health/ingest", ingestCaptureHandler);
 
 // Mount route groups
 app.route("/recipes", recipesRoutes);
