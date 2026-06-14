@@ -21,9 +21,11 @@ import {
 } from "@kirkl/shared";
 import { useLifeContext } from "../life-context";
 import { useLogEvent } from "../lib/useLogEvent";
+import { useTrackables } from "../lib/trackables";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEntry } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
+import { EventEditModal } from "./EventEditModal";
 
 // ---------------------------------------------------------------------------
 // Styled
@@ -123,12 +125,17 @@ const DateHeader = styled.h3`
   letter-spacing: 0.04em;
 `;
 
-const EntryCard = styled.article`
+const EntryCard = styled.article<{ $interactive?: boolean }>`
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-md);
   margin-bottom: var(--space-sm);
+  cursor: ${(p) => (p.$interactive ? "pointer" : "default")};
+
+  &:hover {
+    border-color: ${(p) => (p.$interactive ? "var(--color-primary)" : "var(--color-border)")};
+  }
 `;
 
 const EntryHeader = styled.header`
@@ -260,6 +267,11 @@ function isJournalable(entry: LogEntry): boolean {
 export function Journal() {
   const navigate = useNavigate();
   const { state } = useLifeContext();
+  const trackables = useTrackables();
+  // Single-event edit modal: tapping a freeform journal entry opens it for
+  // edit/delete. Session entries are composite prompt entries, not single-shape
+  // events, so they stay non-interactive.
+  const [editing, setEditing] = useState<LogEntry | null>(null);
   // Entries subscription is mounted once in LifeRoutesInner so every route
   // inherits today's events from a single feed.
 
@@ -560,7 +572,20 @@ export function Journal() {
                     if (labels.location_address) footerBits.push(labels.location_address);
                     if (labels.weather) footerBits.push(labels.weather);
                     return (
-                      <EntryCard key={entry.id}>
+                      <EntryCard
+                        key={entry.id}
+                        $interactive
+                        data-testid="journal-entry-card"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setEditing(entry)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setEditing(entry);
+                          }
+                        }}
+                      >
                         <EntryHeader>
                           <BookOutlined />
                           <EntryKind>Journal</EntryKind>
@@ -589,6 +614,11 @@ export function Journal() {
           )}
         </Section>
       </PageContainer>
+      <EventEditModal
+        event={editing}
+        trackables={trackables}
+        onClose={() => setEditing(null)}
+      />
     </>
   );
 }
