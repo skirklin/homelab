@@ -56,16 +56,6 @@ export function metersToMiles(meters: number): number {
   return round(meters / M_TO_MI, 2);
 }
 
-/** A local-hour aggregation bucket (raw, pre-finalize). */
-export type HourBucket = {
-  /** Local wall-clock hour-start key, e.g. "2026-06-14T07:00:00". */
-  localHour: string;
-  /** Sum of the records' raw values in this bucket. */
-  sum: number;
-  /** Max end_time among the bucket's records (high-water mark). */
-  hwm: string;
-};
-
 /**
  * Canonicalize an ISO instant to its UTC `toISOString()` form, or "" if
  * unparseable. The high-water-mark guard compares end_times LEXICALLY, which
@@ -78,51 +68,10 @@ function canonInstant(iso: string): string {
 }
 
 /**
- * Pure: bucket interval records by their local-hour-start in `timeZone`.
- * `valueOf` extracts the additive value (null skips a record). Only records
- * whose `end_time` is strictly past `sinceHwm` are folded in — that's the
- * high-water-mark guard that makes re-posts/delta-syncs accumulate without
- * double counting. `end_time`s are canonicalized so the lexical compare is
- * order-safe regardless of the source's ISO formatting.
- *
- * NOTE: end_time is treated as a unique high-water key — a distinct record
- * sharing an end instant at/before the hwm is dropped (undercount, never
- * double count). Fine for a single-device personal feed; flagged for clarity.
- * Returns one HourBucket per non-empty local hour.
- */
-export function bucketHourly(
-  records: Record<string, unknown>[],
-  timeZone: string,
-  valueOf: (r: Record<string, unknown>) => number | null,
-  sinceHwm = "",
-): Map<string, HourBucket> {
-  const buckets = new Map<string, HourBucket>();
-  for (const r of records) {
-    const startTime = r.start_time as string;
-    if (!startTime) continue;
-    const startMs = new Date(startTime).getTime();
-    if (Number.isNaN(startMs)) continue; // unparseable start_time — don't reach formatInTimeZone
-    const endTime = canonInstant((r.end_time as string) || startTime);
-    if (!endTime || endTime <= sinceHwm) continue; // unparseable or already counted
-    const value = valueOf(r);
-    if (value === null || !Number.isFinite(value)) continue;
-    const localHour = formatInTimeZone(new Date(startMs), timeZone, "yyyy-MM-dd'T'HH:00:00");
-    let b = buckets.get(localHour);
-    if (!b) {
-      b = { localHour, sum: 0, hwm: sinceHwm };
-      buckets.set(localHour, b);
-    }
-    b.sum += value;
-    if (endTime > b.hwm) b.hwm = endTime;
-  }
-  return buckets;
-}
-
-/**
  * A local-hour group carrying the records that fell in it (pre-fold). Bucketing
  * the FULL record array exactly ONCE into these groups, then folding each group
- * against a per-hour hwm, avoids re-running `bucketHourly` over the whole array
- * for every touched hour (the old O(N²) shape that could time out a backfill).
+ * against a per-hour hwm, avoids the old O(N²) shape that re-scanned the whole
+ * array for every touched hour (which could time out a backfill).
  */
 export type HourGroup = {
   localHour: string;
@@ -173,9 +122,9 @@ export function groupHourly(
 /**
  * Pure: fold a single hour's pre-grouped records, counting only those whose
  * canonical `end_time` is strictly past `sinceHwm`. Returns the additive sum
- * and the new high-water mark. Mirrors `bucketHourly`'s hwm semantics exactly
- * (lexical compare on canonical instants), but operates on already-grouped
- * records so no full-array re-bucket is needed for the update path.
+ * and the new high-water mark. The hwm guard is a lexical compare on canonical
+ * instants, operating on already-grouped records so no full-array re-bucket is
+ * needed for the update path.
  */
 export function foldGroup(group: HourGroup, sinceHwm = ""): { sum: number; hwm: string } {
   let sum = 0;

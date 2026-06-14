@@ -163,22 +163,35 @@ export const screentimeIngestHandler = handler(async (c: Context<AppEnv>) => {
 
   for (const d of days) {
     const date = typeof d.date === "string" ? d.date : "";
-    if (!date) {
-      skipped++; // no logical day → can't key it
+    // Require a strict YYYY-MM-DD: anything else (empty, "2026-6-1", "garbage",
+    // "2026-06-14extra") would otherwise reach fromZonedTime → Invalid Date →
+    // .toISOString() RangeError, which would 500 the whole batch and drop every
+    // valid day in the same payload. Skip-and-continue so the rest still land.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      skipped++; // missing or malformed day → can't key it
       continue;
     }
     const total =
-      typeof d.total_screen_time_minutes === "number" && Number.isFinite(d.total_screen_time_minutes)
+      typeof d.total_screen_time_minutes === "number" &&
+      Number.isFinite(d.total_screen_time_minutes) &&
+      d.total_screen_time_minutes >= 0
         ? d.total_screen_time_minutes
         : null;
     if (total === null) {
-      skipped++; // no usable total
+      skipped++; // missing, negative, or non-finite total — never store garbage
       continue;
     }
     const appsJson = JSON.stringify(appsField(d.apps));
     const sourceId = `st:screen_time:${date}`;
-    // Noon of the local day avoids any day-boundary rounding ambiguity.
-    const timestamp = fromZonedTime(`${date}T12:00:00`, timeZone).toISOString();
+    // Noon of the local day avoids any day-boundary rounding ambiguity. Defensive
+    // guard: even a regex-valid but nonexistent date (e.g. "2026-02-30") can yield
+    // an Invalid Date — never let .toISOString() throw out of the loop.
+    const ts = fromZonedTime(`${date}T12:00:00`, timeZone);
+    if (Number.isNaN(ts.getTime())) {
+      skipped++; // unrepresentable instant
+      continue;
+    }
+    const timestamp = ts.toISOString();
     const labels: Record<string, string> = { source: "screen_time" };
     if (device) labels.device = device;
 

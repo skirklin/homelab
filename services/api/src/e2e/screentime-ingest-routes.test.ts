@@ -233,4 +233,62 @@ describe("POST /screentime/ingest (Phase-2b mapper)", () => {
     expect(empty.data.written.created).toBe(0);
     expect(empty.data.skipped).toBe(0);
   });
+
+  it("skips a malformed date without 500ing — valid days in the same batch still land", async () => {
+    // A junk `date` would otherwise reach fromZonedTime → Invalid Date →
+    // .toISOString() RangeError, 500ing the whole batch. It must be skipped so
+    // the valid day still writes.
+    const { status, data } = await ingest({
+      token: apiToken,
+      body: {
+        timestamp: "2026-06-20T00:00:00Z",
+        device: "Pixel 8",
+        source: "screen_time",
+        screen_time: [
+          { date: "garbage", total_screen_time_minutes: 100, apps: [] }, // malformed → skip
+          { date: "2026-6-1", total_screen_time_minutes: 100, apps: [] }, // not zero-padded → skip
+          { date: "2026-06-20extra", total_screen_time_minutes: 100, apps: [] }, // trailing junk → skip
+          {
+            date: "2026-06-21", // valid, new day → writes
+            total_screen_time_minutes: 55,
+            apps: [{ package: "com.foo", name: "Foo", minutes: 30 }],
+          },
+        ],
+      },
+    });
+    expect(status).toBe(200); // no 500
+    expect(data.ok).toBe(true);
+    expect(data.written.created).toBe(1); // only the valid day
+    expect(data.skipped).toBe(3); // three malformed dates
+
+    const events = await screenTimeEvents();
+    const valid = events.find((e) => e.source_id === "st:screen_time:2026-06-21");
+    expect(valid, "valid day should have landed despite a junk sibling").toBeTruthy();
+    expect(entryValue(valid!, "amount")).toBe(55);
+    // No row was keyed off a malformed date.
+    expect(events.some((e) => e.source_id === "st:screen_time:garbage")).toBe(false);
+  });
+
+  it("skips a day with a negative or non-finite total (never stores garbage)", async () => {
+    const { status, data } = await ingest({
+      token: apiToken,
+      body: {
+        timestamp: "2026-06-22T00:00:00Z",
+        device: "Pixel 8",
+        source: "screen_time",
+        screen_time: [
+          { date: "2026-06-22", total_screen_time_minutes: -5, apps: [] }, // negative → skip
+          { date: "2026-06-23", total_screen_time_minutes: 60, apps: [] }, // valid → writes
+        ],
+      },
+    });
+    expect(status).toBe(200);
+    expect(data.written.created).toBe(1); // only the valid day
+    expect(data.skipped).toBe(1); // the negative-total day
+
+    const events = await screenTimeEvents();
+    expect(events.some((e) => e.source_id === "st:screen_time:2026-06-22")).toBe(false);
+    const valid = events.find((e) => e.source_id === "st:screen_time:2026-06-23");
+    expect(entryValue(valid!, "amount")).toBe(60);
+  });
 });
