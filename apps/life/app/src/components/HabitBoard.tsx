@@ -320,7 +320,7 @@ export function HabitBoard({
                   {isCap
                     ? over
                       ? "over cap"
-                      : `${fmtValue(goal, Math.max(0, goal.target - progress.value))} left`
+                      : `${fmtValue(goal, progress.remaining)} left`
                     : null}
                   {progress.streak > 0 && <Streak>🔥 {progress.streak}</Streak>}
                 </Sub>
