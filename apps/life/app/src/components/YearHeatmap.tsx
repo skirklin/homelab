@@ -11,7 +11,7 @@
 import { useMemo } from "react";
 import styled from "styled-components";
 import type { LifeEvent, LifeGoal } from "@homelab/backend";
-import { dayKey, startOfWeek, startOfDay } from "@homelab/backend";
+import { dayKey, startOfWeek } from "@homelab/backend";
 import { dayEvents, type DayIndex } from "../lib/dayIndex";
 import { cellState, type CellKind } from "./TrackerCalendar";
 import { usePressHold } from "../lib/usePressHold";
@@ -36,15 +36,14 @@ const Col = styled.div`
   gap: 3px;
 `;
 
-const HeatCell = styled.button<{ $kind: CellKind; $future: boolean; $today: boolean; $blank: boolean }>`
+const HeatCell = styled.button<{ $kind: CellKind; $future: boolean; $today: boolean }>`
   width: 13px;
   height: 13px;
   border-radius: 3px;
   padding: 0;
   border: ${(p) => (p.$today ? "2px solid var(--color-primary)" : "1px solid transparent")};
-  cursor: ${(p) => (p.$future || p.$blank ? "default" : "pointer")};
+  cursor: ${(p) => (p.$future ? "default" : "pointer")};
   opacity: ${(p) => (p.$future ? 0.3 : 1)};
-  visibility: ${(p) => (p.$blank ? "hidden" : "visible")};
   background: ${(p) => {
     if (p.$future || p.$kind === "empty") return "var(--color-bg-muted, #ebedf0)";
     if (p.$kind === "over") return "var(--color-warning, #faad14)";
@@ -58,15 +57,12 @@ interface HeatDay {
   key: string;
   future: boolean;
   isToday: boolean;
-  /** Padding slot before the earliest column's first real day (renders hidden). */
-  blank: boolean;
 }
 
 /**
  * Build `weeks` Su–Sa columns ending with the current week. Each column has 7
- * day-slots (Sun..Sat). The first column may begin mid-week relative to the
- * window, but since we always start columns at a Sunday there are no blanks in
- * practice; `blank` stays available for any future ragged-edge needs.
+ * day-slots (Sun..Sat); columns always start on a Sunday so the grid is a clean
+ * 7×weeks rectangle (no ragged edges to pad).
  */
 function buildHeatGrid(today: Date, weeks: number, tz: string): HeatDay[][] {
   const todayKey = dayKey(today, tz);
@@ -77,16 +73,15 @@ function buildHeatGrid(today: Date, weeks: number, tz: string): HeatDay[][] {
     const weekStart = startOfWeek(new Date(thisWeekStart.getTime() - w * 7 * DAY_MS), tz);
     const col: HeatDay[] = [];
     for (let d = 0; d < 7; d++) {
-      const date = startOfDay(new Date(weekStart.getTime() + d * DAY_MS + 12 * HOUR_MS), tz);
-      // Use local noon for the tap timestamp (DST-safe day identity).
-      const noon = new Date(date.getTime() + 12 * HOUR_MS);
-      const key = dayKey(noon, tz);
+      // Local noon of the d-th day — a DST-safe day representative + the tap
+      // timestamp (matches buildCalendarGrid's contract).
+      const date = new Date(weekStart.getTime() + d * DAY_MS + 12 * HOUR_MS);
+      const key = dayKey(date, tz);
       col.push({
-        date: noon,
+        date,
         key,
         future: key > todayKey,
         isToday: key === todayKey,
-        blank: false,
       });
     }
     cols.push(col);
@@ -105,14 +100,13 @@ function HeatButton({
   onTap: () => void;
   onLongPress: () => void;
 }) {
-  const hold = usePressHold(onTap, onLongPress, day.future || day.blank);
+  const hold = usePressHold(onTap, onLongPress, day.future);
   return (
     <HeatCell
       $kind={kind}
       $future={day.future}
       $today={day.isToday}
-      $blank={day.blank}
-      disabled={day.future || day.blank}
+      disabled={day.future}
       data-testid="heatmap-cell"
       data-daykey={day.key}
       data-kind={kind}
@@ -153,7 +147,7 @@ export function YearHeatmap({
         {cols.map((col, ci) => (
           <Col key={ci}>
             {col.map((day) => {
-              const kind = day.future || day.blank ? "empty" : cellState(index, subjectIds, day.key, goal);
+              const kind = day.future ? "empty" : cellState(index, subjectIds, day.key, goal);
               return (
                 <HeatButton
                   key={day.key}

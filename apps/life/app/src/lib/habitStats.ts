@@ -312,20 +312,14 @@ export function monthKey(d: Date, tz: string): string {
   return dayKey(d, tz).slice(0, 7);
 }
 
-/** First-of-month: the local day whose date is the 1st. */
+/** Start-of-day instant for the 1st of the local month containing `d`. */
 function firstOfMonth(d: Date, tz: string): Date {
-  // dayKey gives YYYY-MM-DD; reconstruct the 1st at local noon, then snap.
-  const [y, m] = dayKey(d, tz).split("-").map(Number);
-  // Build an instant in the 1st by stepping back day-by-day to day "01".
+  // Step back day-by-day (DST-safe: −12h then re-snap) until the date is the 1st.
   let cursor = startOfDay(d, tz);
   for (let i = 0; i < 40; i++) {
-    const [, , day] = dayKey(cursor, tz).split("-").map(Number);
-    if (day === 1) break;
+    if (dayKey(cursor, tz).endsWith("-01")) break;
     cursor = startOfDay(new Date(cursor.getTime() - 12 * HOUR_MS), tz);
   }
-  // Guard: if somehow the month/year drifted, ignore (cursor stays the 1st we found).
-  void y;
-  void m;
   return cursor;
 }
 
