@@ -211,7 +211,7 @@ const Track = styled.div`
      height instead of stretching them to the container. The slide-height
      ResizeObserver effect below relies on this — if slides stretched to the
      container, AutoHeight growing the container would resize the slides, re-fire
-     that observer, and reInit in a runaway loop. Don't change to `stretch`. */
+     that observer, and reInit in a runaway loop. Don't change to "stretch". */
   align-items: flex-start;
 `;
 
