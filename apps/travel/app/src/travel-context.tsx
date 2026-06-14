@@ -39,7 +39,9 @@ export type TravelAction =
   | { type: "CLEAR_DATA" }
   | { type: "SET_LOADING"; loading: boolean };
 
-function reducer(state: TravelState, action: TravelAction): TravelState {
+// Exported for unit testing (see travel-context.test.ts). The reducer is pure,
+// so its branches are tested directly rather than through the provider.
+export function reducer(state: TravelState, action: TravelAction): TravelState {
   switch (action.type) {
     case "SET_USER_SLUGS":
       return { ...state, userSlugs: action.slugs, slugsLoaded: true };
@@ -90,7 +92,7 @@ function reducer(state: TravelState, action: TravelAction): TravelState {
   }
 }
 
-const initialState: TravelState = {
+export const initialState: TravelState = {
   userSlugs: {},
   slugsLoaded: false,
   log: null,
