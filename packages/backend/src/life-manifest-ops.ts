@@ -41,7 +41,12 @@ export type ManifestErrorCode =
   | "invalid_default"
   | "invalid_pin"
   | "invalid_pin_entry"
-  | "invalid_order";
+  | "invalid_order"
+  // Goal layer (life-goal-ops.ts) — same ManifestError, distinct codes.
+  | "invalid_goal"
+  | "duplicate_goal"
+  | "goal_not_found"
+  | "immutable_goal";
 
 export class ManifestError extends Error {
   code: ManifestErrorCode;

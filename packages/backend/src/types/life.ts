@@ -75,11 +75,61 @@ export interface LifeManifestTrackable {
 }
 
 /**
+ * What a goal measures over its qualifying events:
+ *   "count" → number of qualifying events in the period
+ *   "sum"   → sum of the qualifying number entry selected by `unit`
+ *             (name-agnostic — picks every number entry whose `unit` matches)
+ *   "days"  → count of DISTINCT local-tz days in the period with ≥1 event
+ */
+export type LifeGoalMetric = "count" | "sum" | "days";
+
+/**
+ * Comparison kind:
+ *   "at_least"  → met when value ≥ target (build a habit up)
+ *   "at_most"   → met when value ≤ target (the ONLY "≤" kind; a cap)
+ *   "frequency" → "N days per period" — forces metric "days", met when ≥ target
+ */
+export type LifeGoalKind = "at_least" | "at_most" | "frequency";
+
+/** What the goal interprets: a single vocab id, or every member of a group. */
+export type LifeGoalScope = { thing: string } | { group: string };
+
+/**
+ * A goal is a THIN interpretive layer over existing `life_events` — it adds NO
+ * new event data and lives in the manifest JSON next to `trackables`. It names
+ * a slice of events (its `scope`), a period, and a target, and the pure
+ * evaluator (apps/life/.../lib/goals.ts) reports adherence. `id` is the
+ * immutable join key (so a goal can be referenced over time); everything else
+ * but scope/kind/metric is freely patchable.
+ */
+export interface LifeGoal {
+  /** IMMUTABLE slug — stable identity for the goal across edits. */
+  id: string;
+  label: string;
+  /** A vocab id (`{thing}`) or a group name (`{group}`) to interpret. */
+  scope: LifeGoalScope;
+  kind: LifeGoalKind;
+  metric: LifeGoalMetric;
+  target: number;
+  /**
+   * REQUIRED when metric === "sum": selects which number entry to sum,
+   * name-agnostically by unit (mg/oz/min/drinks/ct/…). Ignored otherwise.
+   */
+  unit?: string;
+  /** "day" = the local day; "week" = the local week containing the ref date. */
+  period: "day" | "week";
+  hidden?: boolean;
+}
+
+/**
  * The per-user trackable manifest persisted on `life_logs.manifest`. Sessions
  * are NOT in here — they stay code-defined in apps/life/.../manifest.ts.
+ * `goals` is an OPTIONAL thin interpretive layer over existing events; legacy
+ * manifests predate it and read as `undefined`.
  */
 export interface LifeManifest {
   trackables: LifeManifestTrackable[];
+  goals?: LifeGoal[];
 }
 
 export interface LifeLog {

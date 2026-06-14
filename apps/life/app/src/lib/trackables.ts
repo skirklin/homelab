@@ -12,7 +12,7 @@
  * trends (walk/run/bike → "exercise"), not a layout section.
  */
 import { useMemo } from "react";
-import type { LifeManifestTrackable } from "@homelab/backend";
+import type { LifeManifestTrackable, LifeGoal } from "@homelab/backend";
 import { DEFAULT_LIFE_MANIFEST } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 
@@ -24,4 +24,14 @@ export function useTrackables(): LifeManifestTrackable[] {
     if (trackables && trackables.length > 0) return trackables;
     return DEFAULT_LIFE_MANIFEST.trackables;
   }, [state.log?.manifest]);
+}
+
+/**
+ * The goals for the current user's log (the thin interpretive layer on
+ * `manifest.goals[]`). Empty when the log has none — goals are opt-in and
+ * authored via Claude (MCP), so there is no default starter set.
+ */
+export function useGoals(): LifeGoal[] {
+  const { state } = useLifeContext();
+  return useMemo(() => state.log?.manifest?.goals ?? [], [state.log?.manifest]);
 }

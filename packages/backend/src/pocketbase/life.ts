@@ -13,7 +13,7 @@
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
-import type { LifeBackend, AddTrackableInput, UpdateTrackablePatch } from "../interfaces/life";
+import type { LifeBackend, AddTrackableInput, UpdateTrackablePatch, AddGoalInput, UpdateGoalPatch } from "../interfaces/life";
 import type { LifeLog, LifeEvent, LifeEntry, LifeManifest, QuickPayload } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
@@ -25,6 +25,11 @@ import {
   removeTrackable as removeTrackableOp,
   reorderTrackables as reorderTrackablesOp,
 } from "../life-manifest-ops";
+import {
+  addGoal as addGoalOp,
+  updateGoal as updateGoalOp,
+  removeGoal as removeGoalOp,
+} from "../life-goal-ops";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
@@ -39,7 +44,11 @@ function manifestFromRecord(raw: unknown): LifeManifest | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
   if (!Array.isArray(m.trackables)) return null;
-  return { trackables: m.trackables as LifeManifest["trackables"] };
+  const out: LifeManifest = { trackables: m.trackables as LifeManifest["trackables"] };
+  // `goals` is the optional thin interpretive layer; carry it through verbatim
+  // when present (legacy manifests omit it). The pure ops validate on write.
+  if (Array.isArray(m.goals)) out.goals = m.goals as LifeManifest["goals"];
+  return out;
 }
 
 function logFromRecord(r: RecordModel): LifeLog {
@@ -215,6 +224,18 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
   reorderTrackables(logId: string, orderedIds: string[]): Promise<LifeManifest> {
     return this.mutateManifest(logId, (cur) => reorderTrackablesOp(cur, orderedIds));
+  }
+
+  addGoal(logId: string, input: AddGoalInput): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => addGoalOp(cur, input));
+  }
+
+  updateGoal(logId: string, goalId: string, patch: UpdateGoalPatch): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => updateGoalOp(cur, goalId, patch));
+  }
+
+  removeGoal(logId: string, goalId: string): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => removeGoalOp(cur, goalId));
   }
 
   async addEvent(

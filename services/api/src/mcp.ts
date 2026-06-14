@@ -675,6 +675,91 @@ server.tool(
   },
 );
 
+// --- Life goal tools ---
+//
+// A "goal" is a THIN interpretive layer over the caller's existing life_events
+// — it adds NO event data and lives in the manifest next to trackables. It
+// names a slice of events (its scope: one vocab id, or a group name), a metric
+// (count | sum-by-unit | distinct-days), a target, and a period (day | week).
+// These tools manage the caller's OWN manifest (no log-id param). IMMUTABILITY:
+// `id`, `scope`, `kind`, and `metric` define what the goal measures and can
+// NEVER change — patch label/target/unit/period/hidden, or make a new goal.
+
+const goalScopeSchema = z.union([
+  z.object({ thing: z.string().describe("A trackable/vocab id to interpret") }),
+  z.object({ group: z.string().describe("A trackable group name (every non-hidden member)") }),
+]);
+
+server.tool(
+  "list_life_goals",
+  "List the caller's life goals (the thin interpretive layer over events). Each has id, label, scope ({thing}|{group}), kind (at_least|at_most|frequency), metric (count|sum|days), target, optional unit (for sum), period (day|week), hidden.",
+  {},
+  async () => {
+    const data = await api("/life/goals");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_life_goal",
+  "Create a goal in the caller's manifest. `id` is an IMMUTABLE slug. Rules: kind=frequency REQUIRES metric=days (it's 'N days per period'); metric=sum REQUIRES a `unit` (selects which number entry to sum, name-agnostically by unit); at_most is the only '≤' kind (a cap). scope is exactly one of {thing:<vocab id>} or {group:<name>}. scope/kind/metric are IMMUTABLE after creation.",
+  {
+    id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-])"),
+    label: z.string().describe("Display label"),
+    scope: goalScopeSchema.describe("What to interpret: {thing:<vocab id>} or {group:<name>}"),
+    kind: z.enum(["at_least", "at_most", "frequency"]).describe("at_least=build up, at_most=cap (≤), frequency=N days/period"),
+    metric: z.enum(["count", "sum", "days"]).describe("count=#events, sum=sum the unit's number entry, days=distinct days with an event"),
+    target: z.number().positive().describe("Target value (> 0)"),
+    unit: z.string().optional().describe("REQUIRED when metric=sum: which number-entry unit to sum (oz/mg/min/drinks/…)"),
+    period: z.enum(["day", "week"]).describe("day=local day; week=local Sun-start week containing the ref date"),
+    hidden: z.boolean().optional().describe("Hide from the habit board"),
+  },
+  async (args) => {
+    const result = await api("/life/goals", { method: "POST", body: JSON.stringify(args) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_life_goal",
+  "Patch a goal's label/target/unit/period/hidden (pass only what changes). `id`, `scope`, `kind`, and `metric` are IMMUTABLE (they define what the goal measures); to change those, remove the goal and add a new one. Cross-field rules still apply (e.g. a sum goal always needs a unit).",
+  {
+    id: z.string().describe("The goal id to update (immutable; identifies which goal)"),
+    label: z.string().optional(),
+    target: z.number().positive().optional(),
+    unit: z.string().optional().describe("For sum goals: which number-entry unit to sum"),
+    period: z.enum(["day", "week"]).optional(),
+    hidden: z.boolean().optional(),
+  },
+  async ({ id, ...patch }) => {
+    const result = await api(`/life/goals/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_life_goal",
+  "Remove a goal from the caller's manifest. MANIFEST-ONLY: never deletes any life_events — a goal is just an interpretation of existing events.",
+  { id: z.string().describe("The goal id to remove") },
+  async ({ id }) => {
+    const result = await api(`/life/goals/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "get_life_goal_progress",
+  "Evaluate every goal for its current period (default today) — the same evaluator the dashboard's habit board uses. Returns per goal: {id,label,value,target,kind,metric,unit?,met,remaining,streak,period}. This is how to check adherence in chat ('am I on track for water today?').",
+  {
+    date: z.string().optional().describe("ISO date/datetime to evaluate as-of (default: now). Picks the period containing it."),
+  },
+  async ({ date }) => {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : "";
+    const data = await api(`/life/goals/progress${qs}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // --- Observer tools ---
 
 server.tool(
