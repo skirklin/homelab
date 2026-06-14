@@ -178,6 +178,26 @@ function defaultEntriesFor(t: LifeManifestTrackable) {
   }
 }
 
+/**
+ * Would a default tap-to-log for `thing` actually move this goal's value? A
+ * thing with no usable default (rated) can't. And a `sum`/`unit` goal only
+ * counts number entries whose unit === goal.unit, so a thing whose default
+ * payload carries a different unit (e.g. a "drinks" cap over a thing whose
+ * default is "oz") would log an event that doesn't count — a confusing no-op.
+ * In those cases we fall back to opening the shape sheet so the user supplies a
+ * value (and unit) that actually registers.
+ */
+function tapWouldCount(goal: LifeGoal, thing: LifeManifestTrackable): boolean {
+  if (defaultEntriesFor(thing) === null) return false;
+  if (goal.metric === "sum") {
+    // `took` is the only shape that writes a unit-bearing number on its default;
+    // it must match the goal's unit to be summed. Other shapes write no unit.
+    if (thing.shape !== "took") return false;
+    if (thing.defaultUnit !== goal.unit) return false;
+  }
+  return true;
+}
+
 interface DailyRow {
   goal: LifeGoal;
   progress: GoalProgress;
@@ -222,24 +242,30 @@ export function HabitBoard({
 }: HabitBoardProps) {
   const logEvent = useLogEvent();
 
+  // Evaluate goal boundaries in the BROWSER's tz so the dashboard agrees with
+  // the server progress route (which uses the log owner's saved tz). In the
+  // browser the runtime tz already equals this, so the pip day-windows below
+  // (runtime setHours/setDate) line up with the evaluator's periods.
+  const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+
   const visibleGoals = useMemo(() => goals.filter((g) => !g.hidden), [goals]);
 
   const daily = useMemo<DailyRow[]>(() => {
     return visibleGoals
       .filter((g) => g.period === "day")
       .map((goal) => {
-        const progress = evaluateGoal(goal, events, trackables, day);
+        const progress = evaluateGoal(goal, events, trackables, tz, day);
         const thingId = "thing" in goal.scope ? goal.scope.thing : null;
         const thing = thingId ? trackables.find((t) => t.id === thingId) ?? null : null;
         return { goal, progress, thing };
       });
-  }, [visibleGoals, events, trackables, day]);
+  }, [visibleGoals, events, trackables, day, tz]);
 
   const weekly = useMemo<WeeklyRow[]>(() => {
     return visibleGoals
       .filter((g) => g.period === "week")
       .map((goal) => {
-        const progress = evaluateGoal(goal, events, trackables, day);
+        const progress = evaluateGoal(goal, events, trackables, tz, day);
         // Day pips: one per day Sun..Sat of the goal's week, filled when that
         // day had ≥1 qualifying event (re-using the evaluator's day metric on a
         // single-day window keeps the "qualifying" definition identical).
@@ -260,7 +286,7 @@ export function HabitBoard({
         }
         return { goal, progress, pips };
       });
-  }, [visibleGoals, events, trackables, day]);
+  }, [visibleGoals, events, trackables, day, tz]);
 
   if (visibleGoals.length === 0) {
     return (
@@ -284,6 +310,14 @@ export function HabitBoard({
         const member = trackables.find((t) => !t.hidden && t.group === group);
         if (member) onOpenShape(member.shape);
       }
+      return;
+    }
+    // A rated thing, a thing with no usable default, or a sum/unit goal whose
+    // default payload wouldn't be counted (unit mismatch) → open the sheet so
+    // the user supplies a value/unit that actually registers, rather than a
+    // silent no-op.
+    if (!tapWouldCount(goal, thing)) {
+      onOpenShape(thing.shape);
       return;
     }
     const entries = defaultEntriesFor(thing);

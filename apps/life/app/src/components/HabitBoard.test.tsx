@@ -166,6 +166,29 @@ describe("HabitBoard", () => {
     expect(onOpenShape).toHaveBeenCalledWith("did"); // exercise members are `did`
   });
 
+  it("sum goal with a unit mismatch opens the shape sheet instead of a no-op log", async () => {
+    // `water`'s default payload is in "oz", but the goal sums "drinks" — a
+    // default tap-to-log would write an oz event that the goal never counts.
+    // The button must fall back to opening the shape sheet so the user picks a
+    // value/unit that actually registers.
+    const drinksGoal: LifeGoal = { id: "drinks", label: "Drinks", scope: { thing: "water" }, kind: "at_least", metric: "sum", unit: "drinks", target: 3, period: "day" };
+    const { onOpenShape } = renderBoard({ goals: [drinksGoal], events: [] });
+    await userEvent.click(screen.getByTestId("habit-log"));
+    expect(addEvent).not.toHaveBeenCalled();
+    expect(onOpenShape).toHaveBeenCalledWith("took"); // water is a `took` shape
+  });
+
+  it("sum goal whose unit MATCHES the thing default logs directly", async () => {
+    // `water` defaults to oz; an oz goal's default tap-to-log DOES count.
+    const ozGoal: LifeGoal = { id: "oz", label: "Hydrate", scope: { thing: "water" }, kind: "at_least", metric: "sum", unit: "oz", target: 64, period: "day" };
+    renderBoard({ goals: [ozGoal], events: [], timestamp: at(2026, 6, 10) });
+    await userEvent.click(screen.getByTestId("habit-log"));
+    expect(addEvent).toHaveBeenCalledTimes(1);
+    const [, subjectId, entries] = addEvent.mock.calls[0];
+    expect(subjectId).toBe("water");
+    expect(entries).toEqual([{ name: "amount", type: "number", value: 8, unit: "oz" }]);
+  });
+
   it("is date-aware: a past day evaluates that day's events", () => {
     // Goal met on the 9th but not the 10th — viewing the 9th shows it met.
     const events = [ev("floss", num("count", 1, "ct"), at(2026, 6, 9, 9))];
