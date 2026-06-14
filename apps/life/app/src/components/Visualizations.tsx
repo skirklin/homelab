@@ -528,7 +528,14 @@ function isCurrentMonth(d: Date): boolean {
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
 }
 
-export function Visualizations() {
+interface VisualizationsProps {
+  /** When rendered inside the Coach hub, the Coach layout owns the header (the
+   *  Insights/Observations segmented), so we drop the back button + title and
+   *  render only the series selector + charts. */
+  inCoach?: boolean;
+}
+
+export function Visualizations({ inCoach = false }: VisualizationsProps = {}) {
   const { state } = useLifeContext();
   const navigate = useNavigate();
   const trackables = useTrackables();
@@ -575,10 +582,12 @@ export function Visualizations() {
   if (!current) {
     return (
       <Container>
-        <Header>
-          <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
-          <Title>Insights</Title>
-        </Header>
+        {!inCoach && (
+          <Header>
+            <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
+            <Title>Insights</Title>
+          </Header>
+        )}
         <Empty description="Nothing to chart yet" />
       </Container>
     );
@@ -615,8 +624,12 @@ export function Visualizations() {
   return (
     <Container>
       <Header>
-        <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
-        <Title>Insights</Title>
+        {!inCoach && (
+          <>
+            <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
+            <Title>Insights</Title>
+          </>
+        )}
         <SeriesSelect
           value={currentKey}
           onChange={(value) => setSelectedKey(value as string)}

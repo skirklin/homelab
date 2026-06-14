@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Empty, Spin, Tag, App } from "antd";
-import { RobotOutlined, CalendarOutlined, BookOutlined, LineChartOutlined, MessageOutlined } from "@ant-design/icons";
+import { RobotOutlined, CalendarOutlined, MessageOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import {
@@ -123,7 +123,13 @@ function periodTag(period: string) {
 // Component
 // ---------------------------------------------------------------------------
 
-export function Observations() {
+interface ObservationsProps {
+  /** When rendered inside the Coach hub, the Coach layout owns the header (the
+   *  Insights/Observations segmented), so we suppress this component's own. */
+  inCoach?: boolean;
+}
+
+export function Observations({ inCoach = false }: ObservationsProps = {}) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const observer = useObserverBackend();
@@ -188,18 +194,11 @@ export function Observations() {
     }
   };
 
-  const menuItems = [
-    { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("/journal") },
-    { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("/insights") },
-  ];
-
   return (
     <>
-      <AppHeader
-        title="Observations"
-        onBack={() => navigate("/")}
-        menuItems={menuItems}
-      />
+      {!inCoach && (
+        <AppHeader title="Observations" onBack={() => navigate("/")} />
+      )}
 
       <PageContainer>
         <GenerateRow>

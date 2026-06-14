@@ -28,7 +28,6 @@ import {
   CalendarOutlined,
   BookOutlined,
   LineChartOutlined,
-  MessageOutlined,
   RobotOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -153,11 +152,14 @@ export function ObservationDetail() {
     loadObservation();
   }, [loadObservation]);
 
+  // Full-screen reply thread: the bottom tab bar is hidden here, so a small
+  // menu carries the only nav. Back goes to the Coach feed (/observations);
+  // these jump to the other primary destinations. /chat is intentionally
+  // omitted — it's unlinked from nav app-wide.
   const menuItems = [
     { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("/journal") },
     { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("/insights") },
-    { key: "observations", icon: <RobotOutlined />, label: "Observations", onClick: () => navigate("/observations") },
-    { key: "chat", icon: <MessageOutlined />, label: "Chat", onClick: () => navigate("/chat") },
+    { key: "observations", icon: <RobotOutlined />, label: "Coach", onClick: () => navigate("/observations") },
   ];
 
   // The thread_id is the only contract that ties this page to chat — it's

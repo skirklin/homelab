@@ -3,19 +3,20 @@
  * the optional `LifeModule` (kept for parity with other domain packages).
  */
 import { useEffect, lazy, Suspense } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
 import { useAuth, NotFound } from "@kirkl/shared";
 import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { LifeDashboard } from "./components/LifeDashboard";
+import { Today } from "./components/Today";
 import { SessionRunner } from "./components/SessionRunner";
+import { BottomTabBar, BottomBarSpacer, activeTabForPath } from "./components/BottomTabBar";
 import { useEntriesSubscription } from "./subscription";
 
-const Visualizations = lazy(() => import("./components/Visualizations").then(m => ({ default: m.Visualizations })));
+const Coach = lazy(() => import("./components/Coach").then(m => ({ default: m.Coach })));
 const Journal = lazy(() => import("./components/Journal").then(m => ({ default: m.Journal })));
-const Observations = lazy(() => import("./components/Observations").then(m => ({ default: m.Observations })));
 const ObservationDetail = lazy(() => import("./components/ObservationDetail").then(m => ({ default: m.ObservationDetail })));
 const Chat = lazy(() => import("./components/Chat").then(m => ({ default: m.Chat })));
 
@@ -25,6 +26,21 @@ const LoadingContainer = styled.div`
   align-items: center;
   min-height: 200px;
 `;
+
+/**
+ * The bottom tab bar shows on the 4 primary destinations and hides on the
+ * focused full-screen flows (session runners, observation detail). We key off
+ * `activeTabForPath`: a route that maps to a tab is a primary destination;
+ * `/coach` + `/insights` + `/observations` all map to Coach. `/observations/:id`
+ * is detail, so it deliberately does NOT match (the prefix check in
+ * activeTabForPath only matches `/observations` exactly or `/observations/...`,
+ * so we special-case the detail path below).
+ */
+function showsBottomBar(pathname: string): boolean {
+  // Observation DETAIL is a full-screen reply thread — no bar.
+  if (pathname.startsWith("/observations/")) return false;
+  return activeTabForPath(pathname) !== null;
+}
 
 interface LifeRoutesProps {
   /** When true, hides sign-out and other account actions (handled by parent shell) */
@@ -61,6 +77,11 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   // intention_followup prompt (DATA_COLLECTION.md A1).
   useEntriesSubscription(state.log?.id ?? null);
 
+  const location = useLocation();
+  // Standalone shows the persistent bottom bar on the main destinations; the
+  // host shell owns chrome when embedded, so we never render it there.
+  const showBar = !embedded && showsBottomBar(location.pathname);
+
   if (!state.log) {
     return (
       <LoadingContainer>
@@ -69,39 +90,54 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     );
   }
 
+  const coachRoute = (
+    <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+      <Coach />
+    </Suspense>
+  );
+
   return (
-    <Routes>
-      <Route path="/" element={<LifeDashboard embedded={embedded} />} />
-      <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
-      <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
-      <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
-      <Route path="/insights" element={
-        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-          <Visualizations />
-        </Suspense>
-      } />
-      <Route path="/journal" element={
-        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-          <Journal />
-        </Suspense>
-      } />
-      <Route path="/observations" element={
-        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-          <Observations />
-        </Suspense>
-      } />
-      <Route path="/observations/:id" element={
-        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-          <ObservationDetail />
-        </Suspense>
-      } />
-      <Route path="/chat" element={
-        <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-          <Chat />
-        </Suspense>
-      } />
-      <Route path="*" element={<NotFound homePath="/" />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<LifeDashboard embedded={embedded} />} />
+        <Route path="/today" element={<Today />} />
+        <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
+        <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
+        <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
+        {/* Coach is the AI hub. /coach, /insights, /observations all render it
+            so the Insights/Observations segmented stays consistent and these
+            stay deep-linkable. Visualizations/Observations render their content
+            inside Coach (inCoach), suppressing their own headers. */}
+        <Route path="/coach" element={coachRoute} />
+        <Route path="/insights" element={coachRoute} />
+        <Route path="/observations" element={coachRoute} />
+        <Route path="/journal" element={
+          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+            <Journal />
+          </Suspense>
+        } />
+        <Route path="/observations/:id" element={
+          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+            <ObservationDetail />
+          </Suspense>
+        } />
+        {/* /chat is intentionally unlinked from nav (no tab, no menu item, no
+            badge) — reachable only by direct URL. Kept as a PM/product-iteration
+            meta channel. */}
+        <Route path="/chat" element={
+          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+            <Chat />
+          </Suspense>
+        } />
+        <Route path="*" element={<NotFound homePath="/" />} />
+      </Routes>
+      {showBar && (
+        <>
+          <BottomBarSpacer />
+          <BottomTabBar />
+        </>
+      )}
+    </>
   );
 }
 

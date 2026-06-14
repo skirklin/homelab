@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Modal, Button, TimePicker, Switch } from "antd";
-import { ReloadOutlined, DeleteOutlined } from "@ant-design/icons";
+import { ReloadOutlined, DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import styled from "styled-components";
 import { useLifeContext } from "../life-context";
@@ -123,9 +123,11 @@ interface SettingsModalProps {
   log?: LifeLog | null;
   userId?: string;
   onResetSchedule?: () => void;
+  /** Export the full event log. Lives here as a rare action, off the top menu. */
+  onExport?: (format: "csv" | "json") => void;
 }
 
-export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onExport }: SettingsModalProps) {
   const user = useUserBackend();
   const life = useLifeBackend();
   const { message } = useFeedback();
@@ -321,6 +323,34 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule }: S
           </ReminderControls>
         </ReminderRow>
       </Section>
+
+      {onExport && (
+        <Section>
+          <SectionTitle>
+            <span>Export</span>
+          </SectionTitle>
+          <SettingDescription>
+            Download your full event log.
+          </SettingDescription>
+          <SettingRow>
+            <SettingLabel>Data export</SettingLabel>
+            <ReminderControls>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={() => onExport("csv")}
+              >
+                CSV
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={() => onExport("json")}
+              >
+                JSON
+              </Button>
+            </ReminderControls>
+          </SettingRow>
+        </Section>
+      )}
 
       {config?.enabled && (
         <DebugSection>
