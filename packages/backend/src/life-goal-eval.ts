@@ -37,22 +37,28 @@ import type { LifeEvent, LifeManifestTrackable, LifeGoal } from "./types/life";
 // boundary, then fromZonedTime(zoned, tz) maps it back to a true UTC instant.
 // ---------------------------------------------------------------------------
 
-/** Start-of-day UTC instant for the day (in `tz`) containing `d`. */
-function startOfDay(d: Date, tz: string): Date {
+/**
+ * Start-of-day UTC instant for the day (in `tz`) containing `d`.
+ *
+ * Exported so the life app's day index buckets events with the EXACT same
+ * tz-aware boundaries the goal evaluator uses — otherwise a calendar cell and
+ * the goal math could disagree on which day an event near midnight lands in.
+ */
+export function startOfDay(d: Date, tz: string): Date {
   const z = toZonedTime(d, tz);
   z.setHours(0, 0, 0, 0);
   return fromZonedTime(z, tz);
 }
 
 /** End-of-day UTC instant (last ms) for the day (in `tz`) containing `d`. */
-function endOfDay(d: Date, tz: string): Date {
+export function endOfDay(d: Date, tz: string): Date {
   const z = toZonedTime(d, tz);
   z.setHours(23, 59, 59, 999);
   return fromZonedTime(z, tz);
 }
 
 /** Local-day key "YYYY-MM-DD" (in `tz`) for distinct-day counting. */
-function dayKey(d: Date, tz: string): string {
+export function dayKey(d: Date, tz: string): string {
   const z = toZonedTime(d, tz);
   const y = z.getFullYear();
   const m = String(z.getMonth() + 1).padStart(2, "0");
@@ -61,7 +67,7 @@ function dayKey(d: Date, tz: string): string {
 }
 
 /** Start of the Sunday-start week (in `tz`) containing `d`, as a UTC instant. */
-function startOfWeek(d: Date, tz: string): Date {
+export function startOfWeek(d: Date, tz: string): Date {
   const z = toZonedTime(d, tz);
   z.setHours(0, 0, 0, 0);
   z.setDate(z.getDate() - z.getDay()); // getDay: Sun=0 → no shift
