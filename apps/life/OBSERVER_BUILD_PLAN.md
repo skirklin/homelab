@@ -180,6 +180,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-06-11 | NO-OP | Day 13 waiting: Phase 0 + C1–C3 + D1–D3 all on main awaiting deploy; C4 blocked on Scott's input; 5 worktrees from other sessions active. |
 | 2026-06-12 | DISPATCH morning-prompt rework + chat reply | **Deploy is LIVE** (chat_messages in prod with thread_id). Found unresolved 6/8 user message in pm thread: replace "one thing that matters" with a plan-for-the-day prompt (priorities, what/when, calendar). Dispatched worktree agent (keep `id: "intention"` join key, fix evening follow-up + SESSION_REMINDERS drift); replied in pm thread. Built (`2528404`), critically reviewed (0 blockers), MERGED to main same tick; worktree reaped. New wording: "What's the plan for today?" + evening "How did the plan hold up?". Pending deploy of life+api. Tomorrow: nudge deploy + check for first weekly observation. |
 | 2026-06-13 | NO-OP | Waiting for first weekly observation (cron fires Sun 6/15 1pm PT). Morning-prompt rework on main, may need deploy. C4 blocked on Scott's input. 5 worktrees active from other sessions. |
+| 2026-06-14 | NO-OP | Observer endpoint confirmed live in prod (400 on empty body). Weekly cron fires tomorrow Sun 6/15 1pm PT — first observation imminent. C4 blocked on Scott's input. |
 
 ## Decision log
 
