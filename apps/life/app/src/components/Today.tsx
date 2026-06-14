@@ -95,9 +95,17 @@ export function Today() {
   const wpbDebug = useWpbDebug();
 
   const date = useSelectedDate();
-  const { selectedDate, dateParam, getSelectedTimestamp } = date;
+  const { selectedDate, dateParam } = date;
 
   const [openShape, setOpenShape] = useState<TrackableShape | null>(null);
+  // When the Habits calendar backfills via the sheet, it passes the tapped day;
+  // that overrides the viewed day so the sheet logs to the right bucket. Cleared
+  // on close.
+  const [shapeBackfillDay, setShapeBackfillDay] = useState<Date | null>(null);
+  const openShapeForBackfill = useCallback((shape: TrackableShape, backfillDay?: Date) => {
+    setShapeBackfillDay(backfillDay ?? null);
+    setOpenShape(shape);
+  }, []);
   const [reviewLens, setReviewLens] = useState<ReviewLens>(readStoredLens);
   const selectLens = useCallback((lens: ReviewLens) => {
     setReviewLens(lens);
@@ -162,8 +170,7 @@ export function Today() {
                 day={selectedDate}
                 userId={user?.uid ?? ""}
                 logId={state.log?.id}
-                timestamp={getSelectedTimestamp()}
-                onOpenShape={setOpenShape}
+                onOpenShape={openShapeForBackfill}
               />
             )}
           </DateNav>
@@ -197,12 +204,15 @@ export function Today() {
 
       <ShapeSheet
         shape={openShape}
-        onClose={() => setOpenShape(null)}
+        onClose={() => {
+          setOpenShape(null);
+          setShapeBackfillDay(null);
+        }}
         trackables={trackables}
         events={allEntries}
         userId={user?.uid ?? ""}
         logId={state.log?.id}
-        day={selectedDate}
+        day={shapeBackfillDay ?? selectedDate}
       />
     </>
   );

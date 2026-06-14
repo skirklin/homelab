@@ -1,34 +1,51 @@
 /**
  * Habit board — the goal review lens on the dashboard. Swaps in for DayTimeline
- * in the same slot (the Timeline · Habits toggle). It interprets the user's
- * goals (manifest.goals[]) against the day's events via the pure `evaluateGoal`
- * — it adds NO event data, it just reports adherence.
+ * in the same slot (the Timeline · Habits toggle). It is a CALENDAR view over
+ * the unified task/trackable model: every goal and every plain trackable gets a
+ * Su–Sa multi-week `TrackerCalendar` so last week's context, day labels, a today
+ * marker, and history are all legible at a glance (replacing the old single-week
+ * pip strip).
  *
- * Date-aware off `selectedDate`:
- *   - Daily at_least goals → a check + value/target + tap-to-log when unmet.
- *   - Daily at_most caps   → a read-only headroom meter (amber when over).
- *   - Weekly goals         → value/target progress with day pips for the week.
+ * Two sections:
+ *   - Goals (top): each visible goal keeps its at-a-glance status (label,
+ *     value/target, 🔥 streak, met ✓ / cap headroom-or-over, + Log for unmet
+ *     at_least), with a goal-overlaid calendar below. Weekly goals add a
+ *     "this week N/target · last week M/target" context line.
+ *   - All trackables (below, collapsible): every non-hidden trackable not
+ *     already a goal's primary thing gets a plain (binary) calendar.
  *
- * Tap-to-log resolves the goal's default payload from its scope:
- *   - thing scope → replay the trackable's default event for its shape
- *     (happened→count 1; took→defaultAmount+defaultUnit; did→defaultDuration;
- *      rated→open that shape's sheet, since a rating needs a value).
- *   - group scope → can't pick one thing, so open that group's shape sheet.
+ * Tap a calendar cell to BACKFILL or EDIT that day (see `handleTapDay`):
+ *   - empty + a usable default + a tap that would count → log a default event
+ *     timestamped to that day at local noon (tz-correct day bucket);
+ *   - empty + group/rated/no-default → open the shape sheet against that day;
+ *   - populated → edit (one event → EventEditModal; several → a day modal).
  *
- * There is no in-app goal editor yet — authoring is MCP-only — so the empty
- * state points the user at Claude.
+ * All day math is tz-aware (the day index + the goal evaluator share the same
+ * tz helpers); there is no runtime setHours bucketing here. There is no in-app
+ * goal editor — authoring is MCP-only — so the empty state points at Claude.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import styled from "styled-components";
+import { Modal } from "antd";
+import { DownOutlined, RightOutlined } from "@ant-design/icons";
 import type {
   LifeEvent,
   LifeManifestTrackable,
   LifeGoal,
   TrackableShape,
 } from "@homelab/backend";
-import { evaluateGoal, type GoalProgress } from "../lib/goals";
-import { buildEntries, formatUnitValue } from "../lib/shapes";
+import { evaluateGoal, dayKey, type GoalProgress } from "@homelab/backend";
+import { buildEntries, formatUnitValue, labelFor } from "../lib/shapes";
 import { useLogEvent } from "../lib/useLogEvent";
+import { buildDayIndex } from "../lib/dayIndex";
+import { TrackerCalendar } from "./TrackerCalendar";
+import { EventEditModal } from "./EventEditModal";
+import { EntriesList } from "./EntriesList";
+
+// How many weeks each calendar shows. Goals get a fuller window; the long tail
+// is shorter to keep the (potentially long) list scannable on a phone.
+const GOAL_WEEKS = 6;
+const TRACKABLE_WEEKS = 4;
 
 // ---------------------------------------------------------------------------
 // Styled
@@ -36,6 +53,9 @@ import { useLogEvent } from "../lib/useLogEvent";
 
 const Wrap = styled.div`
   margin-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
 `;
 
 const Header = styled.div`
@@ -50,17 +70,23 @@ const Header = styled.div`
 const List = styled.div`
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
+  gap: var(--space-sm);
 `;
 
 const Card = styled.div<{ $over?: boolean }>`
   display: flex;
-  align-items: center;
-  gap: var(--space-sm);
+  flex-direction: column;
+  gap: var(--space-xs);
   padding: var(--space-sm) var(--space-md);
   border: 1px solid ${(p) => (p.$over ? "var(--color-warning, #faad14)" : "var(--color-border)")};
   border-radius: var(--radius-md);
   background: var(--color-bg);
+`;
+
+const StatusRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
 `;
 
 const Mark = styled.span<{ $met: boolean }>`
@@ -114,17 +140,10 @@ const Streak = styled.span`
   color: var(--color-text-secondary);
 `;
 
-const Pips = styled.div`
-  display: flex;
-  gap: 3px;
-  margin-top: 2px;
-`;
-
-const Pip = styled.span<{ $filled: boolean }>`
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: ${(p) => (p.$filled ? "var(--color-primary)" : "var(--color-border)")};
+const WeekContext = styled.div`
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
 `;
 
 const LogButton = styled.button`
@@ -149,6 +168,34 @@ const EmptyHint = styled.div`
   padding: var(--space-xs) 0;
 `;
 
+const ExpanderButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: var(--space-xs) 0;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+
+  .anticon { font-size: 11px; }
+`;
+
+const TrackableRow = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+`;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -157,6 +204,19 @@ const EmptyHint = styled.div`
 function fmtValue(goal: LifeGoal, value: number): string {
   if (goal.metric === "sum" && goal.unit) return formatUnitValue(value, goal.unit);
   return String(value);
+}
+
+/**
+ * Resolve the subjectIds a goal's scope selects, MATCHING the evaluator: a thing
+ * scope is its one id; a group scope is every member whose `group` matches and
+ * that is non-hidden OR is the hidden husk whose id === the group name.
+ */
+function scopeSubjectIds(goal: LifeGoal, trackables: LifeManifestTrackable[]): string[] {
+  if ("thing" in goal.scope) return [goal.scope.thing];
+  const group = goal.scope.group;
+  return trackables
+    .filter((t) => t.group === group && (!t.hidden || t.id === group))
+    .map((t) => t.id);
 }
 
 /**
@@ -190,26 +250,20 @@ function defaultEntriesFor(t: LifeManifestTrackable) {
 function tapWouldCount(goal: LifeGoal, thing: LifeManifestTrackable): boolean {
   if (defaultEntriesFor(thing) === null) return false;
   if (goal.metric === "sum") {
-    // `took` is the only shape that writes a unit-bearing number on its default;
-    // it must match the goal's unit to be summed. Other shapes write no unit.
     if (thing.shape !== "took") return false;
     if (thing.defaultUnit !== goal.unit) return false;
   }
   return true;
 }
 
-interface DailyRow {
+interface GoalRow {
   goal: LifeGoal;
   progress: GoalProgress;
+  subjectIds: string[];
   /** Resolved thing for tap-to-log (thing scope); null for group scope. */
   thing: LifeManifestTrackable | null;
-}
-
-interface WeeklyRow {
-  goal: LifeGoal;
-  progress: GoalProgress;
-  /** 7 booleans Sun..Sat: did this group/thing have a qualifying event? */
-  pips: boolean[];
+  /** Weekly only: this-week and last-week metric values for the context line. */
+  weekContext: { thisWeek: number; lastWeek: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +278,12 @@ export interface HabitBoardProps {
   day: Date;
   userId: string;
   logId: string | undefined;
-  /** Timestamp to log against for the viewed day (undefined = now/today). */
-  timestamp?: Date;
-  /** Opens a shape's bottom sheet (group scope + rated thing fallback). */
-  onOpenShape: (shape: TrackableShape) => void;
+  /**
+   * Opens a shape's bottom sheet for backfill. The optional date routes the
+   * sheet to log against that day (group scope, rated, or no-default things);
+   * omitted → the sheet's current viewed day.
+   */
+  onOpenShape: (shape: TrackableShape, backfillDay?: Date) => void;
 }
 
 export function HabitBoard({
@@ -237,58 +293,122 @@ export function HabitBoard({
   day,
   userId,
   logId,
-  timestamp,
   onOpenShape,
 }: HabitBoardProps) {
   const logEvent = useLogEvent();
 
-  // Evaluate goal boundaries in the BROWSER's tz so the dashboard agrees with
-  // the server progress route (which uses the log owner's saved tz). In the
-  // browser the runtime tz already equals this, so the pip day-windows below
-  // (runtime setHours/setDate) line up with the evaluator's periods.
+  // Evaluate goal boundaries + bucket the calendar in the BROWSER's tz so the
+  // dashboard agrees with the server progress route (which uses the log owner's
+  // saved tz; in the browser the runtime tz equals this).
   const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+
+  // ONE O(events) pass feeds every calendar cell — no per-cell event scans.
+  const index = useMemo(() => buildDayIndex(events, tz), [events, tz]);
 
   const visibleGoals = useMemo(() => goals.filter((g) => !g.hidden), [goals]);
 
-  const daily = useMemo<DailyRow[]>(() => {
-    return visibleGoals
-      .filter((g) => g.period === "day")
-      .map((goal) => {
-        const progress = evaluateGoal(goal, events, trackables, tz, day);
-        const thingId = "thing" in goal.scope ? goal.scope.thing : null;
-        const thing = thingId ? trackables.find((t) => t.id === thingId) ?? null : null;
-        return { goal, progress, thing };
-      });
+  const goalRows = useMemo<GoalRow[]>(() => {
+    return visibleGoals.map((goal) => {
+      const progress = evaluateGoal(goal, events, trackables, tz, day);
+      const subjectIds = scopeSubjectIds(goal, trackables);
+      const thingId = "thing" in goal.scope ? goal.scope.thing : null;
+      const thing = thingId ? trackables.find((t) => t.id === thingId) ?? null : null;
+      let weekContext: GoalRow["weekContext"] = null;
+      if (goal.period === "week") {
+        // Last week = the same evaluator on a refDate 7 days back (tz-safe step).
+        const lastWeekRef = new Date(day.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const last = evaluateGoal(goal, events, trackables, tz, lastWeekRef);
+        weekContext = { thisWeek: progress.value, lastWeek: last.value };
+      }
+      return { goal, progress, subjectIds, thing, weekContext };
+    });
   }, [visibleGoals, events, trackables, day, tz]);
 
-  const weekly = useMemo<WeeklyRow[]>(() => {
-    return visibleGoals
-      .filter((g) => g.period === "week")
-      .map((goal) => {
-        const progress = evaluateGoal(goal, events, trackables, tz, day);
-        // Day pips: one per day Sun..Sat of the goal's week, filled when that
-        // day had ≥1 qualifying event (re-using the evaluator's day metric on a
-        // single-day window keeps the "qualifying" definition identical).
-        const subjectIds = new Set(
-          "thing" in goal.scope
-            ? [goal.scope.thing]
-            : trackables
-                .filter((t) => !t.hidden && t.group === (goal.scope as { group: string }).group)
-                .map((t) => t.id),
-        );
-        const pips: boolean[] = [];
-        for (let i = 0; i < 7; i++) {
-          const d = new Date(progress.periodStart);
-          d.setDate(d.getDate() + i);
-          const lo = new Date(d); lo.setHours(0, 0, 0, 0);
-          const hi = new Date(d); hi.setHours(23, 59, 59, 999);
-          pips.push(events.some((e) => subjectIds.has(e.subjectId) && e.timestamp >= lo && e.timestamp <= hi));
-        }
-        return { goal, progress, pips };
-      });
-  }, [visibleGoals, events, trackables, day, tz]);
+  // Trackables NOT already a goal's PRIMARY thing (thing-scope goals only — a
+  // group goal doesn't claim its members as primaries, so they still show in the
+  // long tail). Hidden ones excluded. Rendered in manifest order.
+  const goalThingIds = useMemo(
+    () => new Set(visibleGoals.flatMap((g) => ("thing" in g.scope ? [g.scope.thing] : []))),
+    [visibleGoals],
+  );
+  const longTail = useMemo(
+    () => trackables.filter((t) => !t.hidden && !goalThingIds.has(t.id)),
+    [trackables, goalThingIds],
+  );
 
-  if (visibleGoals.length === 0) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Edit surface for a tapped populated day: a single event opens EventEditModal;
+  // several open a day modal listing them (each editable/deletable).
+  const [editEvent, setEditEvent] = useState<LifeEvent | null>(null);
+  const [dayEventsModal, setDayEventsModal] = useState<{ label: string; events: LifeEvent[] } | null>(null);
+
+  // ---- Tap-to-log / backfill / edit ------------------------------------
+
+  /**
+   * Backfill or edit the tapped day. `subjectIds`/`thing` describe the calendar's
+   * scope; `date` is local noon of the tapped day (already tz-correct, so a
+   * default log lands in the right day bucket). For a thing-scope goal `goal` is
+   * passed so unit-mismatch no-ops fall back to the sheet.
+   */
+  const handleTapDay = async (
+    subjectIds: string[],
+    thing: LifeManifestTrackable | null,
+    goal: LifeGoal | undefined,
+    date: Date,
+    dayEvts: LifeEvent[],
+  ) => {
+    // Populated day → edit. One event: the single-event modal. Several: a day
+    // modal of the lot.
+    if (dayEvts.length === 1) {
+      setEditEvent(dayEvts[0]);
+      return;
+    }
+    if (dayEvts.length > 1) {
+      const label = thing ? thing.label : labelFor(trackables, subjectIds[0] ?? "");
+      setDayEventsModal({ label, events: dayEvts });
+      return;
+    }
+    // Empty day → backfill. Group scope, a rated thing, a thing with no usable
+    // default, or a goal whose default wouldn't count → open the sheet against
+    // this day so the user supplies a real value (never a silent wrong-day log).
+    if (!logId || !userId) return;
+    if (!thing) {
+      // Group scope: default to a member's shape for the sheet.
+      const shape = trackables.find((t) => subjectIds.includes(t.id) && !t.hidden)?.shape;
+      if (shape) onOpenShape(shape, date);
+      return;
+    }
+    if (goal && !tapWouldCount(goal, thing)) {
+      onOpenShape(thing.shape, date);
+      return;
+    }
+    const entries = defaultEntriesFor(thing);
+    if (!entries) {
+      onOpenShape(thing.shape, date);
+      return;
+    }
+    await logEvent({
+      logId,
+      userId,
+      subjectId: thing.id,
+      entries,
+      timestamp: date, // local noon of the tapped day
+      label: thing.label,
+    });
+  };
+
+  // ---- Goal status row: + Log against the VIEWED day (status reflects it) ---
+
+  const logThing = async (goal: LifeGoal, thing: LifeManifestTrackable | null) => {
+    // Reuse the tap path against the viewed day (local noon), so a status-row
+    // log and a calendar tap on today behave identically.
+    const noon = new Date(day);
+    noon.setHours(12, 0, 0, 0);
+    await handleTapDay(scopeSubjectIds(goal, trackables), thing, goal, noon, []);
+  };
+
+  if (visibleGoals.length === 0 && longTail.length === 0) {
     return (
       <Wrap data-testid="habit-board">
         <Header>Habits</Header>
@@ -299,99 +419,141 @@ export function HabitBoard({
     );
   }
 
-  const logThing = async (goal: LifeGoal, thing: LifeManifestTrackable | null) => {
-    if (!logId || !userId) return;
-    // Group scope (or a rated thing, or a thing with no default) → open the
-    // shape sheet so the user picks the value. For group scope, default to the
-    // first non-hidden member's shape (group members share a shape in practice).
-    if (!thing) {
-      if ("group" in goal.scope) {
-        const group = goal.scope.group;
-        const member = trackables.find((t) => !t.hidden && t.group === group);
-        if (member) onOpenShape(member.shape);
-      }
-      return;
-    }
-    // A rated thing, a thing with no usable default, or a sum/unit goal whose
-    // default payload wouldn't be counted (unit mismatch) → open the sheet so
-    // the user supplies a value/unit that actually registers, rather than a
-    // silent no-op.
-    if (!tapWouldCount(goal, thing)) {
-      onOpenShape(thing.shape);
-      return;
-    }
-    const entries = defaultEntriesFor(thing);
-    if (!entries) {
-      onOpenShape(thing.shape);
-      return;
-    }
-    await logEvent({
-      logId,
-      userId,
-      subjectId: thing.id,
-      entries,
-      timestamp,
-      label: thing.label,
-    });
-  };
-
   return (
     <Wrap data-testid="habit-board">
-      <Header>Habits</Header>
-      <List>
-        {daily.map(({ goal, progress, thing }) => {
-          const isCap = goal.kind === "at_most";
-          const over = isCap && !progress.met;
-          const canTapLog = !isCap && !progress.met;
-          return (
-            <Card key={goal.id} $over={over} data-testid="habit-row">
-              {!isCap && (
-                <Mark $met={progress.met} aria-hidden>{progress.met ? "✓" : ""}</Mark>
-              )}
-              <Body>
-                <Label>{goal.label}</Label>
-                <Sub>
-                  {isCap
-                    ? over
-                      ? "over cap"
-                      : `${fmtValue(goal, progress.remaining)} left`
-                    : null}
-                  {progress.streak > 0 && <Streak>🔥 {progress.streak}</Streak>}
-                </Sub>
-              </Body>
-              <Progress $over={over} data-testid="habit-progress">
-                {fmtValue(goal, progress.value)}/{fmtValue(goal, goal.target)}
-              </Progress>
-              {canTapLog && (
-                <LogButton
-                  disabled={!logId}
-                  onClick={() => logThing(goal, thing)}
-                  data-testid="habit-log"
-                >
-                  + Log
-                </LogButton>
-              )}
-            </Card>
-          );
-        })}
-        {weekly.map(({ goal, progress, pips }) => (
-          <Card key={goal.id} data-testid="habit-row">
-            <Mark $met={progress.met} aria-hidden>{progress.met ? "✓" : ""}</Mark>
-            <Body>
-              <Label>{goal.label}</Label>
-              <Pips data-testid="habit-pips">
-                {pips.map((filled, i) => (
-                  <Pip key={i} $filled={filled} />
-                ))}
-              </Pips>
-              {progress.streak > 0 && <Sub><Streak>🔥 {progress.streak} wk</Streak></Sub>}
-            </Body>
-            <Progress data-testid="habit-progress">
-              {fmtValue(goal, progress.value)}/{fmtValue(goal, goal.target)}
-            </Progress>
-          </Card>
-        ))}
-      </List>
+      {visibleGoals.length === 0 ? (
+        <EmptyHint data-testid="habit-board-empty">
+          No goals yet — set them with Claude (e.g. "track 64 oz of water a day").
+        </EmptyHint>
+      ) : (
+        <div>
+          <Header>Goals</Header>
+          <List>
+            {goalRows.map(({ goal, progress, subjectIds, thing, weekContext }) => {
+              const isCap = goal.kind === "at_most";
+              const over = isCap && !progress.met;
+              const canTapLog = !isCap && !progress.met;
+              return (
+                <Card key={goal.id} $over={over} data-testid="habit-row">
+                  <StatusRow>
+                    {!isCap && (
+                      <Mark $met={progress.met} aria-hidden>{progress.met ? "✓" : ""}</Mark>
+                    )}
+                    <Body>
+                      <Label>{goal.label}</Label>
+                      <Sub>
+                        {isCap
+                          ? over
+                            ? "over cap"
+                            : `${fmtValue(goal, progress.remaining)} left`
+                          : null}
+                        {progress.streak > 0 && (
+                          <Streak>🔥 {progress.streak}{goal.period === "week" ? " wk" : ""}</Streak>
+                        )}
+                      </Sub>
+                    </Body>
+                    <Progress $over={over} data-testid="habit-progress">
+                      {fmtValue(goal, progress.value)}/{fmtValue(goal, goal.target)}
+                    </Progress>
+                    {canTapLog && (
+                      <LogButton
+                        disabled={!logId}
+                        onClick={() => logThing(goal, thing)}
+                        data-testid="habit-log"
+                      >
+                        + Log
+                      </LogButton>
+                    )}
+                  </StatusRow>
+                  {weekContext && (
+                    <WeekContext data-testid="habit-week-context">
+                      this week {fmtValue(goal, weekContext.thisWeek)}/{fmtValue(goal, goal.target)}
+                      {" · "}
+                      last week {fmtValue(goal, weekContext.lastWeek)}/{fmtValue(goal, goal.target)}
+                    </WeekContext>
+                  )}
+                  <TrackerCalendar
+                    subjectIds={subjectIds}
+                    goal={goal}
+                    weeks={GOAL_WEEKS}
+                    index={index}
+                    tz={tz}
+                    today={day}
+                    onTapDay={(date, evts) => void handleTapDay(subjectIds, thing, goal, date, evts)}
+                  />
+                </Card>
+              );
+            })}
+          </List>
+        </div>
+      )}
+
+      {longTail.length > 0 && (
+        <div>
+          <ExpanderButton
+            onClick={() => setExpanded((e) => !e)}
+            aria-expanded={expanded}
+            data-testid="long-tail-expander"
+          >
+            {expanded ? <DownOutlined /> : <RightOutlined />}
+            All trackables ({longTail.length})
+          </ExpanderButton>
+          {expanded && (
+            <List data-testid="long-tail-list">
+              {longTail.map((t) => (
+                <TrackableRow key={t.id} data-testid="trackable-row">
+                  <Label>{t.label}</Label>
+                  <TrackerCalendar
+                    subjectIds={[t.id]}
+                    weeks={TRACKABLE_WEEKS}
+                    index={index}
+                    tz={tz}
+                    today={day}
+                    onTapDay={(date, evts) => void handleTapDay([t.id], t, undefined, date, evts)}
+                  />
+                </TrackableRow>
+              ))}
+            </List>
+          )}
+        </div>
+      )}
+
+      <EventEditModal
+        event={editEvent}
+        trackables={trackables}
+        onClose={() => setEditEvent(null)}
+      />
+
+      <Modal
+        open={dayEventsModal !== null}
+        onCancel={() => setDayEventsModal(null)}
+        title={dayEventsModal ? `${dayEventsModal.label} · ${fmtDay(dayEventsModal.events, tz)}` : ""}
+        footer={null}
+        destroyOnClose
+        data-testid="day-events-modal"
+      >
+        {dayEventsModal && (
+          <EntriesList
+            events={dayEventsModal.events}
+            emptyText={null}
+            onDeleted={(id) =>
+              setDayEventsModal((cur) => {
+                if (!cur) return cur;
+                const next = cur.events.filter((e) => e.id !== id);
+                return next.length > 0 ? { ...cur, events: next } : null;
+              })
+            }
+          />
+        )}
+      </Modal>
     </Wrap>
   );
+}
+
+/** Short date label for the day-events modal title (tz-aware day of the events). */
+function fmtDay(evts: LifeEvent[], tz: string): string {
+  if (evts.length === 0) return "";
+  const key = dayKey(evts[0].timestamp, tz); // YYYY-MM-DD
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
