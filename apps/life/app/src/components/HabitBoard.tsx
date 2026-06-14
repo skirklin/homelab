@@ -24,10 +24,11 @@
  * tz helpers); there is no runtime setHours bucketing here. There is no in-app
  * goal editor — authoring is MCP-only — so the empty state points at Claude.
  */
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import styled from "styled-components";
-import { Modal } from "antd";
+import { Modal, Button } from "antd";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
+import { useFeedback, useLifeBackend } from "@kirkl/shared";
 import type {
   LifeEvent,
   LifeManifestTrackable,
@@ -39,6 +40,7 @@ import { buildEntries, formatUnitValue, labelFor } from "../lib/shapes";
 import { useLogEvent } from "../lib/useLogEvent";
 import { buildDayIndex } from "../lib/dayIndex";
 import { TrackerCalendar } from "./TrackerCalendar";
+import { HabitHistory } from "./HabitHistory";
 import { EventEditModal } from "./EventEditModal";
 import { EntriesList } from "./EntriesList";
 
@@ -118,6 +120,26 @@ const Label = styled.span`
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+`;
+
+/** Tappable habit name → opens the per-habit history screen. */
+const LabelButton = styled.button`
+  align-self: flex-start;
+  max-width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover { color: var(--color-primary); text-decoration: underline; }
 `;
 
 const Sub = styled.span`
@@ -296,6 +318,8 @@ export function HabitBoard({
   onOpenShape,
 }: HabitBoardProps) {
   const logEvent = useLogEvent();
+  const life = useLifeBackend();
+  const { message } = useFeedback();
 
   // Evaluate goal boundaries + bucket the calendar in the BROWSER's tz so the
   // dashboard agrees with the server progress route (which uses the log owner's
@@ -349,6 +373,10 @@ export function HabitBoard({
   // several open a day modal listing them (each editable/deletable).
   const [editEvent, setEditEvent] = useState<LifeEvent | null>(null);
   const [dayEventsModal, setDayEventsModal] = useState<{ label: string; events: LifeEvent[] } | null>(null);
+
+  // Per-habit history screen (year heatmap + month grids + stats). Opened by
+  // tapping a habit's name; carries the trackable + its goal (if any).
+  const [history, setHistory] = useState<{ thing: LifeManifestTrackable; goal: LifeGoal | null } | null>(null);
 
   // ---- Tap-to-log / backfill / edit ------------------------------------
 
@@ -405,6 +433,91 @@ export function HabitBoard({
     });
   };
 
+  /**
+   * Delete a `happened` day's events with an Undo toast that re-creates the
+   * exact events deleted (captured before deletion). The toast names the count.
+   */
+  const deleteWithUndo = useCallback(
+    async (thing: LifeManifestTrackable, dayEvts: LifeEvent[]) => {
+      if (dayEvts.length === 0 || !logId || !userId) return;
+      const snapshot = dayEvts; // captured before delete
+      // allSettled, not all: a rejection on one delete must not strand the
+      // already-succeeded deletes with no Undo affordance. If ANY delete
+      // succeeded we still surface the Undo toast — Undo re-creates the full
+      // original day from the in-memory snapshot, so it's a clean inverse
+      // regardless of which deletes failed. Only when every delete fails do we
+      // show the plain error toast (nothing was removed, nothing to undo).
+      const results = await Promise.allSettled(snapshot.map((e) => life.deleteEvent(e.id)));
+      const anySucceeded = results.some((r) => r.status === "fulfilled");
+      if (!anySucceeded) {
+        const firstErr = results.find((r) => r.status === "rejected");
+        console.error(
+          "Failed to remove entries:",
+          firstErr && firstErr.status === "rejected" ? firstErr.reason : undefined,
+        );
+        message.error("Failed to remove");
+        return;
+      }
+      const n = snapshot.length;
+      const key = `toggled-off-${thing.id}-${Date.now()}`;
+      message.open({
+        key,
+        type: "success",
+        duration: 5,
+        content: (
+          <span>
+            Removed {n} {n === 1 ? "entry" : "entries"}
+            <Button
+              type="link"
+              size="small"
+              onClick={async () => {
+                message.destroy(key);
+                try {
+                  // Re-create each deleted event faithfully (entries, timestamp,
+                  // endTime, labels) so Undo is a true inverse.
+                  await Promise.all(
+                    snapshot.map((e) =>
+                      life.addEvent(logId, e.subjectId, e.entries, userId, {
+                        timestamp: e.timestamp,
+                        endTime: e.endTime,
+                        labels: e.labels,
+                      }),
+                    ),
+                  );
+                } catch (err) {
+                  console.error("Undo failed:", err);
+                  message.error("Undo failed");
+                }
+              }}
+            >
+              Undo
+            </Button>
+          </span>
+        ),
+      });
+    },
+    [life, message, logId, userId],
+  );
+
+  /**
+   * SHORT tap on a `happened` (binary) cell: toggle the day. Empty → backfill a
+   * default event (existing path); filled → delete that day's events + Undo. For
+   * `took`/`did`/`rated` things, a tap opens the editor (handled by `handleTapDay`).
+   */
+  const handleToggleDay = async (
+    thing: LifeManifestTrackable,
+    goal: LifeGoal | undefined,
+    date: Date,
+    dayEvts: LifeEvent[],
+  ) => {
+    if (dayEvts.length > 0) {
+      await deleteWithUndo(thing, dayEvts);
+      return;
+    }
+    // Empty → reuse the backfill path (default event at the day's local noon).
+    await handleTapDay([thing.id], thing, goal, date, []);
+  };
+
   // ---- Goal status row: + Log against the VIEWED day (status reflects it) ---
 
   const logThing = async (goal: LifeGoal, thing: LifeManifestTrackable | null) => {
@@ -447,7 +560,17 @@ export function HabitBoard({
                       <Mark $met={progress.met} aria-hidden>{progress.met ? "✓" : ""}</Mark>
                     )}
                     <Body>
-                      <Label>{goal.label}</Label>
+                      {thing ? (
+                        <LabelButton
+                          type="button"
+                          onClick={() => setHistory({ thing, goal })}
+                          data-testid="goal-name"
+                        >
+                          {goal.label}
+                        </LabelButton>
+                      ) : (
+                        <Label>{goal.label}</Label>
+                      )}
                       <Sub>
                         {isCap
                           ? over
@@ -486,7 +609,16 @@ export function HabitBoard({
                     index={index}
                     tz={tz}
                     today={realToday}
-                    onTapDay={(date, evts) => void handleTapDay(subjectIds, thing, goal, date, evts)}
+                    // `happened` thing → tap toggles; long press opens the editor.
+                    // Everything else → tap opens the editor (long press too).
+                    onTapDay={(date, evts) =>
+                      thing?.shape === "happened"
+                        ? void handleToggleDay(thing, goal, date, evts)
+                        : void handleTapDay(subjectIds, thing, goal, date, evts)
+                    }
+                    onLongPressDay={(date, evts) =>
+                      void handleTapDay(subjectIds, thing, goal, date, evts)
+                    }
                   />
                 </Card>
               );
@@ -509,14 +641,25 @@ export function HabitBoard({
             <List data-testid="long-tail-list">
               {longTail.map((t) => (
                 <TrackableRow key={t.id} data-testid="trackable-row">
-                  <Label>{t.label}</Label>
+                  <LabelButton
+                    type="button"
+                    onClick={() => setHistory({ thing: t, goal: null })}
+                    data-testid="trackable-name"
+                  >
+                    {t.label}
+                  </LabelButton>
                   <TrackerCalendar
                     subjectIds={[t.id]}
                     weeks={TRACKABLE_WEEKS}
                     index={index}
                     tz={tz}
                     today={realToday}
-                    onTapDay={(date, evts) => void handleTapDay([t.id], t, undefined, date, evts)}
+                    onTapDay={(date, evts) =>
+                      t.shape === "happened"
+                        ? void handleToggleDay(t, undefined, date, evts)
+                        : void handleTapDay([t.id], t, undefined, date, evts)
+                    }
+                    onLongPressDay={(date, evts) => void handleTapDay([t.id], t, undefined, date, evts)}
                   />
                 </TrackableRow>
               ))}
@@ -524,6 +667,25 @@ export function HabitBoard({
           )}
         </div>
       )}
+
+      <HabitHistory
+        open={history !== null}
+        thing={history?.thing ?? null}
+        goal={history?.goal ?? null}
+        index={index}
+        events={events}
+        tz={tz}
+        today={realToday}
+        onClose={() => setHistory(null)}
+        onTapDay={(thing, goal, date, evts) =>
+          thing.shape === "happened"
+            ? void handleToggleDay(thing, goal ?? undefined, date, evts)
+            : void handleTapDay([thing.id], thing, goal ?? undefined, date, evts)
+        }
+        onLongPressDay={(thing, goal, date, evts) =>
+          void handleTapDay([thing.id], thing, goal ?? undefined, date, evts)
+        }
+      />
 
       <EventEditModal
         event={editEvent}

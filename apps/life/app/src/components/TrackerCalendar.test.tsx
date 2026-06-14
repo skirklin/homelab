@@ -6,7 +6,7 @@
  * events while future cells are inert.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { LifeEvent, LifeEntry, LifeGoal } from "@homelab/backend";
 import { TrackerCalendar } from "./TrackerCalendar";
@@ -155,5 +155,38 @@ describe("TrackerCalendar", () => {
     );
     await userEvent.click(cell("2026-06-11"));
     expect(onTapDay).not.toHaveBeenCalled();
+  });
+
+  it("a long press fires onLongPressDay (not onTapDay) and a short tap the reverse", async () => {
+    const onTapDay = vi.fn();
+    const onLongPressDay = vi.fn();
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar
+        subjectIds={["water"]}
+        weeks={2}
+        index={index}
+        tz={PT}
+        today={TODAY}
+        onTapDay={onTapDay}
+        onLongPressDay={onLongPressDay}
+      />,
+    );
+    // Long press: hold past the ~450ms threshold, then release → long-press only.
+    const target = cell("2026-06-09");
+    fireEvent.pointerDown(target, { clientX: 0, clientY: 0 });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 520));
+    });
+    fireEvent.pointerUp(target, { clientX: 0, clientY: 0 });
+    expect(onLongPressDay).toHaveBeenCalledTimes(1);
+    expect(onTapDay).not.toHaveBeenCalled();
+
+    // Short tap on another cell → onTapDay only.
+    onTapDay.mockClear();
+    onLongPressDay.mockClear();
+    await userEvent.click(cell("2026-06-08"));
+    expect(onTapDay).toHaveBeenCalledTimes(1);
+    expect(onLongPressDay).not.toHaveBeenCalled();
   });
 });

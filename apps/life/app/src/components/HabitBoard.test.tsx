@@ -11,7 +11,7 @@
  * surface (one event → EventEditModal; several → a day modal).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { LifeManifestTrackable, LifeEvent, LifeEntry, LifeGoal } from "@homelab/backend";
 
@@ -84,6 +84,19 @@ function renderBoard(props: Partial<React.ComponentProps<typeof HabitBoard>> = {
   return { onOpenShape };
 }
 
+/**
+ * Simulate a press-and-hold: pointerdown, let the real ~450ms long-press timer
+ * elapse (the press-hold hook uses real setTimeout — only Date is faked here),
+ * then pointerup. Wrapped in act so the long-press state update flushes.
+ */
+async function longPress(el: HTMLElement): Promise<void> {
+  fireEvent.pointerDown(el, { clientX: 0, clientY: 0 });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 520));
+  });
+  fireEvent.pointerUp(el, { clientX: 0, clientY: 0 });
+}
+
 /** Find a calendar cell by its local day key, scoped to a container. */
 function cellIn(container: HTMLElement, key: string): HTMLElement {
   const el = container.querySelector<HTMLElement>(`[data-daykey="${key}"]`);
@@ -99,6 +112,7 @@ const moveWeekly: LifeGoal = { id: "move", label: "Move", scope: { group: "exerc
 describe("HabitBoard", () => {
   beforeEach(() => {
     addEvent.mockClear();
+    deleteEvent.mockClear();
     messageOpen.mockClear();
     // Pin "now" so the calendar's real-today anchor (and thus which days are
     // past/future and in-window) is deterministic regardless of when the suite
@@ -229,19 +243,70 @@ describe("HabitBoard", () => {
     expect(localKey(opts.timestamp)).toBe("2026-06-08"); // dated to the TAPPED day
   });
 
-  it("backfill: a populated past cell opens the single-event edit modal", async () => {
-    renderBoard({
-      goals: [flossDaily],
-      events: [ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 9))],
-      day: at(2026, 6, 10),
-    });
+  it("toggle off: tapping a filled `happened` cell deletes the day + shows an undo toast", async () => {
+    const event = ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 9));
+    renderBoard({ goals: [flossDaily], events: [event], day: at(2026, 6, 10) });
     const row = screen.getByTestId("habit-row");
     await userEvent.click(cellIn(row, "2026-06-08"));
     expect(addEvent).not.toHaveBeenCalled();
-    expect(screen.getByTestId("event-edit-modal")).toBeInTheDocument();
+    expect(deleteEvent).toHaveBeenCalledTimes(1);
+    expect(deleteEvent).toHaveBeenCalledWith(event.id);
+    // The undo toast names the count (1 entry).
+    expect(messageOpen).toHaveBeenCalledTimes(1);
+    const content = messageOpen.mock.calls[0][0].content;
+    render(content); // render the toast node to inspect its text
+    expect(screen.getByText(/Removed 1 entry/)).toBeInTheDocument();
   });
 
-  it("backfill: a day with several events opens the day-events modal", async () => {
+  it("toggle off: a multi-event `happened` day deletes all + undo restores them", async () => {
+    const a = ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 9));
+    const b = ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 21));
+    renderBoard({ goals: [flossDaily], events: [a, b], day: at(2026, 6, 10) });
+    const row = screen.getByTestId("habit-row");
+    await userEvent.click(cellIn(row, "2026-06-08"));
+    expect(deleteEvent).toHaveBeenCalledTimes(2);
+    const content = messageOpen.mock.calls[0][0].content;
+    const { getByText } = render(content);
+    expect(getByText(/Removed 2 entries/)).toBeInTheDocument();
+    // Undo re-creates the exact deleted events.
+    await userEvent.click(getByText("Undo"));
+    expect(addEvent).toHaveBeenCalledTimes(2);
+    const subjects = addEvent.mock.calls.map((c) => c[1]);
+    expect(subjects).toEqual(["floss", "floss"]);
+    // Re-created at the original timestamps.
+    const stamps = addEvent.mock.calls.map((c) => c[4].timestamp.getTime()).sort();
+    expect(stamps).toEqual([a.timestamp.getTime(), b.timestamp.getTime()].sort());
+  });
+
+  it("toggle off: a partial delete failure still shows Undo, and Undo restores the full day", async () => {
+    // Regression: Promise.all rejected on the first failed delete, stranding the
+    // already-succeeded deletes with no Undo affordance (user saw only "Failed to
+    // remove"). With allSettled, ANY success still surfaces the Undo toast, and
+    // Undo re-creates the full original day from the in-memory snapshot.
+    const a = ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 9));
+    const b = ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 21));
+    // First delete succeeds, second rejects.
+    deleteEvent
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("network"));
+    renderBoard({ goals: [flossDaily], events: [a, b], day: at(2026, 6, 10) });
+    const row = screen.getByTestId("habit-row");
+    await userEvent.click(cellIn(row, "2026-06-08"));
+    expect(deleteEvent).toHaveBeenCalledTimes(2);
+    // The Undo toast still appears despite the partial failure.
+    expect(messageOpen).toHaveBeenCalledTimes(1);
+    const content = messageOpen.mock.calls[0][0].content;
+    const { getByText } = render(content);
+    expect(getByText(/Removed 2 entries/)).toBeInTheDocument();
+    // Undo re-creates the FULL original day (both events), regardless of which
+    // delete failed — a clean inverse from the snapshot.
+    await userEvent.click(getByText("Undo"));
+    expect(addEvent).toHaveBeenCalledTimes(2);
+    const stamps = addEvent.mock.calls.map((c) => c[4].timestamp.getTime()).sort();
+    expect(stamps).toEqual([a.timestamp.getTime(), b.timestamp.getTime()].sort());
+  });
+
+  it("long-press: a multi-event `happened` day opens the day-events editor (no toggle)", async () => {
     renderBoard({
       goals: [flossDaily],
       events: [
@@ -251,10 +316,23 @@ describe("HabitBoard", () => {
       day: at(2026, 6, 10),
     });
     const row = screen.getByTestId("habit-row");
-    await userEvent.click(cellIn(row, "2026-06-08"));
-    expect(addEvent).not.toHaveBeenCalled();
+    await longPress(cellIn(row, "2026-06-08"));
+    expect(deleteEvent).not.toHaveBeenCalled();
     const modal = screen.getByTestId("day-events-modal");
     expect(within(modal).getAllByTestId("entry-row")).toHaveLength(2);
+  });
+
+  it("non-happened tap still opens the editor (took/did/rated never toggle)", async () => {
+    // water is a `took` thing; a populated day taps to edit, never deletes.
+    renderBoard({
+      goals: [hydrate],
+      events: [ev("water", num("amount", 8, "oz"), at(2026, 6, 8, 9))],
+      day: at(2026, 6, 10),
+    });
+    const row = screen.getByTestId("habit-row");
+    await userEvent.click(cellIn(row, "2026-06-08"));
+    expect(deleteEvent).not.toHaveBeenCalled();
+    expect(screen.getByTestId("event-edit-modal")).toBeInTheDocument();
   });
 
   it("backfill: group scope opens the shape sheet against the tapped day", async () => {

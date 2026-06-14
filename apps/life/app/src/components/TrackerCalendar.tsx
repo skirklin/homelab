@@ -18,16 +18,19 @@
  *                                neutral filled.
  *
  * All day identity is tz-aware (buildCalendarGrid + the day index), so the cells
- * agree with the goal evaluator's day math. Tapping a non-future cell fires
- * `onTapDay(date, events)` — the lens decides whether to backfill or edit.
+ * agree with the goal evaluator's day math. A SHORT tap on a non-future cell
+ * fires `onTapDay(date, events)`; a LONG press fires `onLongPressDay(date,
+ * events)` (defaults to `onTapDay` when omitted). The lens decides — by the
+ * trackable's shape — whether a tap toggles (binary `happened`) or edits.
  */
 import { useMemo } from "react";
 import styled from "styled-components";
 import type { LifeEvent, LifeGoal } from "@homelab/backend";
 import { buildCalendarGrid, DOW_LABELS } from "../lib/calendarGrid";
 import { dayHas, daySum, dayEvents, type DayIndex } from "../lib/dayIndex";
+import { usePressHold } from "../lib/usePressHold";
 
-type CellKind = "empty" | "filled" | "met" | "over";
+export type CellKind = "empty" | "filled" | "met" | "over";
 
 const Grid = styled.div`
   display: flex;
@@ -86,8 +89,15 @@ export interface TrackerCalendarProps {
   tz: string;
   /** Any instant in the current local day. */
   today: Date;
-  /** Tapped a non-future cell — receives the day (local noon) + its events. */
+  /** SHORT tap on a non-future cell — receives the day (local noon) + events. */
   onTapDay: (date: Date, events: LifeEvent[]) => void;
+  /**
+   * LONG press on a non-future cell. Same signature as `onTapDay`. When omitted,
+   * a long press behaves like a tap (so callers that don't distinguish gestures
+   * still work). The Habits lens passes this for `happened` things so a tap can
+   * TOGGLE while a long press opens the full editor.
+   */
+  onLongPressDay?: (date: Date, events: LifeEvent[]) => void;
 }
 
 /**
@@ -95,7 +105,7 @@ export interface TrackerCalendarProps {
  * at_most caps compare the day's qualifying SUM to the goal target (a per-day
  * cap); ≥-kinds (at_least/frequency) just need ≥1 qualifying event that day.
  */
-function cellState(
+export function cellState(
   index: DayIndex,
   subjectIds: string[],
   key: string,
@@ -132,6 +142,41 @@ function countFor(index: DayIndex, subjectIds: string[], key: string): number {
   return n;
 }
 
+/**
+ * One interactive day cell. Owns its own press-and-hold hook so tap vs
+ * long-press are distinguished per cell (a tap toggles a `happened` thing; a
+ * long press opens the editor). Future cells are inert.
+ */
+function DayButton({
+  cell,
+  kind,
+  onTap,
+  onLongPress,
+}: {
+  cell: import("../lib/calendarGrid").CalendarCell;
+  kind: CellKind;
+  onTap: () => void;
+  onLongPress: () => void;
+}) {
+  const hold = usePressHold(onTap, onLongPress, cell.future);
+  return (
+    <Cell
+      role="gridcell"
+      $kind={kind}
+      $future={cell.future}
+      $today={cell.isToday}
+      disabled={cell.future}
+      data-testid="calendar-cell"
+      data-daykey={cell.key}
+      data-kind={kind}
+      data-today={cell.isToday ? "true" : undefined}
+      data-future={cell.future ? "true" : undefined}
+      aria-label={cell.key}
+      {...hold}
+    />
+  );
+}
+
 export function TrackerCalendar({
   subjectIds,
   goal,
@@ -140,8 +185,10 @@ export function TrackerCalendar({
   tz,
   today,
   onTapDay,
+  onLongPressDay,
 }: TrackerCalendarProps) {
   const grid = useMemo(() => buildCalendarGrid(today, weeks, tz), [today, weeks, tz]);
+  const longPress = onLongPressDay ?? onTapDay;
 
   return (
     <Grid data-testid="tracker-calendar" role="grid" aria-label="Tracking calendar">
@@ -157,23 +204,12 @@ export function TrackerCalendar({
           {week.map((cell) => {
             const kind = cell.future ? "empty" : cellState(index, subjectIds, cell.key, goal);
             return (
-              <Cell
+              <DayButton
                 key={cell.key}
-                role="gridcell"
-                $kind={kind}
-                $future={cell.future}
-                $today={cell.isToday}
-                disabled={cell.future}
-                data-testid="calendar-cell"
-                data-daykey={cell.key}
-                data-kind={kind}
-                data-today={cell.isToday ? "true" : undefined}
-                data-future={cell.future ? "true" : undefined}
-                aria-label={cell.key}
-                onClick={() => {
-                  if (cell.future) return;
-                  onTapDay(cell.date, dayEvents(index, subjectIds, cell.key));
-                }}
+                cell={cell}
+                kind={kind}
+                onTap={() => onTapDay(cell.date, dayEvents(index, subjectIds, cell.key))}
+                onLongPress={() => longPress(cell.date, dayEvents(index, subjectIds, cell.key))}
               />
             );
           })}
