@@ -24,10 +24,10 @@ const MOVE_SLOP_PX = 10;
 
 export interface PressHoldHandlers {
   onPointerDown: (e: React.PointerEvent) => void;
-  onPointerUp: (e: React.PointerEvent) => void;
+  onPointerUp: () => void;
   onPointerMove: (e: React.PointerEvent) => void;
-  onPointerLeave: (e: React.PointerEvent) => void;
-  onPointerCancel: (e: React.PointerEvent) => void;
+  onPointerLeave: () => void;
+  onPointerCancel: () => void;
   /** Suppress the synthesized click so a long-press never also taps. */
   onClick: (e: React.MouseEvent) => void;
 }
@@ -88,7 +88,7 @@ export function usePressHold(
   );
 
   const onPointerUp = useCallback(
-    (e: React.PointerEvent) => {
+    () => {
       if (disabled) return;
       const armed = start.current !== null;
       clear();
