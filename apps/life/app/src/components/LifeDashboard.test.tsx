@@ -307,3 +307,35 @@ describe("LifeDashboard URL date plumbing", () => {
     expect(nextBtn).toBeDisabled();
   });
 });
+
+describe("LifeDashboard (Log) — IA after the 4-mode split", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps the Sessions + Track capture surface", async () => {
+    renderDashboard("/");
+    await screen.findByText("Sessions");
+    expect(screen.getByText("Track")).toBeInTheDocument();
+  });
+
+  it("no longer renders the Timeline/Habits lens toggle (moved to Today)", async () => {
+    renderDashboard("/");
+    await screen.findByText("Track");
+    expect(screen.queryByTestId("review-lens-toggle")).not.toBeInTheDocument();
+  });
+
+  it("no longer renders the Streaks section (moved to Today)", async () => {
+    renderDashboard("/");
+    await screen.findByText("Track");
+    expect(screen.queryByText("Streaks")).not.toBeInTheDocument();
+  });
+
+  it("has no nav affordance pointing at /chat", async () => {
+    const { container } = renderDashboard("/");
+    await screen.findByText("Track");
+    // No Chat button/link, and the unread badge is gone.
+    expect(screen.queryByText(/^Chat/)).not.toBeInTheDocument();
+    expect(container.querySelector("[href='/chat']")).toBeNull();
+  });
+});

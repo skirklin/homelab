@@ -56,6 +56,19 @@ export function activeTabForPath(pathname: string): LifeTab | null {
   return null;
 }
 
+/**
+ * Whether the bottom bar shows for a pathname. It shows on the 4 primary
+ * destinations (anything `activeTabForPath` recognizes) and hides on the
+ * focused full-screen flows: session runners (/morning, /evening, /weekly) and
+ * the observation DETAIL reply thread (/observations/:id). The detail path is
+ * special-cased because it maps to the Coach tab for highlighting purposes but
+ * is still a full-screen flow.
+ */
+export function showsBottomBar(pathname: string): boolean {
+  if (pathname.startsWith("/observations/")) return false;
+  return activeTabForPath(pathname) !== null;
+}
+
 const Bar = styled.nav`
   position: fixed;
   bottom: 0;

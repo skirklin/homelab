@@ -12,7 +12,7 @@ import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { Today } from "./components/Today";
 import { SessionRunner } from "./components/SessionRunner";
-import { BottomTabBar, BottomBarSpacer, activeTabForPath } from "./components/BottomTabBar";
+import { BottomTabBar, BottomBarSpacer, showsBottomBar } from "./components/BottomTabBar";
 import { useEntriesSubscription } from "./subscription";
 
 const Coach = lazy(() => import("./components/Coach").then(m => ({ default: m.Coach })));
@@ -26,21 +26,6 @@ const LoadingContainer = styled.div`
   align-items: center;
   min-height: 200px;
 `;
-
-/**
- * The bottom tab bar shows on the 4 primary destinations and hides on the
- * focused full-screen flows (session runners, observation detail). We key off
- * `activeTabForPath`: a route that maps to a tab is a primary destination;
- * `/coach` + `/insights` + `/observations` all map to Coach. `/observations/:id`
- * is detail, so it deliberately does NOT match (the prefix check in
- * activeTabForPath only matches `/observations` exactly or `/observations/...`,
- * so we special-case the detail path below).
- */
-function showsBottomBar(pathname: string): boolean {
-  // Observation DETAIL is a full-screen reply thread — no bar.
-  if (pathname.startsWith("/observations/")) return false;
-  return activeTabForPath(pathname) !== null;
-}
 
 interface LifeRoutesProps {
   /** When true, hides sign-out and other account actions (handled by parent shell) */
