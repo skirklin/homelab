@@ -50,6 +50,8 @@ export {
   GOAL_METRICS,
   GOAL_PERIODS,
 } from "./life-goal-ops";
+export { evaluateGoal } from "./life-goal-eval";
+export type { GoalProgress } from "./life-goal-eval";
 export type {
   AddTrackableInput, UpdateTrackablePatch, AddGoalInput, UpdateGoalPatch,
 } from "./interfaces/life";

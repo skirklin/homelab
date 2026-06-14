@@ -19,7 +19,13 @@ import {
   removeTrackable as removeTrackableOp,
   reorderTrackables as reorderTrackablesOp,
   setPins as setPinsOp,
+  addGoal as addGoalOp,
+  updateGoal as updateGoalOp,
+  removeGoal as removeGoalOp,
+  manifestGoals,
+  evaluateGoal,
   type LifeManifest,
+  type LifeEvent,
 } from "@homelab/backend";
 import {
   userOwnsTravelLog,
@@ -2351,7 +2357,11 @@ function manifestFromValue(raw: unknown): LifeManifest | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
   if (!Array.isArray(m.trackables)) return null;
-  return { trackables: m.trackables as LifeManifest["trackables"] };
+  const out: LifeManifest = { trackables: m.trackables as LifeManifest["trackables"] };
+  // Carry the optional goals[] layer through so a goal mutation reads + writes
+  // the freshest list (the pure ops validate on write).
+  if (Array.isArray(m.goals)) out.goals = m.goals as LifeManifest["goals"];
+  return out;
 }
 
 /**
@@ -2376,8 +2386,8 @@ async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
 
 /** Map a ManifestError code to an HTTP status. */
 function manifestErrorStatus(code: ManifestError["code"]): 400 | 404 | 409 {
-  if (code === "not_found") return 404;
-  if (code === "duplicate_id") return 409;
+  if (code === "not_found" || code === "goal_not_found") return 404;
+  if (code === "duplicate_id" || code === "duplicate_goal") return 409;
   return 400;
 }
 
@@ -2519,6 +2529,163 @@ dataRoutes.put("/life/trackables/:id/pins", handler(async (c) => {
   if (!out.ok) return c.json({ error: out.error }, out.status);
   const t = out.manifest.trackables.find((x) => x.id === trackableId);
   return c.json({ pinned: t?.pinned ?? [] });
+}));
+
+// ---- Life goals (thin interpretive layer over events; manifest-only) ----
+//
+// Same identity scoping + read-modify-write pattern as the trackable routes:
+// resolve the CALLER'S OWN log (never a caller-supplied id), run a pure goal op
+// from @homelab/backend, persist the whole manifest. Goals add no event data —
+// removal/edit never touches life_events. The pure ops enforce all validation
+// (frequency⇒days, sum⇒unit, immutable id/scope/kind/metric).
+
+// List the caller's goals.
+dataRoutes.get("/life/goals", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const log = await getOrCreateOwnLifeLog(pb, userId);
+  const manifest = manifestFromValue(log.manifest) ?? emptyManifest();
+  return c.json({ log: log.id, goals: manifestGoals(manifest) });
+}));
+
+// Add a goal to the caller's manifest.
+dataRoutes.post("/life/goals", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{
+    id?: unknown;
+    label?: unknown;
+    scope?: unknown;
+    kind?: unknown;
+    metric?: unknown;
+    target?: unknown;
+    unit?: unknown;
+    period?: unknown;
+    hidden?: unknown;
+  }>();
+  if (typeof body.id !== "string") {
+    return c.json({ error: "id is required (a slug string)" }, 400);
+  }
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    addGoalOp(cur, {
+      id: body.id as string,
+      label: body.label,
+      scope: body.scope,
+      kind: body.kind,
+      metric: body.metric,
+      target: body.target,
+      unit: body.unit,
+      period: body.period,
+      hidden: body.hidden,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ goals: manifestGoals(out.manifest) }, 201);
+}));
+
+// Patch a goal. id/scope/kind/metric are immutable (enforced in the pure op).
+dataRoutes.patch("/life/goals/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const goalId = c.req.param("id")!;
+  const body = await c.req.json<{
+    id?: unknown;
+    label?: unknown;
+    scope?: unknown;
+    kind?: unknown;
+    metric?: unknown;
+    target?: unknown;
+    unit?: unknown;
+    period?: unknown;
+    hidden?: unknown;
+  }>();
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    // Forward id/scope/kind/metric so the pure op rejects any attempt to change
+    // them, rather than silently ignoring.
+    updateGoalOp(cur, goalId, {
+      id: body.id as string | undefined,
+      label: body.label,
+      scope: body.scope,
+      kind: body.kind,
+      metric: body.metric,
+      target: body.target,
+      unit: body.unit,
+      period: body.period,
+      hidden: body.hidden,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ goals: manifestGoals(out.manifest) });
+}));
+
+// Remove a goal (manifest-only — never deletes life_events).
+dataRoutes.delete("/life/goals/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const goalId = c.req.param("id")!;
+  const out = await applyManifestMutation(pb, userId, (cur) => removeGoalOp(cur, goalId));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ success: true, goals: manifestGoals(out.manifest) });
+}));
+
+// Evaluate every goal for its current period (default today) via the shared
+// pure evaluator — the SAME evaluateGoal the HabitBoard uses, so chat-side
+// adherence matches the dashboard exactly. Reads the caller's own log +
+// events; never writes. `date` (ISO) overrides the ref date.
+dataRoutes.get("/life/goals/progress", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const log = await getOrCreateOwnLifeLog(pb, userId);
+  const manifest = manifestFromValue(log.manifest) ?? emptyManifest();
+  const goals = manifestGoals(manifest);
+
+  const refRaw = c.req.query("date");
+  const refDate = refRaw ? new Date(refRaw) : new Date();
+  if (Number.isNaN(refDate.getTime())) {
+    return c.json({ error: "date must be a valid ISO datetime" }, 400);
+  }
+
+  // Pull the log's events into the LifeEvent shape the evaluator expects. The
+  // evaluator only reads subjectId/timestamp/entries, but we build full rows so
+  // the contract stays honest if it grows.
+  const rows = await pb.collection("life_events").getFullList({
+    filter: pb.filter("log = {:logId}", { logId: log.id }),
+    sort: "-timestamp",
+  });
+  const events: LifeEvent[] = rows.map((e) => ({
+    id: e.id,
+    log: e.log as string,
+    subjectId: (e.subject_id as string) || "",
+    timestamp: new Date(e.timestamp as string),
+    endTime: e.end_time ? new Date(e.end_time as string) : undefined,
+    entries: Array.isArray(e.entries) ? (e.entries as LifeEvent["entries"]) : [],
+    labels: (e.labels && typeof e.labels === "object" && !Array.isArray(e.labels))
+      ? (e.labels as Record<string, string>)
+      : undefined,
+    createdBy: (e.created_by as string) || "",
+    created: e.created as string,
+    updated: e.updated as string,
+  }));
+
+  const progress = goals.map((goal) => {
+    const p = evaluateGoal(goal, events, manifest.trackables, refDate);
+    return {
+      id: goal.id,
+      label: goal.label,
+      kind: goal.kind,
+      metric: goal.metric,
+      unit: goal.unit,
+      period: goal.period,
+      value: p.value,
+      target: p.target,
+      met: p.met,
+      remaining: p.remaining,
+      streak: p.streak,
+      period_start: p.periodStart.toISOString(),
+      period_end: p.periodEnd.toISOString(),
+    };
+  });
+  return c.json({ log: log.id, date: refDate.toISOString(), progress });
 }));
 
 // ---- Upkeep ----

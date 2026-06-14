@@ -149,6 +149,8 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 **Life (read):**
 - `list_life_entries` — recent entries (optional days filter)
 - `list_life_trackables` — the caller's per-user trackable vocab rows (id, label, shape, group, defaultUnit/defaultAmount/defaultDuration, ratingLabel, hidden, pinned)
+- `list_life_goals` — the caller's goal definitions (id, label, scope {thing}|{group}, kind at_least|at_most|frequency, metric count|sum|days, target, unit, period day|week, hidden)
+- `get_life_goal_progress` — evaluate every goal for its current period (optional `date` to pick a past period); returns per goal `{id,label,value,target,kind,metric,unit?,met,remaining,streak,period}`. Same evaluator the dashboard habit board uses — this is how to check adherence in chat
 
 **Life (write):**
 - `add_life_entry` — log a widget event (data shape varies per widget type)
@@ -159,8 +161,9 @@ Travel checklists are just tasks tagged `travel:<tripId>`, auto-nested under a `
 - `remove_life_trackable` — drop a trackable from the manifest. Manifest-only — NEVER deletes `life_events`; events re-link if the same id is re-added
 - `reorder_life_trackables` — set trackable order (dashboard renders in manifest order)
 - `add_life_pin` / `remove_life_pin` — manage a trackable's pinned quick-actions; a pin just replays its `entries[]` (+ optional `labels`) as a new event. Use the canonical entry names the trackable's shape writes (took → `amount`, did → `duration`/`rating`, rated → `rating`, happened → `count`) — readers are name-agnostic over legacy names, but new pins should be canonical
+- `add_life_goal` / `update_life_goal` / `remove_life_goal` — manage GOAL definitions. A goal is a thin interpretive layer over existing events (no new event data; it lives in the manifest next to trackables). `scope` is exactly one of `{thing:<vocab id>}` or `{group:<name>}`; `kind` ∈ at_least|at_most|frequency (at_most is the only "≤" cap); `metric` ∈ count|sum|days. Rules: frequency ⇒ metric must be days; sum ⇒ `unit` required (selects which number entry to sum, name-agnostically by unit). `id`, `scope`, `kind`, and `metric` are IMMUTABLE on update (they define what the goal measures); patch label/target/unit/period/hidden, or remove + re-add. `remove_life_goal` is manifest-only — it NEVER deletes any `life_events`.
 
-All trackable tools operate on the authenticated caller's own life log — there is no log-id parameter, so cross-user edits are impossible.
+All trackable and goal tools operate on the authenticated caller's own life log — there is no log-id parameter, so cross-user edits are impossible.
 
 **Sharing:**
 - `create_invite` — generate a sharing invite link (optional expiry)

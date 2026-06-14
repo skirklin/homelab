@@ -1,0 +1,197 @@
+/**
+ * E2E tests for the life-goal routes (`/data/life/goals/*`) exercised through
+ * the same HTTP API the MCP tools call. Pins happy-path CRUD, the validation
+ * rules (frequency⇒days, sum⇒unit, duplicate id, immutable id/scope/kind/
+ * metric), cross-user isolation, and the progress evaluator (which shares the
+ * pure evaluateGoal with the dashboard).
+ *
+ * Requires `pnpm test:env:up`.
+ */
+import { describe, it, expect, beforeAll } from "vitest";
+import PocketBase from "pocketbase";
+import { randomBytes } from "crypto";
+import { getPbTestUrl } from "./pb-test-url";
+
+process.env.PB_URL = getPbTestUrl();
+process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
+process.env.PB_ADMIN_PASSWORD = "testpassword1234";
+
+const { default: { app } } = await import("../test-app");
+
+const PB_URL = getPbTestUrl();
+
+interface Actor {
+  id: string;
+  apiToken: string;
+}
+
+let adminPb: PocketBase;
+let alice: Actor;
+let bob: Actor;
+
+async function makeActor(suffix: string): Promise<Actor> {
+  const email = `${suffix}-${Date.now()}-${randomBytes(4).toString("hex")}@example.com`;
+  const password = "testpassword123";
+  const user = await adminPb.collection("users").create({
+    email,
+    password,
+    passwordConfirm: password,
+    name: suffix,
+  });
+  const userPb = new PocketBase(PB_URL);
+  userPb.autoCancellation(false);
+  await userPb.collection("users").authWithPassword(email, password);
+  const tokenResp = await app.request("/auth/tokens", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${userPb.authStore.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: `${suffix}-test-token` }),
+  });
+  const tokenData = (await tokenResp.json()) as { token: string };
+  return { id: user.id, apiToken: tokenData.token };
+}
+
+async function req(
+  path: string,
+  opts: { method?: string; token: string; body?: unknown },
+): Promise<{ status: number; data: any }> {
+  const resp = await app.request(path, {
+    method: opts.method || "GET",
+    headers: { Authorization: `Bearer ${opts.token}`, "Content-Type": "application/json" },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  return { status: resp.status, data: await resp.json().catch(() => null) };
+}
+
+const goalIds = (data: any): string[] => (data.goals as Array<{ id: string }>).map((g) => g.id);
+
+beforeAll(async () => {
+  adminPb = new PocketBase(PB_URL);
+  adminPb.autoCancellation(false);
+  await adminPb.collection("_superusers").authWithPassword("test-admin@test.local", "testpassword1234");
+  alice = await makeActor("alice-goal");
+  bob = await makeActor("bob-goal");
+});
+
+describe("life goals: CRUD round-trip", () => {
+  it("a fresh caller has no goals", async () => {
+    const { status, data } = await req("/data/life/goals", { token: alice.apiToken });
+    expect(status).toBe(200);
+    expect(data.goals).toEqual([]);
+  });
+
+  it("adds a goal and lists it back", async () => {
+    const add = await req("/data/life/goals", {
+      method: "POST",
+      token: alice.apiToken,
+      body: { id: "hydrate", label: "Hydrate", scope: { thing: "water" }, kind: "at_least", metric: "sum", unit: "oz", target: 64, period: "day" },
+    });
+    expect(add.status).toBe(201);
+    expect(goalIds(add.data)).toContain("hydrate");
+    const list = await req("/data/life/goals", { token: alice.apiToken });
+    expect((list.data.goals as any[]).find((g) => g.id === "hydrate")).toMatchObject({
+      kind: "at_least", metric: "sum", unit: "oz", target: 64, period: "day",
+    });
+  });
+
+  it("rejects a duplicate id with 409", async () => {
+    const dup = await req("/data/life/goals", {
+      method: "POST",
+      token: alice.apiToken,
+      body: { id: "hydrate", label: "Dup", scope: { thing: "water" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+    });
+    expect(dup.status).toBe(409);
+  });
+
+  it("rejects sum without a unit (400)", async () => {
+    const bad = await req("/data/life/goals", {
+      method: "POST",
+      token: alice.apiToken,
+      body: { id: "nounit", label: "No unit", scope: { thing: "water" }, kind: "at_least", metric: "sum", target: 10, period: "day" },
+    });
+    expect(bad.status).toBe(400);
+    expect(String(bad.data.error)).toMatch(/unit/i);
+  });
+
+  it("rejects frequency with a non-days metric (400)", async () => {
+    const bad = await req("/data/life/goals", {
+      method: "POST",
+      token: alice.apiToken,
+      body: { id: "freqbad", label: "Bad freq", scope: { group: "exercise" }, kind: "frequency", metric: "count", target: 3, period: "week" },
+    });
+    expect(bad.status).toBe(400);
+    expect(String(bad.data.error)).toMatch(/days/i);
+  });
+
+  it("patches the mutable fields and keeps id immutable", async () => {
+    const patch = await req("/data/life/goals/hydrate", {
+      method: "PATCH",
+      token: alice.apiToken,
+      body: { target: 80, period: "week" },
+    });
+    expect(patch.status).toBe(200);
+    expect((patch.data.goals as any[]).find((g) => g.id === "hydrate")).toMatchObject({ target: 80, period: "week" });
+  });
+
+  it("rejects scope/kind/metric mutation as immutable (400)", async () => {
+    const scope = await req("/data/life/goals/hydrate", { method: "PATCH", token: alice.apiToken, body: { scope: { thing: "coffee" } } });
+    expect(scope.status).toBe(400);
+    const kind = await req("/data/life/goals/hydrate", { method: "PATCH", token: alice.apiToken, body: { kind: "at_most" } });
+    expect(kind.status).toBe(400);
+    const metric = await req("/data/life/goals/hydrate", { method: "PATCH", token: alice.apiToken, body: { metric: "count" } });
+    expect(metric.status).toBe(400);
+  });
+
+  it("removes a goal (404 to patch afterward)", async () => {
+    const del = await req("/data/life/goals/hydrate", { method: "DELETE", token: alice.apiToken });
+    expect(del.status).toBe(200);
+    expect(goalIds(del.data)).not.toContain("hydrate");
+    const after = await req("/data/life/goals/hydrate", { method: "PATCH", token: alice.apiToken, body: { target: 1 } });
+    expect(after.status).toBe(404);
+  });
+});
+
+describe("life goals: cross-user isolation", () => {
+  it("bob cannot see or touch alice's goals", async () => {
+    await req("/data/life/goals", {
+      method: "POST",
+      token: alice.apiToken,
+      body: { id: "alice-only", label: "Alice", scope: { thing: "water" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+    });
+    const bobList = await req("/data/life/goals", { token: bob.apiToken });
+    expect(goalIds(bobList.data)).not.toContain("alice-only");
+    // bob patching alice's goal id hits bob's own (absent) goal → 404
+    const bobPatch = await req("/data/life/goals/alice-only", { method: "PATCH", token: bob.apiToken, body: { target: 9 } });
+    expect(bobPatch.status).toBe(404);
+  });
+});
+
+describe("life goals: progress evaluation", () => {
+  it("evaluates a goal against the caller's own events", async () => {
+    // Resolve alice's log + add a goal + two qualifying water events today.
+    const list = await req("/data/life/goals", { token: alice.apiToken });
+    const logId = list.data.log as string;
+    await req("/data/life/goals", {
+      method: "POST",
+      token: alice.apiToken,
+      body: { id: "water-prog", label: "Water", scope: { thing: "water" }, kind: "at_least", metric: "sum", unit: "oz", target: 64, period: "day" },
+    });
+    const now = new Date();
+    for (const oz of [40, 30]) {
+      const add = await req("/data/life/entries", {
+        method: "POST",
+        token: alice.apiToken,
+        body: { log: logId, subject_id: "water", entries: [{ name: "amount", type: "number", value: oz, unit: "oz" }], timestamp: now.toISOString() },
+      });
+      expect(add.status).toBe(201);
+    }
+    const prog = await req("/data/life/goals/progress", { token: alice.apiToken });
+    expect(prog.status).toBe(200);
+    const water = (prog.data.progress as any[]).find((p) => p.id === "water-prog");
+    expect(water).toMatchObject({ value: 70, target: 64, met: true, remaining: 0 });
+  });
+
+  it("rejects a malformed date (400)", async () => {
+    const bad = await req("/data/life/goals/progress?date=not-a-date", { token: alice.apiToken });
+    expect(bad.status).toBe(400);
+  });
+});

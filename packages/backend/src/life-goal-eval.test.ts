@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { LifeEvent, LifeEntry, LifeManifestTrackable, LifeGoal } from "@homelab/backend";
-import { evaluateGoal } from "./goals";
+import type { LifeEvent, LifeEntry, LifeManifestTrackable, LifeGoal } from "./types/life";
+import { evaluateGoal } from "./life-goal-eval";
 
 let counter = 0;
 function ev(subjectId: string, entries: LifeEntry[], when: Date): LifeEvent {
