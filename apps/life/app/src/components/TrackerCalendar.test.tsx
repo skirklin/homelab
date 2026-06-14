@@ -1,0 +1,144 @@
+/**
+ * TrackerCalendar — the reusable Su–Sa grid. Verifies: it renders `weeks`
+ * week-rows (+ a DOW header) with today marked and future days disabled; goal
+ * overlay colors met vs cap-over days; plain (no-goal) calendars are binary
+ * filled/empty; and tapping a non-future cell fires onTapDay with that day's
+ * events while future cells are inert.
+ */
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { LifeEvent, LifeEntry, LifeGoal } from "@homelab/backend";
+import { TrackerCalendar } from "./TrackerCalendar";
+import { buildDayIndex } from "../lib/dayIndex";
+
+const PT = "America/Los_Angeles";
+
+let counter = 0;
+function ev(subjectId: string, entries: LifeEntry[], iso: string): LifeEvent {
+  counter += 1;
+  return {
+    id: `e${counter}`,
+    log: "log1",
+    subjectId,
+    timestamp: new Date(iso),
+    entries,
+    createdBy: "u1",
+    created: iso,
+    updated: iso,
+  };
+}
+const num = (name: string, value: number, unit: string): LifeEntry[] => [
+  { name, type: "number", value, unit },
+];
+
+// A fixed "today": 2026-06-10 (a Wednesday) noon PT.
+const TODAY = new Date("2026-06-10T19:00:00.000Z"); // 12:00 PT
+
+function cells() {
+  return screen.getAllByTestId("calendar-cell");
+}
+function cell(dayKey: string): HTMLElement {
+  const el = document.querySelector<HTMLElement>(`[data-daykey="${dayKey}"]`);
+  if (!el) throw new Error(`no calendar cell for ${dayKey}`);
+  return el;
+}
+
+describe("TrackerCalendar", () => {
+  it("renders weeks*7 day cells plus a 7-col DOW header, today marked", () => {
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={3} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    expect(cells()).toHaveLength(21);
+    // Today (2026-06-10) is marked and the last week is at the bottom.
+    expect(cell("2026-06-10").getAttribute("data-today")).toBe("true");
+  });
+
+  it("disables future days in the current week", () => {
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    // Wed 6/10 is today; Thu 6/11..Sat 6/13 are future and disabled.
+    expect(cell("2026-06-11")).toBeDisabled();
+    expect(cell("2026-06-13")).toBeDisabled();
+    expect(cell("2026-06-10")).not.toBeDisabled();
+    expect(cell("2026-06-09")).not.toBeDisabled();
+  });
+
+  it("plain (no-goal) calendar colors logged days filled, others empty", () => {
+    const index = buildDayIndex([ev("water", num("amount", 8, "oz"), "2026-06-09T18:00:00.000Z")], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    expect(cell("2026-06-09").getAttribute("data-kind")).toBe("filled");
+    expect(cell("2026-06-08").getAttribute("data-kind")).toBe("empty");
+  });
+
+  it("at_least goal overlay colors a qualifying day 'met'", () => {
+    const goal: LifeGoal = { id: "g", label: "Hydrate", scope: { thing: "water" }, kind: "at_least", metric: "sum", unit: "oz", target: 64, period: "day" };
+    const index = buildDayIndex([ev("water", num("amount", 8, "oz"), "2026-06-09T18:00:00.000Z")], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} goal={goal} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    // Any qualifying day is "met" for ≥-kinds (even below target — the calendar
+    // shows "logged that day"; per-day target meeting is goal-period business).
+    expect(cell("2026-06-09").getAttribute("data-kind")).toBe("met");
+  });
+
+  it("at_most cap overlay colors an over-cap day 'over' and an under-cap day 'filled'", () => {
+    const cap: LifeGoal = { id: "cap", label: "Drinks", scope: { thing: "drink" }, kind: "at_most", metric: "sum", unit: "drinks", target: 2, period: "day" };
+    const index = buildDayIndex(
+      [
+        // 6/9: 3 drinks → over the daily cap of 2.
+        ev("drink", num("drinks", 3, "drinks"), "2026-06-09T18:00:00.000Z"),
+        // 6/8: 1 drink → logged but under cap.
+        ev("drink", num("drinks", 1, "drinks"), "2026-06-08T18:00:00.000Z"),
+      ],
+      PT,
+    );
+    render(
+      <TrackerCalendar subjectIds={["drink"]} goal={cap} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    expect(cell("2026-06-09").getAttribute("data-kind")).toBe("over");
+    expect(cell("2026-06-08").getAttribute("data-kind")).toBe("filled");
+  });
+
+  it("tapping a populated non-future cell fires onTapDay with that day's events", async () => {
+    const onTapDay = vi.fn();
+    const event = ev("water", num("amount", 8, "oz"), "2026-06-09T18:00:00.000Z");
+    const index = buildDayIndex([event], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={onTapDay} />,
+    );
+    await userEvent.click(cell("2026-06-09"));
+    expect(onTapDay).toHaveBeenCalledTimes(1);
+    const [date, events] = onTapDay.mock.calls[0];
+    expect(events).toHaveLength(1);
+    expect(events[0].id).toBe(event.id);
+    // The passed date is local noon of the tapped day (PT noon === 19:00 UTC).
+    expect(date.toISOString()).toBe("2026-06-09T19:00:00.000Z");
+  });
+
+  it("tapping an empty non-future cell fires onTapDay with no events", async () => {
+    const onTapDay = vi.fn();
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={onTapDay} />,
+    );
+    await userEvent.click(cell("2026-06-08"));
+    expect(onTapDay).toHaveBeenCalledTimes(1);
+    expect(onTapDay.mock.calls[0][1]).toEqual([]);
+  });
+
+  it("a future cell does not fire onTapDay", async () => {
+    const onTapDay = vi.fn();
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={onTapDay} />,
+    );
+    await userEvent.click(cell("2026-06-11"));
+    expect(onTapDay).not.toHaveBeenCalled();
+  });
+});
