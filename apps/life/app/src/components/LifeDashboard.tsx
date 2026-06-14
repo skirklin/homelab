@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Button, Switch, Tooltip, DatePicker, Badge } from "antd";
+import { Button, Switch, Tooltip, DatePicker, Badge, Segmented } from "antd";
 import { DownloadOutlined, BellOutlined, LogoutOutlined, LineChartOutlined, ControlOutlined, LeftOutlined, RightOutlined, SunOutlined, MoonOutlined, BookOutlined, CheckCircleFilled, CalendarOutlined, RobotOutlined, MessageOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
@@ -32,12 +32,13 @@ import { GlobalQuickRow } from "./GlobalQuickRow";
 import { ShapeCard } from "./ShapeCard";
 import { ShapeSheet } from "./ShapeSheet";
 import { DayTimeline } from "./DayTimeline";
+import { HabitBoard } from "./HabitBoard";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { SettingsModal } from "./SettingsModal";
 import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
 import { Hint } from "./Hint";
 import { RANDOM_SAMPLES, SESSIONS, sessionSubjectId, sessionPath, type Session } from "../manifest";
-import { useTrackables } from "../lib/trackables";
+import { useTrackables, useGoals } from "../lib/trackables";
 import { SHAPE_ORDER } from "../lib/shapes";
 import type { TrackableShape } from "@homelab/backend";
 import {
@@ -187,6 +188,22 @@ const SwipeContainer = styled.div`
   user-select: none;
 `;
 
+// The review lens swaps ONLY the area below the shape grid (quick-row + cards
+// stay as the constant logging surface). Default Timeline so the just-shipped
+// inline timeline isn't regressed; the choice persists in localStorage.
+type ReviewLens = "timeline" | "habits";
+const LENS_STORAGE_KEY = "life:reviewLens";
+function readStoredLens(): ReviewLens {
+  if (typeof localStorage === "undefined") return "timeline";
+  return localStorage.getItem(LENS_STORAGE_KEY) === "habits" ? "habits" : "timeline";
+}
+
+const LensToggleRow = styled.div`
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-md);
+`;
+
 const SessionRow = styled.div<{ $hasPrimary: boolean }>`
   display: grid;
   /* Two layouts:
@@ -307,6 +324,17 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // Which shape's bottom sheet is open (null = closed).
   const [openShape, setOpenShape] = useState<TrackableShape | null>(null);
   const [showSampleModal, setShowSampleModal] = useState(false);
+  // Review-lens toggle (Timeline · Habits) — controls only the slot below the
+  // shape grid. Persisted in localStorage; defaults to Timeline.
+  const [reviewLens, setReviewLens] = useState<ReviewLens>(readStoredLens);
+  const selectLens = useCallback((lens: ReviewLens) => {
+    setReviewLens(lens);
+    try {
+      localStorage.setItem(LENS_STORAGE_KEY, lens);
+    } catch {
+      // ignore quota / disabled storage — the in-memory choice still applies
+    }
+  }, []);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
   // Suppress the push-subscription affordance entirely on non-phone devices.
@@ -512,6 +540,9 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
   // default starter set). Layout is by SHAPE (four cards), not by group —
   // `group` is a semantic rollup for trends, not a layout section.
   const trackables = useTrackables();
+  // Goals: the thin interpretive layer the Habits lens renders. Empty unless
+  // the user has authored some via Claude.
+  const goals = useGoals();
 
   // Streaks — recompute when entries change (Map identity flips on each
   // SET_ENTRIES dispatch, so the dep is stable enough).
@@ -1031,13 +1062,38 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
                 />
               ))}
             </ShapeGrid>
-            <DayTimeline
-              trackables={trackables}
-              events={allEntries}
-              day={selectedDate}
-              journalTarget={journalTarget}
-              onOpenShape={setOpenShape}
-            />
+            <LensToggleRow>
+              <Segmented<ReviewLens>
+                size="small"
+                value={reviewLens}
+                onChange={selectLens}
+                options={[
+                  { label: "Timeline", value: "timeline" },
+                  { label: "Habits", value: "habits" },
+                ]}
+                data-testid="review-lens-toggle"
+              />
+            </LensToggleRow>
+            {reviewLens === "timeline" ? (
+              <DayTimeline
+                trackables={trackables}
+                events={allEntries}
+                day={selectedDate}
+                journalTarget={journalTarget}
+                onOpenShape={setOpenShape}
+              />
+            ) : (
+              <HabitBoard
+                trackables={trackables}
+                goals={goals}
+                events={allEntries}
+                day={selectedDate}
+                userId={user?.uid ?? ""}
+                logId={state.log?.id}
+                timestamp={getSelectedTimestamp()}
+                onOpenShape={setOpenShape}
+              />
+            )}
           </SwipeContainer>
         </Section>
       </PageContainer>
