@@ -45,7 +45,7 @@ function magnitudeUnit(t: Pick<LifeManifestTrackable, "shape" | "defaultUnit">):
  *
  * The magnitude branches read the precomputed `cell.sums` (no event scan); a
  * magnitude row that happens to carry NO value of its declared unit on a day
- * (legacy data) falls back to the day's dominant summed unit so the series
+ * (legacy data) falls back to the day's first-seen summed unit so the series
  * isn't silently empty. `rated` reads the cell's own events to average — that's
  * the bucket's events only, still O(events-on-that-day), not a global scan.
  */
@@ -66,7 +66,7 @@ export function dailyValue(
       const unit = magnitudeUnit(trackable);
       const v = cell.sums.get(unit);
       if (v !== undefined) return v;
-      // Declared unit absent on this day — fall back to the dominant summed
+      // Declared unit absent on this day — fall back to the first-seen summed
       // unit so legacy rows still chart instead of reading as empty.
       const first = cell.sums.entries().next();
       return first.done ? null : first.value[1];

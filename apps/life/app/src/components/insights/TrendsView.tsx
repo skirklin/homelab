@@ -85,8 +85,8 @@ export function TrendsView({
     for (const s of picked) {
       const pts = buildAnalysisSeries(index, trackableArg(s), s.subjectIds, granularity, from, today, tz);
       const vals = pts.map((p) => p.value);
-      const lo = Math.min(...vals);
-      const hi = Math.max(...vals);
+      const lo = vals.length ? Math.min(...vals) : 0;
+      const hi = vals.length ? Math.max(...vals) : 0;
       norm.set(s.key, (v) => (hi === lo ? 50 : ((v - lo) / (hi - lo)) * 100));
       for (const p of pts) {
         let row = byDate.get(p.date);
@@ -154,8 +154,10 @@ export function TrendsView({
             <ComposedChart data={rows} onClick={handleClick}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-              {/* Normalized 0–100 axis so different units share the frame. */}
-              <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} hide={!single} />
+              {/* Single series: real values on a visible auto axis. Multi: a
+                  hidden 0–100 axis since the lines are min–max normalized so
+                  different units can share the frame. */}
+              <YAxis tick={{ fontSize: 10 }} domain={single ? [0, "auto"] : [0, 100]} hide={!single} />
               <Tooltip
                 contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }}
                 formatter={(_v, name, item) => {
