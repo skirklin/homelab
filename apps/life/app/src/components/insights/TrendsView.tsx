@@ -20,6 +20,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import type { MouseHandlerDataParam } from "recharts";
 import type { DayIndex } from "../../lib/dayIndex";
 import {
   series as buildAnalysisSeries,
@@ -109,8 +110,9 @@ export function TrendsView({
     single &&
     percentileScale(rows.map((r) => r[single.key]).filter((v): v is number => typeof v === "number"));
 
-  const handleClick = (data: { activePayload?: { payload: MergedRow }[] }) => {
-    const date = data.activePayload?.[0]?.payload?.date;
+  // `activeLabel` is the clicked bucket's x-axis category — our bucket-key date.
+  const handleClick = (data: MouseHandlerDataParam) => {
+    const date = data.activeLabel;
     if (typeof date !== "string") return;
     const { from, to } = bucketRange(date, granularity, tz);
     const subjects = picked.flatMap((s) => s.subjectIds);

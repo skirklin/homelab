@@ -17,7 +17,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { DayIndex } from "../../lib/dayIndex";
-import { series as buildAnalysisSeries, correlate, bucketRange } from "../../lib/analysis";
+import { series as buildAnalysisSeries, correlate, bucketRange, type CorrelationPoint } from "../../lib/analysis";
 import type { Series } from "./model";
 import { trackableArg, isNumeric } from "./model";
 import { Controls, ChartBox, ReadOut, Hint, SERIES_COLORS, useDrillDown } from "./shared";
@@ -121,14 +121,7 @@ export function CorrelateView({
           </ReadOut>
           <ChartBox>
             <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart
-                onClick={(d: { activePayload?: { payload: { date: string } }[] }) => {
-                  const date = d.activePayload?.[0]?.payload?.date;
-                  if (typeof date !== "string") return;
-                  const { from, to } = bucketRange(date, "day", tz);
-                  openRange(from, to, [...x.subjectIds, ...y.subjectIds]);
-                }}
-              >
+              <ScatterChart>
                 <CartesianGrid stroke="var(--color-border)" />
                 <XAxis type="number" dataKey="x" name={x.label} tick={{ fontSize: 10 }} />
                 <YAxis type="number" dataKey="y" name={y.label} tick={{ fontSize: 10 }} />
@@ -138,7 +131,20 @@ export function CorrelateView({
                   contentStyle={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "8px" }}
                   formatter={(v, name) => [v, name === "x" ? x.label : y.label]}
                 />
-                <Scatter data={result.points} fill={SERIES_COLORS[0]} />
+                {/* Per-point onClick hands back the datum directly — a scatter
+                    has no category axis, so the chart-level activeLabel can't
+                    identify a point. */}
+                <Scatter
+                  data={result.points}
+                  fill={SERIES_COLORS[0]}
+                  onClick={(p) => {
+                    // The clicked point's original datum rides on `payload`.
+                    const date = (p?.payload as CorrelationPoint | undefined)?.date;
+                    if (typeof date !== "string") return;
+                    const { from, to } = bucketRange(date, "day", tz);
+                    openRange(from, to, [...x.subjectIds, ...y.subjectIds]);
+                  }}
+                />
               </ScatterChart>
             </ResponsiveContainer>
           </ChartBox>

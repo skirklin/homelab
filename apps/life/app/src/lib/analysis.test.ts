@@ -44,7 +44,9 @@ const num = (name: string, value: number, unit: string, scale?: number): LifeEnt
   { name, type: "number", value, unit, ...(scale ? { scale } : {}) },
 ];
 
-const took = (id: string, unit: string): Pick<LifeManifestTrackable, "shape" | "defaultUnit"> => ({
+// First arg names the subject for readability at call sites; only the unit
+// feeds the trackable arg.
+const took = (_subject: string, unit: string): Pick<LifeManifestTrackable, "shape" | "defaultUnit"> => ({
   shape: "took",
   defaultUnit: unit,
 });
