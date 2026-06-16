@@ -334,7 +334,7 @@ export function monthKey(d: Date, tz: string): string {
 }
 
 /** Start-of-day instant for the 1st of the local month containing `d`. */
-function firstOfMonth(d: Date, tz: string): Date {
+export function firstOfMonth(d: Date, tz: string): Date {
   // Step back day-by-day (DST-safe: −12h then re-snap) until the date is the 1st.
   let cursor = startOfDay(d, tz);
   for (let i = 0; i < 40; i++) {
