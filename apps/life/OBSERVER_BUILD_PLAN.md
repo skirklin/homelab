@@ -182,6 +182,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-06-13 | NO-OP | Waiting for first weekly observation (cron fires Sun 6/15 1pm PT). Morning-prompt rework on main, may need deploy. C4 blocked on Scott's input. 5 worktrees active from other sessions. |
 | 2026-06-14 | NO-OP | Observer endpoint confirmed live in prod (400 on empty body). Weekly cron fires tomorrow Sun 6/15 1pm PT — first observation imminent. C4 blocked on Scott's input. |
 | 2026-06-15 | NO-OP | Weekly cron fires today at 1pm PT — first observation will land in ~7h. Tomorrow's tick evaluates it under Phase 0.5. Six worktrees active from other sessions; none observer-related. |
+| 2026-06-16 | NO-OP | Observer CronJob + claude_observations collection still not deployed; no observation landed. All built work on main awaiting deploy. C4 blocked on Scott's input. |
 
 ## Decision log
 
