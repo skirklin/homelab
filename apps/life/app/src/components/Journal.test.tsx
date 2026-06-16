@@ -29,7 +29,7 @@ vi.mock("@kirkl/shared", async () => {
 
 import { Journal } from "./Journal";
 import { LifeProvider, useLifeContext } from "../life-context";
-import type { LogEntry } from "../types";
+import type { LogEntry, LifeLog } from "../types";
 
 let counter = 0;
 function ev(subjectId: string, entries: LifeEntry[], ts: Date): LifeEvent {
@@ -46,24 +46,32 @@ function ev(subjectId: string, entries: LifeEntry[], ts: Date): LifeEvent {
   };
 }
 
-function Seed({ entries }: { entries: LogEntry[] }) {
+function Seed({ entries, log }: { entries: LogEntry[]; log?: LifeLog }) {
   const { dispatch } = useLifeContext();
   useEffect(() => {
+    if (log) dispatch({ type: "SET_LOG", log });
     dispatch({ type: "SET_ENTRIES", entries });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return null;
 }
 
-function renderJournal(entries: LogEntry[]) {
+function renderJournal(entries: LogEntry[], opts?: { initialEntries?: string[]; log?: LifeLog }) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={opts?.initialEntries ?? ["/journal"]}>
       <LifeProvider>
-        <Seed entries={entries} />
+        <Seed entries={entries} log={opts?.log} />
         <Journal />
       </LifeProvider>
     </MemoryRouter>,
   );
+}
+
+function dateKeyOf(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
 }
 
 const TODAY = new Date();
@@ -90,6 +98,39 @@ describe("Journal", () => {
     await user.click(screen.getByRole("button", { name: "Delete entry" }));
     await waitFor(() => expect(deleteEvent).toHaveBeenCalledWith(entry.id));
     await waitFor(() => expect(screen.queryByTestId("entry-row")).not.toBeInTheDocument());
+  });
+
+  it("with ?date=, shows that day's measurements grouped by trackable", async () => {
+    const log: LifeLog = {
+      id: "log1",
+      sampleSchedule: null,
+      manifest: {
+        trackables: [
+          { id: "weight", label: "Weight", shape: "took", defaultUnit: "lb" },
+        ],
+      },
+      randomSamplingEnabled: false,
+      created: "2026-06-01T00:00:00Z",
+      updated: "2026-06-01T00:00:00Z",
+    };
+    renderJournal(
+      [ev("weight", [{ name: "amount", type: "number", value: 180, unit: "lb" }], TODAY)],
+      { initialEntries: [`/journal?date=${dateKeyOf(TODAY)}`], log },
+    );
+    const section = await screen.findByTestId("journal-measurements");
+    expect(section).toHaveTextContent("Weight");
+    // The measurement renders as an editable entry row (same component the
+    // dashboard timeline uses).
+    expect(screen.getByTestId("entry-row")).toBeInTheDocument();
+  });
+
+  it("without ?date=, the measurements section is absent", async () => {
+    renderJournal([
+      ev("weight", [{ name: "amount", type: "number", value: 180, unit: "lb" }], TODAY),
+    ]);
+    // Give the effect a tick to flush before asserting absence.
+    await screen.findByText(/New entry/);
+    expect(screen.queryByTestId("journal-measurements")).not.toBeInTheDocument();
   });
 
   it("session entries are NOT tappable (no journal-entry-card)", async () => {

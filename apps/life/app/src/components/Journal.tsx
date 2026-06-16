@@ -25,6 +25,8 @@ import { useTrackables } from "../lib/trackables";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEntry } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
+import { eventsForDay, labelFor } from "../lib/shapes";
+import { EntriesList } from "./EntriesList";
 import { EventEditModal } from "./EventEditModal";
 
 // ---------------------------------------------------------------------------
@@ -110,6 +112,21 @@ const OnThisDayPreview = styled.div`
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+`;
+
+const MeasureGroup = styled.div`
+  margin-bottom: var(--space-md);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const MeasureLabel = styled.div`
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: var(--space-xs);
 `;
 
 const DateGroup = styled.div`
@@ -248,6 +265,20 @@ function formatDateHeader(d: Date): string {
 
 function formatTime(d: Date): string {
   return dayjs(d).format("h:mm A");
+}
+
+/**
+ * Parse a `?date=YYYY-MM-DD` param into a local (start-of-day) Date, or null if
+ * absent/malformed. Parsed by hand — the customParseFormat dayjs plugin isn't
+ * loaded in this app (see SettingsModal), and `new Date("YYYY-MM-DD")` parses as
+ * UTC, which would shift the day for non-UTC users.
+ */
+function parseDateParam(raw: string | null): Date | null {
+  if (!raw) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +433,32 @@ export function Journal() {
   });
   const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
 
+  // "See all in Journal" arrives here with `?date=YYYY-MM-DD`. The journal-shaped
+  // filter above intentionally excludes measurement/trackable events, so they'd
+  // be invisible. When a day is in context, surface that day's MEASUREMENTS
+  // (non-session, non-freeform-journal events) grouped by trackable, newest
+  // first, reusing the same editable rows the dashboard uses. Reads the same
+  // mirror (state.entries) — no separate fetch.
+  const measureDay = useMemo(() => parseDateParam(dateParam), [dateParam]);
+  const measureGroups = useMemo(() => {
+    if (!measureDay) return [];
+    const dayEvents = eventsForDay(Array.from(state.entries.values()), measureDay).filter(
+      (e) => !SESSION_SUBJECT_IDS.has(e.subjectId) && !JOURNAL_SUBJECTS.has(e.subjectId),
+    );
+    const bySubject = new Map<string, LogEntry[]>();
+    for (const e of dayEvents) {
+      const list = bySubject.get(e.subjectId);
+      if (list) list.push(e);
+      else bySubject.set(e.subjectId, [e]);
+    }
+    // First-seen (newest-first) trackable order, since dayEvents is sorted.
+    return Array.from(bySubject, ([subjectId, events]) => ({
+      subjectId,
+      label: labelFor(trackables, subjectId),
+      events,
+    }));
+  }, [measureDay, state.entries, trackables]);
+
   const menuItems = [
     {
       key: "insights",
@@ -467,6 +524,20 @@ export function Journal() {
                 );
               })}
             </OnThisDayRow>
+          </Section>
+        )}
+
+        {measureDay && measureGroups.length > 0 && (
+          <Section data-testid="journal-measurements">
+            <SectionTitle>
+              Measurements · {formatDateHeader(measureDay)}
+            </SectionTitle>
+            {measureGroups.map((g) => (
+              <MeasureGroup key={g.subjectId}>
+                <MeasureLabel>{g.label}</MeasureLabel>
+                <EntriesList events={g.events} emptyText={null} />
+              </MeasureGroup>
+            ))}
           </Section>
         )}
 
