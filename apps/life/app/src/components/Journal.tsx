@@ -19,11 +19,13 @@ import {
   useUrlParam,
   useAuth,
 } from "@kirkl/shared";
+import { dayKey } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { useLogEvent } from "../lib/useLogEvent";
 import { useTrackables } from "../lib/trackables";
+import { userTz } from "../lib/useUserTz";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
-import type { LogEntry } from "../types";
+import type { LogEvent } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
 import { EventsEditModal } from "./EventsEditModal";
 
@@ -203,7 +205,7 @@ function parseFilter(raw: string | null): FilterKey {
   return raw && (FILTER_VALUES as readonly string[]).includes(raw) ? (raw as FilterKey) : "all";
 }
 
-function sessionForEntry(entry: LogEntry): Session | undefined {
+function sessionForEntry(entry: LogEvent): Session | undefined {
   return SESSIONS.find((s) => sessionSubjectId(s.id) === entry.subjectId);
 }
 
@@ -219,30 +221,21 @@ function iconForSessionId(id: Session["id"]) {
 }
 
 /** First non-empty text entry on the event, for the on-this-day preview. */
-function firstTextOf(entry: LogEntry): string | undefined {
+function firstTextOf(entry: LogEvent): string | undefined {
   for (const e of entry.entries) {
     if (e.type === "text" && e.value.trim().length > 0) return e.value;
   }
   return undefined;
 }
 
-function dateKey(d: Date): string {
-  // YYYY-MM-DD in local time
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-
-function formatDateHeader(d: Date): string {
+function formatDateHeader(d: Date, tz: string): string {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
-  const dKey = dateKey(d);
-  if (dKey === dateKey(today)) return "Today";
-  if (dKey === dateKey(yesterday)) return "Yesterday";
+  const dKey = dayKey(d, tz);
+  if (dKey === dayKey(today, tz)) return "Today";
+  if (dKey === dayKey(yesterday, tz)) return "Yesterday";
   return dayjs(d).format("MMM D, YYYY");
 }
 
@@ -260,7 +253,7 @@ const SESSION_SUBJECT_IDS = new Set(SESSIONS.map((s) => sessionSubjectId(s.id)))
  * Filterable subjects = sessions + journal. Other trackables stay off the
  * Journal view (they're already on the dashboard).
  */
-function isJournalable(entry: LogEntry): boolean {
+function isJournalable(entry: LogEvent): boolean {
   return SESSION_SUBJECT_IDS.has(entry.subjectId) || JOURNAL_SUBJECTS.has(entry.subjectId);
 }
 
@@ -268,10 +261,11 @@ export function Journal() {
   const navigate = useNavigate();
   const { state } = useLifeContext();
   const trackables = useTrackables();
+  const tz = userTz();
   // Single-event edit modal: tapping a freeform journal entry opens it for
   // edit/delete. Session entries are composite prompt entries, not single-shape
   // events, so they stay non-interactive.
-  const [editing, setEditing] = useState<LogEntry | null>(null);
+  const [editing, setEditing] = useState<LogEvent | null>(null);
   // Entries subscription is mounted once in LifeRoutesInner so every route
   // inherits today's events from a single feed.
 
@@ -351,12 +345,12 @@ export function Journal() {
     });
   }, [journalEntries, filter, search]);
 
-  // Group filtered entries by local date.
+  // Group filtered entries by user-tz date.
   const grouped = useMemo(() => {
-    const groups: { key: string; date: Date; entries: LogEntry[] }[] = [];
-    let current: { key: string; date: Date; entries: LogEntry[] } | null = null;
+    const groups: { key: string; date: Date; entries: LogEvent[] }[] = [];
+    let current: { key: string; date: Date; entries: LogEvent[] } | null = null;
     for (const e of filtered) {
-      const k = dateKey(e.timestamp);
+      const k = dayKey(e.timestamp, tz);
       if (!current || current.key !== k) {
         current = { key: k, date: e.timestamp, entries: [] };
         groups.push(current);
@@ -364,12 +358,11 @@ export function Journal() {
       current.entries.push(e);
     }
     return groups;
-  }, [filtered]);
+  }, [filtered, tz]);
 
   // On-this-day: entries from exactly 1 week / 1 month / 6 months / 1 year ago.
   const onThisDay = useMemo(() => {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
     const offsets: { label: string; date: Date }[] = [
       { label: "1 week ago", date: dayjs(today).subtract(1, "week").toDate() },
@@ -378,19 +371,19 @@ export function Journal() {
       { label: "1 year ago", date: dayjs(today).subtract(1, "year").toDate() },
     ];
 
-    const result: { label: string; entry: LogEntry }[] = [];
+    const result: { label: string; entry: LogEvent }[] = [];
     for (const o of offsets) {
-      const k = dateKey(o.date);
+      const k = dayKey(o.date, tz);
       // First (chronologically earliest) entry for that day, so morning comes first.
       const match = journalEntries
-        .filter((e) => dateKey(e.timestamp) === k)
+        .filter((e) => dayKey(e.timestamp, tz) === k)
         .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())[0];
       if (match) {
         result.push({ label: o.label, entry: match });
       }
     }
     return result;
-  }, [journalEntries]);
+  }, [journalEntries, tz]);
 
   // Preserve `?date=YYYY-MM-DD` when crossing between dashboard / journal /
   // insights so the per-day context survives a tab switch. Only `date` is
@@ -510,7 +503,7 @@ export function Journal() {
           ) : (
             grouped.map((g) => (
               <DateGroup key={g.key}>
-                <DateHeader>{formatDateHeader(g.date)}</DateHeader>
+                <DateHeader>{formatDateHeader(g.date, tz)}</DateHeader>
                 {g.entries.map((entry) => {
                   const session = sessionForEntry(entry);
                   if (session) {

@@ -1,9 +1,8 @@
 import { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { useUrlParam } from "@kirkl/shared";
 import styled from "styled-components";
-import { Select, Empty, Tabs, Button } from "antd";
-import { LeftOutlined, RightOutlined, ArrowLeftOutlined } from "@ant-design/icons";
+import { Select, Empty, Tabs } from "antd";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import {
   BarChart,
   Bar,
@@ -17,7 +16,7 @@ import {
 } from "recharts";
 import { useLifeContext } from "../life-context";
 import { useTrackables } from "../lib/trackables";
-import type { LogEntry } from "../types";
+import type { LogEvent } from "../types";
 import { aggregationFor } from "../lib/format";
 
 const Container = styled.div`
@@ -32,17 +31,6 @@ const Header = styled.div`
   gap: var(--space-md);
   margin-bottom: var(--space-lg);
   flex-wrap: wrap;
-`;
-
-const BackButton = styled(Button)`
-  padding: 0;
-`;
-
-const Title = styled.h1`
-  font-size: var(--font-size-xl);
-  margin: 0;
-  color: var(--color-text);
-  flex: 1;
 `;
 
 const SeriesSelect = styled(Select)`
@@ -181,7 +169,7 @@ interface Series {
 
 const GROUP_PREFIX = "group:";
 
-function buildSeries(trackables: ReturnType<typeof useTrackables>, entries: LogEntry[]): Series[] {
+function buildSeries(trackables: ReturnType<typeof useTrackables>, entries: LogEvent[]): Series[] {
   const out: Series[] = [];
   const known = new Set<string>();
   const byGroup = new Map<string, string[]>();
@@ -219,7 +207,7 @@ function buildSeries(trackables: ReturnType<typeof useTrackables>, entries: LogE
  * predates the shape model): the first non-rating number unit seen, else
  * "rating" when only ratings exist, else "ct".
  */
-function seriesUnit(entries: LogEntry[], subjectIds: Set<string>): string {
+function seriesUnit(entries: LogEvent[], subjectIds: Set<string>): string {
   let sawRating = false;
   for (const e of entries) {
     if (!subjectIds.has(e.subjectId)) continue;
@@ -236,7 +224,7 @@ function seriesUnit(entries: LogEntry[], subjectIds: Set<string>): string {
 }
 
 /** Every numeric value carrying `unit` across the given events. */
-function collectUnitValues(events: LogEntry[], unit: string): number[] {
+function collectUnitValues(events: LogEvent[], unit: string): number[] {
   const out: number[] = [];
   for (const ev of events) {
     for (const e of ev.entries) {
@@ -262,11 +250,11 @@ interface DayData {
   value: number;
 }
 
-function eventsInRange(entries: LogEntry[], subjectIds: Set<string>, lo: Date, hi: Date): LogEntry[] {
+function eventsInRange(entries: LogEvent[], subjectIds: Set<string>, lo: Date, hi: Date): LogEvent[] {
   return entries.filter((e) => subjectIds.has(e.subjectId) && e.timestamp >= lo && e.timestamp <= hi);
 }
 
-function getMonthData(entries: LogEntry[], subjectIds: Set<string>, unit: string, year: number, month: number): DayData[] {
+function getMonthData(entries: LogEvent[], subjectIds: Set<string>, unit: string, year: number, month: number): DayData[] {
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const data: DayData[] = [];
@@ -289,7 +277,7 @@ function getMonthData(entries: LogEntry[], subjectIds: Set<string>, unit: string
   return data;
 }
 
-function getLast30DaysData(entries: LogEntry[], subjectIds: Set<string>, unit: string): { date: string; value: number; count: number }[] {
+function getLast30DaysData(entries: LogEvent[], subjectIds: Set<string>, unit: string): { date: string; value: number; count: number }[] {
   const data: { date: string; value: number; count: number }[] = [];
   const today = new Date();
 
@@ -309,7 +297,7 @@ function getLast30DaysData(entries: LogEntry[], subjectIds: Set<string>, unit: s
   return data;
 }
 
-function getWeeklyData(entries: LogEntry[], subjectIds: Set<string>, unit: string): { week: string; value: number; count: number }[] {
+function getWeeklyData(entries: LogEvent[], subjectIds: Set<string>, unit: string): { week: string; value: number; count: number }[] {
   const data: { week: string; value: number; count: number }[] = [];
   const today = new Date();
 
@@ -339,7 +327,7 @@ function CalendarHeatMap({
   viewDate,
   onMonthChange,
 }: {
-  entries: LogEntry[];
+  entries: LogEvent[];
   subjectIds: Set<string>;
   unit: string;
   viewDate: Date;
@@ -424,7 +412,7 @@ function CalendarHeatMap({
   );
 }
 
-function TrendChart({ entries, subjectIds, unit }: { entries: LogEntry[]; subjectIds: Set<string>; unit: string }) {
+function TrendChart({ entries, subjectIds, unit }: { entries: LogEvent[]; subjectIds: Set<string>; unit: string }) {
   const data = useMemo(
     () => getLast30DaysData(entries, subjectIds, unit),
     [entries, subjectIds, unit],
@@ -480,7 +468,7 @@ function TrendChart({ entries, subjectIds, unit }: { entries: LogEntry[]; subjec
   );
 }
 
-function WeeklyChart({ entries, subjectIds, unit }: { entries: LogEntry[]; subjectIds: Set<string>; unit: string }) {
+function WeeklyChart({ entries, subjectIds, unit }: { entries: LogEvent[]; subjectIds: Set<string>; unit: string }) {
   const data = useMemo(
     () => getWeeklyData(entries, subjectIds, unit),
     [entries, subjectIds, unit],
@@ -528,16 +516,8 @@ function isCurrentMonth(d: Date): boolean {
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
 }
 
-interface VisualizationsProps {
-  /** When rendered inside the Coach hub, the Coach layout owns the header (the
-   *  Insights/Observations segmented), so we drop the back button + title and
-   *  render only the series selector + charts. */
-  inCoach?: boolean;
-}
-
-export function Visualizations({ inCoach = false }: VisualizationsProps = {}) {
+export function Visualizations() {
   const { state } = useLifeContext();
-  const navigate = useNavigate();
   const trackables = useTrackables();
   // Both the selected series and the calendar month live in the URL so
   // refresh + share-link round-trip the exact view. Defaults (first series,
@@ -557,17 +537,7 @@ export function Visualizations({ inCoach = false }: VisualizationsProps = {}) {
     default: parseMonthParam(null),
   });
 
-  // Preserve any inherited `?date=YYYY-MM-DD` when navigating back to the
-  // dashboard — mirrors Journal's behavior so a tab switch doesn't drop the
-  // per-day context.
-  const [dateParam] = useUrlParam<string | null>("date", {
-    parse: (raw) => raw,
-    serialize: (v) => v,
-    default: null,
-  });
-  const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
-
-  const allEntries: LogEntry[] = useMemo(() => Array.from(state.entries.values()), [state.entries]);
+  const allEntries: LogEvent[] = useMemo(() => Array.from(state.entries.values()), [state.entries]);
 
   // Things (vocab rows + unknown history subjects) and group rollups.
   const series = useMemo(() => buildSeries(trackables, allEntries), [trackables, allEntries]);
@@ -582,12 +552,6 @@ export function Visualizations({ inCoach = false }: VisualizationsProps = {}) {
   if (!current) {
     return (
       <Container>
-        {!inCoach && (
-          <Header>
-            <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
-            <Title>Insights</Title>
-          </Header>
-        )}
         <Empty description="Nothing to chart yet" />
       </Container>
     );
@@ -624,12 +588,6 @@ export function Visualizations({ inCoach = false }: VisualizationsProps = {}) {
   return (
     <Container>
       <Header>
-        {!inCoach && (
-          <>
-            <BackButton type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(`..${dateQuerySuffix}`)} />
-            <Title>Insights</Title>
-          </>
-        )}
         <SeriesSelect
           value={currentKey}
           onChange={(value) => setSelectedKey(value as string)}

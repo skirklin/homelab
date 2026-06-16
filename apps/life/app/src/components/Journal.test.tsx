@@ -29,7 +29,7 @@ vi.mock("@kirkl/shared", async () => {
 
 import { Journal } from "./Journal";
 import { LifeProvider, useLifeContext } from "../life-context";
-import type { LogEntry } from "../types";
+import type { LogEvent } from "../types";
 
 let counter = 0;
 function ev(subjectId: string, entries: LifeEntry[], ts: Date): LifeEvent {
@@ -46,7 +46,7 @@ function ev(subjectId: string, entries: LifeEntry[], ts: Date): LifeEvent {
   };
 }
 
-function Seed({ entries }: { entries: LogEntry[] }) {
+function Seed({ entries }: { entries: LogEvent[] }) {
   const { dispatch } = useLifeContext();
   useEffect(() => {
     dispatch({ type: "SET_ENTRIES", entries });
@@ -55,7 +55,7 @@ function Seed({ entries }: { entries: LogEntry[] }) {
   return null;
 }
 
-function renderJournal(entries: LogEntry[]) {
+function renderJournal(entries: LogEvent[]) {
   return render(
     <MemoryRouter>
       <LifeProvider>

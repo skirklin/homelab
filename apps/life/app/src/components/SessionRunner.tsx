@@ -8,7 +8,7 @@ import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { getSession, sessionSubjectId, type Session, type SessionPrompt } from "../manifest";
 import { buildEntries } from "../lib/shapes";
-import type { LogEntry } from "../types";
+import type { LogEvent } from "../types";
 import { MorningUpkeepHeader } from "./MorningUpkeepHeader";
 import { DurationFieldEditor } from "./EntryFields";
 
@@ -144,7 +144,7 @@ function localDayKey(date: Date): string {
  * — the caller drops any prompt whose contextKey doesn't resolve so the
  * user never sees a "you skipped this morning" placeholder.
  */
-function findMorningIntention(entries: Map<string, LogEntry>): string | null {
+function findMorningIntention(entries: Map<string, LogEvent>): string | null {
   const today = localDayKey(new Date());
   const subject = sessionSubjectId("morning");
   for (const event of entries.values()) {
@@ -167,7 +167,7 @@ function findMorningIntention(entries: Map<string, LogEntry>): string | null {
  * — anchors the weekly cadence inside the daily one without adding a prompt.
  * Returns null when there's no recent weekly_review with an intention value.
  */
-function findCurrentWeekIntention(entries: Map<string, LogEntry>): string | null {
+function findCurrentWeekIntention(entries: Map<string, LogEvent>): string | null {
   const subject = sessionSubjectId("weekly_review");
   const cutoffMs = Date.now() - 8 * 24 * 60 * 60 * 1000;
   let bestText: string | null = null;

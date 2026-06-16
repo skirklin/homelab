@@ -7,12 +7,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Button, Empty, Spin, Tag, App } from "antd";
+import { Button, Empty, Spin, App } from "antd";
 import { RobotOutlined, CalendarOutlined, MessageOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import {
-  AppHeader,
   PageContainer,
   Section,
   useAuth,
@@ -21,6 +20,7 @@ import {
   getAuthHeaders,
 } from "@kirkl/shared";
 import type { ClaudeObservation } from "@homelab/backend";
+import { periodTag } from "../lib/observations";
 
 dayjs.extend(relativeTime);
 
@@ -105,31 +105,10 @@ const CardFooter = styled.div`
 `;
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const PERIOD_LABELS: Record<string, { label: string; color: string }> = {
-  weekly: { label: "Weekly", color: "blue" },
-  monthly: { label: "Monthly", color: "purple" },
-  adhoc: { label: "On-demand", color: "cyan" },
-};
-
-function periodTag(period: string) {
-  const info = PERIOD_LABELS[period] ?? { label: period, color: "default" };
-  return <Tag color={info.color}>{info.label}</Tag>;
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-interface ObservationsProps {
-  /** When rendered inside the Coach hub, the Coach layout owns the header (the
-   *  Insights/Observations segmented), so we suppress this component's own. */
-  inCoach?: boolean;
-}
-
-export function Observations({ inCoach = false }: ObservationsProps = {}) {
+export function Observations() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const observer = useObserverBackend();
@@ -196,10 +175,6 @@ export function Observations({ inCoach = false }: ObservationsProps = {}) {
 
   return (
     <>
-      {!inCoach && (
-        <AppHeader title="Observations" onBack={() => navigate("/")} />
-      )}
-
       <PageContainer>
         <GenerateRow>
           <Button

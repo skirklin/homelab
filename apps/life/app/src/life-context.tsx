@@ -1,16 +1,16 @@
 import { createContext, useContext, useMemo, useReducer, type ReactNode, type Dispatch } from "react";
-import type { LogEntry, LifeLog } from "./types";
+import type { LogEvent, LifeLog } from "./types";
 
 export interface LifeState {
   log: LifeLog | null;
-  entries: Map<string, LogEntry>;
+  entries: Map<string, LogEvent>;
   loading: boolean;
 }
 
 export type LifeAction =
   | { type: "SET_LOG"; log: LifeLog | null }
-  | { type: "SET_ENTRY"; entry: LogEntry }
-  | { type: "SET_ENTRIES"; entries: LogEntry[] }
+  | { type: "SET_ENTRY"; entry: LogEvent }
+  | { type: "SET_ENTRIES"; entries: LogEvent[] }
   | { type: "REMOVE_ENTRY"; entryId: string }
   | { type: "CLEAR_ENTRIES" }
   | { type: "SET_LOADING"; loading: boolean };
@@ -31,7 +31,7 @@ function reducer(state: LifeState, action: LifeAction): LifeState {
       return { ...state, entries };
     }
     case "SET_ENTRIES": {
-      const entries = new Map<string, LogEntry>();
+      const entries = new Map<string, LogEvent>();
       action.entries.forEach(e => entries.set(e.id, e));
       return { ...state, entries };
     }

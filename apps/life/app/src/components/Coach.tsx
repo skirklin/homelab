@@ -69,7 +69,7 @@ export function Coach() {
           </LoadingWrap>
         }
       >
-        {view === "insights" ? <Visualizations inCoach /> : <Observations inCoach />}
+        {view === "insights" ? <Visualizations /> : <Observations />}
       </Suspense>
     </>
   );

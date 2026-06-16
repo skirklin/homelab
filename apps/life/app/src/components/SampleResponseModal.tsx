@@ -3,6 +3,7 @@ import styled from "styled-components";
 import { Modal, Button } from "antd";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
 import { type SampleQuestion, type RandomSamplesConfig } from "../manifest";
+import { buildEntries } from "../lib/shapes";
 
 const QuestionContainer = styled.div`
   display: flex;
@@ -79,19 +80,18 @@ export function SampleResponseModal({
     }
     setSaving(true);
     try {
-      // Write one event per answered question (one entry each, labels.source="sample").
-      // Each lands as a normal event under the question's trackable id, so it
-      // flows into the same charts and aggregations as manually-logged ratings.
+      // Write one event per answered question (one rated entry each,
+      // labels.source="sample"). Each lands as a normal event under the
+      // question's trackable id, so it flows into the same charts and
+      // aggregations as manually-logged ratings.
       await Promise.all(
-        answered.map(([trackableId, value]) =>
-          life.addEvent(
-            logId,
-            trackableId,
-            [{ name: "rating", type: "number", value, unit: "rating", scale: 5 }],
-            userId,
-            { labels: { source: "sample" } },
-          ),
-        ),
+        answered.map(([trackableId, value]) => {
+          const entries = buildEntries("rated", { rating: value, scale: 5 });
+          if (!entries) return Promise.resolve(); // filtered to v > 0 above
+          return life.addEvent(logId, trackableId, entries, userId, {
+            labels: { source: "sample" },
+          });
+        }),
       );
       message.success("Response saved");
       onClose();

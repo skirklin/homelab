@@ -23,7 +23,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import styled from "styled-components";
-import { Empty, Spin, Tag } from "antd";
+import { Empty, Spin } from "antd";
 import {
   CalendarOutlined,
   BookOutlined,
@@ -40,6 +40,7 @@ import {
 } from "@kirkl/shared";
 import type { ClaudeObservation } from "@homelab/backend";
 import { ChatThreadPanel } from "./ChatThreadPanel";
+import { periodTag } from "../lib/observations";
 
 dayjs.extend(relativeTime);
 
@@ -102,21 +103,6 @@ const LoadingWrap = styled.div`
   align-items: center;
   flex: 1;
 `;
-
-// ---------------------------------------------------------------------------
-// Helpers (mirrored from Observations.tsx so the badge looks consistent)
-// ---------------------------------------------------------------------------
-
-const PERIOD_LABELS: Record<string, { label: string; color: string }> = {
-  weekly: { label: "Weekly", color: "blue" },
-  monthly: { label: "Monthly", color: "purple" },
-  adhoc: { label: "On-demand", color: "cyan" },
-};
-
-function periodTag(period: string) {
-  const info = PERIOD_LABELS[period] ?? { label: period, color: "default" };
-  return <Tag color={info.color}>{info.label}</Tag>;
-}
 
 // ---------------------------------------------------------------------------
 // Component
