@@ -12,7 +12,7 @@ COPY packages/backend/package.json packages/backend/package.json
 RUN pnpm install --frozen-lockfile || pnpm install
 
 # Install Playwright Chromium + system deps
-RUN npx --yes playwright install --with-deps chromium
+RUN cd services/api && pnpm exec playwright install --with-deps chromium
 
 # Copy source — services/api + the workspace pkgs it imports. @homelab/backend
 # is consumed as TS source directly (its package.json's main points at
