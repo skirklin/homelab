@@ -15,15 +15,19 @@
  * chart library, no horizontal scrolling — the grid is sized to fit any
  * StreakCard width.
  *
- * Also exports `computeStreaks` + the `SessionStreaks` shape, which the
- * dashboard uses to render the streak counters above the grid.
+ * Day identity is tz-aware (the shared `dayKey`/`buildCalendarGrid` helpers, the
+ * SAME ones the goal evaluator + day index use); there is no local setHours
+ * bucketing here, and the streak counters above the grid come from the shared
+ * `habitStats.computeStreaks` — one streak engine app-wide.
  */
 import { useMemo } from "react";
 import styled from "styled-components";
 import { Tooltip } from "antd";
 import dayjs from "dayjs";
-import { sessionSubjectId, type Session } from "../manifest";
-import type { LogEntry } from "../types";
+import type { LifeEvent } from "@homelab/backend";
+import { dayKey } from "@homelab/backend";
+import { sessionSubjectId } from "../manifest";
+import { buildCalendarGrid } from "../lib/calendarGrid";
 
 const WEEKS = 8;
 const CELL_PX = 14;
@@ -90,77 +94,54 @@ const LegendCell = styled.span<{ $bg: string }>`
   background: ${(p) => p.$bg};
 `;
 
-function dateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-
-interface DayData {
-  /** Local YYYY-MM-DD */
-  key: string;
-  date: Date;
-  morning: boolean;
-  evening: boolean;
-  /** Sundays only — was a weekly_review logged that day? */
-  weekly: boolean;
-}
-
 interface SessionStreakGridProps {
-  entries: LogEntry[];
+  entries: LifeEvent[];
+  /** User's IANA tz — buckets day identity to match the rest of the app. */
+  tz: string;
 }
 
-export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
+export function SessionStreakGrid({ entries, tz }: SessionStreakGridProps) {
   const morningSubject = sessionSubjectId("morning");
   const eveningSubject = sessionSubjectId("evening");
   const weeklySubject = sessionSubjectId("weekly_review");
 
-  // Build a rectangular 8-week × 7-day window ending on the Saturday of the
-  // current week. Days past today are rendered as hidden cells so the grid
-  // stays rectangular and "today" lands at its actual weekday row.
-  const cells = useMemo<DayData[]>(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  // The calendar grid (oldest week first, current week last) IS the layout: a
+  // flat Su..Sa cell list whose day identity is tz-aware. We render it
+  // column-major (grid-auto-flow: column) so each calendar week becomes a
+  // visual column. `future` cells render hidden so the grid stays rectangular
+  // and today lands at its real weekday row.
+  const cells = useMemo(() => {
+    const logged = (subject: string) => {
+      const keys = new Set<string>();
+      for (const e of entries) {
+        if (e.subjectId === subject) keys.add(dayKey(e.timestamp, tz));
+      }
+      return keys;
+    };
+    const morningByDay = logged(morningSubject);
+    const eveningByDay = logged(eveningSubject);
+    const weeklyByDay = logged(weeklySubject);
 
-    const morningByDay = new Set<string>();
-    const eveningByDay = new Set<string>();
-    const weeklyByDay = new Set<string>();
-    for (const e of entries) {
-      if (e.subjectId === morningSubject) morningByDay.add(dateKey(e.timestamp));
-      else if (e.subjectId === eveningSubject) eveningByDay.add(dateKey(e.timestamp));
-      else if (e.subjectId === weeklySubject) weeklyByDay.add(dateKey(e.timestamp));
-    }
-
-    const endDate = new Date(today);
-    const daysToSat = 6 - endDate.getDay(); // Sun=0..Sat=6
-    endDate.setDate(endDate.getDate() + daysToSat);
-
-    const days: DayData[] = [];
-    const totalDays = WEEKS * 7;
-    for (let i = totalDays - 1; i >= 0; i--) {
-      const d = new Date(endDate);
-      d.setDate(d.getDate() - i);
-      const k = dateKey(d);
-      days.push({
-        key: k,
-        date: d,
-        morning: morningByDay.has(k),
-        evening: eveningByDay.has(k),
-        weekly: weeklyByDay.has(k),
-      });
-    }
-    return days;
-  }, [entries, morningSubject, eveningSubject, weeklySubject]);
-
-  const todayKey = dateKey(new Date());
+    // buildCalendarGrid returns rows of weeks; flatten in week-then-day order so
+    // the column-major grid lays weeks out as columns.
+    return buildCalendarGrid(new Date(), WEEKS, tz).flat().map((cell) => ({
+      key: cell.key,
+      isToday: cell.isToday,
+      future: cell.future,
+      // Sunday = day-of-week index 0 within each 7-cell week row.
+      isSun: dayjs(cell.date).day() === 0,
+      morning: morningByDay.has(cell.key),
+      evening: eveningByDay.has(cell.key),
+      weekly: weeklyByDay.has(cell.key),
+      labelDate: dayjs(cell.date).format("ddd, MMM D, YYYY"),
+    }));
+  }, [entries, tz, morningSubject, eveningSubject, weeklySubject]);
 
   return (
     <Wrap>
       <Grid>
         {cells.map((c) => {
-          const inFuture = c.date.getTime() > Date.now();
-          if (inFuture) {
+          if (c.future) {
             return (
               <Cell
                 key={c.key}
@@ -172,24 +153,22 @@ export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
           }
           // On Sundays the bottom-right triangle represents weekly_review
           // (purple), not evening — they subsume each other on Sundays.
-          const isSun = c.date.getDay() === 0;
           const topColor = c.morning ? LOGGED_COLOR : MUTED_COLOR;
-          const bottomColor = isSun
+          const bottomColor = c.isSun
             ? (c.weekly ? WEEKLY_COLOR : MUTED_COLOR)
             : (c.evening ? LOGGED_COLOR : MUTED_COLOR);
-          const labelDate = dayjs(c.date).format("ddd, MMM D, YYYY");
-          const secondLabel = isSun ? "weekly review" : "evening";
-          const secondDone = isSun ? c.weekly : c.evening;
+          const secondLabel = c.isSun ? "weekly review" : "evening";
+          const secondDone = c.isSun ? c.weekly : c.evening;
           let tip: string;
-          if (c.morning && secondDone) tip = `${labelDate} — morning + ${secondLabel}`;
-          else if (c.morning) tip = `${labelDate} — morning only`;
-          else if (secondDone) tip = `${labelDate} — ${secondLabel} only`;
-          else tip = `${labelDate} — nothing logged`;
+          if (c.morning && secondDone) tip = `${c.labelDate} — morning + ${secondLabel}`;
+          else if (c.morning) tip = `${c.labelDate} — morning only`;
+          else if (secondDone) tip = `${c.labelDate} — ${secondLabel} only`;
+          else tip = `${c.labelDate} — nothing logged`;
           return (
             <Tooltip key={c.key} title={tip} mouseEnterDelay={0.1}>
               <Cell
                 $bg={splitBg(topColor, bottomColor)}
-                $today={c.key === todayKey}
+                $today={c.isToday}
                 $hidden={false}
               />
             </Tooltip>
@@ -206,71 +185,4 @@ export function SessionStreakGrid({ entries }: SessionStreakGridProps) {
       </Legend>
     </Wrap>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Streak utilities (exported for testing in the future + dashboard use)
-// ---------------------------------------------------------------------------
-
-export interface SessionStreaks {
-  current: number;
-  longest: number;
-}
-
-/**
- * Compute current + longest streaks of consecutive days with at least one
- * entry whose subject_id matches `sessionId`'s subject.
- *
- * "Current" doesn't break when today hasn't been logged yet — if today is
- * empty but yesterday is logged, the streak counts up to yesterday. This is
- * the convention requested in the spec ("today doesn't break the streak if
- * it hasn't started yet").
- */
-export function computeStreaks(entries: LogEntry[], sessionId: Session["id"]): SessionStreaks {
-  const subject = sessionSubjectId(sessionId);
-
-  // Collect days that have at least one matching entry.
-  const days = new Set<string>();
-  for (const e of entries) {
-    if (e.subjectId === subject) {
-      days.add(dateKey(e.timestamp));
-    }
-  }
-  if (days.size === 0) return { current: 0, longest: 0 };
-
-  // Longest streak: walk sorted unique days, count runs of consecutive dates.
-  const sorted = Array.from(days).sort(); // YYYY-MM-DD sorts lexically = chronologically.
-  let longest = 1;
-  let runLen = 1;
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = new Date(sorted[i - 1] + "T00:00:00");
-    const curr = new Date(sorted[i] + "T00:00:00");
-    const diffDays = Math.round((curr.getTime() - prev.getTime()) / 86_400_000);
-    if (diffDays === 1) {
-      runLen++;
-      if (runLen > longest) longest = runLen;
-    } else {
-      runLen = 1;
-    }
-  }
-
-  // Current: start at today, count backwards. If today missing, allow one
-  // skip (only at the start) — start at yesterday instead.
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  let cursor = new Date(today);
-  if (!days.has(dateKey(cursor))) {
-    // Today not logged — try yesterday. If yesterday also not logged, current
-    // streak is 0.
-    cursor.setDate(cursor.getDate() - 1);
-    if (!days.has(dateKey(cursor))) {
-      return { current: 0, longest };
-    }
-  }
-  let current = 0;
-  while (days.has(dateKey(cursor))) {
-    current++;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return { current, longest };
 }

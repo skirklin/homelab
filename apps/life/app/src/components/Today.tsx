@@ -25,9 +25,13 @@ import { DateNav } from "./DateNav";
 import { DayTimeline } from "./DayTimeline";
 import { HabitBoard } from "./HabitBoard";
 import { ShapeSheet } from "./ShapeSheet";
-import { SessionStreakGrid, computeStreaks } from "./SessionStreakGrid";
+import { SessionStreakGrid } from "./SessionStreakGrid";
 import { Hint } from "./Hint";
 import { useTrackables, useGoals } from "../lib/trackables";
+import { userTz } from "../lib/useUserTz";
+import { buildDayIndex } from "../lib/dayIndex";
+import { computeStreaks } from "../lib/habitStats";
+import { sessionSubjectId } from "../manifest";
 
 const LIFE_COLLECTIONS = ["life_logs", "life_events"] as const;
 
@@ -119,11 +123,20 @@ export function Today() {
   const allEntries = useMemo(() => Array.from(state.entries.values()), [state.entries]);
   const trackables = useTrackables();
   const goals = useGoals();
+  const tz = userTz();
 
-  // Map identity flips on each SET_ENTRIES dispatch, so state.entries is a
-  // stable-enough dep for the streak recompute.
-  const morningStreaks = useMemo(() => computeStreaks(allEntries, "morning"), [state.entries]);
-  const eveningStreaks = useMemo(() => computeStreaks(allEntries, "evening"), [state.entries]);
+  // Session streaks use the SAME tz-aware engine as the Habits lens: a session
+  // is a plain (goal-less) day-completion, so "≥1 event for the session's
+  // subject" is the met-day rule. One streak definition app-wide.
+  const sessionIndex = useMemo(() => buildDayIndex(allEntries, tz), [allEntries, tz]);
+  const morningStreaks = useMemo(
+    () => computeStreaks([sessionSubjectId("morning")], null, sessionIndex, allEntries, tz, new Date()),
+    [sessionIndex, allEntries, tz],
+  );
+  const eveningStreaks = useMemo(
+    () => computeStreaks([sessionSubjectId("evening")], null, sessionIndex, allEntries, tz, new Date()),
+    [sessionIndex, allEntries, tz],
+  );
 
   // Carry the current `?date=` through to Journal so the timeline's "jump to
   // journal" handoff keeps the day context.
@@ -198,7 +211,7 @@ export function Today() {
               </StreakValue>
             </StreakItem>
           </StreakCard>
-          <SessionStreakGrid entries={allEntries} />
+          <SessionStreakGrid entries={allEntries} tz={tz} />
         </Section>
       </PageContainer>
 
