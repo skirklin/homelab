@@ -1,13 +1,8 @@
 /**
- * The morning wizard's merged-sleep step (contract item 6 of the 2026-06
- * shape redesign):
- *   - duration + optional quality rating + optional notes are written as ONE
- *     merged `sleep` event with canonical did-shape entries
- *   - a `sleep_quality` event is NEVER written
- *   - skipping the step writes no sleep event
- *   - a partial answer (rating without duration) blocks Next; Skip clears it
- *   - a sleep-only run (every other prompt skipped) writes just the sleep
- *     event, never an empty-payload session event
+ * The morning wizard, post-Fitbit-sync: sleep is NO LONGER prompted here (it
+ * arrives from the Fitbit sync / is logged separately). The morning flow is
+ * gratitude → intention → energy, and writes a single `morning_session` event;
+ * it never writes a `sleep` event.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -71,136 +66,46 @@ function renderMorning() {
   );
 }
 
-/** Step through gratitude/intention/energy, answering only `energy` (4). */
-async function finishRemainingPrompts(user: ReturnType<typeof userEvent.setup>) {
-  // gratitude (text, optional): Skip.
-  await screen.findByText("What are you grateful for?");
-  await user.click(screen.getByRole("button", { name: "Skip" }));
-  // intention (text, optional): Skip.
-  await screen.findByText("What's the plan for today?");
-  await user.click(screen.getByRole("button", { name: "Skip" }));
-  // energy (rating): pick 4, Done.
-  await screen.findByText("Energy");
-  await user.click(screen.getByRole("button", { name: "4" }));
-  await user.click(screen.getByRole("button", { name: /Done/ }));
-}
-
-describe("SessionRunner morning sleep step", () => {
+describe("SessionRunner morning wizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
   });
 
-  it("writes ONE merged sleep event (duration + rating + notes) and never sleep_quality", async () => {
-    const user = userEvent.setup();
+  it("does not prompt for sleep — gratitude is the first step", async () => {
     renderMorning();
-
-    // Step 0 is the sleep step.
-    await screen.findByText("How did you sleep?");
-    // Duration defaults to hours mode: 7.5h → 450 min.
-    await user.type(screen.getByRole("spinbutton"), "7.5");
-    await user.click(screen.getByRole("button", { name: "Quality 4" }));
-    await user.type(screen.getByPlaceholderText("Notes (optional)"), "woke once");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-
-    await finishRemainingPrompts(user);
-    await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(2));
-
-    const subjects = addEvent.mock.calls.map((c) => c[1]);
-    expect(subjects).toContain("sleep");
-    expect(subjects).toContain("morning_session");
-    expect(subjects).not.toContain("sleep_quality");
-
-    const sleepCall = addEvent.mock.calls.find((c) => c[1] === "sleep")!;
-    expect(sleepCall[0]).toBe("log1");
-    expect(sleepCall[2]).toEqual([
-      { name: "duration", type: "number", value: 450, unit: "min" },
-      { name: "rating", type: "number", value: 4, unit: "rating", scale: 5 },
-      { name: "notes", type: "text", value: "woke once" },
-    ]);
-
-    // The session event carries only the session prompts — no sleep entries.
-    const sessionCall = addEvent.mock.calls.find((c) => c[1] === "morning_session")!;
-    expect(sessionCall[2]).toEqual([
-      { name: "energy", type: "number", value: 4, unit: "rating", scale: 5 },
-    ]);
+    await screen.findByText("What are you grateful for?");
+    expect(screen.queryByText("How did you sleep?")).not.toBeInTheDocument();
   });
 
-  it("duration-only sleep logs just the duration entry", async () => {
+  it("writes a single morning_session event and never a sleep event", async () => {
     const user = userEvent.setup();
     renderMorning();
 
-    await screen.findByText("How did you sleep?");
-    await user.type(screen.getByRole("spinbutton"), "8");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await finishRemainingPrompts(user);
-
-    await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(2));
-    const sleepCall = addEvent.mock.calls.find((c) => c[1] === "sleep")!;
-    expect(sleepCall[2]).toEqual([
-      { name: "duration", type: "number", value: 480, unit: "min" },
-    ]);
-  });
-
-  it("skipping the sleep step writes no sleep event", async () => {
-    const user = userEvent.setup();
-    renderMorning();
-
-    await screen.findByText("How did you sleep?");
-    await user.click(screen.getByRole("button", { name: "Skip" }));
-    await finishRemainingPrompts(user);
-
-    await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(1));
-    expect(addEvent.mock.calls[0][1]).toBe("morning_session");
-  });
-
-  it("a partial answer (rating, no duration) blocks Next; Skip clears it and proceeds", async () => {
-    const user = userEvent.setup();
-    renderMorning();
-
-    await screen.findByText("How did you sleep?");
-    await user.click(screen.getByRole("button", { name: "Quality 3" }));
-    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
-    expect(screen.getByText("Add a duration to log sleep — or Skip.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Skip" }));
-    await finishRemainingPrompts(user);
-
-    await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(1));
-    expect(addEvent.mock.calls[0][1]).toBe("morning_session");
-  });
-
-  it("sleep-only run writes the sleep event and no empty session event", async () => {
-    const user = userEvent.setup();
-    renderMorning();
-
-    await screen.findByText("How did you sleep?");
-    await user.type(screen.getByRole("spinbutton"), "7");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-
-    // Skip gratitude + intention; skip energy via Done? Energy is the last
-    // prompt — Skip on the last step submits. Leave it unanswered.
+    // gratitude (text, optional): Skip.
     await screen.findByText("What are you grateful for?");
     await user.click(screen.getByRole("button", { name: "Skip" }));
+    // intention (text, optional): Skip.
     await screen.findByText("What's the plan for today?");
     await user.click(screen.getByRole("button", { name: "Skip" }));
+    // energy (rating): pick 4, Done.
     await screen.findByText("Energy");
-    await user.click(screen.getByRole("button", { name: "Skip" }));
+    await user.click(screen.getByRole("button", { name: "4" }));
+    await user.click(screen.getByRole("button", { name: /Done/ }));
 
     await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(1));
-    expect(addEvent.mock.calls[0][1]).toBe("sleep");
-    expect(addEvent.mock.calls[0][2]).toEqual([
-      { name: "duration", type: "number", value: 420, unit: "min" },
+    const call = addEvent.mock.calls[0];
+    expect(call[1]).toBe("morning_session");
+    expect(call[2]).toEqual([
+      { name: "energy", type: "number", value: 4, unit: "rating", scale: 5 },
     ]);
-    expect(messageInfo).not.toHaveBeenCalled();
+    expect(addEvent.mock.calls.map((c) => c[1])).not.toContain("sleep");
   });
 
   it("all-skipped run writes nothing and surfaces the nothing-to-save notice", async () => {
     const user = userEvent.setup();
     renderMorning();
 
-    await screen.findByText("How did you sleep?");
-    await user.click(screen.getByRole("button", { name: "Skip" }));
     await screen.findByText("What are you grateful for?");
     await user.click(screen.getByRole("button", { name: "Skip" }));
     await screen.findByText("What's the plan for today?");
