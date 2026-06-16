@@ -18,7 +18,7 @@ import type { DayIndex, DayCell } from "./dayIndex";
 import type { LifeManifestTrackable, TrackableShape } from "@homelab/backend";
 import { startOfWeek, dayKey, startOfDay, endOfDay } from "@homelab/backend";
 import { aggregateEvents } from "./shapes";
-import { aggregationFor } from "./format";
+import { monthKey, firstOfMonth } from "./habitStats";
 
 // ---------------------------------------------------------------------------
 // dailyValue — the canonical per-day scalar
@@ -91,11 +91,6 @@ export interface SeriesPoint {
   /** Bucket key: "YYYY-MM-DD" (day/week-start) or "YYYY-MM" (month). */
   date: string;
   value: number;
-}
-
-/** Local "YYYY-MM" for the month (in `tz`) containing `d`. */
-function monthKey(d: Date, tz: string): string {
-  return dayKey(d, tz).slice(0, 7);
 }
 
 /** The bucket key for a local day, at the requested granularity. */
@@ -201,6 +196,29 @@ function dailyValueForDay(
     }
   }
   return any ? total : null;
+}
+
+/**
+ * The local [from, to] day range a bucket key spans, for drill-down. A day key
+ * is a single day; a week-start key spans 7 days; a month key spans its month.
+ * Anchored at noon-local to dodge DST edges before the tz helpers re-normalize.
+ */
+export function bucketRange(key: string, granularity: Granularity, tz: string): { from: Date; to: Date } {
+  if (granularity === "month") {
+    // Anchor at noon-local-ish (UTC noon of the 1st), then snap via the tz
+    // helpers so DST never drifts the boundary.
+    const anchor = new Date(`${key}-01T12:00:00.000Z`);
+    const from = firstOfMonth(anchor, tz);
+    // Last instant of the month = one ms before the next month's 1st.
+    const nextMonthAnchor = new Date(endOfDay(from, tz).getTime() + 32 * 24 * 60 * 60 * 1000);
+    const to = new Date(firstOfMonth(nextMonthAnchor, tz).getTime() - 1);
+    return { from, to };
+  }
+  const from = startOfDay(new Date(`${key}T12:00:00.000Z`), tz);
+  if (granularity === "day") return { from, to: from };
+  // Week: the key is the Sunday start; the range is the following 6 days.
+  const to = new Date(endOfDay(from, tz).getTime() + 6 * 24 * 60 * 60 * 1000);
+  return { from, to };
 }
 
 // ---------------------------------------------------------------------------
@@ -334,15 +352,5 @@ export function periodCompare(
 
 /** Start instant of the current period (week or month) containing `today`. */
 function currentStart(period: "week" | "month", today: Date, tz: string): Date {
-  if (period === "week") return startOfWeek(today, tz);
-  // First local day of the month: re-derive from the "YYYY-MM-01" key.
-  const mk = monthKey(today, tz);
-  return startOfDay(new Date(`${mk}-01T12:00:00.000Z`), tz);
+  return period === "week" ? startOfWeek(today, tz) : firstOfMonth(today, tz);
 }
-
-// ---------------------------------------------------------------------------
-// Re-exports for the unit/aggregation policy the views display.
-// ---------------------------------------------------------------------------
-
-export { magnitudeUnit, monthKey };
-export { aggregationFor };

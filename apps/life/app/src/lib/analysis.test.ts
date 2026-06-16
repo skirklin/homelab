@@ -10,13 +10,17 @@
  */
 import { describe, it, expect } from "vitest";
 import type { LifeEvent, LifeEntry, LifeManifestTrackable } from "@homelab/backend";
+import { dayKey } from "@homelab/backend";
 import { buildDayIndex } from "./dayIndex";
+
+const dailyKey = (d: Date) => dayKey(d, PT);
 import {
   dailyValue,
   series,
   percentileScale,
   correlate,
   periodCompare,
+  bucketRange,
   type SeriesPoint,
 } from "./analysis";
 
@@ -232,6 +236,32 @@ describe("correlate — Pearson r", () => {
     const a = s([["d1", 5], ["d2", 5], ["d3", 5]]);
     const b = s([["d1", 1], ["d2", 2], ["d3", 3]]);
     expect(correlate(a, b).r).toBeNull();
+  });
+});
+
+describe("bucketRange — drill-down spans", () => {
+  it("a day key spans exactly that local day", () => {
+    const { from, to } = bucketRange("2026-06-10", "day", PT);
+    expect(dailyKey(from)).toBe("2026-06-10");
+    expect(from.getTime()).toBe(to.getTime());
+  });
+
+  it("a week key (Sunday start) spans seven local days", () => {
+    const { from, to } = bucketRange("2026-06-07", "week", PT); // Sun
+    expect(dailyKey(from)).toBe("2026-06-07");
+    expect(dailyKey(to)).toBe("2026-06-13"); // Sat
+  });
+
+  it("a month key spans the whole month", () => {
+    const { from, to } = bucketRange("2026-06", "month", PT);
+    expect(dailyKey(from)).toBe("2026-06-01");
+    expect(dailyKey(to)).toBe("2026-06-30");
+  });
+
+  it("handles the December → January month rollover", () => {
+    const { from, to } = bucketRange("2026-12", "month", PT);
+    expect(dailyKey(from)).toBe("2026-12-01");
+    expect(dailyKey(to)).toBe("2026-12-31");
   });
 });
 
