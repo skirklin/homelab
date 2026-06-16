@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Modal, Button, TimePicker, Switch } from "antd";
 import { ReloadOutlined, DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
@@ -7,6 +7,7 @@ import { useLifeContext } from "../life-context";
 import type { LifeLog } from "../types";
 import { RANDOM_SAMPLES } from "../manifest";
 import { useUserBackend, useLifeBackend, useFeedback } from "@kirkl/shared";
+import { useUserTz } from "../lib/useUserTz";
 
 const SettingRow = styled.div`
   display: flex;
@@ -144,10 +145,9 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
   const config = RANDOM_SAMPLES;
   const now = Date.now();
 
-  const userTz = useMemo(
-    () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-    [],
-  );
+  // The single tz source for the whole app — reads the log owner's saved
+  // timezone (Intl fallback), the same value all day/week bucketing uses.
+  const userTz = useUserTz();
 
   // Parse "HH:MM" without relying on the customParseFormat plugin.
   const parseHHmm = (s: string | null | undefined): Dayjs | null => {
