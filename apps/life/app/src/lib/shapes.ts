@@ -21,6 +21,7 @@ import type {
   LifeManifestTrackable,
   TrackableShape,
 } from "@homelab/backend";
+import { startOfDay, endOfDay } from "@homelab/backend";
 import { formatDuration, formatRating } from "./format";
 
 export const SHAPE_ORDER: TrackableShape[] = ["took", "did", "happened", "rated"];
@@ -199,35 +200,31 @@ export function labelFor(trackables: LifeManifestTrackable[], subjectId: string)
 
 // ---------------------------------------------------------------------------
 // Day filtering (shared by cards/sheets)
+//
+// `tz` is the user's IANA zone — the SAME zone the goal evaluator and day index
+// use — so "the events on day D" agrees everywhere. A 6pm-Pacific event (which
+// is next-day UTC) buckets on the Pacific day, not the UTC day. No runtime
+// setHours bucketing here.
 // ---------------------------------------------------------------------------
 
-export function startOfDay(d: Date): Date {
-  const out = new Date(d);
-  out.setHours(0, 0, 0, 0);
-  return out;
-}
-
-export function endOfDay(d: Date): Date {
-  const out = new Date(d);
-  out.setHours(23, 59, 59, 999);
-  return out;
-}
-
-/** Events for one subject on one day (default today), newest first. */
-export function eventsForThing(events: LifeEvent[], subjectId: string, day?: Date): LifeEvent[] {
-  const date = day ?? new Date();
-  const lo = startOfDay(date);
-  const hi = endOfDay(date);
+/** Events for one subject on one day, newest first. `day` is any instant in it. */
+export function eventsForThing(
+  events: LifeEvent[],
+  subjectId: string,
+  day: Date,
+  tz: string,
+): LifeEvent[] {
+  const lo = startOfDay(day, tz);
+  const hi = endOfDay(day, tz);
   return events
     .filter((e) => e.subjectId === subjectId && e.timestamp >= lo && e.timestamp <= hi)
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 }
 
-/** All events on one day, newest first. */
-export function eventsForDay(events: LifeEvent[], day?: Date): LifeEvent[] {
-  const date = day ?? new Date();
-  const lo = startOfDay(date);
-  const hi = endOfDay(date);
+/** All events on one day, newest first. `day` is any instant in it. */
+export function eventsForDay(events: LifeEvent[], day: Date, tz: string): LifeEvent[] {
+  const lo = startOfDay(day, tz);
+  const hi = endOfDay(day, tz);
   return events
     .filter((e) => e.timestamp >= lo && e.timestamp <= hi)
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());

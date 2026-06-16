@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { zonedDateTime, dayKey, startOfDay, endOfDay } from "./life-goal-eval";
 import type { LifeEvent, LifeEntry, LifeManifestTrackable, LifeGoal } from "./types/life";
 import { evaluateGoal } from "./life-goal-eval";
 
@@ -187,6 +188,26 @@ describe("evaluateGoal — streak", () => {
 // ---------------------------------------------------------------------------
 // Finding 1: timezone — boundaries must be in the passed IANA tz, not runtime.
 // ---------------------------------------------------------------------------
+describe("zonedDateTime — wall-clock H:M in an explicit tz", () => {
+  it("builds an instant that reads as the given wall-clock in tz", () => {
+    // Noon Pacific on 2026-06-15 is 19:00 UTC.
+    const seed = new Date(Date.UTC(2026, 5, 15, 12));
+    const noonPt = zonedDateTime(seed, 12, 0, "America/Los_Angeles");
+    expect(noonPt.toISOString()).toBe("2026-06-15T19:00:00.000Z");
+    expect(dayKey(noonPt, "America/Los_Angeles")).toBe("2026-06-15");
+  });
+
+  it("a backfill at 23:00 lands inside that day's tz bucket", () => {
+    const seed = new Date(Date.UTC(2026, 5, 15, 12));
+    const lateNight = zonedDateTime(seed, 23, 0, "America/Los_Angeles");
+    // 23:00 PT June 15 = 06:00 UTC June 16, but it must bucket on June 15 PT,
+    // inside [startOfDay, endOfDay] of that local day.
+    expect(dayKey(lateNight, "America/Los_Angeles")).toBe("2026-06-15");
+    expect(lateNight >= startOfDay(seed, "America/Los_Angeles")).toBe(true);
+    expect(lateNight <= endOfDay(seed, "America/Los_Angeles")).toBe(true);
+  });
+});
+
 describe("evaluateGoal — explicit timezone boundaries", () => {
   const goal: LifeGoal = { id: "floss-daily", label: "Floss", scope: { thing: "floss" }, kind: "at_least", metric: "count", target: 1, period: "day" };
   // 18:00 Pacific on 2026-06-10 === 01:00 UTC on 2026-06-11. Evaluated in

@@ -15,6 +15,7 @@ import {
   eventsForDay,
   formatAggregate,
 } from "../lib/shapes";
+import { userTz } from "../lib/useUserTz";
 
 const Card = styled.button<{ $active: boolean }>`
   display: flex;
@@ -70,12 +71,13 @@ export function ShapeCard({ shape, trackables, events, day, onOpen }: ShapeCardP
   // Summaries: every thing of THIS shape with events on the viewed day —
   // including hidden vocab rows (a logged fact stays visible even if the
   // thing is hidden from the input surfaces).
+  const tz = userTz();
   const lines = useMemo(() => {
     const shapeIds = new Map(
       trackables.filter((t) => t.shape === shape).map((t) => [t.id, t.label]),
     );
     const byThing = new Map<string, LifeEvent[]>();
-    for (const ev of eventsForDay(events, day)) {
+    for (const ev of eventsForDay(events, day, tz)) {
       if (!shapeIds.has(ev.subjectId)) continue;
       const list = byThing.get(ev.subjectId);
       if (list) list.push(ev);
@@ -85,7 +87,7 @@ export function ShapeCard({ shape, trackables, events, day, onOpen }: ShapeCardP
       const summary = formatAggregate(aggregateEvents(evs));
       return { id, text: `${shapeIds.get(id)}${summary ? ` ${summary}` : ""}` };
     });
-  }, [trackables, events, shape, day]);
+  }, [trackables, events, shape, day, tz]);
 
   return (
     <Card $active={lines.length > 0} onClick={() => onOpen(shape)} data-testid={`shape-card-${shape}`}>

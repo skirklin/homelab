@@ -35,8 +35,9 @@ import type {
   LifeGoal,
   TrackableShape,
 } from "@homelab/backend";
-import { evaluateGoal, dayKey, type GoalProgress } from "@homelab/backend";
+import { evaluateGoal, dayKey, zonedDateTime, type GoalProgress } from "@homelab/backend";
 import { buildEntries, formatUnitValue, labelFor } from "../lib/shapes";
+import { userTz } from "../lib/useUserTz";
 import { useLogEvent } from "../lib/useLogEvent";
 import { buildDayIndex } from "../lib/dayIndex";
 import { TrackerCalendar } from "./TrackerCalendar";
@@ -321,10 +322,10 @@ export function HabitBoard({
   const life = useLifeBackend();
   const { message } = useFeedback();
 
-  // Evaluate goal boundaries + bucket the calendar in the BROWSER's tz so the
-  // dashboard agrees with the server progress route (which uses the log owner's
-  // saved tz; in the browser the runtime tz equals this).
-  const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+  // Bucket the calendar + evaluate goal boundaries in the USER's tz (the same
+  // saved tz the server progress route uses), so the dashboard and server agree
+  // on which day/week an event near midnight lands in.
+  const tz = userTz();
 
   // ONE O(events) pass feeds every calendar cell — no per-cell event scans.
   const index = useMemo(() => buildDayIndex(events, tz), [events, tz]);
@@ -521,10 +522,9 @@ export function HabitBoard({
   // ---- Goal status row: + Log against the VIEWED day (status reflects it) ---
 
   const logThing = async (goal: LifeGoal, thing: LifeManifestTrackable | null) => {
-    // Reuse the tap path against the viewed day (local noon), so a status-row
-    // log and a calendar tap on today behave identically.
-    const noon = new Date(day);
-    noon.setHours(12, 0, 0, 0);
+    // Reuse the tap path against the viewed day (user-tz noon), so a status-row
+    // log and a calendar tap on today behave identically and bucket correctly.
+    const noon = zonedDateTime(day, 12, 0, tz);
     await handleTapDay(scopeSubjectIds(goal, trackables), thing, goal, noon, []);
   };
 

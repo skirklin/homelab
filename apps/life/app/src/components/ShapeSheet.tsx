@@ -28,6 +28,7 @@ import { useFeedback, useLifeBackend } from "@kirkl/shared";
 import {
   ManifestError,
   slugifyTrackableId,
+  zonedDateTime,
   type LifeEvent,
   type LifeManifestTrackable,
   type QuickPayload,
@@ -44,6 +45,7 @@ import {
   type ShapeFormValues,
 } from "../lib/shapes";
 import { frecentPayloads, payloadKey } from "../lib/frecency";
+import { userTz } from "../lib/useUserTz";
 import { useLogEvent } from "../lib/useLogEvent";
 import { formatEntry } from "../lib/format";
 import { EntriesList } from "./EntriesList";
@@ -243,9 +245,15 @@ function defaultTime(day: Date): Dayjs {
   return isToday(day) ? dayjs() : dayjs(day).hour(12).minute(0).second(0).millisecond(0);
 }
 
-/** Combine the viewed day with the picked time-of-day. */
-function combine(day: Date, time: Dayjs): Date {
-  return dayjs(day).hour(time.hour()).minute(time.minute()).second(0).millisecond(0).toDate();
+/**
+ * Combine the viewed day with the picked time-of-day, in the USER's tz — so a
+ * backfilled event lands in the tapped day's bucket even when the browser tz
+ * differs from the user's tz. The picker's hour/minute are the wall-clock the
+ * user sees; `zonedDateTime` maps that wall-clock on `day`'s local date to a
+ * true UTC instant.
+ */
+function combine(day: Date, time: Dayjs, tz: string): Date {
+  return zonedDateTime(day, time.hour(), time.minute(), tz);
 }
 
 export interface ShapeSheetProps {
@@ -265,6 +273,7 @@ export function ShapeSheet({ shape, onClose, trackables, events, userId, logId, 
   const life = useLifeBackend();
   const { state, dispatch } = useLifeContext();
   const logEvent = useLogEvent();
+  const tz = userTz();
 
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -369,11 +378,11 @@ export function ShapeSheet({ shape, onClose, trackables, events, userId, logId, 
         subjectId: selected.id,
         entries,
         labels,
-        timestamp: combine(day, time),
+        timestamp: combine(day, time, tz),
         label: `${selected.label} ${valuePart}`.trim(),
       });
     },
-    [selected, logId, userId, logEvent, day, time],
+    [selected, logId, userId, logEvent, day, time, tz],
   );
 
   const handleLog = useCallback(async () => {
@@ -426,15 +435,15 @@ export function ShapeSheet({ shape, onClose, trackables, events, userId, logId, 
   // ---- Today's entries for the selected thing ---------------------------
 
   const todaysEvents = useMemo(
-    () => (selected ? eventsForThing(events, selected.id, day) : []),
-    [selected, events, day],
+    () => (selected ? eventsForThing(events, selected.id, day, tz) : []),
+    [selected, events, day, tz],
   );
 
   const todaySummaryFor = useCallback((thingId: string) => {
-    const todays = eventsForThing(events, thingId, day);
+    const todays = eventsForThing(events, thingId, day, tz);
     if (todays.length === 0) return null;
     return formatAggregate(aggregateEvents(todays));
-  }, [events, day]);
+  }, [events, day, tz]);
 
   const meta = shape ? SHAPE_META[shape] : null;
 

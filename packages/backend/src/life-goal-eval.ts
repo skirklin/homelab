@@ -66,6 +66,19 @@ export function dayKey(d: Date, tz: string): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * The UTC instant for wall-clock `hour:minute` on the day (in `tz`) containing
+ * `d`. Used by the life app's backfill: a tapped past day + a picked time must
+ * land in that day's user-tz bucket, even when the browser tz differs from the
+ * user's tz. Builds off the day's start-of-day in `tz`, so DST transitions are
+ * handled by date-fns-tz rather than naive ms arithmetic.
+ */
+export function zonedDateTime(d: Date, hour: number, minute: number, tz: string): Date {
+  const z = toZonedTime(d, tz);
+  z.setHours(hour, minute, 0, 0);
+  return fromZonedTime(z, tz);
+}
+
 /** Start of the Sunday-start week (in `tz`) containing `d`, as a UTC instant. */
 export function startOfWeek(d: Date, tz: string): Date {
   const z = toZonedTime(d, tz);

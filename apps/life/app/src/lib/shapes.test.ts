@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from "vitest";
 import type { LifeEvent, LifeManifestTrackable } from "@homelab/backend";
+import { dayKey, zonedDateTime } from "@homelab/backend";
 import {
   buildEntries,
   aggregateEvents,
@@ -22,6 +23,7 @@ import {
   thingsOfShape,
   labelFor,
   eventsForThing,
+  eventsForDay,
 } from "./shapes";
 
 let counter = 0;
@@ -161,10 +163,10 @@ describe("vocab helpers", () => {
   });
 
   it("eventsForThing filters by subject and day, newest first", () => {
-    // Pin the reference instant to noon so the "2 hours earlier" event can
-    // never slip across midnight regardless of when the suite runs.
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
+    const tz = "America/Los_Angeles";
+    // Pin the reference instant to local noon so the "2 hours earlier" event
+    // can never slip across midnight regardless of when the suite runs.
+    const today = zonedDateTime(new Date(), 12, 0, tz);
     const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
     const earlier = new Date(today.getTime() - 2 * 60 * 60 * 1000);
     const events = [
@@ -173,7 +175,25 @@ describe("vocab helpers", () => {
       ev("coffee", [{ name: "amount", type: "number", value: 16, unit: "oz" }], yesterday),
       ev("mood", [{ name: "rating", type: "number", value: 3, unit: "rating" }], today),
     ];
-    const out = eventsForThing(events, "coffee", today);
+    const out = eventsForThing(events, "coffee", today, tz);
     expect(out.map((e) => e.entries[0].value)).toEqual([12, 8]);
+  });
+
+  it("eventsForDay/eventsForThing bucket near-midnight events in the USER tz", () => {
+    const tz = "America/Los_Angeles";
+    // 23:00 Pacific on June 15 = 06:00 UTC June 16. It must bucket on June 15
+    // locally (matching dayIndex + the goal evaluator), not the UTC date.
+    const lateNight = zonedDateTime(new Date(Date.UTC(2026, 5, 15, 12)), 23, 0, tz);
+    const events = [
+      ev("coffee", [{ name: "amount", type: "number", value: 8, unit: "oz" }], lateNight),
+    ];
+    const onJune15 = zonedDateTime(new Date(Date.UTC(2026, 5, 15, 12)), 9, 0, tz);
+    const onJune16 = zonedDateTime(new Date(Date.UTC(2026, 5, 16, 12)), 9, 0, tz);
+    expect(eventsForThing(events, "coffee", onJune15, tz)).toHaveLength(1);
+    expect(eventsForThing(events, "coffee", onJune16, tz)).toHaveLength(0);
+    expect(eventsForDay(events, onJune15, tz)).toHaveLength(1);
+    expect(eventsForDay(events, onJune16, tz)).toHaveLength(0);
+    // The same key the day index uses agrees.
+    expect(dayKey(lateNight, tz)).toBe("2026-06-15");
   });
 });

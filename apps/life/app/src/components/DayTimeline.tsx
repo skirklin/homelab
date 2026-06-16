@@ -23,6 +23,7 @@ import {
   formatAggregate,
   labelFor,
 } from "../lib/shapes";
+import { userTz } from "../lib/useUserTz";
 import { EventEditModal } from "./EventEditModal";
 
 // ---------------------------------------------------------------------------
@@ -200,8 +201,9 @@ export function DayTimeline({
   // sorts that way — same ordering as the Journal). Text/notes-only entries
   // (sessions excepted) are kept terse: their per-thing value summary is empty,
   // which the cards already do, so the row just shows the label.
+  const tz = userTz();
   const rows = useMemo<TimelineRow[]>(() => {
-    return eventsForDay(events, day).map((ev) => {
+    return eventsForDay(events, day, tz).map((ev) => {
       const session = SESSION_BY_SUBJECT.get(ev.subjectId);
       if (session) {
         return {
@@ -224,7 +226,7 @@ export function DayTimeline({
         event: ev,
       };
     });
-  }, [events, day, trackables]);
+  }, [events, day, trackables, tz]);
 
   const visible = rows.slice(0, MAX_ROWS);
   const overflow = rows.length - visible.length;

@@ -12,20 +12,21 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useUrlParam } from "@kirkl/shared";
+import { dayKey, zonedDateTime } from "@homelab/backend";
+import { userTz } from "./useUserTz";
 
-// Helper to get date string for comparison (YYYY-MM-DD) in local timezone
+// The selected day's identity is the user-tz "YYYY-MM-DD" — the SAME key the
+// day index / goal evaluator bucket by — so a picked day and the events shown
+// for it agree even when the browser tz differs from the user's tz.
 export function getDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return dayKey(date, userTz());
 }
 
-// Helper to get start of day
+// A stable representative instant for `date`'s user-tz day: local noon. Noon is
+// robust to re-bucketing (any tz offset keeps it on the same date), and the
+// value is only ever read back through tz-aware startOfDay/dayKey downstream.
 export function startOfDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return zonedDateTime(date, 12, 0, userTz());
 }
 
 // Serialize a Date to the `?date=` value, or null when it IS today (today =
@@ -36,9 +37,10 @@ function serializeSelectedDate(date: Date): string | null {
   return getDateString(date) === getDateString(new Date()) ? null : getDateString(date);
 }
 
-// Parse a YYYY-MM-DD string in browser-local time. Returns null on malformed
-// input or on dates outside the plausible range (year < 2000, or > tomorrow).
-// "Tomorrow" is allowed so timezone edge cases at midnight don't trip users.
+// Parse a YYYY-MM-DD string into a user-tz-noon representative instant. Returns
+// null on malformed input or on dates outside the plausible range (year < 2000,
+// or > tomorrow). "Tomorrow" is allowed so timezone edge cases at midnight don't
+// trip users.
 const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 export function parseYmdParam(raw: string | null): Date | null {
   if (!raw) return null;
@@ -48,15 +50,13 @@ export function parseYmdParam(raw: string | null): Date | null {
   const month = Number(m[2]);
   const day = Number(m[3]);
   if (year < 2000 || month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const d = new Date(year, month - 1, day, 0, 0, 0, 0);
-  // Round-trip check rejects things like 2026-02-31.
-  if (
-    d.getFullYear() !== year ||
-    d.getMonth() !== month - 1 ||
-    d.getDate() !== day
-  ) {
-    return null;
-  }
+  // Anchor at user-tz noon of the parsed calendar date. UTC-noon as the seed
+  // lands on the right date in the user's tz for every real-world offset; the
+  // round-trip check below rejects impossible dates (e.g. 2026-02-31, which
+  // rolls into March).
+  const seed = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+  const d = zonedDateTime(seed, 12, 0, userTz());
+  if (getDateString(d) !== raw) return null;
   const tomorrow = startOfDay(new Date());
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (d > tomorrow) return null;
@@ -194,10 +194,9 @@ export function useSelectedDate(): SelectedDate {
   }, []);
 
   const getSelectedTimestamp = useCallback((): Date | undefined => {
-    if (isToday) return undefined;
-    const timestamp = new Date(selectedDate);
-    timestamp.setHours(12, 0, 0, 0);
-    return timestamp;
+    // `selectedDate` is already the user-tz noon representative of the picked
+    // day (see startOfDay), so it IS the correct backfill anchor. Today → now.
+    return isToday ? undefined : selectedDate;
   }, [isToday, selectedDate]);
 
   const formatDateLabel = useCallback(
