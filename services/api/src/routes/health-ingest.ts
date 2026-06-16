@@ -34,13 +34,14 @@ export { round };
  *
  *   1:1 events     — one life_event per source record, deduped by a
  *                    deterministic source_id (insert only if absent).
- *   hourly counters — high-volume interval records (steps/distance/calories)
- *                    aggregated into ONE event per local hour, with an
- *                    additive high-water-mark upsert so re-posts never double
- *                    count. The hwm is end_time-based, so the stored total is a
- *                    lower bound under RESTATEMENT (a corrected record sharing
- *                    an end instant past the hwm is dropped, not reconciled) —
- *                    fine for a single-device append-style feed.
+ *   daily counters — high-volume interval records (steps/distance/calories)
+ *                    aggregated into ONE event per local DAY (in the owner's
+ *                    tz), with an additive high-water-mark upsert so re-posts
+ *                    never double count. The hwm is end_time-based, so the
+ *                    stored total is a lower bound under RESTATEMENT (a
+ *                    corrected record sharing an end instant past the hwm is
+ *                    dropped, not reconciled) — fine for a single-device
+ *                    append-style feed.
  *
  * `heart_rate` is ignored entirely (tens of thousands of raw samples).
  */
@@ -68,30 +69,32 @@ function canonInstant(iso: string): string {
 }
 
 /**
- * A local-hour group carrying the records that fell in it (pre-fold). Bucketing
+ * A local-day group carrying the records that fell in it (pre-fold). Bucketing
  * the FULL record array exactly ONCE into these groups, then folding each group
- * against a per-hour hwm, avoids the old O(N²) shape that re-scanned the whole
- * array for every touched hour (which could time out a backfill).
+ * against a per-day hwm, avoids the old O(N²) shape that re-scanned the whole
+ * array for every touched day (which could time out a backfill).
  */
-export type HourGroup = {
-  localHour: string;
-  /** Records in this hour, each with its canonical end_time precomputed. */
+export type DayGroup = {
+  localDay: string;
+  /** Records in this day, each with its canonical end_time precomputed. */
   records: { value: number; endTime: string }[];
 };
 
 /**
- * Pure: bucket interval records by local-hour-start ONCE, retaining each
- * hour's records (value + canonical end_time) so per-hour folding can be done
- * without re-scanning the full array. Records with no `start_time`, an
- * unparseable `start_time`/`end_time`, or a non-finite value are skipped
- * (counted as malformed by the caller). One HourGroup per non-empty hour.
+ * Pure: bucket interval records by local-day (in the owner's tz) ONCE,
+ * retaining each day's records (value + canonical end_time) so per-day folding
+ * can be done without re-scanning the full array. Records with no `start_time`,
+ * an unparseable `start_time`/`end_time`, or a non-finite value are skipped
+ * (counted as malformed by the caller). One DayGroup per non-empty day. The
+ * day key is the owner-tz local date (`YYYY-MM-DD`), so a record's calendar day
+ * is decided in the user's zone, not the UTC pod's.
  */
-export function groupHourly(
+export function groupDaily(
   records: Record<string, unknown>[],
   timeZone: string,
   valueOf: (r: Record<string, unknown>) => number | null,
-): { groups: Map<string, HourGroup>; skipped: number } {
-  const groups = new Map<string, HourGroup>();
+): { groups: Map<string, DayGroup>; skipped: number } {
+  const groups = new Map<string, DayGroup>();
   let skipped = 0;
   for (const r of records) {
     const startTime = r.start_time as string;
@@ -108,11 +111,11 @@ export function groupHourly(
     }
     const value = valueOf(r);
     if (value === null || !Number.isFinite(value)) continue; // no/invalid value: drop
-    const localHour = formatInTimeZone(new Date(startMs), timeZone, "yyyy-MM-dd'T'HH:00:00");
-    let g = groups.get(localHour);
+    const localDay = formatInTimeZone(new Date(startMs), timeZone, "yyyy-MM-dd");
+    let g = groups.get(localDay);
     if (!g) {
-      g = { localHour, records: [] };
-      groups.set(localHour, g);
+      g = { localDay, records: [] };
+      groups.set(localDay, g);
     }
     g.records.push({ value, endTime });
   }
@@ -120,13 +123,13 @@ export function groupHourly(
 }
 
 /**
- * Pure: fold a single hour's pre-grouped records, counting only those whose
+ * Pure: fold a single day's pre-grouped records, counting only those whose
  * canonical `end_time` is strictly past `sinceHwm`. Returns the additive sum
  * and the new high-water mark. The hwm guard is a lexical compare on canonical
  * instants, operating on already-grouped records so no full-array re-bucket is
  * needed for the update path.
  */
-export function foldGroup(group: HourGroup, sinceHwm = ""): { sum: number; hwm: string } {
+export function foldGroup(group: DayGroup, sinceHwm = ""): { sum: number; hwm: string } {
   let sum = 0;
   let hwm = sinceHwm;
   for (const rec of group.records) {
@@ -206,7 +209,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
   const log = await getOrCreateOwnLifeLog(pb, userId);
   const logId = log.id as string;
 
-  // Owner timezone for hour/day bucketing — the pod runs UTC, so all boundary
+  // Owner timezone for day bucketing — the pod runs UTC, so all boundary
   // math goes through the owner's tz. (Same fallback the life notifier uses.)
   let timeZone = "America/Los_Angeles";
   try {
@@ -365,12 +368,12 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     });
   }
 
-  // ---- Hourly-aggregated counters (steps / distance / total_calories) ----
-  // Bucket each interval record by its local-hour-start (in the owner's tz),
-  // then additive-upsert with a high-water-mark so re-posts / delta-syncs never
+  // ---- Daily-aggregated counters (steps / distance / total_calories) ----
+  // Bucket each interval record by its local DAY (in the owner's tz), then
+  // additive-upsert with a high-water-mark so re-posts / delta-syncs never
   // double count. `finalize` maps a raw sum to the stored unit (meters→miles
   // etc.); `digits` is the canonical precision the combined total is rounded to.
-  async function aggregateHourly(opts: {
+  async function aggregateDaily(opts: {
     arrayKey: string;
     subject: string;
     unit: string;
@@ -383,16 +386,16 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     const records = arr(opts.arrayKey);
     if (records.length === 0) return;
 
-    // Bucket the full set ONCE into per-hour groups carrying their records.
-    // Every touched hour then folds against its own stored hwm off this single
-    // grouping — no per-hour re-bucket of the full array (the old O(N²) shape).
-    const { groups, skipped: malformed } = groupHourly(records, timeZone, opts.valueOf);
+    // Bucket the full set ONCE into per-day groups carrying their records.
+    // Every touched day then folds against its own stored hwm off this single
+    // grouping — no per-day re-bucket of the full array (the old O(N²) shape).
+    const { groups, skipped: malformed } = groupDaily(records, timeZone, opts.valueOf);
     skipped += malformed; // unparseable start_time/end_time count as skipped
 
-    // Fold this hour's group into an existing row by its stored hwm and update
+    // Fold this day's group into an existing row by its stored hwm and update
     // (or skip if nothing new). Shared by the found-path and the lost-create
     // race (re-read) path so both apply identical hwm/fold semantics.
-    const foldIntoExisting = async (group: HourGroup, existing: { id: string; labels?: unknown; entries?: unknown }) => {
+    const foldIntoExisting = async (group: DayGroup, existing: { id: string; labels?: unknown; entries?: unknown }) => {
       const labels = existing.labels as Record<string, string> | null | undefined;
       const rawHwm = (labels && typeof labels === "object" && labels.hwm) || "";
       const prevHwm = rawHwm ? canonInstant(rawHwm) : "";
@@ -416,11 +419,13 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
       bump(opts.subject);
     };
 
-    for (const [localHour, group] of groups) {
-      const sourceId = `hc:${opts.subject}:${localHour}`;
+    for (const [localDay, group] of groups) {
+      const sourceId = `hc:${opts.subject}:${localDay}`;
       const existing = await findBySourceId(pb, logId, sourceId);
-      // UTC instant of the local-hour start = the event timestamp.
-      const timestamp = fromZonedTime(localHour, timeZone).toISOString();
+      // NOON of the local day in the owner's tz = the event timestamp. Mirrors
+      // the screen-time mapper: noon avoids any day-boundary rounding ambiguity
+      // when the UTC pod renders the instant back to a calendar day.
+      const timestamp = fromZonedTime(`${localDay}T12:00:00`, timeZone).toISOString();
 
       if (existing) {
         await foldIntoExisting(group, existing);
@@ -453,7 +458,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     }
   }
 
-  await aggregateHourly({
+  await aggregateDaily({
     arrayKey: "steps",
     subject: "steps",
     unit: "ct",
@@ -461,7 +466,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     valueOf: (r) => num(r.count),
     finalize: (sum) => sum,
   });
-  await aggregateHourly({
+  await aggregateDaily({
     arrayKey: "distance",
     subject: "distance",
     unit: "mi",
@@ -469,7 +474,7 @@ export const healthIngestHandler = handler(async (c: Context<AppEnv>) => {
     valueOf: (r) => num(r.meters),
     finalize: (sum) => metersToMiles(sum),
   });
-  await aggregateHourly({
+  await aggregateDaily({
     arrayKey: "total_calories",
     subject: "calories",
     unit: "kcal",
