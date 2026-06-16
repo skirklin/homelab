@@ -7,8 +7,8 @@
  *
  * Tap-to-log backfills the TAPPED day: an empty day with a usable default logs a
  * default event timestamped to that day at local noon; group/rated/no-default
- * days open the shape sheet against that day; a populated day opens an edit
- * surface (one event → EventEditModal; several → a day modal).
+ * days open the shape sheet against that day; a populated day opens the unified
+ * edit surface (EventsEditModal, rendering 1..n events).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within, fireEvent, act } from "@testing-library/react";
@@ -318,7 +318,7 @@ describe("HabitBoard", () => {
     const row = screen.getByTestId("habit-row");
     await longPress(cellIn(row, "2026-06-08"));
     expect(deleteEvent).not.toHaveBeenCalled();
-    const modal = screen.getByTestId("day-events-modal");
+    const modal = screen.getByTestId("event-edit-modal");
     expect(within(modal).getAllByTestId("entry-row")).toHaveLength(2);
   });
 

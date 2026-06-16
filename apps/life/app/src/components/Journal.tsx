@@ -25,7 +25,7 @@ import { useTrackables } from "../lib/trackables";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEntry } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
-import { EventEditModal } from "./EventEditModal";
+import { EventsEditModal } from "./EventsEditModal";
 
 // ---------------------------------------------------------------------------
 // Styled
@@ -614,8 +614,8 @@ export function Journal() {
           )}
         </Section>
       </PageContainer>
-      <EventEditModal
-        event={editing}
+      <EventsEditModal
+        events={editing ? [editing] : null}
         trackables={trackables}
         onClose={() => setEditing(null)}
       />

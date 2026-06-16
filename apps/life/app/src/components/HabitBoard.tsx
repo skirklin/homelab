@@ -18,7 +18,7 @@
  *   - empty + a usable default + a tap that would count → log a default event
  *     timestamped to that day at local noon (tz-correct day bucket);
  *   - empty + group/rated/no-default → open the shape sheet against that day;
- *   - populated → edit (one event → EventEditModal; several → a day modal).
+ *   - populated → edit via the unified EventsEditModal (renders 1..n events).
  *
  * All day math is tz-aware (the day index + the goal evaluator share the same
  * tz helpers); there is no runtime setHours bucketing here. There is no in-app
@@ -26,7 +26,7 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import styled from "styled-components";
-import { Modal, Button } from "antd";
+import { Button } from "antd";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
 import type {
@@ -35,15 +35,14 @@ import type {
   LifeGoal,
   TrackableShape,
 } from "@homelab/backend";
-import { evaluateGoal, dayKey, zonedDateTime, type GoalProgress } from "@homelab/backend";
-import { buildEntries, formatUnitValue, labelFor } from "../lib/shapes";
+import { evaluateGoal, zonedDateTime, type GoalProgress } from "@homelab/backend";
+import { buildEntries, formatUnitValue } from "../lib/shapes";
 import { userTz } from "../lib/useUserTz";
 import { useLogEvent } from "../lib/useLogEvent";
 import { buildDayIndex } from "../lib/dayIndex";
 import { TrackerCalendar } from "./TrackerCalendar";
 import { HabitHistory } from "./HabitHistory";
-import { EventEditModal } from "./EventEditModal";
-import { EntriesList } from "./EntriesList";
+import { EventsEditModal } from "./EventsEditModal";
 
 // How many weeks each calendar shows. Goals get a fuller window; the long tail
 // is shorter to keep the (potentially long) list scannable on a phone.
@@ -370,10 +369,9 @@ export function HabitBoard({
 
   const [expanded, setExpanded] = useState(false);
 
-  // Edit surface for a tapped populated day: a single event opens EventEditModal;
-  // several open a day modal listing them (each editable/deletable).
-  const [editEvent, setEditEvent] = useState<LifeEvent | null>(null);
-  const [dayEventsModal, setDayEventsModal] = useState<{ label: string; events: LifeEvent[] } | null>(null);
+  // Edit surface for a tapped populated day: the unified modal renders N events
+  // (one or several), each editable/deletable.
+  const [editEvents, setEditEvents] = useState<LifeEvent[] | null>(null);
 
   // Per-habit history screen (year heatmap + month grids + stats). Opened by
   // tapping a habit's name; carries the trackable + its goal (if any).
@@ -394,15 +392,9 @@ export function HabitBoard({
     date: Date,
     dayEvts: LifeEvent[],
   ) => {
-    // Populated day → edit. One event: the single-event modal. Several: a day
-    // modal of the lot.
-    if (dayEvts.length === 1) {
-      setEditEvent(dayEvts[0]);
-      return;
-    }
-    if (dayEvts.length > 1) {
-      const label = thing ? thing.label : labelFor(trackables, subjectIds[0] ?? "");
-      setDayEventsModal({ label, events: dayEvts });
+    // Populated day → edit the lot (the unified modal handles 1..n).
+    if (dayEvts.length > 0) {
+      setEditEvents(dayEvts);
       return;
     }
     // Empty day → backfill. Group scope, a rated thing, a thing with no usable
@@ -687,42 +679,11 @@ export function HabitBoard({
         }
       />
 
-      <EventEditModal
-        event={editEvent}
+      <EventsEditModal
+        events={editEvents}
         trackables={trackables}
-        onClose={() => setEditEvent(null)}
+        onClose={() => setEditEvents(null)}
       />
-
-      <Modal
-        open={dayEventsModal !== null}
-        onCancel={() => setDayEventsModal(null)}
-        title={dayEventsModal ? `${dayEventsModal.label} · ${fmtDay(dayEventsModal.events, tz)}` : ""}
-        footer={null}
-        destroyOnClose
-        data-testid="day-events-modal"
-      >
-        {dayEventsModal && (
-          <EntriesList
-            events={dayEventsModal.events}
-            emptyText={null}
-            onDeleted={(id) =>
-              setDayEventsModal((cur) => {
-                if (!cur) return cur;
-                const next = cur.events.filter((e) => e.id !== id);
-                return next.length > 0 ? { ...cur, events: next } : null;
-              })
-            }
-          />
-        )}
-      </Modal>
     </Wrap>
   );
-}
-
-/** Short date label for the day-events modal title (tz-aware day of the events). */
-function fmtDay(evts: LifeEvent[], tz: string): string {
-  if (evts.length === 0) return "";
-  const key = dayKey(evts[0].timestamp, tz); // YYYY-MM-DD
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }

@@ -4,8 +4,8 @@
  * It swipes with the day (lives inside <SwipeContainer>) so it tracks
  * `selectedDate`, not always "today".
  *
- * It is a READ surface plus a tap that opens the single-event edit modal:
- * tapping an event's row opens `EventEditModal` for that exact event (edit
+ * It is a READ surface plus a tap that opens the unified edit modal:
+ * tapping an event's row opens `EventsEditModal` on that one event (edit
  * timestamp/values, or delete). Session rows are non-interactive (they're
  * composite prompt entries, not single-shape events); deleted-vocab rows ARE
  * editable — the event still has entries worth editing/deleting. The full
@@ -24,7 +24,7 @@ import {
   labelFor,
 } from "../lib/shapes";
 import { userTz } from "../lib/useUserTz";
-import { EventEditModal } from "./EventEditModal";
+import { EventsEditModal } from "./EventsEditModal";
 
 // ---------------------------------------------------------------------------
 // Styled
@@ -261,8 +261,8 @@ export function DayTimeline({
           </Footer>
         </List>
       )}
-      <EventEditModal
-        event={editing}
+      <EventsEditModal
+        events={editing ? [editing] : null}
         trackables={trackables}
         onClose={() => setEditing(null)}
       />
