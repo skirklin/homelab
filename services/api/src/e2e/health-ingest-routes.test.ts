@@ -2,9 +2,9 @@
  * E2E test for the Phase-2 Health Connect mapper POST /health/ingest
  * (served as /fn/health/ingest in prod). Confirms it is behind authMiddleware,
  * that an hlk_ API token authenticates and identifies the caller, that records
- * map into life_events with the right subjects/units/conversions, that hourly
- * counters bucket by local hour, and that re-posting the same payload is a
- * no-op (high-water-mark guard).
+ * map into life_events with the right subjects/units/conversions, that daily
+ * counters bucket by local day (one event/day), and that re-posting the same
+ * payload is a no-op (high-water-mark guard).
  *
  * Requires `pnpm test:env:up`.
  */
@@ -94,9 +94,9 @@ beforeAll(async () => {
   apiToken = ((await tokenResp.json()) as { token: string }).token;
 });
 
-// A representative multi-type payload. The two steps records fall in the SAME
-// local hour (07:0x PT for the chosen UTC instants) so they bucket together;
-// the third is the next hour.
+// A representative multi-type payload. The three steps records span different
+// hours but all fall on the SAME local day (07:00 / 07:01 / 08:30 PT, all
+// 2026-06-14) so they collapse into ONE daily bucket totaling 410.
 const PAYLOAD = {
   timestamp: "2026-06-14T20:00:00Z",
   app_version: "1.2.3",
@@ -105,7 +105,7 @@ const PAYLOAD = {
   resting_heart_rate: [{ bpm: 58, time: "2026-06-14T15:00:00Z" }],
   body_fat: [{ percentage: 18.34, time: "2026-06-14T15:00:00Z" }],
   respiratory_rate: [{ rate: 14.27, time: "2026-06-14T15:00:00Z" }],
-  // 14:00–14:02 UTC = 07:00 PT (two records same hour); 15:30 UTC = 08:30 PT.
+  // 14:00, 14:01, 15:30 UTC = 07:00 / 07:01 / 08:30 PT — all 2026-06-14 PT.
   steps: [
     { count: 100, start_time: "2026-06-14T14:00:00Z", end_time: "2026-06-14T14:01:00Z" },
     { count: 250, start_time: "2026-06-14T14:01:00Z", end_time: "2026-06-14T14:02:00Z" },
@@ -170,12 +170,13 @@ describe("POST /health/ingest (Phase-2 mapper)", () => {
     expect(exercise[0].labels).toMatchObject({ category: "Running" });
     expect(exercise[0].end_time).toBe("2026-06-14 16:30:00.000Z");
 
-    // steps: two hourly buckets (07:00 PT = 350; 08:00 PT = 60)
-    const steps = bySubject(events, "steps").sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1));
-    expect(steps).toHaveLength(2);
-    const stepValues = steps.map((s) => s.entries[0].value).sort((a, b) => a - b);
-    expect(stepValues).toEqual([60, 350]);
-    expect(steps.every((s) => s.entries[0].unit === "ct")).toBe(true);
+    // steps: ONE daily bucket for 2026-06-14 PT = 100 + 250 + 60 = 410
+    const steps = bySubject(events, "steps");
+    expect(steps).toHaveLength(1);
+    expect(steps[0].entries[0]).toMatchObject({ value: 410, unit: "ct" });
+    // source_id keyed on the owner-tz local day, timestamp = noon of that day PT.
+    expect(steps[0].source_id).toBe("hc:steps:2026-06-14");
+    expect(steps[0].timestamp).toBe("2026-06-14 19:00:00.000Z"); // noon PT = 19:00 UTC (PDT)
     // hwm label stamped
     expect(steps[0].labels?.hwm).toBeTruthy();
 
@@ -208,7 +209,7 @@ describe("POST /health/ingest (Phase-2 mapper)", () => {
         timestamp: "2026-06-15T00:00:00Z",
         source: "health-connect",
         // One unparseable start_time (must be skipped, not crash) + one valid
-        // record in a brand-new local hour (must be written).
+        // record on a brand-new local day (must be written).
         steps: [
           { count: 999, start_time: "not-a-date", end_time: "2026-06-15T01:01:00Z" },
           { count: 42, start_time: "2026-06-15T18:00:00Z", end_time: "2026-06-15T18:05:00Z" },
@@ -249,5 +250,33 @@ describe("POST /health/ingest (Phase-2 mapper)", () => {
       .map((s) => s.entries[0].value)
       .sort((a, b) => a - b);
     expect(stepsAfter).toEqual(stepsBefore); // counters did NOT double
+  });
+
+  it("accumulates a later record on the same local day into the SAME day event (no new row)", async () => {
+    // The 2026-06-14 PT steps day already holds 410 (from PAYLOAD). A delta-sync
+    // adding a brand-new record (past the stored hwm) in a different hour of the
+    // SAME local day must fold into that one row, not create a second event.
+    const before = await ownEvents();
+    const dayRow = bySubject(before, "steps").find((s) => s.source_id === "hc:steps:2026-06-14");
+    expect(dayRow).toBeTruthy();
+    expect(dayRow!.entries[0].value).toBe(410);
+    const beforeCount = before.length;
+
+    const { status, data } = await ingest({
+      token: apiToken,
+      body: {
+        timestamp: "2026-06-14T23:00:00Z",
+        source: "health-connect",
+        // 22:00 UTC = 15:00 PT, still 2026-06-14 PT, end_time past the prior hwm.
+        steps: [{ count: 90, start_time: "2026-06-14T22:00:00Z", end_time: "2026-06-14T22:05:00Z" }],
+      },
+    });
+    expect(status).toBe(200);
+    expect(data.written.steps).toBe(1); // an UPDATE to the existing day row
+
+    const after = await ownEvents();
+    expect(after.length).toBe(beforeCount); // folded in, no new row
+    const updated = bySubject(after, "steps").find((s) => s.source_id === "hc:steps:2026-06-14");
+    expect(updated!.entries[0].value).toBe(500); // 410 + 90
   });
 });

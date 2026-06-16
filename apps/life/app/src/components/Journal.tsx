@@ -27,6 +27,9 @@ import { userTz } from "../lib/useUserTz";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEvent } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
+import { eventsForDay, labelFor } from "../lib/shapes";
+import { parseYmdParam } from "../lib/useSelectedDate";
+import { EntriesList } from "./EntriesList";
 import { EventsEditModal } from "./EventsEditModal";
 
 // ---------------------------------------------------------------------------
@@ -112,6 +115,21 @@ const OnThisDayPreview = styled.div`
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+`;
+
+const MeasureGroup = styled.div`
+  margin-bottom: var(--space-md);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const MeasureLabel = styled.div`
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: var(--space-xs);
 `;
 
 const DateGroup = styled.div`
@@ -395,6 +413,38 @@ export function Journal() {
   });
   const dateQuerySuffix = dateParam ? `?date=${encodeURIComponent(dateParam)}` : "";
 
+  // "See all in Journal" arrives here with `?date=YYYY-MM-DD`. The journal-shaped
+  // filter above intentionally excludes measurement/trackable events, so they'd
+  // be invisible. When a day is in context, surface that day's MEASUREMENTS
+  // (non-session, non-freeform-journal events) grouped by trackable, newest
+  // first, reusing the same editable rows the dashboard uses. Reads the same
+  // mirror (state.entries) — no separate fetch.
+  // `?date=` is parsed with the SAME tz-aware parser the dashboard day-picker
+  // uses (anchors at user-tz noon, validates the round-trip) — NOT a local
+  // setHours reimplementation — so the measurement day buckets on the user's tz,
+  // consistent with the rest of the app's day math.
+  const measureDay = useMemo(() => parseYmdParam(dateParam), [dateParam]);
+  const measureGroups = useMemo(() => {
+    if (!measureDay) return [];
+    // eventsForDay buckets by the user's tz (lo/hi = tz-aware start/end of day),
+    // so a near-midnight measurement lands on the same local day the picker shows.
+    const dayEvents = eventsForDay(Array.from(state.entries.values()), measureDay, tz).filter(
+      (e) => !SESSION_SUBJECT_IDS.has(e.subjectId) && !JOURNAL_SUBJECTS.has(e.subjectId),
+    );
+    const bySubject = new Map<string, LogEvent[]>();
+    for (const e of dayEvents) {
+      const list = bySubject.get(e.subjectId);
+      if (list) list.push(e);
+      else bySubject.set(e.subjectId, [e]);
+    }
+    // First-seen (newest-first) trackable order, since dayEvents is sorted.
+    return Array.from(bySubject, ([subjectId, events]) => ({
+      subjectId,
+      label: labelFor(trackables, subjectId),
+      events,
+    }));
+  }, [measureDay, state.entries, trackables, tz]);
+
   const menuItems = [
     {
       key: "insights",
@@ -460,6 +510,20 @@ export function Journal() {
                 );
               })}
             </OnThisDayRow>
+          </Section>
+        )}
+
+        {measureDay && measureGroups.length > 0 && (
+          <Section data-testid="journal-measurements">
+            <SectionTitle>
+              Measurements · {formatDateHeader(measureDay, tz)}
+            </SectionTitle>
+            {measureGroups.map((g) => (
+              <MeasureGroup key={g.subjectId}>
+                <MeasureLabel>{g.label}</MeasureLabel>
+                <EntriesList events={g.events} emptyText={null} />
+              </MeasureGroup>
+            ))}
           </Section>
         )}
 

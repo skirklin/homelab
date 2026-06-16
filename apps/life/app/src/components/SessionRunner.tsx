@@ -7,10 +7,8 @@ import { useAuth, useFeedback, PageContainer, useLifeBackend, AppHeader, useUrlP
 import type { LifeEntry } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { getSession, sessionSubjectId, type Session, type SessionPrompt } from "../manifest";
-import { buildEntries } from "../lib/shapes";
 import type { LogEvent } from "../types";
 import { MorningUpkeepHeader } from "./MorningUpkeepHeader";
-import { DurationFieldEditor } from "./EntryFields";
 
 // sessionStorage holds the freeform answer text — they can be large and/or
 // sensitive, so they don't go in the URL. The step index is in the URL
@@ -64,14 +62,11 @@ function clearAnswers(sessionId: Session["id"]): void {
  *   rating   -> { type: "number", unit: "rating", scale: max ?? 5 }
  *   number   -> { type: "number", unit: prompt.unit ?? "ct" }
  *   checkbox -> { type: "number", value: 1|0, unit: "ct" }
- * `sleep` prompts are skipped — their answer becomes a separate merged
- * `sleep` event (see sleepEntriesFromAnswer), never session-event entries.
  * Empty / undefined answers are skipped — the storage shape is sparse.
  */
 function answersToEntries(session: Session, answers: Record<string, unknown>): LifeEntry[] {
   const out: LifeEntry[] = [];
   for (const prompt of session.prompts) {
-    if (prompt.type === "sleep") continue;
     const v = answers[prompt.id];
     if (v === undefined || v === null || v === "") continue;
     if (prompt.type === "text" && typeof v === "string") {
@@ -85,45 +80,6 @@ function answersToEntries(session: Session, answers: Record<string, unknown>): L
     }
   }
   return out;
-}
-
-// ---------- Sleep step (morning wizard) ----------
-//
-// The sleep step writes its OWN event: subjectId "sleep", canonical did-shape
-// entries (duration + optional rating + optional notes) — ONE merged event.
-// It never writes a `sleep_quality` event; quality rides as the rating entry.
-
-const SLEEP_SUBJECT_ID = "sleep";
-
-interface SleepAnswer {
-  /** Minutes. */
-  duration?: number | null;
-  /** 1–5 quality, optional. */
-  rating?: number | null;
-  notes?: string;
-}
-
-function asSleepAnswer(v: unknown): SleepAnswer {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as SleepAnswer) : {};
-}
-
-/** Canonical merged entries for the sleep answer, or null when there's no
- *  loggable duration (buildEntries enforces the did-shape requirement). */
-function sleepEntriesFromAnswer(v: unknown): LifeEntry[] | null {
-  const a = asSleepAnswer(v);
-  return buildEntries("did", {
-    duration: typeof a.duration === "number" ? a.duration : null,
-    rating: typeof a.rating === "number" ? a.rating : null,
-    notes: typeof a.notes === "string" ? a.notes : "",
-  });
-}
-
-/** Rating/notes entered but no duration — would silently drop on submit, so
- *  the runner blocks Next (Skip clears) until a duration is added. */
-function sleepAnswerIsPartial(v: unknown): boolean {
-  const a = asSleepAnswer(v);
-  const hasExtras = typeof a.rating === "number" || Boolean(a.notes?.trim());
-  return hasExtras && sleepEntriesFromAnswer(v) === null;
 }
 
 /**
@@ -422,11 +378,7 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     // sitting in the draft for it (from a separate wizard run earlier
     // today) must not get written out.
     const entries = answersToEntries({ ...session, prompts }, answers);
-    // The sleep step (morning) writes its own merged event; a partial answer
-    // (rating/notes without duration) builds to null and writes nothing.
-    const sleepPrompt = prompts.find((p) => p.type === "sleep");
-    const sleepEntries = sleepPrompt ? sleepEntriesFromAnswer(answers[sleepPrompt.id]) : null;
-    if (entries.length === 0 && !sleepEntries) {
+    if (entries.length === 0) {
       // UI-level guard for F1 — no-op the submit instead of writing an
       // empty-payload event. The backend will also throw if this slips
       // through, but the friendly path catches the common case (user
@@ -436,28 +388,13 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     }
     setSubmitting(true);
     try {
-      // Session event first. If the sleep write then fails, retrying the
-      // submit duplicates only the session event (benign — dashboard shows
-      // the latest); the reverse order would duplicate the sleep event and
-      // double the day's sleep sum.
-      if (entries.length > 0) {
-        await life.addEvent(
-          state.log.id,
-          sessionSubjectId(session.id),
-          entries,
-          user.uid,
-          { labels: { source: "manual" } },
-        );
-      }
-      if (sleepEntries) {
-        await life.addEvent(
-          state.log.id,
-          SLEEP_SUBJECT_ID,
-          sleepEntries,
-          user.uid,
-          { labels: { source: "manual" } },
-        );
-      }
+      await life.addEvent(
+        state.log.id,
+        sessionSubjectId(session.id),
+        entries,
+        user.uid,
+        { labels: { source: "manual" } },
+      );
       message.success(`${session.title} session saved`);
       // Wipe the in-progress draft now that it's been persisted to the
       // backend — re-entering the wizard starts fresh.
@@ -470,19 +407,12 @@ export function SessionRunner({ sessionId }: SessionRunnerProps) {
     }
   };
 
-  // Sleep step: block Next on a partial answer (rating/notes without a
-  // duration) — submitting it would silently drop what the user typed.
   const canAdvance = prompt
-    ? prompt.type === "sleep"
-      ? !sleepAnswerIsPartial(answers[prompt.id])
-      : (prompt.optional ?? true) || answers[prompt.id] !== undefined
+    ? (prompt.optional ?? true) || answers[prompt.id] !== undefined
     : false;
   const skipLabel = (prompt?.optional ?? true) ? "Skip" : null;
 
-  // Skip discards the sleep step's draft (so a partial answer can't linger
-  // into submit); other prompt types keep theirs (re-entering restores).
   const skip = () => {
-    if (prompt?.type === "sleep") setAnswer(prompt.id, undefined);
     advance();
   };
 
@@ -599,62 +529,5 @@ function PromptInput({ prompt, value, onChange }: PromptInputProps) {
           {prompt.placeholder ?? "Yes"}
         </Checkbox>
       );
-    case "sleep": {
-      const a = asSleepAnswer(value);
-      const partial = sleepAnswerIsPartial(value);
-      const set = (patch: Partial<SleepAnswer>) =>
-        onChange({
-          duration: a.duration ?? null,
-          rating: a.rating ?? null,
-          notes: a.notes ?? "",
-          ...patch,
-        });
-      return (
-        <SleepStack>
-          <DurationFieldEditor
-            label="Duration"
-            minutes={a.duration ?? null}
-            onChange={(minutes) => set({ duration: minutes })}
-            initialUnit="hours"
-            size="middle"
-          />
-          <div>
-            <SleepFieldLabel>Quality (optional)</SleepFieldLabel>
-            <RatingRow>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <RatingButton
-                  key={n}
-                  type="button"
-                  $selected={a.rating === n}
-                  aria-label={`Quality ${n}`}
-                  onClick={() => set({ rating: a.rating === n ? null : n })}
-                >
-                  {n}
-                </RatingButton>
-              ))}
-            </RatingRow>
-          </div>
-          <Input.TextArea
-            rows={2}
-            placeholder="Notes (optional)"
-            value={a.notes ?? ""}
-            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => set({ notes: e.target.value })}
-          />
-          {partial && <SleepFieldLabel>Add a duration to log sleep — or Skip.</SleepFieldLabel>}
-        </SleepStack>
-      );
-    }
   }
 }
-
-const SleepStack = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-`;
-
-const SleepFieldLabel = styled.div`
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-xs);
-`;
