@@ -565,13 +565,13 @@ build_args_for() {
         # Vite frontend → shared app.Dockerfile with build args
         local app_dir dist_dir nginx_conf nginx_conf_dest
         IFS=: read -r app_dir dist_dir nginx_conf nginx_conf_dest <<< "${APP_BUILDS[$app]}"
+        # No VITE_* build-args: the bundle is built on the host now (turbo),
+        # so the image is a thin COPY of the pre-built dist into nginx.
         printf '%s\n' \
             -f infra/docker/app.Dockerfile \
             --build-arg "APP=${app}" \
             --build-arg "APP_DIR=${app_dir}" \
-            --build-arg "DIST_DIR=${dist_dir}" \
-            --build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY:-}" \
-            --build-arg "VITE_DOMAIN=${DOMAIN:-kirkl.in}"
+            --build-arg "DIST_DIR=${dist_dir}"
         [ -n "$nginx_conf" ] && printf '%s\n' --build-arg "NGINX_CONF=${nginx_conf}"
         [ -n "$nginx_conf_dest" ] && printf '%s\n' --build-arg "NGINX_CONF_DEST=${nginx_conf_dest}"
         return 0
@@ -602,14 +602,48 @@ if [ "$PUSH_ONLY" = false ]; then
         fi
     done
 
+    # ─── Host-side vite build (turbo-cached) ─────────────────────────────────
+    # Frontend apps (APP_BUILDS) are built on the HOST, not inside Docker — the
+    # app.Dockerfile is now a thin `COPY dist → nginx`. Turbo caches by input
+    # hash, so unchanged apps are instant on a re-deploy (the main win). We must
+    # bake the SAME Vite env the old Docker build baked in: VITE_DOMAIN comes
+    # from ${DOMAIN:-kirkl.in} (unchanged by --beta — beta only forks the image
+    # TAG, not the domain) and VITE_GOOGLE_MAPS_API_KEY from .env. These are
+    # declared in turbo.json's build `env`, so a domain change invalidates the
+    # cache instead of returning a stale bundle.
+    #
+    # Filter turbo by the app's source DIRECTORY (./apps/.../) rather than its
+    # package name — money's package is "frontend" and monitor's is "monitor",
+    # so a name map would be one more thing to keep in sync; the dir is already
+    # in APP_BUILDS. `^build` pulls in the workspace deps (@kirkl/shared etc.).
+    HOST_BUILD_FILTERS=()
+    for app in "${BUILD_LIST[@]}"; do
+        if [ -n "${APP_BUILDS[$app]+x}" ]; then
+            app_dir="${APP_BUILDS[$app]%%:*}"
+            HOST_BUILD_FILTERS+=("--filter=./${app_dir}")
+        fi
+    done
+    if [ ${#HOST_BUILD_FILTERS[@]} -gt 0 ]; then
+        echo "=== Building ${#HOST_BUILD_FILTERS[@]} frontend app(s) on host (turbo-cached) ==="
+        HOST_BUILD_START=$SECONDS
+        if ! VITE_DOMAIN="${DOMAIN:-kirkl.in}" \
+             VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}" \
+             pnpm exec turbo run build "${HOST_BUILD_FILTERS[@]}"; then
+            echo "[deploy.sh] Host vite build failed — aborting before image build." >&2
+            exit 1
+        fi
+        echo "✓ Host build ($(elapsed $((SECONDS - HOST_BUILD_START))))"
+        echo ""
+    fi
+
     TOTAL=${#BUILD_LIST[@]}
     BUILD_START=$SECONDS
 
-    # Lean by default — every parallel BuildKit job allocates ~2-3 GB peak
-    # (workspace install + tsc + vite build inside the container). Default to
-    # SERIAL; the outer systemd scope caps total memory, but serial keeps the
-    # peak predictable. Override with DEPLOY_BUILD_JOBS=N for "I have RAM,
-    # go fast" (CI environments are the canonical case).
+    # Lean by default. Frontend images are now thin (host-built dist → nginx
+    # COPY), but SERVICE_BUILDS still compile inside Docker (~2-3 GB peak each:
+    # pnpm install + tsc/esbuild). Default to SERIAL; the outer systemd scope
+    # caps total memory, but serial keeps the peak predictable. Override with
+    # DEPLOY_BUILD_JOBS=N for "I have RAM, go fast" (CI is the canonical case).
     #
     # The footgun: you CANNOT collect exit codes by appending to a bash array
     # from `&`-backgrounded subshells — the appends happen in the subshell and

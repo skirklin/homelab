@@ -12,7 +12,8 @@
         "package.json",
         "tsconfig*.json"
       ],
-      "outputs": ["dist/**"]
+      "env": ["VITE_DOMAIN", "VITE_GOOGLE_MAPS_API_KEY"],
+      "outputs": ["dist/**", "build/**"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
