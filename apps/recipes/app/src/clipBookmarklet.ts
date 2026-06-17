@@ -16,8 +16,11 @@
  * origin's /import page via the URL **hash** (kept out of server logs), where
  * the user's logged-in session does the actual save.
  *
- * Bulky non-recipe fields (review, aggregateRating, comment) are dropped to
- * keep the URL under length limits.
+ * Bulky non-recipe fields (review, aggregateRating, comment, commentCount) are
+ * dropped to keep the URL short — matching the in-app ImportModal strip-list.
+ * As a final guard, if the resulting URL would still exceed ~30k chars (i.e. a
+ * page with many recipes), the bookmarklet alerts rather than opening a
+ * truncated/doomed URL.
  *
  * The bookmarklet is a STATIC string with no per-user token — auth happens on
  * the /import page via the existing logged-in session.
@@ -46,12 +49,14 @@ try{
       var t=it['@type'];var types=Array.isArray(t)?t:[t];
       if(types.indexOf('Recipe')===-1)continue;
       if(!it.url)it.url=location.href;
-      delete it.review;delete it.aggregateRating;delete it.comment;
+      delete it.review;delete it.aggregateRating;delete it.comment;delete it.commentCount;
       out.push(it);
     }
   }
   if(!out.length){alert('No recipe found on this page.');return;}
-  window.open(U+'#'+encodeURIComponent(JSON.stringify(out)),'_blank');
+  var encoded=encodeURIComponent(JSON.stringify(out));
+  if((U+'#'+encoded).length>30000){alert('Recipe data too large to clip from this page ('+out.length+' recipes found). Try a page with a single recipe.');return;}
+  window.open(U+'#'+encoded,'_blank');
 }catch(e){alert('Clip failed: '+e);}
 `;
 

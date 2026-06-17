@@ -29,6 +29,16 @@ type ParsedHash =
   | { kind: 'empty' }
   | { kind: 'error' };
 
+// Mirrors services/api/src/lib/scraper.ts `isRecipe`: keep only schema.org
+// objects whose @type is (or includes) "Recipe". Guards against a hand-crafted
+// /import#<arbitrary-json> URL saving non-recipe junk into a box.
+function isRecipe(r: unknown): r is RecipeData {
+  if (!r || typeof r !== 'object') return false;
+  const t = (r as { '@type'?: unknown })['@type'];
+  if (Array.isArray(t)) return t.includes('Recipe');
+  return t === 'Recipe';
+}
+
 function parseHash(): ParsedHash {
   // location.hash includes the leading '#'
   const raw = window.location.hash.replace(/^#/, '');
@@ -37,9 +47,7 @@ function parseHash(): ParsedHash {
     const decoded = decodeURIComponent(raw);
     const parsed = JSON.parse(decoded);
     const arr: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-    const recipes = arr.filter(
-      (r): r is RecipeData => !!r && typeof r === 'object',
-    );
+    const recipes = arr.filter(isRecipe);
     if (recipes.length === 0) return { kind: 'empty' };
     return { kind: 'recipes', recipes };
   } catch {
