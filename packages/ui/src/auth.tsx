@@ -36,6 +36,21 @@ function userEquals(a: User | null, b: User | null): boolean {
   return a.id === b.id && a.email === b.email && a.name === b.name;
 }
 
+/**
+ * Decide whether a failed authRefresh means the credential is genuinely
+ * invalid and the session should be torn down. PocketBase's SDK throws a
+ * ClientResponseError with a numeric `.status`; only 401/403 mean the server
+ * actively rejected the token. Everything else — a network failure (surfaces
+ * as `status === 0`), a 5xx while the API pod is mid-deploy, a CORS/proxy blip
+ * — is transient and must NOT log out a valid session. refresh() runs on every
+ * app mount, so treating any failure as fatal logged users out the moment they
+ * opened the app while offline or during a deploy.
+ */
+export function shouldClearAuthStore(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return status === 401 || status === 403;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -69,14 +84,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Slide token expiry forward whenever the app is loaded or kept open.
     // PocketBase has no automatic refresh (Firebase used to do this for us),
     // so without this users get bounced to login every ~7 days regardless of
-    // active use. Failures clear the store, so an actually-expired token
-    // funnels the user through the login screen as expected.
+    // active use. Only clear the store when the server genuinely rejects the
+    // credential (401/403) — a transient failure (offline, 5xx mid-deploy,
+    // CORS blip) must NOT log out a valid session, since refresh() runs on
+    // every app mount. See shouldClearAuthStore for the full reasoning.
     const refresh = async () => {
       if (!pb.authStore.isValid) return;
       try {
         await pb.collection("users").authRefresh();
-      } catch {
-        pb.authStore.clear();
+      } catch (err) {
+        if (shouldClearAuthStore(err)) pb.authStore.clear();
       }
     };
     refresh();
