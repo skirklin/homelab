@@ -13,6 +13,8 @@ import Settings from './routes/Settings';
 import RoutedRecipe from './routes/Recipe';
 import JoinBox from './routes/JoinBox';
 import InviteRedeem from './routes/InviteRedeem';
+import Import from './routes/Import';
+import Clip from './routes/Clip';
 
 /**
  * Provides the base path for the recipes app so navigate calls work
@@ -43,6 +45,8 @@ export function RecipesRoutes({ embedded = false, basePath }: RecipesRoutesProps
         <Route path="/" element={<Main embedded={embedded} />}>
           <Route index element={<Contents />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="import" element={<Import />} />
+          <Route path="clip" element={<Clip />} />
           <Route path="boxes" element={<Boxes />} />
           <Route path="boxes/:boxId" element={<Box />} />
           <Route path="boxes/:boxId/recipes/:recipeId" element={<RoutedRecipe />} />

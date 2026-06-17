@@ -1,7 +1,7 @@
 import styled from 'styled-components';
 import { Button, Tooltip } from 'antd';
 import { getBackend, SyncDot, useWpbDebug } from '@kirkl/shared';
-import { InboxOutlined, LogoutOutlined } from '@ant-design/icons';
+import { InboxOutlined, LogoutOutlined, ScissorOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useBasePath } from '../RecipesRoutes';
 import { AppHeader } from '@kirkl/shared';
@@ -40,6 +40,7 @@ function Header({ embedded = false }: HeaderProps) {
   // When standalone, dropdown has Manage Boxes (for mobile) and Sign Out
   const menuItems = embedded ? [] : [
     { key: "boxes", icon: <InboxOutlined />, label: "Manage Boxes", onClick: () => navigate(`${basePath}/boxes`) },
+    { key: "clip", icon: <ScissorOutlined />, label: "Clip Recipe Bookmarklet", onClick: () => navigate(`${basePath}/clip`) },
     { type: "divider" as const },
     { key: "signout", icon: <LogoutOutlined />, label: "Sign Out", onClick: () => getBackend().authStore.clear() },
   ];
