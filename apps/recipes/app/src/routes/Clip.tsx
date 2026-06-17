@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Input, Space, Typography } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import { useFeedback } from '@kirkl/shared';
 
-import { CLIP_BOOKMARKLET } from '../clipBookmarklet';
+import { buildClipBookmarklet } from '../clipBookmarklet';
+import { useBasePath } from '../RecipesRoutes';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -19,15 +20,24 @@ export default function Clip() {
   const [copied, setCopied] = useState(false);
   const { message } = useFeedback();
 
+  // Target the same origin (+ base path) this setup page is being viewed on, so
+  // the bookmarklet lands where the user is already logged in (PB auth is
+  // per-origin localStorage). '/recipes' when embedded in the home shell, ''
+  // when standalone on recipes.kirkl.in.
+  const base = useBasePath();
+  const importUrl =
+    window.location.origin + (base && base !== '/' ? base : '') + '/import';
+  const bookmarklet = useMemo(() => buildClipBookmarklet(importUrl), [importUrl]);
+
   useEffect(() => {
     if (linkRef.current) {
-      linkRef.current.setAttribute('href', CLIP_BOOKMARKLET);
+      linkRef.current.setAttribute('href', bookmarklet);
     }
-  }, []);
+  }, [bookmarklet]);
 
   async function copyCode() {
     try {
-      await navigator.clipboard.writeText(CLIP_BOOKMARKLET);
+      await navigator.clipboard.writeText(bookmarklet);
       setCopied(true);
       message.success('Bookmarklet copied');
       setTimeout(() => setCopied(false), 2000);
@@ -78,7 +88,7 @@ export default function Clip() {
             URL/address:
           </Paragraph>
           <Input.TextArea
-            value={CLIP_BOOKMARKLET}
+            value={bookmarklet}
             readOnly
             autoSize={{ minRows: 3, maxRows: 8 }}
             onFocus={(e) => e.target.select()}

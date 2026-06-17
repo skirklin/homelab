@@ -14,7 +14,12 @@
  * It must NOT fetch our API directly — the recipe site's CSP `connect-src`
  * would block a cross-origin request. Instead it hands the payload to our own
  * origin's /import page via the URL **hash** (kept out of server logs), where
- * the user's logged-in session does the actual save.
+ * the user's logged-in session does the actual save. The target is the SAME
+ * origin (+ base path) the user is viewing this setup page on — NOT a fixed
+ * subdomain — because PocketBase auth is per-origin localStorage. Opening the
+ * setup page at kirkl.in/recipes/clip yields a kirkl.in/recipes/import target;
+ * opening it standalone at recipes.kirkl.in/clip yields recipes.kirkl.in/import.
+ * The caller computes that URL from the live page and passes it in.
  *
  * Bulky non-recipe fields (review, aggregateRating, comment, commentCount) are
  * dropped to keep the URL short — matching the in-app ImportModal strip-list.
@@ -26,15 +31,17 @@
  * the /import page via the existing logged-in session.
  */
 
-const DOMAIN: string =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_DOMAIN) || 'kirkl.in';
-
-export const CLIP_IMPORT_URL = `https://recipes.${DOMAIN}/import`;
-
-// Hand-written, ES5-only, self-contained source. Kept readable here and
-// minified into the bookmarklet below. Mirrors extension-recipes/extract.js.
-const SOURCE = `
-var U=${JSON.stringify(CLIP_IMPORT_URL)};
+/**
+ * Build the "Clip Recipe" bookmarklet, targeting `importUrl` as its destination
+ * /import page. The caller computes `importUrl` from the live setup page's
+ * origin + base path so the bookmarklet lands on the same origin the user is
+ * already authenticated against.
+ */
+export function buildClipBookmarklet(importUrl: string): string {
+  // Hand-written, ES5-only, self-contained source. Kept readable here and
+  // minified into the bookmarklet below. Mirrors extension-recipes/extract.js.
+  const SOURCE = `
+var U=${JSON.stringify(importUrl)};
 try{
   var out=[];
   var blocks=document.querySelectorAll('script[type="application/ld+json"]');
@@ -60,6 +67,7 @@ try{
 }catch(e){alert('Clip failed: '+e);}
 `;
 
-const minified = SOURCE.replace(/\s*\n\s*/g, '').trim();
+  const minified = SOURCE.replace(/\s*\n\s*/g, '').trim();
 
-export const CLIP_BOOKMARKLET = `javascript:(function(){${minified}})();`;
+  return `javascript:(function(){${minified}})();`;
+}
