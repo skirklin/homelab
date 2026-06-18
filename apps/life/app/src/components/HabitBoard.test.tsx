@@ -18,6 +18,9 @@ import type { LifeManifestTrackable, LifeEvent, LifeEntry, LifeGoal } from "@hom
 const addEvent = vi.fn().mockResolvedValue("evt1");
 const deleteEvent = vi.fn().mockResolvedValue(undefined);
 const updateEvent = vi.fn().mockResolvedValue(undefined);
+const reorderGoals = vi.fn().mockResolvedValue(undefined);
+const reorderTrackables = vi.fn().mockResolvedValue(undefined);
+const messageError = vi.fn();
 const messageOpen = vi.fn();
 
 vi.mock("@kirkl/shared", async () => {
@@ -25,13 +28,13 @@ vi.mock("@kirkl/shared", async () => {
   return {
     ...actual,
     useFeedback: () => ({
-      message: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), open: messageOpen, destroy: vi.fn() },
+      message: { error: messageError, success: vi.fn(), warning: vi.fn(), open: messageOpen, destroy: vi.fn() },
     }),
-    useLifeBackend: () => ({ addEvent, deleteEvent, updateEvent }),
+    useLifeBackend: () => ({ addEvent, deleteEvent, updateEvent, reorderGoals, reorderTrackables }),
   };
 });
 
-import { HabitBoard } from "./HabitBoard";
+import { HabitBoard, spliceVisibleOrder } from "./HabitBoard";
 
 let counter = 0;
 function ev(subjectId: string, entries: LifeEntry[], when: Date): LifeEvent {
@@ -113,13 +116,18 @@ describe("HabitBoard", () => {
   beforeEach(() => {
     addEvent.mockClear();
     deleteEvent.mockClear();
+    reorderGoals.mockClear();
+    reorderTrackables.mockClear();
+    messageError.mockClear();
     messageOpen.mockClear();
     // Pin "now" so the calendar's real-today anchor (and thus which days are
     // past/future and in-window) is deterministic regardless of when the suite
-    // runs. 2026-06-14 is a Sunday → the test fixture days 6/8..6/13 are all in
-    // the current+prior week, in the past, and inside the 6-week goal window.
+    // runs. The board now renders a SINGLE Su–Sa week, so "now" must land in the
+    // same week as the fixtures. 2026-06-10 is a Wednesday → its week is Sun 6/7
+    // .. Sat 6/13: fixture days 6/8/6/9 are past, 6/10 is today, and 6/11..6/13
+    // are in-window future cells (used by the future-cell test).
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(at(2026, 6, 14, 12));
+    vi.setSystemTime(at(2026, 6, 10, 12));
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -135,6 +143,17 @@ describe("HabitBoard", () => {
     renderBoard({ goals: [{ ...flossDaily, hidden: true }], trackables: [TRACKABLES[1]] });
     expect(screen.getByTestId("habit-board-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("habit-row")).not.toBeInTheDocument();
+  });
+
+  it("the board calendars default to a single Su–Sa week (7 cells)", () => {
+    // Goal row + a long-tail trackable: each board calendar is one week strip.
+    renderBoard({ goals: [flossDaily], trackables: TRACKABLES });
+    const row = screen.getByTestId("habit-row");
+    const goalCal = within(row).getByTestId("tracker-calendar");
+    expect(goalCal.querySelectorAll("[data-testid='calendar-cell']")).toHaveLength(7);
+    // The strip is the week containing today (Wed 6/10): Sun 6/7 .. Sat 6/13.
+    expect(cellIn(row, "2026-06-07")).toBeInTheDocument();
+    expect(cellIn(row, "2026-06-13")).toBeInTheDocument();
   });
 
   it("renders an unmet at_least daily goal with a tap-to-log button and a calendar", () => {
@@ -359,10 +378,10 @@ describe("HabitBoard", () => {
   });
 
   it("backfill: a future cell is inert (no log, no sheet)", async () => {
-    // Real today is pinned to Sun 6/14; Mon 6/15 is a future cell in this week.
+    // Real today is pinned to Wed 6/10; Thu 6/11 is a future cell in this week.
     const { onOpenShape } = renderBoard({ goals: [flossDaily], events: [] });
     const row = screen.getByTestId("habit-row");
-    await userEvent.click(cellIn(row, "2026-06-15"));
+    await userEvent.click(cellIn(row, "2026-06-11"));
     expect(addEvent).not.toHaveBeenCalled();
     expect(onOpenShape).not.toHaveBeenCalled();
   });
@@ -387,5 +406,77 @@ describe("HabitBoard", () => {
     const row = screen.getByTestId("habit-row");
     expect(within(row).getByTestId("habit-progress")).toHaveTextContent("1/1");
     expect(within(row).queryByTestId("habit-log")).not.toBeInTheDocument();
+  });
+
+  describe("reorder edit mode", () => {
+    it("shows no reorder toggle with fewer than two habits", () => {
+      // One goal, no long tail (its primary is the only trackable shown).
+      renderBoard({ goals: [flossDaily], trackables: [TRACKABLES[1]] });
+      expect(screen.queryByTestId("reorder-toggle")).not.toBeInTheDocument();
+    });
+
+    it("toggles into a drag-handle reorder view and back to the clean board", async () => {
+      renderBoard({ goals: [hydrate, flossDaily], trackables: TRACKABLES });
+      // Clean view: habit rows + calendars, no handles.
+      expect(screen.getAllByTestId("habit-row").length).toBe(2);
+      expect(screen.queryByTestId("drag-handle")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId("reorder-toggle"));
+
+      // Reorder view: goals + long-tail become drag-only lists with handles,
+      // and the interactive calendars/rows are gone.
+      expect(screen.getByTestId("goals-reorder-list")).toBeInTheDocument();
+      expect(screen.getByTestId("long-tail-reorder-list")).toBeInTheDocument();
+      expect(screen.queryByTestId("habit-row")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("tracker-calendar")).not.toBeInTheDocument();
+      // A handle per habit: 2 goals (hydrate→water, floss-daily→floss) + the
+      // long tail (run, walk; water & floss are goal primaries) = 4.
+      expect(screen.getAllByTestId("drag-handle").length).toBe(4);
+
+      // "Done" returns to the clean board.
+      await userEvent.click(screen.getByTestId("reorder-toggle"));
+      expect(screen.getAllByTestId("habit-row").length).toBe(2);
+      expect(screen.queryByTestId("drag-handle")).not.toBeInTheDocument();
+    });
+
+    it("lists goals (by label) in the goals reorder list, in manifest order", async () => {
+      renderBoard({ goals: [hydrate, flossDaily], trackables: TRACKABLES });
+      await userEvent.click(screen.getByTestId("reorder-toggle"));
+      const list = screen.getByTestId("goals-reorder-list");
+      const rows = within(list).getAllByTestId("sortable-row");
+      expect(rows.map((r) => r.getAttribute("data-id"))).toEqual(["hydrate", "floss-daily"]);
+    });
+  });
+});
+
+describe("spliceVisibleOrder", () => {
+  it("splices a reordered subset back into the full order, leaving others put", () => {
+    // Full order: water(primary), floss, run, walk. Long tail = floss/run/walk.
+    // Reorder the long tail to walk, floss, run.
+    const full = ["water", "floss", "run", "walk"];
+    expect(spliceVisibleOrder(full, ["walk", "floss", "run"])).toEqual([
+      "water", "walk", "floss", "run",
+    ]);
+  });
+
+  it("is a no-op when the subset order is unchanged", () => {
+    const full = ["water", "floss", "run", "walk"];
+    expect(spliceVisibleOrder(full, ["floss", "run", "walk"])).toEqual(full);
+  });
+
+  it("keeps a non-subset id pinned at its original index", () => {
+    // water sits between two long-tail ids and must not move.
+    const full = ["floss", "water", "run"];
+    expect(spliceVisibleOrder(full, ["run", "floss"])).toEqual(["run", "water", "floss"]);
+  });
+
+  it("splices reordered VISIBLE goals around a hidden goal (Bug 2 regression)", () => {
+    // Goals section renders only visible goals, but reorderGoals needs a full
+    // permutation of ALL goals. "secret" is hidden and sits in the middle; a
+    // visible-goal reorder must leave it pinned and yield a complete order.
+    const all = ["hydrate", "secret", "floss-daily"];
+    expect(spliceVisibleOrder(all, ["floss-daily", "hydrate"])).toEqual([
+      "floss-daily", "secret", "hydrate",
+    ]);
   });
 });

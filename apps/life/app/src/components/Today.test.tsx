@@ -1,6 +1,6 @@
 /**
  * Today (the review lens): renders the Timeline/Habits toggle + the session
- * streak grid, and its date stepping (shared with Log via ?date=) works.
+ * completion grid, and its date stepping (shared with Log via ?date=) works.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
@@ -70,12 +70,15 @@ describe("Today", () => {
     expect(screen.getByText("Habits")).toBeInTheDocument();
   });
 
-  it("renders the Streaks section", async () => {
+  it("renders the Sessions section with the completion grid (no streak counters)", async () => {
     renderToday();
-    await screen.findByText("Streaks");
-    // Morning/Evening session streak labels.
-    expect(screen.getByText("Morning")).toBeInTheDocument();
-    expect(screen.getByText("Evening")).toBeInTheDocument();
+    await screen.findByText("Sessions");
+    // The session completion grid still renders (its legend labels the halves);
+    // the old current/longest streak counters are gone.
+    expect(screen.getByText("morning")).toBeInTheDocument();
+    expect(screen.getByText("evening")).toBeInTheDocument();
+    expect(screen.queryByText("Streaks")).not.toBeInTheDocument();
+    expect(screen.queryByText(/best:/)).not.toBeInTheDocument();
   });
 
   it("date stepping: prev-day button writes ?date=<yesterday>", async () => {

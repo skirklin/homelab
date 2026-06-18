@@ -3,7 +3,7 @@
  * mount pattern) opened by tapping a habit's name on the HabitBoard. For the
  * tapped trackable (and its goal, if any) it shows:
  *   - a GitHub-style YearHeatmap (53 weeks, shared cell coloring),
- *   - per-year + per-month stat summaries (completion %, current/longest streak),
+ *   - per-year + per-month stat summaries (completion %),
  *   - the current month as a full grid, paginating lazily back through history.
  *
  * Every calendar surface here reuses the SAME tz-aware day index + cellState as
@@ -193,7 +193,7 @@ export function HabitHistory({
       data-testid="habit-history"
       styles={{ body: { padding: "var(--space-md)" } }}
     >
-      {/* Year totals + streaks */}
+      {/* Year totals */}
       {year && (
         <Section>
           <SectionTitle>This year</SectionTitle>
@@ -205,14 +205,6 @@ export function HabitHistory({
             <Stat>
               <StatValue data-testid="stat-elapsed">{year.elapsedDays}</StatValue>
               <StatLabel>days tracked</StatLabel>
-            </Stat>
-            <Stat>
-              <StatValue data-testid="stat-current">🔥 {year.current}</StatValue>
-              <StatLabel>current streak{goal?.period === "week" ? " (wk)" : ""}</StatLabel>
-            </Stat>
-            <Stat>
-              <StatValue data-testid="stat-longest">{year.longest}</StatValue>
-              <StatLabel>longest streak{goal?.period === "week" ? " (wk)" : ""}</StatLabel>
             </Stat>
           </StatGrid>
         </Section>

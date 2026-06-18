@@ -29,6 +29,7 @@ import {
   addGoal as addGoalOp,
   updateGoal as updateGoalOp,
   removeGoal as removeGoalOp,
+  reorderGoals as reorderGoalsOp,
 } from "../life-goal-ops";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
@@ -236,6 +237,10 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
   removeGoal(logId: string, goalId: string): Promise<LifeManifest> {
     return this.mutateManifest(logId, (cur) => removeGoalOp(cur, goalId));
+  }
+
+  reorderGoals(logId: string, orderedIds: string[]): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => reorderGoalsOp(cur, orderedIds));
   }
 
   async addEvent(

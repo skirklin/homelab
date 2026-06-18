@@ -108,8 +108,8 @@ describe("HabitHistory", () => {
     expect(empty?.getAttribute("data-kind")).toBe("empty");
   });
 
-  it("shows per-year stats: completed days, %, current + longest streak", () => {
-    // First event 6/8 → 3-day window (6/8..6/10), all logged → 100%, streak 3.
+  it("shows per-year stats: completed days + %, with no streak tiles", () => {
+    // First event 6/8 → 3-day window (6/8..6/10), all logged → 100%.
     const events = [
       ev("floss", ct(), at(2026, 6, 8, 9)),
       ev("floss", ct(), at(2026, 6, 9, 9)),
@@ -118,8 +118,10 @@ describe("HabitHistory", () => {
     renderHistory({ events, goal: flossGoal });
     const stats = screen.getByTestId("year-stats");
     expect(within(stats).getByTestId("stat-completed")).toHaveTextContent("3");
-    expect(within(stats).getByTestId("stat-current")).toHaveTextContent("3");
-    expect(within(stats).getByTestId("stat-longest")).toHaveTextContent("3");
+    // Streaks are gone — neither tile renders.
+    expect(within(stats).queryByTestId("stat-current")).not.toBeInTheDocument();
+    expect(within(stats).queryByTestId("stat-longest")).not.toBeInTheDocument();
+    expect(stats).not.toHaveTextContent(/streak/i);
   });
 
   it("shows a current-month grid with a completed/elapsed line", () => {

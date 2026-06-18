@@ -382,7 +382,7 @@ export function reorderTrackables(current: LifeManifest, orderedIds: unknown): L
     if (!t) throw new ManifestError("invalid_order", `order references unknown trackable id "${id}"`);
     reordered.push(t);
   }
-  return { trackables: reordered };
+  return { ...current, trackables: reordered };
 }
 
 /**

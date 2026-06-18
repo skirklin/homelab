@@ -17,8 +17,7 @@
  *
  * Day identity is tz-aware (the shared `dayKey`/`buildCalendarGrid` helpers, the
  * SAME ones the goal evaluator + day index use); there is no local setHours
- * bucketing here, and the streak counters above the grid come from the shared
- * `habitStats.computeStreaks` — one streak engine app-wide.
+ * bucketing here. This is a completion-history grid, not a streak counter.
  */
 import { useMemo } from "react";
 import styled from "styled-components";
