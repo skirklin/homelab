@@ -18,6 +18,9 @@ import type { LifeManifestTrackable, LifeEvent, LifeEntry, LifeGoal } from "@hom
 const addEvent = vi.fn().mockResolvedValue("evt1");
 const deleteEvent = vi.fn().mockResolvedValue(undefined);
 const updateEvent = vi.fn().mockResolvedValue(undefined);
+const reorderGoals = vi.fn().mockResolvedValue(undefined);
+const reorderTrackables = vi.fn().mockResolvedValue(undefined);
+const messageError = vi.fn();
 const messageOpen = vi.fn();
 
 vi.mock("@kirkl/shared", async () => {
@@ -25,13 +28,13 @@ vi.mock("@kirkl/shared", async () => {
   return {
     ...actual,
     useFeedback: () => ({
-      message: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), open: messageOpen, destroy: vi.fn() },
+      message: { error: messageError, success: vi.fn(), warning: vi.fn(), open: messageOpen, destroy: vi.fn() },
     }),
-    useLifeBackend: () => ({ addEvent, deleteEvent, updateEvent }),
+    useLifeBackend: () => ({ addEvent, deleteEvent, updateEvent, reorderGoals, reorderTrackables }),
   };
 });
 
-import { HabitBoard } from "./HabitBoard";
+import { HabitBoard, spliceLongTailOrder } from "./HabitBoard";
 
 let counter = 0;
 function ev(subjectId: string, entries: LifeEntry[], when: Date): LifeEvent {
@@ -113,6 +116,9 @@ describe("HabitBoard", () => {
   beforeEach(() => {
     addEvent.mockClear();
     deleteEvent.mockClear();
+    reorderGoals.mockClear();
+    reorderTrackables.mockClear();
+    messageError.mockClear();
     messageOpen.mockClear();
     // Pin "now" so the calendar's real-today anchor (and thus which days are
     // past/future and in-window) is deterministic regardless of when the suite
@@ -400,5 +406,67 @@ describe("HabitBoard", () => {
     const row = screen.getByTestId("habit-row");
     expect(within(row).getByTestId("habit-progress")).toHaveTextContent("1/1");
     expect(within(row).queryByTestId("habit-log")).not.toBeInTheDocument();
+  });
+
+  describe("reorder edit mode", () => {
+    it("shows no reorder toggle with fewer than two habits", () => {
+      // One goal, no long tail (its primary is the only trackable shown).
+      renderBoard({ goals: [flossDaily], trackables: [TRACKABLES[1]] });
+      expect(screen.queryByTestId("reorder-toggle")).not.toBeInTheDocument();
+    });
+
+    it("toggles into a drag-handle reorder view and back to the clean board", async () => {
+      renderBoard({ goals: [hydrate, flossDaily], trackables: TRACKABLES });
+      // Clean view: habit rows + calendars, no handles.
+      expect(screen.getAllByTestId("habit-row").length).toBe(2);
+      expect(screen.queryByTestId("drag-handle")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId("reorder-toggle"));
+
+      // Reorder view: goals + long-tail become drag-only lists with handles,
+      // and the interactive calendars/rows are gone.
+      expect(screen.getByTestId("goals-reorder-list")).toBeInTheDocument();
+      expect(screen.getByTestId("long-tail-reorder-list")).toBeInTheDocument();
+      expect(screen.queryByTestId("habit-row")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("tracker-calendar")).not.toBeInTheDocument();
+      // A handle per habit: 2 goals (hydrate→water, floss-daily→floss) + the
+      // long tail (run, walk; water & floss are goal primaries) = 4.
+      expect(screen.getAllByTestId("drag-handle").length).toBe(4);
+
+      // "Done" returns to the clean board.
+      await userEvent.click(screen.getByTestId("reorder-toggle"));
+      expect(screen.getAllByTestId("habit-row").length).toBe(2);
+      expect(screen.queryByTestId("drag-handle")).not.toBeInTheDocument();
+    });
+
+    it("lists goals (by label) in the goals reorder list, in manifest order", async () => {
+      renderBoard({ goals: [hydrate, flossDaily], trackables: TRACKABLES });
+      await userEvent.click(screen.getByTestId("reorder-toggle"));
+      const list = screen.getByTestId("goals-reorder-list");
+      const rows = within(list).getAllByTestId("sortable-row");
+      expect(rows.map((r) => r.getAttribute("data-id"))).toEqual(["hydrate", "floss-daily"]);
+    });
+  });
+});
+
+describe("spliceLongTailOrder", () => {
+  it("splices a reordered subset back into the full order, leaving others put", () => {
+    // Full order: water(primary), floss, run, walk. Long tail = floss/run/walk.
+    // Reorder the long tail to walk, floss, run.
+    const full = ["water", "floss", "run", "walk"];
+    expect(spliceLongTailOrder(full, ["walk", "floss", "run"])).toEqual([
+      "water", "walk", "floss", "run",
+    ]);
+  });
+
+  it("is a no-op when the subset order is unchanged", () => {
+    const full = ["water", "floss", "run", "walk"];
+    expect(spliceLongTailOrder(full, ["floss", "run", "walk"])).toEqual(full);
+  });
+
+  it("keeps a non-subset id pinned at its original index", () => {
+    // water sits between two long-tail ids and must not move.
+    const full = ["floss", "water", "run"];
+    expect(spliceLongTailOrder(full, ["run", "floss"])).toEqual(["run", "water", "floss"]);
   });
 });

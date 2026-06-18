@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addGoal, updateGoal, removeGoal, manifestGoals } from "./life-goal-ops";
+import { addGoal, updateGoal, removeGoal, reorderGoals, manifestGoals } from "./life-goal-ops";
 import { ManifestError } from "./life-manifest-ops";
 import type { LifeManifest, LifeGoal } from "./types/life";
 
@@ -122,5 +122,48 @@ describe("removeGoal", () => {
   });
   it("throws when absent", () => {
     expect(() => removeGoal(base(), "nope")).toThrow(/no goal/);
+  });
+});
+
+describe("reorderGoals", () => {
+  function multi(): LifeManifest {
+    const m = base();
+    return {
+      ...m,
+      goals: [
+        ...manifestGoals(m), // hydrate
+        { id: "move", label: "Move", scope: { group: "exercise" }, kind: "frequency", metric: "days", target: 3, period: "week" },
+        { id: "floss-daily", label: "Floss", scope: { thing: "floss" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+      ],
+    };
+  }
+
+  it("reorders goals to match a permutation, manifest-only", () => {
+    const next = reorderGoals(multi(), ["floss-daily", "hydrate", "move"]);
+    expect(manifestGoals(next).map((g) => g.id)).toEqual(["floss-daily", "hydrate", "move"]);
+    expect(next.trackables).toHaveLength(4); // trackables untouched
+  });
+
+  it("does not mutate the input manifest", () => {
+    const m = multi();
+    reorderGoals(m, ["move", "floss-daily", "hydrate"]);
+    expect(manifestGoals(m).map((g) => g.id)).toEqual(["hydrate", "move", "floss-daily"]);
+  });
+
+  it("rejects a non-permutation (missing id)", () => {
+    expect(() => reorderGoals(multi(), ["hydrate", "move"])).toThrow(ManifestError);
+    expect(() => reorderGoals(multi(), ["hydrate", "move"])).toThrow(/permutation/);
+  });
+
+  it("rejects duplicate ids", () => {
+    expect(() => reorderGoals(multi(), ["hydrate", "hydrate", "move"])).toThrow(/permutation/);
+  });
+
+  it("rejects an unknown id of the right length", () => {
+    expect(() => reorderGoals(multi(), ["hydrate", "move", "ghost"])).toThrow(/unknown goal id/);
+  });
+
+  it("rejects a non-array order", () => {
+    expect(() => reorderGoals(multi(), "hydrate")).toThrow(/array of goal ids/);
   });
 });

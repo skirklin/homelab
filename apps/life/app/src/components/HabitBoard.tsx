@@ -29,6 +29,7 @@ import styled from "styled-components";
 import { Button } from "antd";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
+import { SortableList, SortableRow } from "./SortableList";
 import type {
   LifeEvent,
   LifeManifestTrackable,
@@ -67,6 +68,44 @@ const Header = styled.div`
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: var(--space-xs);
+`;
+
+/** Top board bar: the "Habits" label on the left, the Reorder/Done toggle right. */
+const BoardBar = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+`;
+
+const EditToggle = styled.button`
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+
+  &:hover { text-decoration: underline; }
+`;
+
+/** A compact reorder-mode row: just the habit's name (the handle is supplied by SortableRow). */
+const ReorderName = styled.div`
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const List = styled.div`
@@ -273,6 +312,18 @@ function tapWouldCount(goal: LifeGoal, thing: LifeManifestTrackable): boolean {
   return true;
 }
 
+/**
+ * Splice a reordered subset of trackable ids back into the FULL trackable order,
+ * leaving non-subset ids (goal primaries, hidden) in their original slots. The
+ * subset positions are filled in the subset's new order; the result is a complete
+ * permutation of all trackable ids — what `reorderTrackables` requires.
+ */
+export function spliceLongTailOrder(allIds: string[], orderedSubsetIds: string[]): string[] {
+  const subset = new Set(orderedSubsetIds);
+  let cursor = 0;
+  return allIds.map((id) => (subset.has(id) ? orderedSubsetIds[cursor++] : id));
+}
+
 interface GoalRow {
   goal: LifeGoal;
   progress: GoalProgress;
@@ -371,6 +422,38 @@ export function HabitBoard({
   // Per-habit history screen (year heatmap + month grids + stats). Opened by
   // tapping a habit's name; carries the trackable + its goal (if any).
   const [history, setHistory] = useState<{ thing: LifeManifestTrackable; goal: LifeGoal | null } | null>(null);
+
+  // "Reorder" edit mode: reveals drag handles and swaps each section for a
+  // compact, drag-only list. Reordering goals and trackables are independent
+  // per-section permutations (the two groups render distinctly), persisted via
+  // the manifest reorder ops so the order survives reload.
+  const [editing, setEditing] = useState(false);
+
+  const persistOrder = useCallback(
+    async (kind: "goals" | "trackables", orderedIds: string[]) => {
+      if (!logId) return;
+      try {
+        if (kind === "goals") await life.reorderGoals(logId, orderedIds);
+        else await life.reorderTrackables(logId, orderedIds);
+      } catch (err) {
+        console.error(`Failed to reorder ${kind}:`, err);
+        message.error("Couldn't save the new order");
+      }
+    },
+    [life, logId, message],
+  );
+
+  // Reordering the long tail must preserve manifest order for the trackables NOT
+  // shown there (goal primaries + hidden). We splice the reordered long-tail ids
+  // back into the full trackable order so the permutation the op requires stays
+  // complete.
+  const reorderLongTail = useCallback(
+    (orderedLongTailIds: string[]) => {
+      const fullOrder = spliceLongTailOrder(trackables.map((t) => t.id), orderedLongTailIds);
+      void persistOrder("trackables", fullOrder);
+    },
+    [trackables, persistOrder],
+  );
 
   // ---- Tap-to-log / backfill / edit ------------------------------------
 
@@ -526,12 +609,45 @@ export function HabitBoard({
     );
   }
 
+  // Edit mode is reachable whenever there's more than one habit to reorder
+  // across the two sections (a single habit has nothing to sort).
+  const canReorder = !!logId && visibleGoals.length + longTail.length >= 2;
+
   return (
     <Wrap data-testid="habit-board">
+      <BoardBar>
+        <Header style={{ margin: 0 }}>Habits</Header>
+        {canReorder && (
+          <EditToggle
+            type="button"
+            onClick={() => setEditing((e) => !e)}
+            data-testid="reorder-toggle"
+          >
+            {editing ? "Done" : "Reorder"}
+          </EditToggle>
+        )}
+      </BoardBar>
+
       {visibleGoals.length === 0 ? (
         <EmptyHint data-testid="habit-board-empty">
           No goals yet — set them with Claude (e.g. "track 64 oz of water a day").
         </EmptyHint>
+      ) : editing ? (
+        <div>
+          <Header>Goals</Header>
+          <List data-testid="goals-reorder-list">
+            <SortableList
+              ids={visibleGoals.map((g) => g.id)}
+              onReorder={(ids) => void persistOrder("goals", ids)}
+            >
+              {visibleGoals.map((goal) => (
+                <SortableRow key={goal.id} id={goal.id}>
+                  <ReorderName>{goal.label}</ReorderName>
+                </SortableRow>
+              ))}
+            </SortableList>
+          </List>
+        </div>
       ) : (
         <div>
           <Header>Goals</Header>
@@ -607,7 +723,22 @@ export function HabitBoard({
         </div>
       )}
 
-      {longTail.length > 0 && (
+      {longTail.length > 0 && editing && (
+        <div>
+          <Header>All trackables</Header>
+          <List data-testid="long-tail-reorder-list">
+            <SortableList ids={longTail.map((t) => t.id)} onReorder={reorderLongTail}>
+              {longTail.map((t) => (
+                <SortableRow key={t.id} id={t.id}>
+                  <ReorderName>{t.label}</ReorderName>
+                </SortableRow>
+              ))}
+            </SortableList>
+          </List>
+        </div>
+      )}
+
+      {longTail.length > 0 && !editing && (
         <div>
           <ExpanderButton
             onClick={() => setExpanded((e) => !e)}

@@ -220,3 +220,32 @@ export function removeGoal(current: LifeManifest, goalId: string): LifeManifest 
   }
   return { ...current, goals: goals.filter((g) => g.id !== goalId) };
 }
+
+/**
+ * REORDER goals. `orderedIds` must be a permutation of the current goal ids
+ * (same set, no dupes, no extras). Manifest order IS display order on the habit
+ * board, so this is how the board's "reorder" edit mode persists goal order.
+ * Mirrors `reorderTrackables`. Manifest-only; never touches life_events.
+ */
+export function reorderGoals(current: LifeManifest, orderedIds: unknown): LifeManifest {
+  if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === "string")) {
+    throw new ManifestError("invalid_order", "order must be an array of goal ids");
+  }
+  const goals = manifestGoals(current);
+  const currentIds = goals.map((g) => g.id);
+  const wanted = orderedIds as string[];
+  if (wanted.length !== currentIds.length || new Set(wanted).size !== wanted.length) {
+    throw new ManifestError(
+      "invalid_order",
+      `order must be a permutation of the ${currentIds.length} current goal ids`,
+    );
+  }
+  const byId = new Map(goals.map((g) => [g.id, g]));
+  const reordered: LifeGoal[] = [];
+  for (const id of wanted) {
+    const g = byId.get(id);
+    if (!g) throw new ManifestError("invalid_order", `order references unknown goal id "${id}"`);
+    reordered.push(g);
+  }
+  return { ...current, goals: reordered };
+}

@@ -195,3 +195,38 @@ describe("life goals: progress evaluation", () => {
     expect(bad.status).toBe(400);
   });
 });
+
+describe("life goals: reorder", () => {
+  it("reorders goals to a given permutation, manifest-only", async () => {
+    // A dedicated actor with a known three-goal set, so the permutation is
+    // self-contained regardless of what other suites added to alice/bob.
+    const carol = await makeActor("carol-goal");
+    const seed = [
+      { id: "g-a", label: "A", scope: { thing: "water" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+      { id: "g-b", label: "B", scope: { thing: "water" }, kind: "at_most", metric: "count", target: 3, period: "day" },
+      { id: "g-c", label: "C", scope: { group: "exercise" }, kind: "frequency", metric: "days", target: 2, period: "week" },
+    ];
+    for (const g of seed) {
+      const add = await req("/data/life/goals", { method: "POST", token: carol.apiToken, body: g });
+      expect(add.status).toBe(201);
+    }
+    const order = ["g-c", "g-a", "g-b"];
+    const re = await req("/data/life/goals/reorder", { method: "POST", token: carol.apiToken, body: { order } });
+    expect(re.status).toBe(200);
+    expect(goalIds(re.data)).toEqual(order);
+    // Persisted: a fresh GET reflects the new order.
+    const list = await req("/data/life/goals", { token: carol.apiToken });
+    expect(goalIds(list.data)).toEqual(order);
+  });
+
+  it("rejects a non-permutation order (400)", async () => {
+    const dave = await makeActor("dave-goal");
+    await req("/data/life/goals", {
+      method: "POST",
+      token: dave.apiToken,
+      body: { id: "only", label: "Only", scope: { thing: "water" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+    });
+    const re = await req("/data/life/goals/reorder", { method: "POST", token: dave.apiToken, body: { order: ["only", "ghost"] } });
+    expect(re.status).toBe(400);
+  });
+});

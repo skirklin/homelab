@@ -748,6 +748,16 @@ server.tool(
 );
 
 server.tool(
+  "reorder_life_goals",
+  "Set the order of the caller's goals (the habit board renders goal rows in manifest order). `order` must be a permutation of all current goal ids.",
+  { order: z.array(z.string()).describe("All current goal ids in the desired order") },
+  async ({ order }) => {
+    const result = await api("/life/goals/reorder", { method: "POST", body: JSON.stringify({ order }) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
   "get_life_goal_progress",
   "Evaluate every goal for its current period (default today) — the same evaluator the dashboard's habit board uses. Returns per goal: {id,label,value,target,kind,metric,unit?,met,remaining,streak,period}. This is how to check adherence in chat ('am I on track for water today?').",
   {

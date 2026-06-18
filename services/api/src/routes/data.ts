@@ -22,6 +22,7 @@ import {
   addGoal as addGoalOp,
   updateGoal as updateGoalOp,
   removeGoal as removeGoalOp,
+  reorderGoals as reorderGoalsOp,
   manifestGoals,
   evaluateGoal,
   type LifeManifest,
@@ -2627,6 +2628,16 @@ dataRoutes.delete("/life/goals/:id", handler(async (c) => {
   const out = await applyManifestMutation(pb, userId, (cur) => removeGoalOp(cur, goalId));
   if (!out.ok) return c.json({ error: out.error }, out.status);
   return c.json({ success: true, goals: manifestGoals(out.manifest) });
+}));
+
+// Reorder goals. order[] must be a permutation of the current goal ids.
+dataRoutes.post("/life/goals/reorder", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{ order?: unknown }>();
+  const out = await applyManifestMutation(pb, userId, (cur) => reorderGoalsOp(cur, body.order));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ goals: manifestGoals(out.manifest) });
 }));
 
 // Evaluate every goal for its current period (default today) via the shared

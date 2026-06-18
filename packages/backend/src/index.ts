@@ -45,6 +45,7 @@ export {
   addGoal,
   updateGoal,
   removeGoal,
+  reorderGoals,
   manifestGoals,
   GOAL_KINDS,
   GOAL_METRICS,

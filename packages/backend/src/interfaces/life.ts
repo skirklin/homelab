@@ -156,6 +156,9 @@ export interface LifeBackend {
   /** Remove a goal from the manifest. Manifest-only — never touches events. */
   removeGoal(logId: string, goalId: string): Promise<LifeManifest>;
 
+  /** Reorder goals. `orderedIds` must be a permutation of the current goal ids. */
+  reorderGoals(logId: string, orderedIds: string[]): Promise<LifeManifest>;
+
   // --- Events ---
 
   /**
