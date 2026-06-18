@@ -244,6 +244,8 @@ export function HabitHistory({
               // Anchor each month grid on the LAST day of that month (clamped to
               // today for the current month) so the 6-week window covers it.
               today={monthAnchor(ref, today, tz)}
+              // Dim adjacent-month days so the reference month reads as the focus.
+              monthRef={ref}
               onTapDay={(date, evts) => onTapDay(thing, goal, date, evts)}
               onLongPressDay={(date, evts) => onLongPressDay(thing, goal, date, evts)}
             />

@@ -136,7 +136,7 @@ function renderDashboard(initialEntry: string) {
     <MemoryRouter initialEntries={[initialEntry]}>
       <LifeProvider>
         <Routes>
-          <Route path="/" element={<LifeDashboard embedded />} />
+          <Route path="/" element={<LifeDashboard />} />
         </Routes>
         <LocationProbe onChange={probe} />
       </LifeProvider>

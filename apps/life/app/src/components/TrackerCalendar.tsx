@@ -53,7 +53,12 @@ const DowCell = styled.div`
   letter-spacing: 0.03em;
 `;
 
-const Cell = styled.button<{ $kind: CellKind; $future: boolean; $today: boolean }>`
+const Cell = styled.button<{
+  $kind: CellKind;
+  $future: boolean;
+  $today: boolean;
+  $inMonth: boolean;
+}>`
   aspect-ratio: 1;
   min-width: 0;
   min-height: 22px;
@@ -61,8 +66,27 @@ const Cell = styled.button<{ $kind: CellKind; $future: boolean; $today: boolean 
   border: ${(p) => (p.$today ? "2px solid var(--color-primary)" : "1px solid transparent")};
   cursor: ${(p) => (p.$future ? "default" : "pointer")};
   padding: 0;
-  opacity: ${(p) => (p.$future ? 0.35 : 1)};
+  /* Future days mute hardest; out-of-month days dim a bit so the reference
+     month reads as the focus without hiding the surrounding context. */
+  opacity: ${(p) => (p.$future ? 0.35 : p.$inMonth ? 1 : 0.45)};
   transition: background 0.1s;
+  /* Center the day-of-month number. Empty/future cells keep dark-on-pale text;
+     filled/met (cyan/green) flip to white. The over kind is amber, where
+     white-on-amber is ~1.6:1 (illegible at 10px), so it keeps dark text -
+     matching how amber pairs with dark text elsewhere (HabitBoard over-cap). */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: ${(p) => {
+    if (p.$future || p.$kind === "empty") return "var(--color-text-secondary)";
+    // Amber over-cap needs a dark number for contrast; cyan/green take white.
+    if (p.$kind === "over") return "var(--color-text, #1a1a1a)";
+    return "#fff";
+  }};
   background: ${(p) => {
     if (p.$future || p.$kind === "empty") return "var(--color-bg-muted, #f0f0f0)";
     if (p.$kind === "over") return "var(--color-warning, #faad14)";
@@ -98,6 +122,12 @@ export interface TrackerCalendarProps {
    * TOGGLE while a long press opens the full editor.
    */
   onLongPressDay?: (date: Date, events: LifeEvent[]) => void;
+  /**
+   * When set, cells outside this month are dimmed as adjacent-month days. Used by
+   * the 6-week month grids in HabitHistory; omitted for the single-week board
+   * strip (every cell is in-month).
+   */
+  monthRef?: Date;
 }
 
 /**
@@ -165,15 +195,23 @@ function DayButton({
       $kind={kind}
       $future={cell.future}
       $today={cell.isToday}
+      $inMonth={cell.inMonth}
       disabled={cell.future}
       data-testid="calendar-cell"
       data-daykey={cell.key}
       data-kind={kind}
       data-today={cell.isToday ? "true" : undefined}
       data-future={cell.future ? "true" : undefined}
+      data-in-month={cell.inMonth ? undefined : "false"}
       aria-label={cell.key}
       {...hold}
-    />
+    >
+      {/* Day number derived from the tz-correct key (YYYY-MM-DD), NOT
+          cell.date.getDate(): cell.date is a UTC instant equal to noon-in-tz, and
+          getDate() reads the BROWSER's tz — east of the saved tz that lands on the
+          next local day and prints an off-by-one number. */}
+      {Number(cell.key.slice(8))}
+    </Cell>
   );
 }
 
@@ -186,8 +224,12 @@ export function TrackerCalendar({
   today,
   onTapDay,
   onLongPressDay,
+  monthRef,
 }: TrackerCalendarProps) {
-  const grid = useMemo(() => buildCalendarGrid(today, weeks, tz), [today, weeks, tz]);
+  const grid = useMemo(
+    () => buildCalendarGrid(today, weeks, tz, monthRef),
+    [today, weeks, tz, monthRef],
+  );
   const longPress = onLongPressDay ?? onTapDay;
 
   return (

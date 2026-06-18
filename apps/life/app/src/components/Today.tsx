@@ -19,6 +19,7 @@ import {
 } from "@kirkl/shared";
 import type { TrackableShape } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
+import { useSettingsMenu } from "../settings-menu";
 import { useSelectedDate } from "../lib/useSelectedDate";
 import { DateNav } from "./DateNav";
 import { DayTimeline } from "./DayTimeline";
@@ -56,6 +57,7 @@ export function Today() {
   const { user } = useAuth();
   const { state } = useLifeContext();
   const wpbDebug = useWpbDebug();
+  const { menuItems } = useSettingsMenu();
 
   const date = useSelectedDate();
   const { selectedDate, dateParam } = date;
@@ -98,6 +100,7 @@ export function Today() {
             <SyncDot debug={wpbDebug} collections={LIFE_COLLECTIONS} />
           </TitleWithStatus>
         }
+        menuItems={menuItems}
       />
 
       <PageContainer>

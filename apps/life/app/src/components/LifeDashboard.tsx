@@ -2,10 +2,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Switch, Tooltip } from "antd";
-import { BellOutlined, LogoutOutlined, ControlOutlined, SunOutlined, MoonOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
+import { BellOutlined, SunOutlined, MoonOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
 import {
   useAuth,
-  getBackend,
   PageContainer,
   SectionTitle,
   Section,
@@ -26,11 +25,11 @@ const TitleWithStatus = styled.div`
   gap: 8px;
 `;
 import { useLifeContext } from "../life-context";
+import { useSettingsMenu } from "../settings-menu";
 import { GlobalQuickRow } from "./GlobalQuickRow";
 import { ShapeCard } from "./ShapeCard";
 import { ShapeSheet } from "./ShapeSheet";
 import { SampleResponseModal } from "./SampleResponseModal";
-import { SettingsModal } from "./SettingsModal";
 import { DateNav } from "./DateNav";
 import { Hint } from "./Hint";
 import { RANDOM_SAMPLES, SESSIONS, sessionSubjectId, sessionPath, type Session } from "../manifest";
@@ -127,19 +126,16 @@ const SessionCardCheck = styled.span`
   font-weight: 500;
 `;
 
-interface LifeDashboardProps {
-  /** When true, hides sign-out (handled by parent shell) */
-  embedded?: boolean;
-}
-
-export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
+export function LifeDashboard() {
   const { message } = useFeedback();
   const { user } = useAuth();
   const { state } = useLifeContext();
   const navigate = useNavigate();
   const life = useLifeBackend();
   const wpbDebug = useWpbDebug();
-  const [showSettings, setShowSettings] = useState(false);
+  // Settings/Sign Out now come from the shared header-menu fragment that
+  // LifeRoutesInner provides (and which owns the single SettingsModal mount).
+  const { menuItems } = useSettingsMenu();
   // Which shape's bottom sheet is open (null = closed).
   const [openShape, setOpenShape] = useState<TrackableShape | null>(null);
   const [showSampleModal, setShowSampleModal] = useState(false);
@@ -330,61 +326,7 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
     }
   };
 
-  // Export logic — the trigger UI lives in SettingsModal now (rare action), but
-  // the data assembly stays here where `allEntries` is in scope.
-  const handleExport = (format: "csv" | "json") => {
-    const sortedEntries = [...allEntries].sort(
-      (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
-    );
-
-    if (format === "json") {
-      const content = JSON.stringify(sortedEntries, null, 2);
-      const date = new Date().toISOString().split("T")[0];
-      downloadFile(content, `life-tracker-export-${date}.json`, "application/json");
-      message.success("Exported to JSON");
-    } else {
-      const headers = ["timestamp", "subject_id", "source", "entries", "labels"];
-      const rows = sortedEntries.map(e => [
-        e.timestamp.toISOString(),
-        e.subjectId,
-        e.labels?.source ?? "manual",
-        JSON.stringify(e.entries),
-        JSON.stringify(e.labels ?? {}),
-      ]);
-      const csv = [headers.join(","), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
-      const date = new Date().toISOString().split("T")[0];
-      downloadFile(csv, `life-tracker-export-${date}.csv`, "text/csv");
-      message.success("Exported to CSV");
-    }
-  };
-
-  const downloadFile = (content: string, filename: string, mimeType: string) => {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   const samplingEnabled = RANDOM_SAMPLES.enabled;
-
-  const handleSignOut = () => {
-    getBackend().authStore.clear();
-  };
-
-  // Hamburger menu = RARE actions only. The 4 primary destinations live in the
-  // bottom tab bar, not here. Settings (which now also hosts Export) + Sign Out.
-  const menuItems = [
-    { key: "settings", icon: <ControlOutlined />, label: "Settings", onClick: () => setShowSettings(true) },
-    ...(!embedded ? [
-      { type: "divider" as const },
-      { key: "logout", icon: <LogoutOutlined />, label: "Sign Out", onClick: handleSignOut },
-    ] : []),
-  ];
 
   const mobileActions = samplingEnabled && isMobile ? (
     <NotificationToggle>
@@ -517,19 +459,6 @@ export function LifeDashboard({ embedded = false }: LifeDashboardProps) {
         config={RANDOM_SAMPLES}
         userId={user?.uid ?? ""}
         logId={state.log?.id}
-      />
-
-      <SettingsModal
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        log={state.log}
-        userId={user?.uid}
-        onExport={handleExport}
-        onResetSchedule={async () => {
-          if (state.log?.id) {
-            await life.clearSampleSchedule(state.log.id);
-          }
-        }}
       />
     </>
   );

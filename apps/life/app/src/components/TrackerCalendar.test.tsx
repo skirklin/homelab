@@ -55,6 +55,65 @@ describe("TrackerCalendar", () => {
     expect(cell("2026-06-10").getAttribute("data-today")).toBe("true");
   });
 
+  it("renders the day-of-month number in each cell", () => {
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    // Each cell shows its date number (6/10 → "10", 6/9 → "9").
+    expect(cell("2026-06-10")).toHaveTextContent("10");
+    expect(cell("2026-06-09")).toHaveTextContent("9");
+    expect(cell("2026-06-01")).toHaveTextContent("1");
+  });
+
+  it("renders each cell's number from its tz-correct day-key, not the browser tz", () => {
+    // Regression guard for B1: the day number MUST be derived from the cell's
+    // dayKey (YYYY-MM-DD computed in the saved tz), not cell.date.getDate(). With
+    // a saved tz (PT) west of common browser tzs, noon-in-PT (19:00Z) is the same
+    // calendar day everywhere — but reading `cell.date.getDate()` in a browser tz
+    // east of PT would render the NEXT day's number (off-by-one). Asserting the
+    // text equals the key's day component is tz-agnostic and catches that lie
+    // regardless of the process TZ the test happens to run under.
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={6} index={index} tz={PT} today={TODAY} monthRef={TODAY} onTapDay={vi.fn()} />,
+    );
+    for (const el of cells()) {
+      const key = el.getAttribute("data-daykey")!; // YYYY-MM-DD
+      const expected = String(Number(key.slice(8, 10))); // strip leading zero
+      expect(el).toHaveTextContent(new RegExp(`^${expected}$`));
+    }
+  });
+
+  it("without monthRef every cell is in-month (board strip unaffected)", () => {
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={3} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    // No cell carries the out-of-month marker when monthRef is omitted.
+    expect(document.querySelector('[data-in-month="false"]')).toBeNull();
+  });
+
+  it("with monthRef, cells outside that month are marked out-of-month", () => {
+    const index = buildDayIndex([], PT);
+    // 6-week grid anchored on today (June) with June as the reference month: the
+    // top rows reach back into late May → those cells are out-of-month.
+    render(
+      <TrackerCalendar
+        subjectIds={["water"]}
+        weeks={6}
+        index={index}
+        tz={PT}
+        today={TODAY}
+        monthRef={TODAY}
+        onTapDay={vi.fn()}
+      />,
+    );
+    // A May day is out-of-month; a June day is in-month.
+    expect(cell("2026-05-31").getAttribute("data-in-month")).toBe("false");
+    expect(cell("2026-06-09").getAttribute("data-in-month")).toBeNull();
+  });
+
   it("disables future days in the current week", () => {
     const index = buildDayIndex([], PT);
     render(

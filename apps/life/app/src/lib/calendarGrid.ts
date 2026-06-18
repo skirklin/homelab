@@ -15,6 +15,11 @@ import { dayKey, startOfWeek } from "@homelab/backend";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOON_MS = 12 * 60 * 60 * 1000;
 
+/** Local "YYYY-MM" key for the month containing a tz-aware day key. */
+function monthOf(key: string): string {
+  return key.slice(0, 7);
+}
+
 export interface CalendarCell {
   /** Local noon of this day — the backfill timestamp + day representative. */
   date: Date;
@@ -24,6 +29,12 @@ export interface CalendarCell {
   future: boolean;
   /** This cell IS today's local day → render the today marker. */
   isToday: boolean;
+  /**
+   * Belongs to the reference month (`monthRef`). Always true when no `monthRef`
+   * is given (the board's single-week strip has no month framing), so the strip
+   * is unaffected; the 6-week month grids pass a ref to dim adjacent-month days.
+   */
+  inMonth: boolean;
 }
 
 export type CalendarWeek = CalendarCell[]; // length 7, Sun..Sat
@@ -31,9 +42,19 @@ export type CalendarWeek = CalendarCell[]; // length 7, Sun..Sat
 /**
  * `weeks` calendar weeks ending with the week containing `today`, oldest first.
  * `tz` is the user's IANA zone; `today` is any instant in the current day.
+ *
+ * `monthRef` (optional): any instant in the month a grid is "about". When given,
+ * cells outside that local month are flagged `inMonth: false` so the renderer can
+ * dim adjacent-month days. Omitted → every cell is `inMonth: true`.
  */
-export function buildCalendarGrid(today: Date, weeks: number, tz: string): CalendarWeek[] {
+export function buildCalendarGrid(
+  today: Date,
+  weeks: number,
+  tz: string,
+  monthRef?: Date,
+): CalendarWeek[] {
   const todayKey = dayKey(today, tz);
+  const refMonth = monthRef ? monthOf(dayKey(monthRef, tz)) : null;
   const thisWeekStart = startOfWeek(today, tz); // UTC instant at local Sunday 00:00
   const rows: CalendarWeek[] = [];
   for (let w = weeks - 1; w >= 0; w--) {
@@ -50,6 +71,7 @@ export function buildCalendarGrid(today: Date, weeks: number, tz: string): Calen
         key,
         future: key > todayKey,
         isToday: key === todayKey,
+        inMonth: refMonth === null || monthOf(key) === refMonth,
       });
     }
     rows.push(row);

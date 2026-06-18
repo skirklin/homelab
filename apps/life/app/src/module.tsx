@@ -2,16 +2,19 @@
  * Life tracker route tree. Used by the standalone app entry in App.tsx and by
  * the optional `LifeModule` (kept for parity with other domain packages).
  */
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
-import { useAuth, NotFound } from "@kirkl/shared";
+import { useAuth, NotFound, getBackend, useFeedback } from "@kirkl/shared";
 import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { Today } from "./components/Today";
 import { SessionRunner } from "./components/SessionRunner";
+import { SettingsModal } from "./components/SettingsModal";
+import { SettingsMenuProvider, buildSettingsMenuItems } from "./settings-menu";
+import { exportEvents } from "./lib/exportEvents";
 import { BottomTabBar, BottomBarSpacer, showsBottomBar } from "./components/BottomTabBar";
 import { useEntriesSubscription } from "./subscription";
 
@@ -36,6 +39,27 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   const { user } = useAuth();
   const { state, dispatch } = useLifeContext();
   const life = useLifeBackend();
+  const { message } = useFeedback();
+
+  // The Settings modal is mounted ONCE here (not per route) and opened from the
+  // shared header-menu fragment every bottom-tab gear pulls via useSettingsMenu.
+  const [showSettings, setShowSettings] = useState(false);
+
+  const handleExport = (format: "csv" | "json") => {
+    exportEvents(Array.from(state.entries.values()), format);
+    message.success(`Exported to ${format.toUpperCase()}`);
+  };
+
+  const settingsMenu = useMemo(
+    () => ({
+      menuItems: buildSettingsMenuItems({
+        embedded,
+        onOpenSettings: () => setShowSettings(true),
+        onSignOut: () => getBackend().authStore.clear(),
+      }),
+    }),
+    [embedded],
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -82,9 +106,9 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   );
 
   return (
-    <>
+    <SettingsMenuProvider value={settingsMenu}>
       <Routes>
-        <Route path="/" element={<LifeDashboard embedded={embedded} />} />
+        <Route path="/" element={<LifeDashboard />} />
         <Route path="/today" element={<Today />} />
         <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
         <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
@@ -122,7 +146,20 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
           <BottomTabBar />
         </>
       )}
-    </>
+
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        log={state.log}
+        userId={user?.uid}
+        onExport={handleExport}
+        onResetSchedule={async () => {
+          if (state.log?.id) {
+            await life.clearSampleSchedule(state.log.id);
+          }
+        }}
+      />
+    </SettingsMenuProvider>
   );
 }
 
