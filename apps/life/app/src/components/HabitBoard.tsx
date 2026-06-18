@@ -44,10 +44,10 @@ import { TrackerCalendar } from "./TrackerCalendar";
 import { HabitHistory } from "./HabitHistory";
 import { EventsEditModal } from "./EventsEditModal";
 
-// How many weeks each calendar shows. Goals get a fuller window; the long tail
-// is shorter to keep the (potentially long) list scannable on a phone.
-const GOAL_WEEKS = 6;
-const TRACKABLE_WEEKS = 4;
+// How many weeks each board calendar shows: a single Su–Sa strip per habit,
+// keeping the board clean and short-timeline. The longer history (year heatmap +
+// per-month grids) is one tap away — tapping a habit's name opens HabitHistory.
+const BOARD_WEEKS = 1;
 
 // ---------------------------------------------------------------------------
 // Styled
@@ -585,7 +585,7 @@ export function HabitBoard({
                   <TrackerCalendar
                     subjectIds={subjectIds}
                     goal={goal}
-                    weeks={GOAL_WEEKS}
+                    weeks={BOARD_WEEKS}
                     index={index}
                     tz={tz}
                     today={realToday}
@@ -630,7 +630,7 @@ export function HabitBoard({
                   </LabelButton>
                   <TrackerCalendar
                     subjectIds={[t.id]}
-                    weeks={TRACKABLE_WEEKS}
+                    weeks={BOARD_WEEKS}
                     index={index}
                     tz={tz}
                     today={realToday}

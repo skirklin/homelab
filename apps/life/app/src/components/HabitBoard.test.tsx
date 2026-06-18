@@ -116,10 +116,12 @@ describe("HabitBoard", () => {
     messageOpen.mockClear();
     // Pin "now" so the calendar's real-today anchor (and thus which days are
     // past/future and in-window) is deterministic regardless of when the suite
-    // runs. 2026-06-14 is a Sunday → the test fixture days 6/8..6/13 are all in
-    // the current+prior week, in the past, and inside the 6-week goal window.
+    // runs. The board now renders a SINGLE Su–Sa week, so "now" must land in the
+    // same week as the fixtures. 2026-06-10 is a Wednesday → its week is Sun 6/7
+    // .. Sat 6/13: fixture days 6/8/6/9 are past, 6/10 is today, and 6/11..6/13
+    // are in-window future cells (used by the future-cell test).
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(at(2026, 6, 14, 12));
+    vi.setSystemTime(at(2026, 6, 10, 12));
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -135,6 +137,17 @@ describe("HabitBoard", () => {
     renderBoard({ goals: [{ ...flossDaily, hidden: true }], trackables: [TRACKABLES[1]] });
     expect(screen.getByTestId("habit-board-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("habit-row")).not.toBeInTheDocument();
+  });
+
+  it("the board calendars default to a single Su–Sa week (7 cells)", () => {
+    // Goal row + a long-tail trackable: each board calendar is one week strip.
+    renderBoard({ goals: [flossDaily], trackables: TRACKABLES });
+    const row = screen.getByTestId("habit-row");
+    const goalCal = within(row).getByTestId("tracker-calendar");
+    expect(goalCal.querySelectorAll("[data-testid='calendar-cell']")).toHaveLength(7);
+    // The strip is the week containing today (Wed 6/10): Sun 6/7 .. Sat 6/13.
+    expect(cellIn(row, "2026-06-07")).toBeInTheDocument();
+    expect(cellIn(row, "2026-06-13")).toBeInTheDocument();
   });
 
   it("renders an unmet at_least daily goal with a tap-to-log button and a calendar", () => {
@@ -359,10 +372,10 @@ describe("HabitBoard", () => {
   });
 
   it("backfill: a future cell is inert (no log, no sheet)", async () => {
-    // Real today is pinned to Sun 6/14; Mon 6/15 is a future cell in this week.
+    // Real today is pinned to Wed 6/10; Thu 6/11 is a future cell in this week.
     const { onOpenShape } = renderBoard({ goals: [flossDaily], events: [] });
     const row = screen.getByTestId("habit-row");
-    await userEvent.click(cellIn(row, "2026-06-15"));
+    await userEvent.click(cellIn(row, "2026-06-11"));
     expect(addEvent).not.toHaveBeenCalled();
     expect(onOpenShape).not.toHaveBeenCalled();
   });
