@@ -287,6 +287,181 @@ const rerun2 = await fetchAll();
 check("script 2 rerun is a no-op", JSON.stringify([...state].sort()) === JSON.stringify([...rerun2].sort()));
 
 // ---------------------------------------------------------------------------
+// Script 3: fanout-session-events
+// ---------------------------------------------------------------------------
+
+console.log("");
+console.log("  ==============================================");
+console.log("  Script 3: fanout-session-events");
+console.log("  ==============================================");
+
+// Seed all three session shapes + a live mood sample (no view_run, must not be
+// mistaken for a child) + a partial/crashed run (one child pre-created).
+const morningTs = "2026-05-21 15:00:00.000Z";
+const eveningTs = "2026-05-22 04:00:00.000Z";
+const weeklyTs = "2026-06-01 16:00:00.000Z";
+const partialTs = "2026-05-23 15:00:00.000Z";
+
+const fanMorning = await addEvent({
+  subject_id: "morning_session",
+  timestamp: morningTs,
+  entries: [
+    { name: "gratitude", type: "text", value: "coffee" },
+    { name: "intention", type: "text", value: "ship it" },
+    { name: "energy", type: "number", value: 4, unit: "rating", scale: 5 },
+  ],
+  labels: { source: "manual" },
+});
+const fanEvening = await addEvent({
+  subject_id: "evening_session",
+  timestamp: eveningTs,
+  entries: [
+    { name: "win", type: "text", value: "finished feature" },
+    { name: "lesson", type: "text", value: "rest more" },
+    { name: "intention_followup", type: "text", value: "yes" },
+    { name: "mood", type: "number", value: 5, unit: "rating", scale: 5 },
+  ],
+  labels: { source: "manual" },
+});
+const fanWeekly = await addEvent({
+  subject_id: "weekly_review_session",
+  timestamp: weeklyTs,
+  entries: [
+    { name: "highlights", type: "text", value: "great week" },
+    { name: "lows", type: "text", value: "tired" },
+    { name: "lesson", type: "text", value: "pace yourself" },
+    { name: "intention", type: "text", value: "plan ahead" },
+    { name: "mood_rating", type: "number", value: 3, unit: "rating", scale: 5 },
+  ],
+  labels: { source: "manual" },
+});
+// A real mood sample on the same day as the evening session: subject_id mood,
+// NO view_run. It must survive untouched and must not block the migrated child.
+const liveMood = await addEvent({
+  subject_id: "mood",
+  timestamp: eveningTs,
+  entries: [{ name: "rating", type: "number", value: 2, unit: "rating", scale: 5 }],
+  labels: { source: "manual" },
+});
+// A partial/crashed run: a morning_session source whose `gratitude` child was
+// already written (carries view_run). The rerun must create only the missing
+// two children, then delete the source.
+const fanPartial = await addEvent({
+  subject_id: "morning_session",
+  timestamp: partialTs,
+  entries: [
+    { name: "gratitude", type: "text", value: "sunshine" },
+    { name: "intention", type: "text", value: "focus" },
+    { name: "energy", type: "number", value: 3, unit: "rating", scale: 5 },
+  ],
+  labels: { source: "manual" },
+});
+const partialChild = await addEvent({
+  subject_id: "gratitude",
+  timestamp: partialTs,
+  entries: [{ name: "note", type: "text", value: "sunshine" }],
+  labels: { source: "manual", view: "morning", view_run: partialTs },
+});
+console.log("  Seeded 3 sessions + 1 live mood + 1 partial run (with 1 pre-created child)");
+
+const fanSeedIds = [fanMorning, fanEvening, fanWeekly, liveMood, fanPartial, partialChild];
+
+// Dry run must change nothing.
+const beforeFan = await fetchAll();
+console.log("");
+console.log("  --- fanout dry run (must be inert) ---");
+runScript("fanout-session-events.ts", []);
+const afterFanDry = await fetchAll();
+check("fanout dry-run changed nothing", JSON.stringify([...beforeFan].sort()) === JSON.stringify([...afterFanDry].sort()));
+
+// --log without a value must hard-error.
+{
+  const bad = spawnSync(
+    "pnpm",
+    ["exec", "tsx", join(here, "fanout-session-events.ts"), "--pb-url", pbUrl, "--log"],
+    { cwd: join(here, ".."), env: { ...process.env, PB_ADMIN_EMAIL: adminEmail, PB_ADMIN_PASSWORD: adminPassword }, encoding: "utf8" },
+  );
+  check("fanout: --log without value exits 1", bad.status === 1 && `${bad.stderr}`.includes("--log requires a value"), `status=${bad.status}`);
+}
+
+// Apply.
+console.log("");
+console.log("  --- fanout --apply ---");
+runScript("fanout-session-events.ts", ["--apply"], 0);
+state = await fetchAll();
+
+// The fat session sources are gone.
+check("fanout: morning_session source deleted", !state.has(fanMorning));
+check("fanout: evening_session source deleted", !state.has(fanEvening));
+check("fanout: weekly_review_session source deleted", !state.has(fanWeekly));
+check("fanout: partial morning_session source deleted", !state.has(fanPartial));
+
+// Helper: find a child by subject + view_run.
+const childBy = (subjectId: string, viewRun: string) =>
+  [...state.values()].find(
+    (r) => r.subject_id === subjectId && (r.labels as any)?.view_run === viewRun,
+  );
+
+// Morning children.
+const mGrat = childBy("gratitude", morningTs);
+const mInt = childBy("daily_intention", morningTs);
+const mEnergy = childBy("energy", morningTs);
+check("fanout: morning -> gratitude note child", mGrat?.entries?.[0]?.value === "coffee" && (mGrat?.labels as any)?.view === "morning");
+check("fanout: morning -> daily_intention note child", mInt?.entries?.[0]?.value === "ship it");
+check(
+  "fanout: morning -> energy rating child (canonical)",
+  mEnergy?.entries?.[0]?.name === "rating" && mEnergy?.entries?.[0]?.value === 4 && (mEnergy?.entries?.[0] as any)?.unit === "rating",
+);
+
+// Evening children, incl. mood routed to the live series.
+const eMood = childBy("mood", eveningTs);
+check("fanout: evening -> daily_win", childBy("daily_win", eveningTs)?.entries?.[0]?.value === "finished feature");
+check("fanout: evening -> daily_lesson", childBy("daily_lesson", eveningTs)?.entries?.[0]?.value === "rest more");
+check("fanout: evening -> intention_followup", childBy("intention_followup", eveningTs)?.entries?.[0]?.value === "yes");
+check(
+  "fanout: evening mood -> mood series with canonical rating + view=evening",
+  eMood?.entries?.[0]?.name === "rating" && eMood?.entries?.[0]?.value === 5 && (eMood?.labels as any)?.view === "evening",
+);
+
+// Weekly children, view id `weekly`, mood_rating -> mood.
+const wMood = childBy("mood", weeklyTs);
+check("fanout: weekly -> weekly_lesson (de-collided)", childBy("weekly_lesson", weeklyTs)?.entries?.[0]?.value === "pace yourself");
+check("fanout: weekly -> weekly_intention (de-collided)", childBy("weekly_intention", weeklyTs)?.entries?.[0]?.value === "plan ahead");
+check("fanout: weekly view id is 'weekly'", (childBy("highlights", weeklyTs)?.labels as any)?.view === "weekly");
+check(
+  "fanout: weekly mood_rating -> mood series with canonical rating",
+  wMood?.entries?.[0]?.name === "rating" && wMood?.entries?.[0]?.value === 3,
+);
+
+// The live mood event is untouched; exactly 2 migrated mood children added.
+check("fanout: live mood sample untouched", state.has(liveMood) && (state.get(liveMood)?.labels as any)?.view_run === undefined);
+const moodChildren = [...state.values()].filter((r) => r.subject_id === "mood" && (r.labels as any)?.view_run);
+check("fanout: exactly 2 migrated mood children", moodChildren.length === 2, `got ${moodChildren.length}`);
+
+// Partial run: the pre-existing gratitude child survives (NOT duplicated), the
+// missing two were created, the source deleted. `state` keys are ids, so check
+// the original child id is still present and no second gratitude/partialTs row
+// was created.
+const partialGratRows = [...state].filter(
+  ([, r]) => r.subject_id === "gratitude" && (r.labels as any)?.view_run === partialTs,
+);
+check(
+  "fanout: partial pre-existing gratitude child kept (not duplicated)",
+  partialGratRows.length === 1 && partialGratRows[0][0] === partialChild && partialGratRows[0][1].entries?.[0]?.value === "sunshine",
+  `rows=${partialGratRows.length}`,
+);
+check("fanout: partial -> daily_intention created", childBy("daily_intention", partialTs)?.entries?.[0]?.value === "focus");
+check("fanout: partial -> energy created", childBy("energy", partialTs)?.entries?.[0]?.value === 3);
+
+// Rerun must be a clean no-op (exit 0).
+console.log("  --- fanout --apply (rerun: clean no-op, exit 0) ---");
+runScript("fanout-session-events.ts", ["--apply"], 0);
+const fanRerun = await fetchAll();
+check("fanout: rerun is a no-op", JSON.stringify([...state].sort()) === JSON.stringify([...fanRerun].sort()));
+
+void fanSeedIds;
+
+// ---------------------------------------------------------------------------
 // Cleanup + verdict
 // ---------------------------------------------------------------------------
 

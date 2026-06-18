@@ -6,6 +6,10 @@
  *   2. split-category-subjects.ts — split category-shaped subjects
  *      (`exercise`, `focus`) into per-thing subjects derived from
  *      `labels.category`, renaming `intensity` → `rating`.
+ *   3. fanout-session-events.ts — fan each fat `*_session` event OUT into N
+ *      per-item `life_events` rows (one per prompt entry), then delete the
+ *      source. The Phase-B3.1 cutover from one-fat-event sessions to the
+ *      per-item, label-correlated View model.
  *
  * Everything here is pure (no PocketBase, no I/O) so it can be unit-tested
  * directly — see life-rewrite.test.ts. The scripts own auth + fetch + apply.
@@ -491,4 +495,216 @@ export function planCategorySplit(ev: EventRow): CategorySplitAction {
     labels: Object.keys(newLabels).length > 0 ? newLabels : null,
     renamedIntensity: hasIntensity,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Script 3: fan fat *_session events out into per-item events
+// ---------------------------------------------------------------------------
+
+/** The three fat session subjects this migration consumes. */
+export const SESSION_SUBJECTS = [
+  "morning_session",
+  "evening_session",
+  "weekly_review_session",
+] as const;
+export type SessionSubject = (typeof SESSION_SUBJECTS)[number];
+
+/**
+ * `labels.view` written on each fanned child. NOTE: weekly's view id is
+ * `weekly` (matching B2's ViewRunner `labels.view`), NOT `weekly_review`.
+ */
+export const SESSION_VIEW: Record<SessionSubject, string> = {
+  morning_session: "morning",
+  evening_session: "evening",
+  weekly_review_session: "weekly",
+};
+
+/**
+ * The fully-decided id map (§3 + the B1 mood decision). For each session
+ * subject, the legacy `entries[].name` → the new per-item `subject_id`.
+ *
+ * `mood` / `mood_rating` route into the LIVE `mood` series. All others are
+ * the §3 reflective vocab ids (distinct, de-collided across sessions).
+ *
+ * The planner HARD-FAILS on any entry name not present here for its subject —
+ * an unmapped name yields an `error` action, never a silent drop. This is the
+ * guard against drift between the audit and the run.
+ */
+export const SESSION_ID_MAP: Record<SessionSubject, Record<string, string>> = {
+  morning_session: {
+    gratitude: "gratitude",
+    intention: "daily_intention",
+    energy: "energy",
+  },
+  evening_session: {
+    win: "daily_win",
+    lesson: "daily_lesson",
+    intention_followup: "intention_followup",
+    mood: "mood",
+  },
+  weekly_review_session: {
+    highlights: "highlights",
+    lows: "lows",
+    lesson: "weekly_lesson",
+    intention: "weekly_intention",
+    mood_rating: "mood",
+  },
+};
+
+/** New per-item subject_ids whose entry is the canonical RATED shape. Every
+ *  other mapped id is `noted` (a single `{name:"note", type:"text"}` entry). */
+const RATED_NEW_IDS = new Set(["energy", "mood"]);
+
+/** A single fanned-out child event to create. */
+export interface FanoutChild {
+  subjectId: string;
+  entries: [Entry];
+  labels: { source: string; view: string; view_run: string };
+  timestamp: string;
+  created_by?: string;
+}
+
+export type SessionFanoutAction =
+  /** CREATE one per-item child for a session entry whose child does not yet
+   *  exist (keyed on `(subjectId, view_run)`). */
+  | { kind: "create"; sourceId: string; subject: SessionSubject; entryName: string; child: FanoutChild }
+  /** The child for this entry already exists (a prior partial run) — skip it,
+   *  create nothing. */
+  | { kind: "skip"; sourceId: string; subject: SessionSubject; entryName: string; subjectId: string; reason: string }
+  /** DELETE the source: the full expected child set is present (either created
+   *  this run or pre-existing). Ordered LAST per source. */
+  | { kind: "delete-source"; sourceId: string; subject: SessionSubject }
+  /** Every child already existed (fully-migrated source from a prior run):
+   *  nothing to create, just delete the source. A flavour of delete-source
+   *  reported distinctly so reruns read as no-op-ish. */
+  | { kind: "delete-only"; sourceId: string; subject: SessionSubject }
+  /** An entry name with NO disposition in SESSION_ID_MAP. The driver must NOT
+   *  apply (no create, and crucially no delete-source for this source) and
+   *  exit non-zero. Nothing is ever dropped silently. */
+  | { kind: "error"; sourceId: string; subject: SessionSubject; entryName: string; reason: string };
+
+/** Normalize a legacy fat-session entry into the canonical per-item entry for
+ *  its new subject id. RATED ids get `{name:"rating", unit:"rating", scale}`;
+ *  everything else is `{name:"note", type:"text"}`. */
+function normalizeEntry(newSubjectId: string, src: Entry): Entry {
+  if (RATED_NEW_IDS.has(newSubjectId)) {
+    // Carry the source's numeric value + scale; canonicalize name + unit.
+    const value = src.type === "number" ? src.value : Number(src.value);
+    const scale = src.type === "number" ? src.scale ?? 5 : 5;
+    return { name: "rating", type: "number", value, unit: "rating", scale };
+  }
+  // noted: a single text note. Source value coerced to string.
+  const value = src.type === "text" ? src.value : String(src.value);
+  return { name: "note", type: "text", value };
+}
+
+/**
+ * Plan the session→per-item fanout for one log's events.
+ *
+ * `events` is the mixed set of fat `*_session` SOURCE rows AND any prior-run
+ * CHILD rows (events carrying `labels.view_run`). Real `mood` sampling events
+ * have NO `view_run`, so they are never mistaken for children — children are
+ * matched by `(subject_id, labels.view_run === source.timestamp)`.
+ *
+ * Per source, deterministically (sources by timestamp then id; entries in
+ * stored order):
+ *   - one `create` per entry whose child is MISSING (mapped id),
+ *   - one `skip` per entry whose child already exists,
+ *   - then exactly one `delete-source` (all expected children present after
+ *     this run's creates) or `delete-only` (all pre-existed) — ordered LAST,
+ *   - UNLESS any entry is unmapped: each such entry yields an `error` and the
+ *     source gets NO delete action (nothing dropped with an unmapped entry).
+ *
+ * Idempotency is PER CHILD: a partial/crashed run that created some children
+ * creates only the missing ones, then deletes the source.
+ */
+export function planSessionFanout(events: EventRow[]): SessionFanoutAction[] {
+  // Index prior-run children by (subject_id, view_run). Only events carrying a
+  // labels.view_run are children — a live `mood` sample has none, so it can't
+  // block creating a migrated mood child.
+  const childKeys = new Set<string>();
+  for (const ev of events) {
+    const viewRun = ev.labels?.view_run;
+    if (viewRun) childKeys.add(`${ev.subject_id} ${viewRun}`);
+  }
+
+  const sources = events
+    .filter((ev): ev is EventRow & { subject_id: SessionSubject } =>
+      (SESSION_SUBJECTS as readonly string[]).includes(ev.subject_id),
+    )
+    .sort((a, b) =>
+      a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : a.id < b.id ? -1 : 1,
+    );
+
+  const actions: SessionFanoutAction[] = [];
+  for (const src of sources) {
+    const subject = src.subject_id;
+    const view = SESSION_VIEW[subject];
+    const viewRun = src.timestamp; // children correlate on the source timestamp
+    const map = SESSION_ID_MAP[subject];
+    const source = (src.labels?.source as string) ?? "manual";
+
+    let hadError = false;
+    let createdCount = 0;
+    const sourceActions: SessionFanoutAction[] = [];
+
+    for (const entry of src.entries) {
+      const newSubjectId = map[entry.name];
+      if (newSubjectId === undefined) {
+        hadError = true;
+        sourceActions.push({
+          kind: "error",
+          sourceId: src.id,
+          subject,
+          entryName: entry.name,
+          reason: `entry "${entry.name}" on ${subject} has no disposition in SESSION_ID_MAP`,
+        });
+        continue;
+      }
+      const key = `${newSubjectId} ${viewRun}`;
+      if (childKeys.has(key)) {
+        sourceActions.push({
+          kind: "skip",
+          sourceId: src.id,
+          subject,
+          entryName: entry.name,
+          subjectId: newSubjectId,
+          reason: `child ${newSubjectId} for view_run ${viewRun} already exists`,
+        });
+        continue;
+      }
+      // Reserve this child key so two same-named entries in one source (or a
+      // collision across this run) each create exactly once.
+      childKeys.add(key);
+      createdCount++;
+      sourceActions.push({
+        kind: "create",
+        sourceId: src.id,
+        subject,
+        entryName: entry.name,
+        child: {
+          subjectId: newSubjectId,
+          entries: [normalizeEntry(newSubjectId, entry)],
+          labels: { source, view, view_run: viewRun },
+          timestamp: src.timestamp,
+          ...(src.created_by ? { created_by: src.created_by } : {}),
+        },
+      });
+    }
+
+    actions.push(...sourceActions);
+
+    if (hadError) {
+      // Leave the source intact: an unmapped entry must never be lost to a
+      // delete. No delete action is emitted for this source.
+      continue;
+    }
+    // Full expected child set is present (created this run + any pre-existing).
+    if (createdCount === 0) {
+      actions.push({ kind: "delete-only", sourceId: src.id, subject });
+    } else {
+      actions.push({ kind: "delete-source", sourceId: src.id, subject });
+    }
+  }
+  return actions;
 }

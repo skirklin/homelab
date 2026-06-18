@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   type Entry,
   type EventRow,
+  type SessionFanoutAction,
   extractRating,
   localDayKey,
   planCategorySplit,
+  planSessionFanout,
   planSleepMerge,
   safeTz,
   sleepDurationMinutes,
@@ -566,5 +568,220 @@ describe("planCategorySplit", () => {
     expect(
       planCategorySplit(base({ entries: [{ name: "intensity", type: "number", value: 2 }], labels: null })),
     ).toMatchObject({ kind: "missing-category" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Script 3: session fanout
+// ---------------------------------------------------------------------------
+
+describe("planSessionFanout", () => {
+  // Fat-session entry builders matching the live shapes: noted prompts are
+  // `{name:<promptid>, type:"text"}`; energy/mood/mood_rating are numeric
+  // `{name:..., unit:"rating", scale}`.
+  const noted = (name: string, value: string): Entry => ({ name, type: "text", value });
+  const rated = (name: string, value: number, scale = 5): Entry => ({
+    name,
+    type: "number",
+    value,
+    unit: "rating",
+    scale,
+  });
+
+  const session = (
+    id: string,
+    subject_id: string,
+    timestamp: string,
+    entries: Entry[],
+    labels: Record<string, string> | null = null,
+  ): EventRow => ({ id, subject_id, timestamp, entries, labels, created_by: "user1" });
+
+  // A prior-run child: own vocab subject_id, single entry, carries view_run.
+  const child = (
+    id: string,
+    subject_id: string,
+    timestamp: string,
+    viewRun: string,
+    view: string,
+    entries: Entry[],
+  ): EventRow => ({
+    id,
+    subject_id,
+    timestamp,
+    entries,
+    labels: { source: "manual", view, view_run: viewRun },
+    created_by: "user1",
+  });
+
+  const creates = (actions: SessionFanoutAction[]) =>
+    actions.filter((a): a is Extract<SessionFanoutAction, { kind: "create" }> => a.kind === "create");
+
+  it("fans a morning_session into 3 per-item children with right ids + entries", () => {
+    const ts = "2026-05-21 15:00:00.000Z";
+    const src = session("m1", "morning_session", ts, [
+      noted("gratitude", "coffee"),
+      noted("intention", "ship it"),
+      rated("energy", 4),
+    ]);
+    const actions = planSessionFanout([src]);
+    const c = creates(actions);
+    expect(c.map((a) => a.child.subjectId)).toEqual(["gratitude", "daily_intention", "energy"]);
+    expect(c[0].child.entries).toEqual([{ name: "note", type: "text", value: "coffee" }]);
+    expect(c[1].child.entries).toEqual([{ name: "note", type: "text", value: "ship it" }]);
+    expect(c[2].child.entries).toEqual([{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }]);
+    // All children carry view=morning + view_run=<source timestamp> + source.
+    for (const a of c) {
+      expect(a.child.labels).toEqual({ source: "manual", view: "morning", view_run: ts });
+      expect(a.child.timestamp).toBe(ts);
+      expect(a.child.created_by).toBe("user1");
+    }
+    // delete-source ordered LAST.
+    expect(actions[actions.length - 1]).toMatchObject({ kind: "delete-source", sourceId: "m1" });
+  });
+
+  it("fans an evening_session, routing mood into the live mood series with a canonical rating entry", () => {
+    const ts = "2026-05-22 04:00:00.000Z";
+    const src = session("e1", "evening_session", ts, [
+      noted("win", "finished feature"),
+      noted("lesson", "rest more"),
+      noted("intention_followup", "yes"),
+      rated("mood", 5),
+    ]);
+    const c = creates(planSessionFanout([src]));
+    expect(c.map((a) => a.child.subjectId)).toEqual([
+      "daily_win",
+      "daily_lesson",
+      "intention_followup",
+      "mood",
+    ]);
+    const moodChild = c.find((a) => a.child.subjectId === "mood")!;
+    expect(moodChild.child.entries).toEqual([{ name: "rating", type: "number", value: 5, unit: "rating", scale: 5 }]);
+    expect(moodChild.child.labels.view).toBe("evening");
+  });
+
+  it("fans a weekly_review_session with view id 'weekly' and mood_rating -> mood", () => {
+    const ts = "2026-06-01 16:00:00.000Z";
+    const src = session("w1", "weekly_review_session", ts, [
+      noted("highlights", "great week"),
+      noted("lows", "tired"),
+      noted("lesson", "pace yourself"),
+      noted("intention", "plan ahead"),
+      rated("mood_rating", 3),
+    ]);
+    const c = creates(planSessionFanout([src]));
+    expect(c.map((a) => a.child.subjectId)).toEqual([
+      "highlights",
+      "lows",
+      "weekly_lesson",
+      "weekly_intention",
+      "mood",
+    ]);
+    // view id is `weekly`, NOT `weekly_review`.
+    for (const a of c) expect(a.child.labels.view).toBe("weekly");
+    const moodChild = c.find((a) => a.child.subjectId === "mood")!;
+    expect(moodChild.child.entries).toEqual([{ name: "rating", type: "number", value: 3, unit: "rating", scale: 5 }]);
+  });
+
+  it("carries a non-default rating scale verbatim", () => {
+    const src = session("m1", "morning_session", "2026-05-21 15:00:00.000Z", [rated("energy", 7, 10)]);
+    const c = creates(planSessionFanout([src]));
+    expect(c[0].child.entries).toEqual([{ name: "rating", type: "number", value: 7, unit: "rating", scale: 10 }]);
+  });
+
+  it("hard-fails (error action, no create, no delete) on an unmapped entry name", () => {
+    const src = session("m1", "morning_session", "2026-05-21 15:00:00.000Z", [
+      noted("gratitude", "coffee"),
+      noted("mystery_prompt", "???"),
+    ]);
+    const actions = planSessionFanout([src]);
+    // gratitude still planned, but the unmapped entry is an error...
+    expect(actions.some((a) => a.kind === "create" && a.child.subjectId === "gratitude")).toBe(true);
+    expect(actions.some((a) => a.kind === "error" && (a as any).entryName === "mystery_prompt")).toBe(true);
+    // ...and the source must NOT be deleted (nothing dropped with the unmapped entry).
+    expect(actions.some((a) => a.kind === "delete-source" || a.kind === "delete-only")).toBe(false);
+  });
+
+  it("delete-only when ALL children already exist (fully-migrated prior run)", () => {
+    const ts = "2026-05-21 15:00:00.000Z";
+    const src = session("m1", "morning_session", ts, [
+      noted("gratitude", "coffee"),
+      noted("intention", "ship it"),
+      rated("energy", 4),
+    ]);
+    const existing = [
+      child("c1", "gratitude", ts, ts, "morning", [{ name: "note", type: "text", value: "coffee" }]),
+      child("c2", "daily_intention", ts, ts, "morning", [{ name: "note", type: "text", value: "ship it" }]),
+      child("c3", "energy", ts, ts, "morning", [rated("rating", 4)]),
+    ];
+    const actions = planSessionFanout([src, ...existing]);
+    expect(creates(actions)).toHaveLength(0);
+    expect(actions.filter((a) => a.kind === "skip")).toHaveLength(3);
+    expect(actions[actions.length - 1]).toMatchObject({ kind: "delete-only", sourceId: "m1" });
+  });
+
+  it("partial run: creates only the MISSING children, then deletes the source", () => {
+    const ts = "2026-05-21 15:00:00.000Z";
+    const src = session("m1", "morning_session", ts, [
+      noted("gratitude", "coffee"),
+      noted("intention", "ship it"),
+      rated("energy", 4),
+    ]);
+    // Only the first child was written before the crash.
+    const existing = [
+      child("c1", "gratitude", ts, ts, "morning", [{ name: "note", type: "text", value: "coffee" }]),
+    ];
+    const actions = planSessionFanout([src, ...existing]);
+    const c = creates(actions);
+    // gratitude is skipped; the other two are created.
+    expect(c.map((a) => a.child.subjectId)).toEqual(["daily_intention", "energy"]);
+    expect(actions.some((a) => a.kind === "skip" && (a as any).subjectId === "gratitude")).toBe(true);
+    // Source deleted once the full set is present -> delete-source (creates happened this run).
+    expect(actions[actions.length - 1]).toMatchObject({ kind: "delete-source", sourceId: "m1" });
+  });
+
+  it("a pre-existing live mood event (no view_run) does NOT count as a child", () => {
+    const ts = "2026-05-22 04:00:00.000Z";
+    const src = session("e1", "evening_session", ts, [rated("mood", 5)]);
+    // A real mood sample on the same day: subject_id mood, NO view_run label.
+    const liveMood: EventRow = {
+      id: "live1",
+      subject_id: "mood",
+      timestamp: ts,
+      entries: [rated("rating", 2)],
+      labels: { source: "manual" }, // no view_run
+      created_by: "user1",
+    };
+    const actions = planSessionFanout([src, liveMood]);
+    // The migrated mood child must still be CREATED (the live event didn't block it).
+    const c = creates(actions);
+    expect(c).toHaveLength(1);
+    expect(c[0].child.subjectId).toBe("mood");
+    expect(c[0].child.labels.view_run).toBe(ts);
+    expect(actions[actions.length - 1]).toMatchObject({ kind: "delete-source", sourceId: "e1" });
+  });
+
+  it("ignores non-session subjects entirely", () => {
+    const other: EventRow = {
+      id: "x",
+      subject_id: "sleep",
+      timestamp: "2026-05-21 15:00:00.000Z",
+      entries: [{ name: "duration", type: "number", value: 420, unit: "min" }],
+      labels: null,
+    };
+    expect(planSessionFanout([other])).toEqual([]);
+  });
+
+  it("preserves a non-manual labels.source on the children", () => {
+    const ts = "2026-05-21 15:00:00.000Z";
+    const src = session("m1", "morning_session", ts, [noted("gratitude", "coffee")], { source: "import" });
+    const c = creates(planSessionFanout([src]));
+    expect(c[0].child.labels.source).toBe("import");
+  });
+
+  it("processes multiple sources deterministically by timestamp", () => {
+    const later = session("m2", "morning_session", "2026-05-22 15:00:00.000Z", [noted("gratitude", "b")]);
+    const earlier = session("m1", "morning_session", "2026-05-21 15:00:00.000Z", [noted("gratitude", "a")]);
+    const c = creates(planSessionFanout([later, earlier]));
+    expect(c.map((a) => a.child.entries[0].value)).toEqual(["a", "b"]);
   });
 });
