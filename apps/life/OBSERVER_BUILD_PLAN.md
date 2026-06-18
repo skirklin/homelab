@@ -184,6 +184,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-06-15 | NO-OP | Weekly cron fires today at 1pm PT — first observation will land in ~7h. Tomorrow's tick evaluates it under Phase 0.5. Six worktrees active from other sessions; none observer-related. |
 | 2026-06-16 | NO-OP | Observer CronJob + claude_observations collection still not deployed; no observation landed. All built work on main awaiting deploy. C4 blocked on Scott's input. |
 | 2026-06-17 | NO-OP | Endpoint is live (500 not 404) but `ANTHROPIC_API_KEY` missing from api-secrets; observer-weekly CronJob also not applied. Two specific blockers for Scott. |
+| 2026-06-18 | NO-OP | Same two blockers: `ANTHROPIC_API_KEY` not in api-secrets + `observer-weekly` CronJob not applied. SSH unavailable this tick; no new observer-related commits. |
 
 ## Decision log
 
