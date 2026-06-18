@@ -308,7 +308,12 @@ into the manifest then can be retired.
   (sessions still run the old path). Fully additive.
 - **Phase B2 — ViewRunner at parity, STILL writing the fat `*_session` event.** Prove the data-driven
   renderer (templating + tasks_due + banner) reproduces the wizards with **zero event-shape change** —
-  fully reversible. Remove `SESSIONS` once at parity.
+  fully reversible. `SESSIONS` / `sessionSubjectId` / `sessionPath` STAY in `manifest.ts` through B2 —
+  the readers (Journal, DayTimeline, SessionStreakGrid, LifeDashboard) still consume them, and the
+  fat-event shape is unchanged. They are removed in **B3**, when the readers are made group-aware and
+  the write path flips to per-item events. (The ViewRunner deletes only `SessionRunner` /
+  `MorningUpkeepHeader` / the `findMorningIntention`/`findCurrentWeekIntention` resolvers — all
+  superseded by `lib/templating.ts`.)
 - **Phase B3 — the cutover (one deploy).** Flip the runner to per-item events (`labels.view*`) +
   make Journal/DayTimeline/SessionStreakGrid/`bundle.ts` group-aware (read both shapes) + **run the
   §4 migration in the same deploy** so no day ever shows mixed shapes (B3). Backup first; the
