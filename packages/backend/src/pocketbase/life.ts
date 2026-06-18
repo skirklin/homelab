@@ -49,6 +49,13 @@ function manifestFromRecord(raw: unknown): LifeManifest | null {
   // `goals` is the optional thin interpretive layer; carry it through verbatim
   // when present (legacy manifests omit it). The pure ops validate on write.
   if (Array.isArray(m.goals)) out.goals = m.goals as LifeManifest["goals"];
+  // `views` / `notifications` (Unified Capture, Phase B1) carry through
+  // verbatim. An explicit `[]` is meaningful (it means "no views/notifications"
+  // — distinct from `undefined` → the DEFAULT_* fallback), so we preserve the
+  // empty array rather than coercing it to undefined.
+  if (Array.isArray(m.views)) out.views = m.views as LifeManifest["views"];
+  if (Array.isArray(m.notifications))
+    out.notifications = m.notifications as LifeManifest["notifications"];
   return out;
 }
 
