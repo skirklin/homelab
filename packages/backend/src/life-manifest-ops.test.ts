@@ -81,6 +81,41 @@ describe("addTrackable", () => {
     });
     expect(next.trackables.find((t) => t.id === "edibles")!.pinned).toHaveLength(1);
   });
+  it("accepts the reflective `noted` shape", () => {
+    const next = addTrackable(base(), { id: "gratitude", label: "Gratitude", shape: "noted" });
+    expect(next.trackables.find((t) => t.id === "gratitude")!.shape).toBe("noted");
+  });
+  it("round-trips view-render metadata (prompt/hint/refs)", () => {
+    const next = addTrackable(base(), {
+      id: "intention_followup",
+      label: "Intention follow-up",
+      shape: "noted",
+      prompt: "How did {intention} go?",
+      hint: "Be honest.",
+      refs: [{ token: "intention", fromTrackable: "daily_intention", within: "day", entry: "note" }],
+    });
+    const t = next.trackables.find((x) => x.id === "intention_followup")!;
+    expect(t.prompt).toBe("How did {intention} go?");
+    expect(t.hint).toBe("Be honest.");
+    expect(t.refs).toEqual([
+      { token: "intention", fromTrackable: "daily_intention", within: "day", entry: "note" },
+    ]);
+  });
+  it("drops empty refs[] and omits absent metadata", () => {
+    const next = addTrackable(base(), { id: "plain", label: "Plain", shape: "noted", refs: [] });
+    const t = next.trackables.find((x) => x.id === "plain")!;
+    expect(t.refs).toBeUndefined();
+    expect(t.prompt).toBeUndefined();
+    expect(t.hint).toBeUndefined();
+  });
+  it("rejects malformed refs", () => {
+    expect(() =>
+      addTrackable(base(), { id: "bad", label: "Bad", shape: "noted", refs: [{ fromTrackable: "x", within: "day" }] }),
+    ).toThrow(/token/);
+    expect(() =>
+      addTrackable(base(), { id: "bad", label: "Bad", shape: "noted", refs: [{ token: "t", fromTrackable: "x", within: "year" }] }),
+    ).toThrow(/within/);
+  });
 });
 
 describe("updateTrackable", () => {
@@ -128,6 +163,21 @@ describe("updateTrackable", () => {
   });
   it("throws on unknown trackable", () => {
     expect(() => updateTrackable(base(), "nope", { label: "x" })).toThrow(/no trackable/);
+  });
+  it("patches and clears view-render metadata", () => {
+    const withMeta = addTrackable(base(), { id: "win", label: "Win", shape: "noted" });
+    const patched = updateTrackable(withMeta, "win", {
+      prompt: "What went well?",
+      refs: [{ token: "t", fromTrackable: "mood", within: "week" }],
+    });
+    const t = patched.trackables.find((x) => x.id === "win")!;
+    expect(t.prompt).toBe("What went well?");
+    expect(t.refs).toEqual([{ token: "t", fromTrackable: "mood", within: "week" }]);
+
+    const cleared = updateTrackable(patched, "win", { prompt: "", refs: [] });
+    const c = cleared.trackables.find((x) => x.id === "win")!;
+    expect(c.prompt).toBeUndefined();
+    expect(c.refs).toBeUndefined();
   });
 });
 

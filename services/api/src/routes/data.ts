@@ -2442,6 +2442,9 @@ dataRoutes.post("/life/trackables", handler(async (c) => {
     defaultDuration?: unknown;
     ratingLabel?: unknown;
     pinned?: unknown;
+    prompt?: unknown;
+    hint?: unknown;
+    refs?: unknown;
   }>();
   if (typeof body.id !== "string" || typeof body.label !== "string" || typeof body.shape !== "string") {
     return c.json({ error: "id, label, and shape are required strings" }, 400);
@@ -2458,6 +2461,9 @@ dataRoutes.post("/life/trackables", handler(async (c) => {
       defaultDuration: body.defaultDuration,
       ratingLabel: body.ratingLabel,
       pinned: body.pinned,
+      prompt: body.prompt,
+      hint: body.hint,
+      refs: body.refs,
     }),
   );
   if (!out.ok) return c.json({ error: out.error }, out.status);
@@ -2480,6 +2486,9 @@ dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
     defaultDuration?: unknown;
     ratingLabel?: unknown;
     pinned?: unknown;
+    prompt?: unknown;
+    hint?: unknown;
+    refs?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
     // Forward `id`/`shape` so the pure op enforces immutability — a caller
@@ -2495,6 +2504,9 @@ dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
       defaultDuration: body.defaultDuration,
       ratingLabel: body.ratingLabel,
       pinned: body.pinned,
+      prompt: body.prompt,
+      hint: body.hint,
+      refs: body.refs,
     }),
   );
   if (!out.ok) return c.json({ error: out.error }, out.status);

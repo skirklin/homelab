@@ -22,12 +22,17 @@ import type {
   LifeManifest,
   LifeManifestTrackable,
   TrackableShape,
+  TemplateRef,
   QuickPayload,
   LifeEntry,
 } from "./types/life";
 
-/** Every legal shape, in display order. */
-export const TRACKABLE_SHAPES = ["took", "did", "happened", "rated"] as const;
+/**
+ * Every legal shape, in display order. `noted` (reflective free text) is last
+ * and is deliberately NOT shown on the dashboard input surfaces — see the
+ * exclusion invariant in apps/life/.../lib/shapes.ts (`isReflective`).
+ */
+export const TRACKABLE_SHAPES = ["took", "did", "happened", "rated", "noted"] as const;
 
 /** Stable error codes so callers can map to HTTP status / messages. */
 export type ManifestErrorCode =
@@ -203,6 +208,41 @@ export function validatePins(raw: unknown): QuickPayload[] {
   });
 }
 
+/**
+ * Validate the optional `refs[]` view-render metadata on a vocab row. These are
+ * UNUSED by capture in Phase A (the Phase-B View renderer consumes them) but
+ * must round-trip through the manifest ops without being dropped or corrupted.
+ * Returns the typed list, or undefined when absent. An empty array clears.
+ */
+function validateRefs(raw: unknown): TemplateRef[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) throw new ManifestError("invalid_default", "refs must be an array");
+  const out: TemplateRef[] = raw.map((r, i) => {
+    if (!r || typeof r !== "object" || Array.isArray(r)) {
+      throw new ManifestError("invalid_default", `refs[${i}] must be an object`);
+    }
+    const ref = r as Record<string, unknown>;
+    if (typeof ref.token !== "string" || ref.token.length === 0) {
+      throw new ManifestError("invalid_default", `refs[${i}].token must be a non-empty string`);
+    }
+    if (typeof ref.fromTrackable !== "string" || ref.fromTrackable.length === 0) {
+      throw new ManifestError("invalid_default", `refs[${i}].fromTrackable must be a non-empty string`);
+    }
+    if (ref.within !== "day" && ref.within !== "week") {
+      throw new ManifestError("invalid_default", `refs[${i}].within must be "day" or "week"`);
+    }
+    const next: TemplateRef = { token: ref.token, fromTrackable: ref.fromTrackable, within: ref.within };
+    if (ref.entry !== undefined) {
+      if (typeof ref.entry !== "string" || ref.entry.length === 0) {
+        throw new ManifestError("invalid_default", `refs[${i}].entry must be a non-empty string`);
+      }
+      next.entry = ref.entry;
+    }
+    return next;
+  });
+  return out;
+}
+
 /** Empty manifest, used when a log has no manifest yet. */
 export function emptyManifest(): LifeManifest {
   return { trackables: [] };
@@ -226,6 +266,9 @@ export function addTrackable(
     defaultDuration?: unknown;
     ratingLabel?: unknown;
     pinned?: unknown;
+    prompt?: unknown;
+    hint?: unknown;
+    refs?: unknown;
   },
 ): LifeManifest {
   if (!isSlug(input.id)) {
@@ -257,6 +300,13 @@ export function addTrackable(
   if (ratingLabel !== undefined) next.ratingLabel = ratingLabel;
   const pins = validatePins(input.pinned);
   if (pins.length > 0) next.pinned = pins;
+  // View-render metadata (Phase-B consumers; round-trips through here).
+  const prompt = validateOptionalString(input.prompt, "prompt", "invalid_label");
+  if (prompt !== undefined) next.prompt = prompt;
+  const hint = validateOptionalString(input.hint, "hint", "invalid_label");
+  if (hint !== undefined) next.hint = hint;
+  const refs = validateRefs(input.refs);
+  if (refs !== undefined && refs.length > 0) next.refs = refs;
   return { trackables: [...current.trackables, next] };
 }
 
@@ -283,6 +333,9 @@ export function updateTrackable(
     defaultDuration?: unknown;
     ratingLabel?: unknown;
     pinned?: unknown;
+    prompt?: unknown;
+    hint?: unknown;
+    refs?: unknown;
   },
 ): LifeManifest {
   const idx = current.trackables.findIndex((t) => t.id === trackableId);
@@ -339,6 +392,21 @@ export function updateTrackable(
     const pins = validatePins(patch.pinned);
     if (pins.length > 0) next.pinned = pins;
     else delete next.pinned;
+  }
+
+  // View-render metadata (Phase-B). Nullable: null/"" clears.
+  if (patch.prompt !== undefined) {
+    if (patch.prompt === null || patch.prompt === "") delete next.prompt;
+    else next.prompt = validateOptionalString(patch.prompt, "prompt", "invalid_label");
+  }
+  if (patch.hint !== undefined) {
+    if (patch.hint === null || patch.hint === "") delete next.hint;
+    else next.hint = validateOptionalString(patch.hint, "hint", "invalid_label");
+  }
+  if (patch.refs !== undefined) {
+    const refs = validateRefs(patch.refs);
+    if (refs !== undefined && refs.length > 0) next.refs = refs;
+    else delete next.refs;
   }
 
   const trackables = current.trackables.slice();

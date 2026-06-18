@@ -22,6 +22,7 @@
  *     form a dominant chip — intended; pins cover those shortcuts.
  */
 import type { LifeEvent, LifeEntry, QuickPayload, LifeManifestTrackable } from "@homelab/backend";
+import { isInputEligible } from "./shapes";
 
 /** Default recency half-life. ~3 weeks: recent habits dominate, old ones fade. */
 const DEFAULT_HALF_LIFE_DAYS = 21;
@@ -157,10 +158,14 @@ export interface GlobalAction {
 }
 
 /**
- * Aggregate the most-frecent actions across all (non-hidden) vocab rows for
+ * Aggregate the most-frecent actions across all INPUT-ELIGIBLE vocab rows for
  * the global quick-log row. ALL pins come first (stable, in vocab order,
  * flagged, NEVER trimmed — they are deliberate favorites), then frecency
  * fills any remaining slots up to `limit`, deduped against the pins.
+ *
+ * Eligibility is `isInputEligible` (non-hidden AND non-reflective): replaying a
+ * free-text `noted` action is meaningless, so reflective vocab is excluded here
+ * as well as from its pins. This is one site of the EXCLUSION INVARIANT.
  */
 export function globalFrecentActions(
   events: LifeEvent[],
@@ -170,7 +175,7 @@ export function globalFrecentActions(
   const now = options.now ?? new Date();
   const halfLife = options.halfLifeDays ?? DEFAULT_HALF_LIFE_DAYS;
   const limit = options.limit ?? 8;
-  const visible = trackables.filter((t) => !t.hidden);
+  const visible = trackables.filter(isInputEligible);
 
   // Pins first — stable, in vocab order, deduped within each trackable.
   const out: GlobalAction[] = [];

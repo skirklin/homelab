@@ -24,6 +24,9 @@ import {
   labelFor,
   eventsForThing,
   eventsForDay,
+  isReflective,
+  isInputEligible,
+  SHAPE_ORDER,
 } from "./shapes";
 
 let counter = 0;
@@ -83,6 +86,54 @@ describe("buildEntries", () => {
     ]);
     expect(buildEntries("rated", { rating: 6 })).toBeNull();
     expect(buildEntries("rated", {})).toBeNull();
+  });
+
+  it("noted → single text `note` entry; blank/absent → null", () => {
+    expect(buildEntries("noted", { text: "grateful for the rain" })).toEqual([
+      { name: "note", type: "text", value: "grateful for the rain" },
+    ]);
+    // trims, and a whitespace-only / empty / absent body is rejected so we
+    // never write an empty entries[] (PB addEvent rejects it).
+    expect(buildEntries("noted", { text: "  trimmed  " })).toEqual([
+      { name: "note", type: "text", value: "trimmed" },
+    ]);
+    expect(buildEntries("noted", { text: "   " })).toBeNull();
+    expect(buildEntries("noted", { text: "" })).toBeNull();
+    expect(buildEntries("noted", {})).toBeNull();
+  });
+});
+
+describe("input-surface exclusion invariant (noted)", () => {
+  const vocab: LifeManifestTrackable[] = [
+    { id: "coffee", label: "Coffee", shape: "took" },
+    { id: "gratitude", label: "Gratitude", shape: "noted" }, // non-hidden, reflective
+    { id: "mood", label: "Mood", shape: "rated" },
+  ];
+
+  it("isReflective is true only for noted", () => {
+    expect(isReflective("noted")).toBe(true);
+    expect(isReflective("took")).toBe(false);
+    expect(isReflective("did")).toBe(false);
+    expect(isReflective("happened")).toBe(false);
+    expect(isReflective("rated")).toBe(false);
+  });
+
+  it("isInputEligible excludes hidden AND non-hidden reflective rows", () => {
+    expect(isInputEligible({ id: "a", label: "A", shape: "took" })).toBe(true);
+    expect(isInputEligible({ id: "g", label: "G", shape: "noted" })).toBe(false);
+    expect(isInputEligible({ id: "h", label: "H", shape: "took", hidden: true })).toBe(false);
+  });
+
+  it("SHAPE_ORDER (the 2×2 grid) omits noted but lists the input shapes", () => {
+    expect(SHAPE_ORDER).toEqual(["took", "did", "happened", "rated"]);
+    expect(SHAPE_ORDER).not.toContain("noted");
+  });
+
+  it("thingsOfShape never surfaces a noted row on an input surface", () => {
+    // A noted row is non-hidden vocab, but it must not appear when enumerating
+    // input things — even if asked for its own shape directly.
+    expect(thingsOfShape(vocab, "noted")).toEqual([]);
+    expect(thingsOfShape(vocab, "took").map((t) => t.id)).toEqual(["coffee"]);
   });
 });
 

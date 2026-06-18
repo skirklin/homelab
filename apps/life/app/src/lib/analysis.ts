@@ -71,6 +71,9 @@ export function dailyValue(
       const first = cell.sums.entries().next();
       return first.done ? null : first.value[1];
     }
+    case "noted":
+      // Reflective text carries no numeric magnitude — nothing to chart.
+      return null;
   }
 }
 

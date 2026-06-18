@@ -224,6 +224,9 @@ function prefillFor(
       return { scale: last.scale ?? 5 };
     case "happened":
       return {};
+    case "noted":
+      // Reflective text is never prefilled (each note is fresh).
+      return {};
   }
 }
 
@@ -392,7 +395,8 @@ export function ShapeSheet({ shape, onClose, trackables, events, userId, logId, 
       message.warning(
         selected.shape === "took" ? "Enter an amount"
           : selected.shape === "did" ? "Enter a duration"
-            : "Pick a rating",
+            : selected.shape === "noted" ? "Write something first"
+              : "Pick a rating",
       );
       return;
     }
@@ -401,6 +405,8 @@ export function ShapeSheet({ shape, onClose, trackables, events, userId, logId, 
     // shape's other prefills are replay-friendly and persist).
     if (selected.shape === "rated") setValues((v) => ({ ...v, rating: null }));
     if (selected.shape === "did") setValues((v) => ({ ...v, rating: null, notes: "" }));
+    // Noted: clear the text so a follow-up note starts blank.
+    if (selected.shape === "noted") setValues((v) => ({ ...v, text: "" }));
   }, [selected, values, doLog, message]);
 
   // ---- Per-thing chips: pins first, frecency fills ---------------------
@@ -608,6 +614,20 @@ export function ShapeSheet({ shape, onClose, trackables, events, userId, logId, 
                       </RatingNum>
                     ))}
                   </RatingRow>
+                )}
+
+                {/* Reflective free-text capture. `noted` vocab is View-only, so
+                    this branch isn't reachable from the dashboard grid in Phase
+                    A — but it's the reusable widget the Phase-B ViewRunner
+                    renders, so it lives here as a clean, self-contained field. */}
+                {selected.shape === "noted" && (
+                  <TextFieldEditor
+                    label={selected.prompt ?? "Note"}
+                    value={values.text ?? ""}
+                    onChange={(v) => setValues((s) => ({ ...s, text: v }))}
+                    placeholder="A few words…"
+                    rows={4}
+                  />
                 )}
 
                 <LogRow>
