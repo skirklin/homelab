@@ -13,7 +13,7 @@
  * mid-history. Centralizing the policy here means there is one place that
  * decides what a legal mutation is.
  *
- * Mutation discipline (mirrors `setTrackablePins`): every op does a structural
+ * Mutation discipline: every op does a structural
  * read-modify-write that touches ONLY the targeted trackable and otherwise
  * preserves the rest of the manifest byte-for-byte. Callers persist the
  * returned manifest wholesale.
@@ -463,8 +463,8 @@ export function reorderTrackables(current: LifeManifest, orderedIds: unknown): L
 
 /**
  * Set a trackable's `pinned[]` wholesale (validated). Used by the pin
- * add/remove MCP tools, which compute the full next list. Mirrors the existing
- * `setTrackablePins` backend method but as a pure manifest op.
+ * add/remove MCP tools (via the `PUT /life/trackables/:id/pins` route), which
+ * compute the full next list. This pure op is the single pin-write path.
  */
 export function setPins(current: LifeManifest, trackableId: string, pinned: unknown): LifeManifest {
   const idx = current.trackables.findIndex((t) => t.id === trackableId);

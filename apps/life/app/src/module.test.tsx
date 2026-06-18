@@ -21,7 +21,6 @@ const mockLifeBackend = {
   deleteEvent: vi.fn(),
   subscribeToEvents: vi.fn(() => () => {}),
   clearSampleSchedule: vi.fn(),
-  setTrackablePins: vi.fn(),
 };
 
 const mockChatBackend = { listMessages: vi.fn().mockResolvedValue([]) };
