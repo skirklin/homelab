@@ -100,64 +100,6 @@ describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () =>
   });
 });
 
-/**
- * setTrackablePins drives a read (plain client getOne) + a wpb update. The
- * stub returns a manifest record on getOne so the read-modify-write path runs.
- */
-function makePinBackend(opts: { manifest?: unknown } = {}): {
-  backend: PocketBaseLifeBackend;
-  updateSpy: ReturnType<typeof vi.fn>;
-  getOneSpy: ReturnType<typeof vi.fn>;
-} {
-  const updateSpy = vi.fn(() => Promise.resolve({}));
-  const getOneSpy = vi.fn(() => Promise.resolve({ id: "log1", manifest: opts.manifest }));
-  const wpb = {
-    collection: () => ({ create: vi.fn(), update: updateSpy }),
-  } as unknown as WrappedPocketBase;
-  const pb = (() => ({
-    filter: (s: string) => s,
-    collection: () => ({ getOne: getOneSpy }),
-  })) as unknown as () => PocketBase;
-  const mirror = {} as PBMirror;
-  return { backend: new PocketBaseLifeBackend(pb, wpb, mirror), updateSpy, getOneSpy };
-}
-
-describe("PocketBaseLifeBackend.setTrackablePins — read-modify-write of manifest.pinned[]", () => {
-  const manifest = {
-    trackables: [
-      { id: "edibles", label: "Edibles", shape: "took", defaultUnit: "mg" },
-      { id: "coffee", label: "Coffee", shape: "took", defaultUnit: "oz" },
-    ],
-  };
-
-  it("swaps only the target trackable's pinned[], leaving others untouched", async () => {
-    const { backend, updateSpy } = makePinBackend({ manifest });
-    const pins = [{ label: "5mg", entries: [{ name: "dose", type: "number" as const, value: 5, unit: "mg" }] }];
-    await backend.setTrackablePins("log1", "edibles", pins);
-
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    const [, patch] = updateSpy.mock.calls[0];
-    const written = (patch as { manifest: typeof manifest }).manifest;
-    const edibles = written.trackables.find((t) => t.id === "edibles")!;
-    const coffee = written.trackables.find((t) => t.id === "coffee")!;
-    expect((edibles as { pinned?: unknown }).pinned).toEqual(pins);
-    // Coffee is byte-for-byte the original (no pinned key introduced).
-    expect(coffee).toEqual(manifest.trackables[1]);
-  });
-
-  it("no-ops cleanly when the trackable is not in the manifest", async () => {
-    const { backend, updateSpy } = makePinBackend({ manifest });
-    await backend.setTrackablePins("log1", "ghost", []);
-    expect(updateSpy).not.toHaveBeenCalled();
-  });
-
-  it("no-ops cleanly when the log has no manifest (legacy row)", async () => {
-    const { backend, updateSpy } = makePinBackend({ manifest: null });
-    await backend.setTrackablePins("log1", "edibles", []);
-    expect(updateSpy).not.toHaveBeenCalled();
-  });
-});
-
 describe("PocketBaseLifeBackend.addEvent — empty-payload invariant (F1)", () => {
   it("throws when entries[] is empty and does not touch the backend", async () => {
     const { backend, createSpy } = makeBackend();

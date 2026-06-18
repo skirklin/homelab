@@ -150,6 +150,38 @@ describe("life goals: CRUD round-trip", () => {
   });
 });
 
+describe("life goals: a goal-write through the route preserves sibling keys", () => {
+  // Locks the shared applyManifestMutation path on a GOALS route (the trackable
+  // route already has this guard). Seed an explicit `views: []` on the log, add
+  // a goal through the real route, confirm `views` is STILL [] — not dropped to
+  // undefined (→ DEFAULT_VIEWS), not reverted. `[]` is load-bearing.
+  it("a POST /life/goals leaves an explicit views [] intact", async () => {
+    const carol = await makeActor("carol-goal");
+    await req("/data/life/goals", { token: carol.apiToken }); // get-or-create the log
+
+    const logs = await adminPb.collection("life_logs").getList(1, 1, {
+      filter: adminPb.filter("owner = {:uid}", { uid: carol.id }),
+      sort: "created",
+    });
+    const log = logs.items[0];
+    await adminPb.collection("life_logs").update(log.id, {
+      manifest: { ...(log.manifest as Record<string, unknown>), views: [] },
+    });
+
+    const add = await req("/data/life/goals", {
+      method: "POST",
+      token: carol.apiToken,
+      body: { id: "carol-goal", label: "Carol", scope: { thing: "water" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+    });
+    expect(add.status).toBe(201);
+
+    const after = await adminPb.collection("life_logs").getOne(log.id);
+    const manifest = after.manifest as any;
+    expect(manifest.goals.map((g: any) => g.id)).toContain("carol-goal");
+    expect(manifest.views, "views: [] must survive the goals RMW").toEqual([]);
+  });
+});
+
 describe("life goals: cross-user isolation", () => {
   it("bob cannot see or touch alice's goals", async () => {
     await req("/data/life/goals", {

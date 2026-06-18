@@ -14,7 +14,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { LifeBackend, AddTrackableInput, UpdateTrackablePatch, AddGoalInput, UpdateGoalPatch } from "../interfaces/life";
-import type { LifeLog, LifeEvent, LifeEntry, LifeManifest, QuickPayload } from "../types/life";
+import type { LifeLog, LifeEvent, LifeEntry, LifeManifest } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
 import { defaultLifeManifest } from "../life-manifest-default";
@@ -49,6 +49,13 @@ function manifestFromRecord(raw: unknown): LifeManifest | null {
   // `goals` is the optional thin interpretive layer; carry it through verbatim
   // when present (legacy manifests omit it). The pure ops validate on write.
   if (Array.isArray(m.goals)) out.goals = m.goals as LifeManifest["goals"];
+  // `views` / `notifications` (Unified Capture, Phase B1) carry through
+  // verbatim. An explicit `[]` is meaningful (it means "no views/notifications"
+  // — distinct from `undefined` → the DEFAULT_* fallback), so we preserve the
+  // empty array rather than coercing it to undefined.
+  if (Array.isArray(m.views)) out.views = m.views as LifeManifest["views"];
+  if (Array.isArray(m.notifications))
+    out.notifications = m.notifications as LifeManifest["notifications"];
   return out;
 }
 
@@ -168,26 +175,6 @@ export class PocketBaseLifeBackend implements LifeBackend {
     await this.wpb.collection("life_logs").update(logId, {
       random_sampling_enabled: enabled,
     });
-  }
-
-  async setTrackablePins(logId: string, trackableId: string, pins: QuickPayload[]): Promise<void> {
-    // Read-modify-write the single `manifest` JSON column. `pinned[]` is
-    // presentation state (not a history join key), so swapping it in place is
-    // safe. We read the freshest manifest from the plain client (the wpb queue
-    // overlay isn't needed for a config read), splice in the new pins for just
-    // this trackable, and write the whole manifest back. A missing trackable
-    // is a clean no-op — it may have been removed from the manifest.
-    const rec = await this.pb().collection("life_logs").getOne(logId);
-    const manifest = manifestFromRecord(rec.manifest);
-    if (!manifest) return;
-    const idx = manifest.trackables.findIndex((t) => t.id === trackableId);
-    if (idx === -1) return;
-    const next: LifeManifest = {
-      trackables: manifest.trackables.map((t, i) =>
-        i === idx ? { ...t, pinned: pins } : t,
-      ),
-    };
-    await this.wpb.collection("life_logs").update(logId, { manifest: next });
   }
 
   async mutateManifest(

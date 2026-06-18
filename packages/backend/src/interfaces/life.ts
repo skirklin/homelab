@@ -99,17 +99,6 @@ export interface LifeBackend {
    */
   setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void>;
 
-  /**
-   * Replace one trackable's `pinned[]` quick-action favorites in the log's
-   * manifest. Read-modify-write of the single `manifest` JSON column: the
-   * caller computes the complete new pin list (the per-trackable set is small),
-   * and only that trackable's `pinned` is swapped — every other trackable and
-   * field is left byte-for-byte intact. No-ops cleanly if the trackable isn't
-   * in the manifest (it may have been removed). `pinned[]` is presentation
-   * state, NOT a history join key, so it is freely mutable.
-   */
-  setTrackablePins(logId: string, trackableId: string, pins: QuickPayload[]): Promise<void>;
-
   // --- Trackable manifest (P4) ---
 
   /**
@@ -118,7 +107,7 @@ export interface LifeBackend {
    * null/garbage) and returns the next one. Every trackable mutation below is
    * built on this: it reads the freshest manifest, applies a PURE op from
    * `life-manifest-ops`, and writes the whole manifest back, touching ONLY the
-   * targeted trackable and never clobbering the rest (mirrors `setTrackablePins`).
+   * targeted trackable and never clobbering the rest.
    * The pure op throws `ManifestError` on invalid input; this method does not
    * catch it. Returns the persisted manifest.
    */

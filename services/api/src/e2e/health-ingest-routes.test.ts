@@ -252,6 +252,75 @@ describe("POST /health/ingest (Phase-2 mapper)", () => {
     expect(stepsAfter).toEqual(stepsBefore); // counters did NOT double
   });
 
+  it("preserves manifest sibling keys (views/goals) when appending a new trackable", async () => {
+    // Bug #14 guard: ensureTrackables read-modify-writes the manifest to append
+    // a still-missing trackable on every sync. A naive manifestOf that only
+    // carries `trackables` strips `views`/`notifications`/`goals` on write-back,
+    // silently reverting a user's Unified-Capture config (incl. an explicit
+    // `views: []`) to defaults on routine background sync.
+    //
+    // Use a FRESH user so we control the seed manifest: a goal + an explicit
+    // empty views[]. Seeding only the `sleep` trackable means the first health
+    // payload (which carries weight/steps/etc.) MUST append new trackables,
+    // exercising the write-back path. After ingest both siblings must survive.
+    const seedEmail = `health-ingest-sibling-${Date.now()}-${randomBytes(4).toString("hex")}@example.com`;
+    const seedPassword = "testpassword123";
+    const seedUser = await adminPb.collection("users").create({
+      email: seedEmail,
+      password: seedPassword,
+      passwordConfirm: seedPassword,
+      name: "Sibling-Key Guard User",
+    });
+    const seedGoal = {
+      id: "sleep-goal",
+      label: "Sleep enough",
+      scope: { thing: "sleep" },
+      kind: "at_least",
+      metric: "sum",
+      unit: "min",
+      target: 420,
+      period: "day",
+    };
+    await adminPb.collection("life_logs").create({
+      name: "Life Log",
+      owner: seedUser.id,
+      manifest: {
+        trackables: [{ id: "sleep", label: "Sleep", shape: "did", defaultUnit: "min" }],
+        goals: [seedGoal],
+        views: [], // explicit empty — MUST survive (distinct from undefined → default)
+      },
+    });
+
+    const seedPb = new PocketBase(PB_URL);
+    seedPb.autoCancellation(false);
+    await seedPb.collection("users").authWithPassword(seedEmail, seedPassword);
+    const tokResp = await app.request("/auth/tokens", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${seedPb.authStore.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "sibling-guard-token" }),
+    });
+    const seedToken = ((await tokResp.json()) as { token: string }).token;
+
+    const { status } = await ingest({ token: seedToken, body: PAYLOAD });
+    expect(status).toBe(200);
+
+    const logs = await adminPb.collection("life_logs").getList(1, 1, {
+      filter: adminPb.filter("owner = {:uid}", { uid: seedUser.id }),
+    });
+    const manifest = logs.items[0].manifest as {
+      trackables: { id: string }[];
+      goals?: { id: string }[];
+      views?: unknown[];
+    };
+    // New trackables were appended (proving the write-back path ran)…
+    const ids = new Set(manifest.trackables.map((t) => t.id));
+    expect(ids.has("weight")).toBe(true);
+    expect(ids.has("sleep")).toBe(true);
+    // …and the sibling keys survived untouched.
+    expect(manifest.views).toEqual([]);
+    expect(manifest.goals).toEqual([seedGoal]);
+  });
+
   it("accumulates a later record on the same local day into the SAME day event (no new row)", async () => {
     // The 2026-06-14 PT steps day already holds 410 (from PAYLOAD). A delta-sync
     // adding a brand-new record (past the stored hwm) in a different hour of the

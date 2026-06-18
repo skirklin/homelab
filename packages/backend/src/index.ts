@@ -26,8 +26,14 @@ export type {
   LifeLog, LifeEvent, LifeEntry, SampleSchedule,
   LifeManifest, LifeManifestTrackable, TrackableShape, QuickPayload, TemplateRef,
   LifeGoal, LifeGoalScope, LifeGoalKind, LifeGoalMetric,
+  LifeView, LifeViewItem, LifeNotification, LifeNotifyStrategy,
 } from "./types/life";
 export { DEFAULT_LIFE_MANIFEST, defaultLifeManifest } from "./life-manifest-default";
+export {
+  DEFAULT_VIEW_TRACKABLES,
+  DEFAULT_VIEWS,
+  DEFAULT_NOTIFICATIONS,
+} from "./life-view-defaults";
 export {
   ManifestError,
   TRACKABLE_SHAPES,

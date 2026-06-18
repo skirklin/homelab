@@ -109,9 +109,101 @@ export interface LifeManifestTrackable {
   prompt?: string;
   /** View-render sub-label; may contain `{token}`s. Phase-B only. */
   hint?: string;
+  /** View-render input placeholder (the textarea's empty-state ghost text,
+   *  byte-faithful to today's session prompt `placeholder`). Phase-B only. */
+  placeholder?: string;
   /** Template references for `{token}`s in `prompt`/`hint`. Phase-B only. */
   refs?: TemplateRef[];
 }
+
+/**
+ * A View is a named, ordered set of capture items rendered for human input —
+ * the unifying primitive of the Unified Capture redesign. Today's morning /
+ * evening / weekly *sessions* are Views rendered `guided`; the dashboard's
+ * inline shape-grid is conceptually a View rendered `inline`. One renderer.
+ *
+ * Stored on `life_logs.manifest.views`. UNUSED by any live surface in Phase B1
+ * (sessions still run the old `SessionRunner`/`SESSIONS` path) — the data model
+ * lands first, the ViewRunner consumes it in Phase B2.
+ */
+export interface LifeView {
+  /** IMMUTABLE — runner slug; written to `life_events.labels.view`. */
+  id: string;
+  title: string;
+  /** One-line greeting shown at the top of a guided run. */
+  greeting?: string;
+  /** Icon hint for the View card (e.g. "sun" / "moon" / "calendar"). */
+  icon?: string;
+  /** "guided" = stepped wizard (sessions); "inline" = the dashboard surface. */
+  render?: "guided" | "inline";
+  items: LifeViewItem[];
+}
+
+/**
+ * One renderable item in a View. A discriminated union on `kind`:
+ *   - `capture`  — prompt the user to log a vocab row. The prompt/hint/refs
+ *                  live on the VOCAB row (`LifeManifestTrackable`), not here;
+ *                  this item only names the `trackableId` and whether it may be
+ *                  skipped. A required (`optional` falsy) capture whose vocab
+ *                  prompt has an unresolvable required ref is dropped by the
+ *                  renderer (preserving today's no-nudge behavior).
+ *   - `tasks_due` — a declarative header echoing upkeep tasks due today (today's
+ *                  MorningUpkeepHeader). Writes no event.
+ *   - `banner`   — a read-only templated echo ("This week: {wk}"). Writes no
+ *                  event; drops silently if a required `refs` token is absent.
+ *
+ * Renderer contract (Phase B2): non-capture blocks render BEFORE the first
+ * capture step, matching today's wizard layout.
+ */
+export type LifeViewItem =
+  | { kind: "capture"; trackableId: string; optional?: boolean }
+  | { kind: "tasks_due" }
+  | { kind: "banner"; text: string; refs: TemplateRef[] };
+
+/**
+ * A scheduled nudge that targets a View. Decoupled from View *content* — a View
+ * defines WHAT to capture; a notification defines WHEN to open it. Stored on
+ * `life_logs.manifest.notifications`. UNUSED by the cron in Phase B1 — the
+ * strategy dispatch (fixed + random + `subsumes` + per-user reminder-time
+ * reconciliation) is Phase B4.
+ */
+export interface LifeNotification {
+  /** IMMUTABLE — keys `reminder_state`. */
+  id: string;
+  /** The View id to open when the nudge fires. */
+  target: string;
+  strategy: LifeNotifyStrategy;
+  /** Defaults to true when omitted. */
+  enabled?: boolean;
+}
+
+/**
+ * How a notification decides when to fire:
+ *   - `fixed`  — a wall-clock time on a daily/weekly cadence. `weekday`
+ *                (0 = Sunday) pins a weekly cadence to one day. `subsumes`
+ *                lists notification ids this one REPLACES on its day (the weekly
+ *                review subsumes the evening reminder on Sunday).
+ *   - `random` — random sampling: `timesPerDay` pushes spread across
+ *                `activeHours` ([startHour, endHour], 24h local). Reproduces the
+ *                `RANDOM_SAMPLES` behavior; gated by `random_sampling_enabled`.
+ */
+export type LifeNotifyStrategy =
+  | {
+      kind: "fixed";
+      cadence: "daily" | "weekly";
+      /** "HH:MM" 24h local. */
+      time: string;
+      /** 0 = Sunday … 6 = Saturday. Only meaningful for cadence "weekly". */
+      weekday?: number;
+      /** Notification ids this one replaces on its day. */
+      subsumes?: string[];
+    }
+  | {
+      kind: "random";
+      timesPerDay: number;
+      /** [startHour, endHour] 24h local, inclusive start / exclusive end. */
+      activeHours: [number, number];
+    };
 
 /**
  * What a goal measures over its qualifying events:
@@ -169,6 +261,21 @@ export interface LifeGoal {
 export interface LifeManifest {
   trackables: LifeManifestTrackable[];
   goals?: LifeGoal[];
+  /**
+   * The user's capture Views (the Unified Capture primitive). RESOLVE SEMANTICS
+   * (see `useViews`): `undefined` → fall back to `DEFAULT_VIEWS` (legacy logs
+   * and new logs that haven't customized); `[]` → explicitly NO views (Angela);
+   * a non-empty array → exactly those. Distinguishing `undefined` from `[]` is
+   * load-bearing, so the PB mapper carries an explicit `[]` through verbatim.
+   * UNUSED by any live surface in Phase B1.
+   */
+  views?: LifeView[];
+  /**
+   * The user's scheduled nudges. Same RESOLVE SEMANTICS as `views`
+   * (`undefined` → `DEFAULT_NOTIFICATIONS`; `[]` → explicitly none). UNUSED by
+   * the cron in Phase B1 (Phase B4 wires strategy dispatch).
+   */
+  notifications?: LifeNotification[];
 }
 
 export interface LifeLog {

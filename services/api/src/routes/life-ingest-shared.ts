@@ -61,17 +61,24 @@ export type EnsureSpec = {
 };
 
 type ManifestTrackable = { id: string; shape: string; [k: string]: unknown };
-type Manifest = { trackables: ManifestTrackable[]; goals?: unknown[] };
+// `trackables` is the only key this module reads/writes; ALL other sibling
+// keys (`goals`, `views`, `notifications`, plus any future ones) are carried
+// through OPAQUELY via the index signature so the append-only write-back in
+// `ensureTrackables` never strips them (regression: routine Health-Connect /
+// screen-time syncs would otherwise revert a user's `views`/`notifications`
+// to defaults).
+type Manifest = { trackables: ManifestTrackable[]; [k: string]: unknown };
 
-/** Coerce a PB manifest JSON value into a Manifest, defaulting to empty. */
+/**
+ * Coerce a PB manifest JSON value into a Manifest, defaulting to empty.
+ * Spreads every sibling key through unchanged — we only ever mutate
+ * `trackables`, so the rest of the manifest survives the round-trip.
+ */
 function manifestOf(raw: unknown): Manifest {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const m = raw as Record<string, unknown>;
     if (Array.isArray(m.trackables)) {
-      return {
-        trackables: m.trackables as ManifestTrackable[],
-        goals: Array.isArray(m.goals) ? (m.goals as unknown[]) : undefined,
-      };
+      return { ...m, trackables: m.trackables as ManifestTrackable[] };
     }
   }
   return { trackables: [] };

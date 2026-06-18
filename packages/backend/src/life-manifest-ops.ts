@@ -13,7 +13,7 @@
  * mid-history. Centralizing the policy here means there is one place that
  * decides what a legal mutation is.
  *
- * Mutation discipline (mirrors `setTrackablePins`): every op does a structural
+ * Mutation discipline: every op does a structural
  * read-modify-write that touches ONLY the targeted trackable and otherwise
  * preserves the rest of the manifest byte-for-byte. Callers persist the
  * returned manifest wholesale.
@@ -268,6 +268,7 @@ export function addTrackable(
     pinned?: unknown;
     prompt?: unknown;
     hint?: unknown;
+    placeholder?: unknown;
     refs?: unknown;
   },
 ): LifeManifest {
@@ -305,9 +306,11 @@ export function addTrackable(
   if (prompt !== undefined) next.prompt = prompt;
   const hint = validateOptionalString(input.hint, "hint", "invalid_label");
   if (hint !== undefined) next.hint = hint;
+  const placeholder = validateOptionalString(input.placeholder, "placeholder", "invalid_label");
+  if (placeholder !== undefined) next.placeholder = placeholder;
   const refs = validateRefs(input.refs);
   if (refs !== undefined && refs.length > 0) next.refs = refs;
-  return { trackables: [...current.trackables, next] };
+  return { ...current, trackables: [...current.trackables, next] };
 }
 
 /**
@@ -335,6 +338,7 @@ export function updateTrackable(
     pinned?: unknown;
     prompt?: unknown;
     hint?: unknown;
+    placeholder?: unknown;
     refs?: unknown;
   },
 ): LifeManifest {
@@ -403,6 +407,10 @@ export function updateTrackable(
     if (patch.hint === null || patch.hint === "") delete next.hint;
     else next.hint = validateOptionalString(patch.hint, "hint", "invalid_label");
   }
+  if (patch.placeholder !== undefined) {
+    if (patch.placeholder === null || patch.placeholder === "") delete next.placeholder;
+    else next.placeholder = validateOptionalString(patch.placeholder, "placeholder", "invalid_label");
+  }
   if (patch.refs !== undefined) {
     const refs = validateRefs(patch.refs);
     if (refs !== undefined && refs.length > 0) next.refs = refs;
@@ -411,7 +419,7 @@ export function updateTrackable(
 
   const trackables = current.trackables.slice();
   trackables[idx] = next;
-  return { trackables };
+  return { ...current, trackables };
 }
 
 /**
@@ -423,7 +431,7 @@ export function removeTrackable(current: LifeManifest, trackableId: string): Lif
   if (!current.trackables.some((t) => t.id === trackableId)) {
     throw new ManifestError("not_found", `no trackable with id "${trackableId}"`);
   }
-  return { trackables: current.trackables.filter((t) => t.id !== trackableId) };
+  return { ...current, trackables: current.trackables.filter((t) => t.id !== trackableId) };
 }
 
 /**
@@ -455,8 +463,8 @@ export function reorderTrackables(current: LifeManifest, orderedIds: unknown): L
 
 /**
  * Set a trackable's `pinned[]` wholesale (validated). Used by the pin
- * add/remove MCP tools, which compute the full next list. Mirrors the existing
- * `setTrackablePins` backend method but as a pure manifest op.
+ * add/remove MCP tools (via the `PUT /life/trackables/:id/pins` route), which
+ * compute the full next list. This pure op is the single pin-write path.
  */
 export function setPins(current: LifeManifest, trackableId: string, pinned: unknown): LifeManifest {
   const idx = current.trackables.findIndex((t) => t.id === trackableId);
@@ -468,5 +476,5 @@ export function setPins(current: LifeManifest, trackableId: string, pinned: unkn
   else delete next.pinned;
   const trackables = current.trackables.slice();
   trackables[idx] = next;
-  return { trackables };
+  return { ...current, trackables };
 }
