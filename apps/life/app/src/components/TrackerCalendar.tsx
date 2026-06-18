@@ -71,8 +71,9 @@ const Cell = styled.button<{
   opacity: ${(p) => (p.$future ? 0.35 : p.$inMonth ? 1 : 0.45)};
   transition: background 0.1s;
   /* Center the day-of-month number. Empty/future cells keep dark-on-pale text;
-     saturated kinds (filled/met/over) flip to white so the number stays legible
-     against the strong fill. */
+     filled/met (cyan/green) flip to white. The over kind is amber, where
+     white-on-amber is ~1.6:1 (illegible at 10px), so it keeps dark text -
+     matching how amber pairs with dark text elsewhere (HabitBoard over-cap). */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -80,8 +81,12 @@ const Cell = styled.button<{
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  color: ${(p) =>
-    p.$future || p.$kind === "empty" ? "var(--color-text-secondary)" : "#fff"};
+  color: ${(p) => {
+    if (p.$future || p.$kind === "empty") return "var(--color-text-secondary)";
+    // Amber over-cap needs a dark number for contrast; cyan/green take white.
+    if (p.$kind === "over") return "var(--color-text, #1a1a1a)";
+    return "#fff";
+  }};
   background: ${(p) => {
     if (p.$future || p.$kind === "empty") return "var(--color-bg-muted, #f0f0f0)";
     if (p.$kind === "over") return "var(--color-warning, #faad14)";
@@ -201,7 +206,11 @@ function DayButton({
       aria-label={cell.key}
       {...hold}
     >
-      {cell.date.getDate()}
+      {/* Day number derived from the tz-correct key (YYYY-MM-DD), NOT
+          cell.date.getDate(): cell.date is a UTC instant equal to noon-in-tz, and
+          getDate() reads the BROWSER's tz — east of the saved tz that lands on the
+          next local day and prints an off-by-one number. */}
+      {Number(cell.key.slice(8))}
     </Cell>
   );
 }
