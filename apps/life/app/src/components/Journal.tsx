@@ -21,6 +21,7 @@ import {
 } from "@kirkl/shared";
 import { dayKey } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
+import { useSettingsMenu } from "../settings-menu";
 import { useLogEvent } from "../lib/useLogEvent";
 import { useTrackables } from "../lib/trackables";
 import { userTz } from "../lib/useUserTz";
@@ -278,6 +279,7 @@ function isJournalable(entry: LogEvent): boolean {
 export function Journal() {
   const navigate = useNavigate();
   const { state } = useLifeContext();
+  const { menuItems: settingsMenuItems } = useSettingsMenu();
   const trackables = useTrackables();
   const tz = userTz();
   // Single-event edit modal: tapping a freeform journal entry opens it for
@@ -452,6 +454,7 @@ export function Journal() {
       label: "Insights",
       onClick: () => navigate(`/insights${dateQuerySuffix}`),
     },
+    ...settingsMenuItems,
   ];
 
   return (

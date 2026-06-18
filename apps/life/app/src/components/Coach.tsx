@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Segmented, Spin } from "antd";
 import { AppHeader } from "@kirkl/shared";
+import { useSettingsMenu } from "../settings-menu";
 
 const Visualizations = lazy(() =>
   import("./Visualizations").then((m) => ({ default: m.Visualizations })),
@@ -47,10 +48,11 @@ export function Coach() {
   const navigate = useNavigate();
   const location = useLocation();
   const view = viewForPath(location.pathname);
+  const { menuItems } = useSettingsMenu();
 
   return (
     <>
-      <AppHeader title="Coach" />
+      <AppHeader title="Coach" menuItems={menuItems} />
       <ToggleRow>
         <Segmented<CoachView>
           value={view}
