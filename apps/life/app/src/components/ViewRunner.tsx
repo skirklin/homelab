@@ -1,24 +1,27 @@
 /**
- * Data-driven guided ViewRunner — the Phase-B2 replacement for SessionRunner on
- * the INPUT side. Given a `viewId`, it resolves a `LifeView` from `useViews()`
- * and renders its `items` as a guided wizard reproducing today's morning /
- * evening / weekly session UX (greeting, step dots, back/next, sessionStorage
- * draft, `?step=` URL param).
+ * Data-driven guided ViewRunner — the guided wizard on the INPUT side. Given a
+ * `viewId`, it resolves a `LifeView` from `useViews()` and renders its `items`
+ * as a guided wizard reproducing the morning / evening / weekly session UX
+ * (greeting, step dots, back/next, sessionStorage draft, `?step=` URL param).
  *
- * ── BYTE-IDENTICAL WRITE (the load-bearing B2 contract) ─────────────────────
- * Even though the View references the NEW split vocab ids (`daily_intention`,
- * `daily_win`, `weekly_lesson`, …), a completed run still writes EXACTLY the fat
- * `*_session` event today's SessionRunner writes:
+ * ── PER-ITEM WRITE (the B3.2 cutover) ───────────────────────────────────────
+ * On finish, the run writes N PER-ITEM `life_events` rows — one per captured,
+ * non-empty item — each under its OWN vocab `subject_id`, with canonical
+ * shape entries (`buildEntries`), correlated by labels:
  *
- *     addEvent(logId, "<viewId>_session", entries, uid, { labels: { source: "manual" } })
+ *     addEvent(logId, item.trackableId, buildEntries(shape, values), uid, {
+ *       timestamp: runTs,
+ *       labels: { source: "manual", view: viewId, view_run: runTsIso },
+ *     })
  *
- * where `entries` is keyed by the ORIGINAL prompt ids (`gratitude`, `intention`,
- * `energy`, `win`, `lesson`, …) with the same type/unit/scale `answersToEntries`
- * produced. The vocab-id → legacy-entry-name translation happens ONLY in the
- * write path, via `LEGACY_ENTRY_NAME` below. This is what makes B2 fully
- * reversible: every reader (Journal, DayTimeline, SessionStreakGrid, the Coach
- * bundle.ts) stays untouched because the on-disk shape is unchanged. The
- * per-item event split is Phase B3, NOT here.
+ * One shared `runTs` / `view_run` for the whole run so the N events co-group as
+ * a single session run (see `normalizeSessionRuns` in @homelab/backend, which
+ * every reader funnels through to render fat AND per-item runs identically).
+ *
+ * The §4 fanout migration converts ALL historical fat `*_session` events into
+ * this same per-item shape; the normalizer dedups the transient window when both
+ * shapes coexist. `synthesizeViewEvents` (below) remains ONLY as a templating
+ * read-bridge for any fat history not yet migrated — removed in B3.3.
  */
 import { useState, useEffect, useMemo, type ChangeEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -37,79 +40,21 @@ import type { LifeEntry, LifeView, LifeViewItem, LifeManifestTrackable } from "@
 import { useLifeContext } from "../life-context";
 import { useViews } from "../lib/views";
 import { useTrackables } from "../lib/trackables";
-import { DEFAULT_VIEW_TRACKABLES } from "@homelab/backend";
+import { DEFAULT_VIEW_TRACKABLES, FAT_NAME_TO_VOCAB } from "@homelab/backend";
+import { buildEntries } from "../lib/shapes";
 import { resolveTemplate } from "../lib/templating";
 import { userTz } from "../lib/useUserTz";
 import type { LogEvent } from "../types";
 import { TasksDueBlock } from "./TasksDueBlock";
 
-// ──────────────────────────────────────────────────────────────────────────
-// TRANSITIONAL (B3-REMOVABLE): new vocab id → legacy fat-event entry name.
-//
-// Used ONLY in the byte-identical write path. The View references the new split
-// vocab ids (which give each prompt its own subject_id series in B3), but the
-// fat `*_session` event TODAY is keyed by the original prompt ids. This map is
-// the inverse of the design §3 id table, verified entry-by-entry against
-// `SESSIONS` in apps/life/app/src/manifest.ts:
-//
-//   morning:  gratitude→gratitude, daily_intention→intention, energy→energy
-//   evening:  intention_followup→intention_followup, daily_win→win, daily_lesson→lesson
-//   weekly:   highlights→highlights, lows→lows, weekly_lesson→lesson, weekly_intention→intention
-//
-// Keyed PER VIEW because the new ids are globally distinct but the legacy names
-// collide across sessions (morning.intention vs weekly.intention; evening.lesson
-// vs weekly.lesson). DELETE this constant when B3 flips the write path to
-// per-item events keyed by the vocab id directly.
-const LEGACY_ENTRY_NAME: Record<string, Record<string, string>> = {
-  morning: {
-    gratitude: "gratitude",
-    daily_intention: "intention",
-    energy: "energy",
-  },
-  evening: {
-    intention_followup: "intention_followup",
-    daily_win: "win",
-    daily_lesson: "lesson",
-  },
-  weekly: {
-    highlights: "highlights",
-    lows: "lows",
-    weekly_lesson: "lesson",
-    weekly_intention: "intention",
-  },
-};
-
-// TRANSITIONAL (B3-REMOVABLE): View id → the fat-event subject_id the readers
-// expect. CRITICAL for byte-identity: morning/evening view ids equal the old
-// session ids, so `<id>_session` is unchanged — BUT the weekly View's id is
-// `weekly` (chosen so labels.view is stable across the B3 cutover) while the
-// historical session subject is `weekly_review_session` (the session id was
-// `weekly_review`). Writing `weekly_session` would orphan the event from every
-// reader (SessionStreakGrid/Journal/DayTimeline all key on
-// `sessionSubjectId("weekly_review")`). So the weekly View maps explicitly to
-// the legacy subject. Verified against `sessionSubjectId` in manifest.ts:
-//   morning → morning_session, evening → evening_session,
-//   weekly  → weekly_review_session.
-// DELETE in B3, when the write path stops emitting fat `*_session` events.
-const LEGACY_SESSION_SUBJECT: Record<string, string> = {
-  morning: "morning_session",
-  evening: "evening_session",
-  weekly: "weekly_review_session",
-};
-
-// TRANSITIONAL (B3-REMOVABLE): the inverse of LEGACY_ENTRY_NAME, indexed by the
-// legacy fat-event subject_id, mapping legacy entry name → new vocab id. Used by
-// `synthesizeViewEvents` to make today's fat `*_session` history resolvable by
-// templating refs that point at the NEW split vocab ids (e.g. evening's `{plan}`
-// ref → `daily_intention`). Without this, B2 has NO events under those vocab ids
-// (they aren't materialized until B3), so the evening follow-up and the week
-// banner would ALWAYS drop — a parity regression. DELETE in B3 (real per-item
-// events under the new ids make the synthesis unnecessary).
-const FAT_SUBJECT_TO_VOCAB: Record<string, Record<string, string>> = {
-  morning_session: { gratitude: "gratitude", intention: "daily_intention", energy: "energy" },
-  evening_session: { intention_followup: "intention_followup", win: "daily_win", lesson: "daily_lesson" },
-  weekly_review_session: { highlights: "highlights", lows: "lows", lesson: "weekly_lesson", intention: "weekly_intention" },
-};
+// TRANSITIONAL (B3.3-REMOVABLE): legacy fat-event subject_id → (legacy entry
+// name → new vocab id). The inverse-by-subject of the shared `SESSION_ID_MAP`
+// (`FAT_NAME_TO_VOCAB`). Used by `synthesizeViewEvents` to make any not-yet-
+// migrated fat `*_session` history resolvable by templating refs that point at
+// the NEW split vocab ids (e.g. evening's `{plan}` ref → `daily_intention`).
+// Once the §4 migration has run, no fat events remain and this synthesis is a
+// no-op — DELETE it (and this map) in B3.3.
+const FAT_SUBJECT_TO_VOCAB: Record<string, Record<string, string>> = FAT_NAME_TO_VOCAB;
 
 /**
  * TRANSITIONAL (B3-REMOVABLE): project today's fat `*_session` events into
@@ -209,56 +154,31 @@ interface BannerStep {
 type LeadBlock = TasksDueStep | BannerStep;
 
 /**
- * Build the legacy fat-event entries from the wizard's collected answers.
- *
- * Walks the captured vocab ids that actually appeared (the filtered step list),
- * maps each to its legacy entry name (per the view), and emits the SAME
- * type/unit/scale the old `answersToEntries` did:
- *   noted (text) → { name: legacy, type: "text",   value }
- *   rated        → { name: legacy, type: "number", value, unit: "rating", scale: 5 }
- *   (took/did/happened are not used by any default session, but are mapped
- *    canonically for completeness if a custom View ever references them.)
- * Sparse: empty / undefined answers are skipped (matches the old path).
+ * Map a wizard answer (raw form value) to the `ShapeFormValues` `buildEntries`
+ * expects, per the vocab's shape. The default session vocab only uses `noted`
+ * (text) + `rated` (1–5 rating); the other shapes are handled so a custom View
+ * referencing them produces a sensible canonical event. Returns null for an
+ * empty/missing answer so the run sparsely skips it (matches the old path).
  */
-function buildFatEntries(
-  viewId: string,
-  captureSteps: CaptureStep[],
-  answers: Record<string, unknown>,
-): LifeEntry[] {
-  const nameMap = LEGACY_ENTRY_NAME[viewId] ?? {};
-  const out: LifeEntry[] = [];
-  for (const step of captureSteps) {
-    const vocabId = step.trackable.id;
-    // For a default View, the legacy name comes from the map; for a custom View
-    // referencing an unmapped vocab id, fall back to the vocab id itself.
-    const name = nameMap[vocabId] ?? vocabId;
-    const v = answers[vocabId];
-    if (v === undefined || v === null || v === "") continue;
-    switch (step.trackable.shape) {
-      case "noted":
-        if (typeof v === "string") out.push({ name, type: "text", value: v });
-        break;
-      case "rated":
-        if (typeof v === "number") {
-          out.push({ name, type: "number", value: v, unit: "rating", scale: 5 });
-        }
-        break;
-      case "took":
-        if (typeof v === "number") {
-          out.push({ name, type: "number", value: v, unit: step.trackable.defaultUnit || "ct" });
-        }
-        break;
-      case "did":
-        if (typeof v === "number") {
-          out.push({ name, type: "number", value: v, unit: "min" });
-        }
-        break;
-      case "happened":
-        out.push({ name, type: "number", value: 1, unit: "ct" });
-        break;
-    }
+function entriesForStep(step: CaptureStep, answer: unknown): LifeEntry[] | null {
+  const { shape } = step.trackable;
+  switch (shape) {
+    case "noted":
+      return typeof answer === "string" ? buildEntries("noted", { text: answer }) : null;
+    case "rated":
+      return typeof answer === "number" ? buildEntries("rated", { rating: answer, scale: 5 }) : null;
+    case "took":
+      return typeof answer === "number"
+        ? buildEntries("took", { amount: answer, unit: step.trackable.defaultUnit })
+        : null;
+    case "did":
+      return typeof answer === "number" ? buildEntries("did", { duration: answer }) : null;
+    case "happened":
+      // happened captures presence; any non-empty answer logs the count event.
+      return answer !== undefined && answer !== null && answer !== ""
+        ? buildEntries("happened", {})
+        : null;
   }
-  return out;
 }
 
 const Greeting = styled.p`
@@ -355,16 +275,15 @@ export function ViewRunner({ viewId }: ViewRunnerProps) {
   // Vocab resolution: the user's manifest trackables ∪ DEFAULT_VIEW_TRACKABLES,
   // with DEFAULT_VIEW_TRACKABLES applied LAST so it WINS on an id collision.
   //
-  // B2-correct: the morning/evening/weekly wizards are fixed, code-defined
-  // views, and the parity gate's contract is "reproduce the fixed wizard
-  // verbatim". A live user may already own a trackable whose id collides with a
-  // reflective vocab id (`energy`, `gratitude`, `highlights`, …) but at a
-  // DIFFERENT shape; if their row won, the step would render the wrong input and
-  // `buildFatEntries` would emit the wrong entry — silently breaking byte-parity
-  // for that user. Defaults must win so the wizard is identical for everyone.
+  // The morning/evening/weekly wizards are fixed, code-defined views. A live
+  // user may already own a trackable whose id collides with a reflective vocab
+  // id (`energy`, `gratitude`, `highlights`, …) but at a DIFFERENT shape; if
+  // their row won, the step would render the wrong input control and write the
+  // wrong shape's entries (e.g. a `did` duration instead of the `rated` rating).
+  // Defaults must win so the wizard is identical for everyone.
   //
-  // B3 revisits this: once users can customize view prompts (`manifest.views` /
-  // custom vocab), user/custom rows should take precedence — flip back then.
+  // A later phase revisits this: once users can customize view prompts
+  // (`manifest.views` / custom vocab), user/custom rows should take precedence.
   const userTrackables = useTrackables();
   const vocab = useMemo<Map<string, LifeManifestTrackable>>(() => {
     const m = new Map<string, LifeManifestTrackable>();
@@ -484,24 +403,33 @@ export function ViewRunner({ viewId }: ViewRunnerProps) {
     if (!user?.uid || !state.log?.id) return;
     // Walk the FILTERED capture steps (not the raw view items): a step whose
     // required ref didn't resolve was never shown, so any stale draft answer for
-    // it must not be written out.
-    const entries = buildFatEntries(view.id, captureSteps, answers);
-    if (entries.length === 0) {
+    // it must not be written out. Each captured, non-empty step becomes ONE
+    // per-item event under its own vocab subject_id.
+    const captured: { trackableId: string; entries: LifeEntry[] }[] = [];
+    for (const step of captureSteps) {
+      const entries = entriesForStep(step, answers[step.trackable.id]);
+      if (entries && entries.length > 0) {
+        captured.push({ trackableId: step.trackable.id, entries });
+      }
+    }
+    if (captured.length === 0) {
       message.info("Nothing to save — add a value before finishing.");
       return;
     }
     setSubmitting(true);
     try {
-      // Byte-identical subject_id: the legacy `*_session` the readers expect
-      // (weekly maps to `weekly_review_session`, not `weekly_session`). A custom
-      // View with no legacy mapping falls back to `<id>_session`.
-      const subjectId = LEGACY_SESSION_SUBJECT[view.id] ?? `${view.id}_session`;
-      await life.addEvent(
-        state.log.id,
-        subjectId,
-        entries,
-        user.uid,
-        { labels: { source: "manual" } },
+      // One shared run timestamp + view_run so the N events co-group as a single
+      // session run (normalizeSessionRuns keys on labels.view + labels.view_run).
+      const runTs = new Date();
+      const runTsIso = runTs.toISOString();
+      const labels = { source: "manual", view: view.id, view_run: runTsIso };
+      await Promise.all(
+        captured.map((c) =>
+          life.addEvent(state.log!.id, c.trackableId, c.entries, user.uid, {
+            timestamp: runTs,
+            labels,
+          }),
+        ),
       );
       message.success(`${view.title} session saved`);
       clearAnswers(view.id);
