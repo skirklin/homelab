@@ -102,12 +102,20 @@ describe("resolveTemplate", () => {
     expect(resolveTemplate("{plan}", refs, events, TZ, NOW)).toBeNull();
   });
 
-  it("week window resolves an event from 6 days ago but not 8 days ago", () => {
+  it("week window (8-day grace) resolves 6 / 7.5 days ago but not 8.5 days ago", () => {
+    // NOW = 2026-06-18T19:00:00Z. The window is the rolling last 8 days, matching
+    // findCurrentWeekIntention's grace window so a Sunday-evening weekly review
+    // still surfaces in Monday-morning's banner.
     const within: TemplateRef = { token: "wk", fromTrackable: "weekly_intention", within: "week" };
-    const sixDaysAgo = [ev("weekly_intention", "2026-06-12T19:00:00Z", note("in window"))];
-    const eightDaysAgo = [ev("weekly_intention", "2026-06-10T19:00:00Z", note("too old"))];
-    expect(resolveTemplate("{wk}", [within], sixDaysAgo, TZ, NOW)).toBe("in window");
-    expect(resolveTemplate("{wk}", [within], eightDaysAgo, TZ, NOW)).toBeNull();
+    const sixDaysAgo = [ev("weekly_intention", "2026-06-12T19:00:00Z", note("six"))];
+    // 7.5 days ago: 2026-06-11T07:00:00Z. Inside the 7-day window's blind spot
+    // but inside the 8-day grace window — the case the 7→8 widening fixes.
+    const sevenAndHalfDaysAgo = [ev("weekly_intention", "2026-06-11T07:00:00Z", note("seven and a half"))];
+    // 8.5 days ago: 2026-06-10T07:00:00Z — past the 8-day grace window.
+    const eightAndHalfDaysAgo = [ev("weekly_intention", "2026-06-10T07:00:00Z", note("too old"))];
+    expect(resolveTemplate("{wk}", [within], sixDaysAgo, TZ, NOW)).toBe("six");
+    expect(resolveTemplate("{wk}", [within], sevenAndHalfDaysAgo, TZ, NOW)).toBe("seven and a half");
+    expect(resolveTemplate("{wk}", [within], eightAndHalfDaysAgo, TZ, NOW)).toBeNull();
   });
 
   it("ignores events for other trackables", () => {

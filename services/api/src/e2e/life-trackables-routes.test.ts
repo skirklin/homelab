@@ -147,7 +147,7 @@ describe("life trackables: add → list round-trip + uniqueness", () => {
     expect(bad.status).toBe(400);
   });
 
-  it("accepts the reflective `noted` shape and round-trips prompt/hint/refs", async () => {
+  it("accepts the reflective `noted` shape and round-trips prompt/hint/placeholder/refs", async () => {
     const add = await req("/data/life/trackables", {
       method: "POST",
       token: alice.apiToken,
@@ -157,6 +157,7 @@ describe("life trackables: add → list round-trip + uniqueness", () => {
         shape: "noted",
         prompt: "How did {intention} go?",
         hint: "Be honest.",
+        placeholder: "How did it turn out? Honest beats tidy.",
         refs: [{ token: "intention", fromTrackable: "daily_intention", within: "day", entry: "note" }],
       },
     });
@@ -168,8 +169,54 @@ describe("life trackables: add → list round-trip + uniqueness", () => {
       shape: "noted",
       prompt: "How did {intention} go?",
       hint: "Be honest.",
+      placeholder: "How did it turn out? Honest beats tidy.",
       refs: [{ token: "intention", fromTrackable: "daily_intention", within: "day", entry: "note" }],
     });
+  });
+});
+
+describe("life trackables: a manifest mutation preserves sibling keys (views/notifications round-trip)", () => {
+  // S2 regression guard. The pure manifest ops were dropping sibling manifest
+  // keys, AND the route's manifestFromValue used to read only trackables+goals
+  // — so a read-modify-write through the trackable routes silently reverted an
+  // explicit `manifest.views: []` (Angela) back to undefined → DEFAULT_VIEWS.
+  // This exercises the REAL write path end-to-end: seed `views: []` +
+  // `notifications: []` directly on the log, confirm the route's RMW keeps them
+  // as `[]` (NOT defaulted, NOT dropped). `[]` is load-bearing.
+  it("an addTrackable through the route leaves an explicit views/notifications [] intact", async () => {
+    // Carol starts fresh, then we stamp explicit-empty views/notifications onto
+    // her log directly (no route authors views in B1 — it's data-model only).
+    const carol = await makeActor("carol-tk");
+    await req("/data/life/trackables", { token: carol.apiToken }); // get-or-create the log
+
+    const logs = await adminPb.collection("life_logs").getList(1, 1, {
+      filter: adminPb.filter("owner = {:uid}", { uid: carol.id }),
+      sort: "created",
+    });
+    const log = logs.items[0];
+    const seeded = { ...(log.manifest as Record<string, unknown>), views: [], notifications: [] };
+    await adminPb.collection("life_logs").update(log.id, { manifest: seeded });
+
+    // Read back the raw record: views/notifications are explicitly [] (not defaulted).
+    const before = await adminPb.collection("life_logs").getOne(log.id);
+    expect((before.manifest as any).views).toEqual([]);
+    expect((before.manifest as any).notifications).toEqual([]);
+
+    // Mutate the manifest through the real route (read-modify-write).
+    const add = await req("/data/life/trackables", {
+      method: "POST",
+      token: carol.apiToken,
+      body: { id: "carol_thing", label: "Carol thing", shape: "happened" },
+    });
+    expect(add.status).toBe(201);
+
+    // Re-read the raw record: the trackable landed AND views/notifications are
+    // STILL [] — not dropped to undefined, not reverted to a default.
+    const after = await adminPb.collection("life_logs").getOne(log.id);
+    const manifest = after.manifest as any;
+    expect(manifest.trackables.map((t: any) => t.id)).toContain("carol_thing");
+    expect(manifest.views, "views: [] must survive the RMW").toEqual([]);
+    expect(manifest.notifications, "notifications: [] must survive the RMW").toEqual([]);
   });
 });
 

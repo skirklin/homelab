@@ -109,6 +109,9 @@ export interface LifeManifestTrackable {
   prompt?: string;
   /** View-render sub-label; may contain `{token}`s. Phase-B only. */
   hint?: string;
+  /** View-render input placeholder (the textarea's empty-state ghost text,
+   *  byte-faithful to today's session prompt `placeholder`). Phase-B only. */
+  placeholder?: string;
   /** Template references for `{token}`s in `prompt`/`hint`. Phase-B only. */
   refs?: TemplateRef[];
 }

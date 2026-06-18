@@ -2363,6 +2363,14 @@ function manifestFromValue(raw: unknown): LifeManifest | null {
   // Carry the optional goals[] layer through so a goal mutation reads + writes
   // the freshest list (the pure ops validate on write).
   if (Array.isArray(m.goals)) out.goals = m.goals as LifeManifest["goals"];
+  // Carry `views` / `notifications` (Unified Capture) through verbatim — a
+  // read-modify-write of one manifest key must not drop the others. An explicit
+  // `[]` is LOAD-BEARING (means "explicitly none", distinct from `undefined` →
+  // the DEFAULT_* fallback), so we preserve `[]` rather than coercing it to
+  // undefined. Mirrors the PB mapper in packages/backend/src/pocketbase/life.ts.
+  if (Array.isArray(m.views)) out.views = m.views as LifeManifest["views"];
+  if (Array.isArray(m.notifications))
+    out.notifications = m.notifications as LifeManifest["notifications"];
   return out;
 }
 
@@ -2444,6 +2452,7 @@ dataRoutes.post("/life/trackables", handler(async (c) => {
     pinned?: unknown;
     prompt?: unknown;
     hint?: unknown;
+    placeholder?: unknown;
     refs?: unknown;
   }>();
   if (typeof body.id !== "string" || typeof body.label !== "string" || typeof body.shape !== "string") {
@@ -2463,6 +2472,7 @@ dataRoutes.post("/life/trackables", handler(async (c) => {
       pinned: body.pinned,
       prompt: body.prompt,
       hint: body.hint,
+      placeholder: body.placeholder,
       refs: body.refs,
     }),
   );
@@ -2488,6 +2498,7 @@ dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
     pinned?: unknown;
     prompt?: unknown;
     hint?: unknown;
+    placeholder?: unknown;
     refs?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
@@ -2506,6 +2517,7 @@ dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
       pinned: body.pinned,
       prompt: body.prompt,
       hint: body.hint,
+      placeholder: body.placeholder,
       refs: body.refs,
     }),
   );

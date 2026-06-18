@@ -18,10 +18,12 @@
  *
  * WINDOW SEMANTICS (owner-local, via the shared tz-aware helpers):
  *   - `within: "day"`  → the owner-local day containing `now` (today).
- *   - `within: "week"` → the last 7 owner-local days (now − 7d … now). A
- *     rolling 7-day lookback, NOT the Sunday-start calendar week — this is the
- *     "what did you intend this week" recency window, so a Tuesday morning
- *     still surfaces last Sunday's weekly intention.
+ *   - `within: "week"` → the last 8 days (now − 8d … now). This mirrors the
+ *     original `findCurrentWeekIntention` (SessionRunner) grace window, NOT the
+ *     Sunday-start calendar week: 8 days (one week + a day of slack) so a
+ *     Sunday-evening weekly review still surfaces in Monday-morning's banner.
+ *     It is the "what did you intend this week" recency window, so a Tuesday
+ *     morning still surfaces last Sunday's weekly intention.
  *
  * Pure: no React, no I/O, no clock read beyond the passed `now`.
  */
@@ -62,9 +64,11 @@ function resolveRef(ref: TemplateRef, events: LifeEvent[], now: Date, tz: string
     lo = startOfDay(now, tz).getTime();
     hi = endOfDay(now, tz).getTime();
   } else {
-    // Rolling 7-day window ending at `now`.
+    // Rolling 8-day window ending at `now` — mirrors findCurrentWeekIntention's
+    // grace window (one week + a day of slack) so a Sunday-evening weekly review
+    // still surfaces in Monday-morning's banner.
     hi = now.getTime();
-    lo = hi - 7 * 24 * 60 * 60 * 1000;
+    lo = hi - 8 * 24 * 60 * 60 * 1000;
   }
 
   // Most-recent qualifying event for this trackable within the window.

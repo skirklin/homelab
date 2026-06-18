@@ -33,6 +33,67 @@ describe("DEFAULT_VIEW_TRACKABLES", () => {
     }
   });
 
+  it("is byte-faithful to the original SESSIONS prompt / hint / placeholder", () => {
+    // Mirror of apps/life/app/src/manifest.ts SESSIONS — the source of truth for
+    // the wizard text. `prompt` = SESSIONS label, `hint` = SESSIONS hint,
+    // `placeholder` = SESSIONS placeholder. A `null` here means the SESSIONS row
+    // had no value for that field (so the default row must NOT carry it). This
+    // is the guard that the placeholder migration (N1) stays byte-faithful: a
+    // placeholder dropped or moved into `hint` (the original B1 bug) fails here.
+    // (apps/life can't be imported from packages/backend; this fixture is the
+    //  copied original text, intentionally duplicated for cross-package guarding.)
+    const expected: Record<string, { prompt: string; hint: string | null; placeholder: string | null }> = {
+      // ── Morning ──
+      gratitude: { prompt: "What are you grateful for?", hint: null, placeholder: "One thing is plenty." },
+      daily_intention: {
+        prompt: "What's the plan for today?",
+        hint: "What are you doing, and when? Worth a glance at your calendar.",
+        placeholder: "Priorities, rough timing, the shape of the day.",
+      },
+      // energy is a `rated` prompt: SESSIONS gives it a label + hint, no placeholder.
+      energy: { prompt: "Energy", hint: "How's the tank look?", placeholder: null },
+      // ── Evening ──
+      intention_followup: {
+        prompt: "How did the plan hold up?",
+        // SESSIONS hint carries the morning-plan echo; the token is rewritten
+        // from the runner's `{context}` to the data-driven ref token `{plan}`.
+        hint: "This morning's plan: “{plan}”",
+        placeholder: "How did it turn out? Honest beats tidy.",
+      },
+      daily_win: { prompt: "One thing that went well", hint: null, placeholder: "However small." },
+      daily_lesson: {
+        prompt: "What did today show you?",
+        hint: null,
+        placeholder: "Optional — something surprising, something confirmed, anything.",
+      },
+      // ── Weekly ──
+      highlights: {
+        prompt: "What's worth remembering from this week?",
+        hint: null,
+        placeholder: "The moments you'd want to find later.",
+      },
+      lows: { prompt: "What was hard?", hint: null, placeholder: "Honest, not heavy." },
+      weekly_lesson: {
+        prompt: "What did this week teach you?",
+        hint: null,
+        placeholder: "What clicked, or what got clearer.",
+      },
+      weekly_intention: {
+        prompt: "One intention for the week ahead?",
+        hint: null,
+        placeholder: "Where do you want your attention?",
+      },
+    };
+    // Every default row must be covered, and every covered row must match.
+    expect(new Set(DEFAULT_VIEW_TRACKABLES.map((t) => t.id))).toEqual(new Set(Object.keys(expected)));
+    for (const t of DEFAULT_VIEW_TRACKABLES) {
+      const want = expected[t.id];
+      expect(t.prompt, `${t.id}.prompt`).toBe(want.prompt);
+      expect(t.hint ?? null, `${t.id}.hint`).toBe(want.hint);
+      expect(t.placeholder ?? null, `${t.id}.placeholder`).toBe(want.placeholder);
+    }
+  });
+
   it("the energy row is the only non-noted shape", () => {
     const nonNoted = DEFAULT_VIEW_TRACKABLES.filter((t) => t.shape !== "noted");
     expect(nonNoted.map((t) => t.id)).toEqual(["energy"]);

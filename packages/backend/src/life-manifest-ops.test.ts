@@ -9,6 +9,7 @@ import {
   ManifestError,
   emptyManifest,
 } from "./life-manifest-ops";
+import { addGoal, updateGoal, removeGoal, reorderGoals } from "./life-goal-ops";
 import type { LifeManifest } from "./types/life";
 
 function base(): LifeManifest {
@@ -303,5 +304,88 @@ describe("ManifestError", () => {
       expect(e).toBeInstanceOf(ManifestError);
       expect((e as ManifestError).code).toBe("invalid_shape");
     }
+  });
+});
+
+describe("sibling-key preservation (every manifest mutation keeps views/goals/notifications)", () => {
+  // INVARIANT: every pure manifest op does a read-modify-write that preserves
+  // ALL sibling keys — `goals`, `views`, `notifications` — touching only its
+  // target. The original B1 regression was that the trackable ops returned a
+  // bare `{ trackables }`, silently dropping these. A user with an explicit
+  // `views: []` (Angela) would have reverted to DEFAULT_VIEWS on her first
+  // trackable add/edit/remove/pin, and `goals` had already been dropping in
+  // prod. `[]` is LOAD-BEARING (distinct from `undefined`): it must survive as
+  // `[]`, not be dropped to undefined (which would re-enable the DEFAULT_*
+  // fallback).
+  function withSiblings(): LifeManifest {
+    return {
+      ...base(),
+      goals: [
+        { id: "hydrate", label: "Hydrate", scope: { thing: "coffee" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+      ],
+      views: [], // explicit empty — must stay [], NOT default-fallback
+      notifications: [], // explicit empty — must stay []
+    };
+  }
+
+  function assertSiblings(next: LifeManifest, m: LifeManifest) {
+    expect(next.goals).toEqual(m.goals);
+    expect(next.views, "views: [] must survive as [], not be dropped to undefined").toEqual([]);
+    expect(next.notifications, "notifications: [] must survive as []").toEqual([]);
+  }
+
+  describe("trackable ops", () => {
+    it("addTrackable preserves goals/views/notifications", () => {
+      const m = withSiblings();
+      assertSiblings(addTrackable(m, { id: "sleep", label: "Sleep", shape: "did" }), m);
+    });
+    it("updateTrackable preserves them", () => {
+      const m = withSiblings();
+      assertSiblings(updateTrackable(m, "coffee", { label: "Coffee II" }), m);
+    });
+    it("removeTrackable preserves them", () => {
+      const m = withSiblings();
+      assertSiblings(removeTrackable(m, "floss"), m);
+    });
+    it("reorderTrackables preserves them", () => {
+      const m = withSiblings();
+      assertSiblings(reorderTrackables(m, ["mood", "floss", "coffee", "run"]), m);
+    });
+    it("setPins preserves them", () => {
+      const m = withSiblings();
+      const next = setPins(m, "coffee", [{ entries: [{ name: "amount", type: "number", value: 8, unit: "oz" }] }]);
+      assertSiblings(next, m);
+    });
+  });
+
+  describe("goal ops (preserve trackables/views/notifications)", () => {
+    function assertNonGoalSiblings(next: LifeManifest, m: LifeManifest) {
+      expect(next.trackables).toEqual(m.trackables);
+      expect(next.views).toEqual([]);
+      expect(next.notifications).toEqual([]);
+    }
+    it("addGoal preserves trackables/views/notifications", () => {
+      const m = withSiblings();
+      const next = addGoal(m, { id: "floss-daily", label: "Floss", scope: { thing: "floss" }, kind: "frequency", metric: "days", target: 5, period: "week" });
+      assertNonGoalSiblings(next, m);
+    });
+    it("updateGoal preserves them", () => {
+      const m = withSiblings();
+      assertNonGoalSiblings(updateGoal(m, "hydrate", { target: 3 }), m);
+    });
+    it("removeGoal preserves them", () => {
+      const m = withSiblings();
+      assertNonGoalSiblings(removeGoal(m, "hydrate"), m);
+    });
+    it("reorderGoals preserves them", () => {
+      const m: LifeManifest = {
+        ...withSiblings(),
+        goals: [
+          { id: "hydrate", label: "Hydrate", scope: { thing: "coffee" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+          { id: "move", label: "Move", scope: { thing: "run" }, kind: "frequency", metric: "days", target: 3, period: "week" },
+        ],
+      };
+      assertNonGoalSiblings(reorderGoals(m, ["move", "hydrate"]), m);
+    });
   });
 });

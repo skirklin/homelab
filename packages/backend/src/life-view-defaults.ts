@@ -38,9 +38,12 @@ import type {
 
 /**
  * The vocab rows the default Views reference. Each carries the original session
- * prompt text as `prompt`/`hint`, and the energy `rated` row keeps the 1–5
- * scale via `ratingLabel`. These are NON-HIDDEN (so Views can render them); the
- * `noted`-shape exclusion (Phase A) is what keeps them off the input surfaces.
+ * prompt text byte-faithfully across THREE distinct fields — `prompt` = the
+ * SESSIONS `label`, `hint` = the SESSIONS `hint`, `placeholder` = the SESSIONS
+ * `placeholder` (the textarea ghost text) — so the ViewRunner reproduces the
+ * wizards exactly. The energy `rated` row keeps the 1–5 scale via `ratingLabel`.
+ * These are NON-HIDDEN (so Views can render them); the `noted`-shape exclusion
+ * (Phase A) is what keeps them off the input surfaces.
  */
 export const DEFAULT_VIEW_TRACKABLES: LifeManifestTrackable[] = [
   // ── Morning ──
@@ -49,7 +52,7 @@ export const DEFAULT_VIEW_TRACKABLES: LifeManifestTrackable[] = [
     label: "Gratitude",
     shape: "noted",
     prompt: "What are you grateful for?",
-    hint: "One thing is plenty.",
+    placeholder: "One thing is plenty.",
   },
   {
     id: "daily_intention",
@@ -57,6 +60,7 @@ export const DEFAULT_VIEW_TRACKABLES: LifeManifestTrackable[] = [
     shape: "noted",
     prompt: "What's the plan for today?",
     hint: "What are you doing, and when? Worth a glance at your calendar.",
+    placeholder: "Priorities, rough timing, the shape of the day.",
   },
   {
     id: "energy",
@@ -73,6 +77,7 @@ export const DEFAULT_VIEW_TRACKABLES: LifeManifestTrackable[] = [
     shape: "noted",
     prompt: "How did the plan hold up?",
     hint: "This morning's plan: “{plan}”",
+    placeholder: "How did it turn out? Honest beats tidy.",
     refs: [{ token: "plan", fromTrackable: "daily_intention", within: "day" }],
   },
   {
@@ -80,14 +85,14 @@ export const DEFAULT_VIEW_TRACKABLES: LifeManifestTrackable[] = [
     label: "Daily win",
     shape: "noted",
     prompt: "One thing that went well",
-    hint: "However small.",
+    placeholder: "However small.",
   },
   {
     id: "daily_lesson",
     label: "Daily lesson",
     shape: "noted",
     prompt: "What did today show you?",
-    hint: "Optional — something surprising, something confirmed, anything.",
+    placeholder: "Optional — something surprising, something confirmed, anything.",
   },
   // ── Weekly ──
   {
@@ -95,28 +100,28 @@ export const DEFAULT_VIEW_TRACKABLES: LifeManifestTrackable[] = [
     label: "Highlights",
     shape: "noted",
     prompt: "What's worth remembering from this week?",
-    hint: "The moments you'd want to find later.",
+    placeholder: "The moments you'd want to find later.",
   },
   {
     id: "lows",
     label: "Lows",
     shape: "noted",
     prompt: "What was hard?",
-    hint: "Honest, not heavy.",
+    placeholder: "Honest, not heavy.",
   },
   {
     id: "weekly_lesson",
     label: "Weekly lesson",
     shape: "noted",
     prompt: "What did this week teach you?",
-    hint: "What clicked, or what got clearer.",
+    placeholder: "What clicked, or what got clearer.",
   },
   {
     id: "weekly_intention",
     label: "Weekly intention",
     shape: "noted",
     prompt: "One intention for the week ahead?",
-    hint: "Where do you want your attention?",
+    placeholder: "Where do you want your attention?",
   },
 ];
 
