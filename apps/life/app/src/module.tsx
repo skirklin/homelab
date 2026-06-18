@@ -11,7 +11,7 @@ import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { LifeDashboard } from "./components/LifeDashboard";
 import { Today } from "./components/Today";
-import { SessionRunner } from "./components/SessionRunner";
+import { ViewRunner } from "./components/ViewRunner";
 import { SettingsModal } from "./components/SettingsModal";
 import { SettingsMenuProvider, buildSettingsMenuItems } from "./settings-menu";
 import { exportEvents } from "./lib/exportEvents";
@@ -81,9 +81,9 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
   // inherits `state.entries` without each having to subscribe on
   // its own. Critical for the push-notification entry path: the "evening
   // session" push lands the user directly on /evening with no dashboard
-  // mount, so without this the wizard's `findMorningIntention` lookup ran
-  // against an empty `state.entries` and silently dropped the
-  // intention_followup prompt (DATA_COLLECTION.md A1).
+  // mount, so without this the ViewRunner's templating lookup (the evening
+  // intention-follow-up's `{plan}` ref → today's daily_intention) ran against
+  // an empty `state.entries` and silently dropped the step (DATA_COLLECTION.md A1).
   useEntriesSubscription(state.log?.id ?? null);
 
   const location = useLocation();
@@ -110,9 +110,9 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
       <Routes>
         <Route path="/" element={<LifeDashboard />} />
         <Route path="/today" element={<Today />} />
-        <Route path="/morning" element={<SessionRunner sessionId="morning" />} />
-        <Route path="/evening" element={<SessionRunner sessionId="evening" />} />
-        <Route path="/weekly" element={<SessionRunner sessionId="weekly_review" />} />
+        <Route path="/morning" element={<ViewRunner viewId="morning" />} />
+        <Route path="/evening" element={<ViewRunner viewId="evening" />} />
+        <Route path="/weekly" element={<ViewRunner viewId="weekly" />} />
         {/* Coach is the AI hub. /coach, /insights, /observations all render it
             so the Insights/Observations segmented stays consistent and these
             stay deep-linkable. Visualizations/Observations render their content

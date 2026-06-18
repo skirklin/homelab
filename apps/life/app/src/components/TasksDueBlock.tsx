@@ -1,13 +1,15 @@
 /**
- * Read-only "Today's upkeep" header rendered above the first prompt in the
- * morning session wizard. Glance-able context, not interactive — no checkboxes,
- * no complete/snooze affordances. Empty state renders nothing (no flicker, no
- * "Nothing due" message).
+ * Read-only "Today's upkeep" block — the renderer for a View's `tasks_due`
+ * item. Glance-able context, not interactive — no checkboxes, no complete/snooze
+ * affordances. Empty state renders nothing (no flicker, no "Nothing due"
+ * message). Rendered as a lead block above the first capture step (today it
+ * appears in the morning View; it is driven by the `tasks_due` item, not by a
+ * hardcoded session id).
  *
  * Aggregates today's tasks across ALL household lists in the user's slug map.
- * The morning surface is a "what's due today" union — if you have multiple
- * lists they're all here. Today there's typically just one list (`home`), but
- * the union is the right shape for aggregation.
+ * The surface is a "what's due today" union — if you have multiple lists they're
+ * all here. Today there's typically just one list (`home`), but the union is the
+ * right shape for aggregation.
  */
 import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
@@ -66,7 +68,7 @@ const TaskItem = styled.li`
   color: var(--color-text);
 `;
 
-export function MorningUpkeepHeader() {
+export function TasksDueBlock() {
   const { user } = useAuth();
   const upkeep = useUpkeepBackend();
   const userBackend = useUserBackend();
