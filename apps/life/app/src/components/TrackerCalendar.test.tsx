@@ -55,6 +55,46 @@ describe("TrackerCalendar", () => {
     expect(cell("2026-06-10").getAttribute("data-today")).toBe("true");
   });
 
+  it("renders the day-of-month number in each cell", () => {
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={2} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    // Each cell shows its date number (6/10 → "10", 6/9 → "9").
+    expect(cell("2026-06-10")).toHaveTextContent("10");
+    expect(cell("2026-06-09")).toHaveTextContent("9");
+    expect(cell("2026-06-01")).toHaveTextContent("1");
+  });
+
+  it("without monthRef every cell is in-month (board strip unaffected)", () => {
+    const index = buildDayIndex([], PT);
+    render(
+      <TrackerCalendar subjectIds={["water"]} weeks={3} index={index} tz={PT} today={TODAY} onTapDay={vi.fn()} />,
+    );
+    // No cell carries the out-of-month marker when monthRef is omitted.
+    expect(document.querySelector('[data-in-month="false"]')).toBeNull();
+  });
+
+  it("with monthRef, cells outside that month are marked out-of-month", () => {
+    const index = buildDayIndex([], PT);
+    // 6-week grid anchored on today (June) with June as the reference month: the
+    // top rows reach back into late May → those cells are out-of-month.
+    render(
+      <TrackerCalendar
+        subjectIds={["water"]}
+        weeks={6}
+        index={index}
+        tz={PT}
+        today={TODAY}
+        monthRef={TODAY}
+        onTapDay={vi.fn()}
+      />,
+    );
+    // A May day is out-of-month; a June day is in-month.
+    expect(cell("2026-05-31").getAttribute("data-in-month")).toBe("false");
+    expect(cell("2026-06-09").getAttribute("data-in-month")).toBeNull();
+  });
+
   it("disables future days in the current week", () => {
     const index = buildDayIndex([], PT);
     render(
