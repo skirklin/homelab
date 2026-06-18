@@ -63,9 +63,11 @@ old data, and there's a **live `mood` trackable today**. The redesigned sessions
 ratings into the live `mood` series (restores them as mood data, but changes mood goal/chart
 history), or **(b)** isolate them under a distinct legacy id so the live `mood` series is
 untouched. This is your data; the migration hard-fails until every real entry name has a
-disposition (no silent drop). **DECISION DEFERRED to the Phase B3 audit** — choose (a) vs (b)
-once the audit prints the real counts + date range of legacy `mood`/`mood_rating` entries. Does
-not block Phases A–B2.
+disposition (no silent drop). **DECIDED 2026-06-18 (after the B3 audit): route into the live
+`mood` series (option a).** Audit found exactly 10 legacy ratings — 9 `evening_session.mood`
+(2026-05-21→05-31) + 1 `weekly_review_session.mood_rating` (2026-06-01), values 3–5 — all on
+Scott's log only (Angela's log has zero session events). They map to `subject_id: mood` with
+the canonical rated entry (`{name:"rating", unit:"rating", scale:5}`) to match the live series.
 
 ### Non-goals
 - Renaming `trackable`. A configurable/curated home View or time-of-day rules. A widget builder.
