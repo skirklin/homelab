@@ -104,7 +104,7 @@ importers:
         version: 7.3.2(@types/node@25.5.2)(terser@5.46.2)(tsx@4.21.0)
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
   apps/life/app:
     dependencies:
@@ -187,9 +187,9 @@ importers:
       globals:
         specifier: ^16.5.0
         version: 16.5.0
-      jsdom:
-        specifier: ^26.1.0
-        version: 26.1.0
+      happy-dom:
+        specifier: ^20.0.0
+        version: 20.10.6
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -201,7 +201,7 @@ importers:
         version: 7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0)
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
   apps/money:
     dependencies:
@@ -441,7 +441,7 @@ importers:
         version: 6.1.1(typescript@5.9.3)(vite@7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0))
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
 
   apps/shopping/app:
     dependencies:
@@ -535,7 +535,7 @@ importers:
         version: 7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0)
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
 
   apps/travel/app:
     dependencies:
@@ -644,7 +644,7 @@ importers:
         version: 7.3.2(@types/node@25.5.2)(terser@5.46.2)(tsx@4.21.0)
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
 
   apps/upkeep/app:
     dependencies:
@@ -735,7 +735,7 @@ importers:
         version: 7.3.2(@types/node@24.12.2)(terser@5.46.2)(tsx@4.21.0)
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0)
 
   packages/backend:
     dependencies:
@@ -760,7 +760,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
   packages/ui:
     dependencies:
@@ -806,7 +806,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
   packages/vite-preset:
     dependencies:
@@ -882,7 +882,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
   services/coach:
     dependencies:
@@ -916,7 +916,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
   services/event-watcher:
     dependencies:
@@ -935,7 +935,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
   services/scripts:
     dependencies:
@@ -969,7 +969,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0)
 
 packages:
 
@@ -3077,8 +3077,14 @@ packages:
   '@types/web-push@3.6.4':
     resolution: {integrity: sha512-GnJmSr40H3RAnj0s34FNTcJi1hmWFV5KXugE0mYWnYhgTAHLJ/dJKAwDmvPJYMke0RplY2XE9LnM4hqSqKIjhQ==}
 
+  '@types/whatwg-mimetype@3.0.2':
+    resolution: {integrity: sha512-c2AKvDT8ToxLIOUlN51gTiHXflsfIFisS4pO7pDPoKouJCESkhZnEy623gwP9laCy5lnLDAw1vAzu2vM2YLOrA==}
+
   '@types/wicg-file-system-access@2020.9.8':
     resolution: {integrity: sha512-ggMz8nOygG7d/stpH40WVaNvBwuyYLnrg5Mbyf6bmsj/8+gb6Ei4ZZ9/4PNpcPNTT8th9Q8sM8wYmWGjMWLX/A==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@types/yargs-parser@21.0.3':
     resolution: {integrity: sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ==}
@@ -3584,6 +3590,10 @@ packages:
 
   buffer-from@1.1.2:
     resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
+
+  buffer-image-size@0.6.4:
+    resolution: {integrity: sha512-nEh+kZOPY1w+gcCMobZ6ETUp9WfibndnosbpwB1iJk/8Gt5ZF2bhS6+B6bPYz424KtwsR6Rflc3tCz1/ghX2dQ==}
+    engines: {node: '>=4.0'}
 
   buffer@5.7.1:
     resolution: {integrity: sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==}
@@ -4224,6 +4234,10 @@ packages:
 
   entities@6.0.1:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
+    engines: {node: '>=0.12'}
+
+  entities@7.0.1:
+    resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
     engines: {node: '>=0.12'}
 
   error-ex@1.3.4:
@@ -4925,6 +4939,10 @@ packages:
   gtoken@7.1.0:
     resolution: {integrity: sha512-pCcEwRi+TKpMlxAQObHDQ56KawURgyAf6jtIY046fJ5tIv3zDe/LEIubckAO8fj6JnAxLdmWkUfNyulQ2iKdEw==}
     engines: {node: '>=14.0.0'}
+
+  happy-dom@20.10.6:
+    resolution: {integrity: sha512-6QD0ilzDDt93tX44y8tbmZdAcdTRYDhUP+Asgi6pC8Pp5IA3cvaZGyoVN/EGtlq9ziT65iPuBBn3ASLr6hCgVw==}
+    engines: {node: '>=20.0.0'}
 
   har-schema@2.0.0:
     resolution: {integrity: sha512-Oqluz6zhGX8cyRaTQlFMPw80bSJVG2x/cFb8ZPhUILGgHka9SsokCCOQgpveePerqidZOrT14ipqfJb7ILcW5Q==}
@@ -7991,6 +8009,10 @@ packages:
   whatwg-mimetype@2.3.0:
     resolution: {integrity: sha512-M4yMwr6mAnQz76TbJm914+gPpB/nCwvZbJU28cUD6dR004SAxDLOOSUaB1JDRqLtaOV/vi0IC5lEAGFgrjGv/g==}
 
+  whatwg-mimetype@3.0.0:
+    resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
+    engines: {node: '>=12'}
+
   whatwg-mimetype@4.0.0:
     resolution: {integrity: sha512-QaKxh0eNIi2mE9p2vEdzfagOKHCcj1pJ56EEHGQOVxp8r9/iszLUUV7v89x9O1p/T+NlTM5W7jW6+cz4Fq1YVg==}
     engines: {node: '>=18'}
@@ -8128,6 +8150,18 @@ packages:
 
   ws@8.20.0:
     resolution: {integrity: sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -10730,7 +10764,13 @@ snapshots:
     dependencies:
       '@types/node': 25.5.2
 
+  '@types/whatwg-mimetype@3.0.2': {}
+
   '@types/wicg-file-system-access@2020.9.8': {}
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 25.5.2
 
   '@types/yargs-parser@21.0.3': {}
 
@@ -11442,6 +11482,10 @@ snapshots:
 
   buffer-from@1.1.2: {}
 
+  buffer-image-size@0.6.4:
+    dependencies:
+      '@types/node': 25.5.2
+
   buffer@5.7.1:
     dependencies:
       base64-js: 1.5.1
@@ -12046,6 +12090,8 @@ snapshots:
       once: 1.4.0
 
   entities@6.0.1: {}
+
+  entities@7.0.1: {}
 
   error-ex@1.3.4:
     dependencies:
@@ -13142,6 +13188,19 @@ snapshots:
       - encoding
       - supports-color
     optional: true
+
+  happy-dom@20.10.6:
+    dependencies:
+      '@types/node': 25.5.2
+      '@types/whatwg-mimetype': 3.0.2
+      '@types/ws': 8.18.1
+      buffer-image-size: 0.6.4
+      entities: 7.0.1
+      whatwg-mimetype: 3.0.0
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   har-schema@2.0.0: {}
 
@@ -16899,7 +16958,7 @@ snapshots:
       terser: 5.46.2
       tsx: 4.21.0
 
-  vitest@3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0):
+  vitest@3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
@@ -16927,6 +16986,7 @@ snapshots:
     optionalDependencies:
       '@types/debug': 4.1.13
       '@types/node': 24.12.2
+      happy-dom: 20.10.6
       jsdom: 26.1.0
     transitivePeerDependencies:
       - jiti
@@ -16942,7 +17002,7 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0):
+  vitest@3.2.4(@types/debug@4.1.13)(@types/node@24.12.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
@@ -16970,6 +17030,7 @@ snapshots:
     optionalDependencies:
       '@types/debug': 4.1.13
       '@types/node': 24.12.2
+      happy-dom: 20.10.6
       jsdom: 27.4.0
     transitivePeerDependencies:
       - jiti
@@ -16985,7 +17046,7 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0):
+  vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@26.1.0)(terser@5.46.2)(tsx@4.21.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
@@ -17013,6 +17074,7 @@ snapshots:
     optionalDependencies:
       '@types/debug': 4.1.13
       '@types/node': 25.5.2
+      happy-dom: 20.10.6
       jsdom: 26.1.0
     transitivePeerDependencies:
       - jiti
@@ -17028,7 +17090,7 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0):
+  vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.5.2)(happy-dom@20.10.6)(jsdom@27.4.0)(terser@5.46.2)(tsx@4.21.0):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
@@ -17056,6 +17118,7 @@ snapshots:
     optionalDependencies:
       '@types/debug': 4.1.13
       '@types/node': 25.5.2
+      happy-dom: 20.10.6
       jsdom: 27.4.0
     transitivePeerDependencies:
       - jiti
@@ -17148,6 +17211,8 @@ snapshots:
       iconv-lite: 0.6.3
 
   whatwg-mimetype@2.3.0: {}
+
+  whatwg-mimetype@3.0.0: {}
 
   whatwg-mimetype@4.0.0: {}
 
@@ -17371,6 +17436,8 @@ snapshots:
   ws@7.5.10: {}
 
   ws@8.20.0: {}
+
+  ws@8.21.0: {}
 
   xml-name-validator@3.0.0: {}
 

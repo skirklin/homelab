@@ -100,8 +100,16 @@ describe("Journal", () => {
     await user.click(await screen.findByTestId("journal-entry-card"));
     await screen.findByTestId("entry-row");
     await user.click(screen.getByRole("button", { name: "Delete entry" }));
+    // (a) The delete handler ran against the tapped event.
     await waitFor(() => expect(deleteEvent).toHaveBeenCalledWith(entry.id));
-    await waitFor(() => expect(screen.queryByTestId("entry-row")).not.toBeInTheDocument());
+    // (b) The modal closed. AntD's leave motion never *completes* under
+    // happy-dom (no CSS transitionend fires, so the portal subtree lingers),
+    // but the `open=false` re-render DOES flip the dialog into its leave
+    // transition — the `ant-zoom-leave` class is the honest "closing" signal.
+    // It is absent while the modal is open, so the assertion still has teeth.
+    await waitFor(() =>
+      expect(document.querySelector(".ant-modal")).toHaveClass("ant-zoom-leave"),
+    );
   });
 
   it("with ?date=, shows that day's measurements grouped by trackable", async () => {

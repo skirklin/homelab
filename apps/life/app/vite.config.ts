@@ -27,7 +27,7 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'jsdom',
+    environment: 'happy-dom',
     setupFiles: './src/setupTests.ts',
     // One retry absorbs a transient host-contention race in the PB-hitting
     // e2e specs under src/e2e/ (parallel deploy gates share a swap-less box).
