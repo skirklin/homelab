@@ -313,12 +313,15 @@ function tapWouldCount(goal: LifeGoal, thing: LifeManifestTrackable): boolean {
 }
 
 /**
- * Splice a reordered subset of trackable ids back into the FULL trackable order,
- * leaving non-subset ids (goal primaries, hidden) in their original slots. The
- * subset positions are filled in the subset's new order; the result is a complete
- * permutation of all trackable ids — what `reorderTrackables` requires.
+ * Splice a reordered VISIBLE subset of ids back into the FULL order, leaving
+ * non-subset ids (e.g. goal primaries / hidden trackables, or hidden goals) in
+ * their original slots. The subset positions are filled in the subset's new
+ * order; the result is a complete permutation of all ids — what the manifest
+ * reorder ops (`reorderTrackables` / `reorderGoals`) require. Used for both the
+ * trackable long tail and the goals section, since each renders only its
+ * visible members but persists a full permutation.
  */
-export function spliceLongTailOrder(allIds: string[], orderedSubsetIds: string[]): string[] {
+export function spliceVisibleOrder(allIds: string[], orderedSubsetIds: string[]): string[] {
   const subset = new Set(orderedSubsetIds);
   let cursor = 0;
   return allIds.map((id) => (subset.has(id) ? orderedSubsetIds[cursor++] : id));
@@ -449,10 +452,22 @@ export function HabitBoard({
   // complete.
   const reorderLongTail = useCallback(
     (orderedLongTailIds: string[]) => {
-      const fullOrder = spliceLongTailOrder(trackables.map((t) => t.id), orderedLongTailIds);
+      const fullOrder = spliceVisibleOrder(trackables.map((t) => t.id), orderedLongTailIds);
       void persistOrder("trackables", fullOrder);
     },
     [trackables, persistOrder],
+  );
+
+  // Same splice for goals: the section renders only VISIBLE goals, but
+  // `reorderGoals` requires a full permutation of ALL goals (hidden included).
+  // Splice the reordered visible ids back into the full goal order so a hidden
+  // goal doesn't trip the op's permutation check.
+  const reorderGoalsList = useCallback(
+    (orderedVisibleIds: string[]) => {
+      const fullOrder = spliceVisibleOrder(goals.map((g) => g.id), orderedVisibleIds);
+      void persistOrder("goals", fullOrder);
+    },
+    [goals, persistOrder],
   );
 
   // ---- Tap-to-log / backfill / edit ------------------------------------
@@ -638,7 +653,7 @@ export function HabitBoard({
           <List data-testid="goals-reorder-list">
             <SortableList
               ids={visibleGoals.map((g) => g.id)}
-              onReorder={(ids) => void persistOrder("goals", ids)}
+              onReorder={reorderGoalsList}
             >
               {visibleGoals.map((goal) => (
                 <SortableRow key={goal.id} id={goal.id}>

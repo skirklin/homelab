@@ -219,6 +219,32 @@ describe("life goals: reorder", () => {
     expect(goalIds(list.data)).toEqual(order);
   });
 
+  it("reorders a goal set that includes a HIDDEN goal", async () => {
+    // The habit board renders only visible goals but persists a full
+    // permutation of ALL goals (hidden included). Seed a set with a hidden
+    // goal and confirm a full-permutation reorder round-trips — the dashboard's
+    // visible-id reorder must splice hidden ids back in before calling this.
+    const erin = await makeActor("erin-goal");
+    const seed = [
+      { id: "h-a", label: "A", scope: { thing: "water" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+      { id: "h-b", label: "B", scope: { thing: "water" }, kind: "at_most", metric: "count", target: 3, period: "day", hidden: true },
+      { id: "h-c", label: "C", scope: { group: "exercise" }, kind: "frequency", metric: "days", target: 2, period: "week" },
+    ];
+    for (const g of seed) {
+      const add = await req("/data/life/goals", { method: "POST", token: erin.apiToken, body: g });
+      expect(add.status).toBe(201);
+    }
+    const order = ["h-c", "h-b", "h-a"];
+    const re = await req("/data/life/goals/reorder", { method: "POST", token: erin.apiToken, body: { order } });
+    expect(re.status).toBe(200);
+    expect(goalIds(re.data)).toEqual(order);
+    // The hidden goal kept its hidden flag through the reorder.
+    const hb = (re.data.goals as Array<{ id: string; hidden?: boolean }>).find((g) => g.id === "h-b");
+    expect(hb?.hidden).toBe(true);
+    const list = await req("/data/life/goals", { token: erin.apiToken });
+    expect(goalIds(list.data)).toEqual(order);
+  });
+
   it("rejects a non-permutation order (400)", async () => {
     const dave = await makeActor("dave-goal");
     await req("/data/life/goals", {

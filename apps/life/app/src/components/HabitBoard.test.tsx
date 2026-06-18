@@ -34,7 +34,7 @@ vi.mock("@kirkl/shared", async () => {
   };
 });
 
-import { HabitBoard, spliceLongTailOrder } from "./HabitBoard";
+import { HabitBoard, spliceVisibleOrder } from "./HabitBoard";
 
 let counter = 0;
 function ev(subjectId: string, entries: LifeEntry[], when: Date): LifeEvent {
@@ -449,24 +449,34 @@ describe("HabitBoard", () => {
   });
 });
 
-describe("spliceLongTailOrder", () => {
+describe("spliceVisibleOrder", () => {
   it("splices a reordered subset back into the full order, leaving others put", () => {
     // Full order: water(primary), floss, run, walk. Long tail = floss/run/walk.
     // Reorder the long tail to walk, floss, run.
     const full = ["water", "floss", "run", "walk"];
-    expect(spliceLongTailOrder(full, ["walk", "floss", "run"])).toEqual([
+    expect(spliceVisibleOrder(full, ["walk", "floss", "run"])).toEqual([
       "water", "walk", "floss", "run",
     ]);
   });
 
   it("is a no-op when the subset order is unchanged", () => {
     const full = ["water", "floss", "run", "walk"];
-    expect(spliceLongTailOrder(full, ["floss", "run", "walk"])).toEqual(full);
+    expect(spliceVisibleOrder(full, ["floss", "run", "walk"])).toEqual(full);
   });
 
   it("keeps a non-subset id pinned at its original index", () => {
     // water sits between two long-tail ids and must not move.
     const full = ["floss", "water", "run"];
-    expect(spliceLongTailOrder(full, ["run", "floss"])).toEqual(["run", "water", "floss"]);
+    expect(spliceVisibleOrder(full, ["run", "floss"])).toEqual(["run", "water", "floss"]);
+  });
+
+  it("splices reordered VISIBLE goals around a hidden goal (Bug 2 regression)", () => {
+    // Goals section renders only visible goals, but reorderGoals needs a full
+    // permutation of ALL goals. "secret" is hidden and sits in the middle; a
+    // visible-goal reorder must leave it pinned and yield a complete order.
+    const all = ["hydrate", "secret", "floss-daily"];
+    expect(spliceVisibleOrder(all, ["floss-daily", "hydrate"])).toEqual([
+      "floss-daily", "secret", "hydrate",
+    ]);
   });
 });

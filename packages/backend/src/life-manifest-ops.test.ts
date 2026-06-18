@@ -151,6 +151,20 @@ describe("reorderTrackables", () => {
     expect(() => reorderTrackables(base(), ["mood", "mood", "coffee", "run"])).toThrow(/permutation/);
     expect(() => reorderTrackables(base(), ["mood", "coffee", "run", "ghost"])).toThrow(/unknown trackable id/);
   });
+  it("preserves the rest of the manifest (goals must survive a trackable reorder)", () => {
+    // Regression: a long-tail trackable drag routes through reorderTrackables.
+    // It must not wipe the user's goals (which live alongside trackables in the
+    // same manifest blob).
+    const withGoals: LifeManifest = {
+      ...base(),
+      goals: [
+        { id: "hydrate", label: "Hydrate", scope: { thing: "coffee" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+      ],
+    };
+    const next = reorderTrackables(withGoals, ["mood", "floss", "coffee", "run"]);
+    expect(next.trackables.map((t) => t.id)).toEqual(["mood", "floss", "coffee", "run"]);
+    expect(next.goals).toEqual(withGoals.goals);
+  });
 });
 
 describe("setPins / validatePins", () => {
