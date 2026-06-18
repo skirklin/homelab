@@ -37,8 +37,8 @@ describe("buildSettingsMenuItems", () => {
     const items = buildSettingsMenuItems({ embedded: false, onOpenSettings, onSignOut });
     const settings = items.find((i) => i && "key" in i && i.key === "settings");
     const logout = items.find((i) => i && "key" in i && i.key === "logout");
-    (settings as { onClick: () => void }).onClick();
-    (logout as { onClick: () => void }).onClick();
+    (settings as unknown as { onClick: () => void }).onClick();
+    (logout as unknown as { onClick: () => void }).onClick();
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
