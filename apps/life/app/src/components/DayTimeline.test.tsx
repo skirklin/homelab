@@ -133,17 +133,23 @@ describe("DayTimeline", () => {
     expect(updateEvent.mock.calls[0][0]).toBe(event.id);
   });
 
-  it("deleting from the modal closes it and the row is gone after the event leaves", async () => {
+  it("deleting from the modal calls deleteEvent and closes the modal", async () => {
     const user = userEvent.setup();
-    renderTimeline({
-      events: [ev("run", num("duration", 30, "min"), TODAY, 17)],
-    });
+    const event = ev("run", num("duration", 30, "min"), TODAY, 17);
+    renderTimeline({ events: [event] });
     await user.click(screen.getByTestId("day-timeline-row"));
     await screen.findByTestId("entry-row");
     await user.click(screen.getByRole("button", { name: "Delete entry" }));
-    await waitFor(() => expect(deleteEvent).toHaveBeenCalled());
-    // Modal closed: the inline editor row is no longer in the document.
-    await waitFor(() => expect(screen.queryByTestId("entry-row")).not.toBeInTheDocument());
+    // (a) The delete handler ran against the tapped event.
+    await waitFor(() => expect(deleteEvent).toHaveBeenCalledWith(event.id));
+    // (b) The modal closed. AntD's leave motion never *completes* under
+    // happy-dom (no CSS transitionend fires, so the portal subtree lingers),
+    // but the `open=false` re-render DOES flip the dialog into its leave
+    // transition — the `ant-zoom-leave` class is the honest "closing" signal.
+    // It is absent while the modal is open, so the assertion still has teeth.
+    await waitFor(() =>
+      expect(document.querySelector(".ant-modal")).toHaveClass("ant-zoom-leave"),
+    );
   });
 
   it("caps at 7 rows and surfaces a '+N more' footer", () => {
