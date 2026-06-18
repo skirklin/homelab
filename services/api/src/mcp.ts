@@ -580,11 +580,11 @@ server.tool(
 
 server.tool(
   "add_life_trackable",
-  "Create a new vocab row in the caller's manifest. `id` is an IMMUTABLE slug (becomes the events subject_id; the history join key) and must be unique. `shape` is also IMMUTABLE: took (amount+unit), did (duration + optional rating + notes), happened (count 1), rated (1..5).",
+  "Create a new vocab row in the caller's manifest. `id` is an IMMUTABLE slug (becomes the events subject_id; the history join key) and must be unique. `shape` is also IMMUTABLE: took (amount+unit), did (duration + optional rating + notes), happened (count 1), rated (1..5), noted (free reflective text — captured only inside Views, not on the dashboard input surfaces).",
   {
     id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-]); becomes the events subject_id"),
     label: z.string().describe("Display label"),
-    shape: z.enum(["took", "did", "happened", "rated"]).describe("IMMUTABLE shape — decides the entries[] a new event carries"),
+    shape: z.enum(["took", "did", "happened", "rated", "noted"]).describe("IMMUTABLE shape — decides the entries[] a new event carries"),
     group: z.string().optional().describe("Semantic rollup (e.g. walk/run/bike share group 'exercise')"),
     hidden: z.boolean().optional().describe("Hide from the dashboard (history preserved)"),
     defaultUnit: z.string().optional().describe("took: prefill unit (mg, oz, drinks, …)"),

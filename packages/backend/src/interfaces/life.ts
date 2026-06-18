@@ -13,6 +13,7 @@ import type {
   QuickPayload,
   LifeManifest,
   TrackableShape,
+  TemplateRef,
   LifeGoalScope,
   LifeGoalKind,
   LifeGoalMetric,
@@ -52,6 +53,10 @@ export interface AddTrackableInput {
   defaultDuration?: number;
   ratingLabel?: string;
   pinned?: QuickPayload[];
+  /** View-render metadata (Phase-B consumers; round-trips through here). */
+  prompt?: string;
+  hint?: string;
+  refs?: TemplateRef[];
 }
 
 /** Vocab-row patch (id + shape are immutable; null clears nullable hints). */
@@ -64,6 +69,10 @@ export interface UpdateTrackablePatch {
   defaultDuration?: number | null;
   ratingLabel?: string | null;
   pinned?: QuickPayload[];
+  /** View-render metadata (Phase-B); null/"" clears. */
+  prompt?: string | null;
+  hint?: string | null;
+  refs?: TemplateRef[] | null;
 }
 
 export interface LifeBackend {

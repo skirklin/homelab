@@ -146,6 +146,31 @@ describe("life trackables: add → list round-trip + uniqueness", () => {
     });
     expect(bad.status).toBe(400);
   });
+
+  it("accepts the reflective `noted` shape and round-trips prompt/hint/refs", async () => {
+    const add = await req("/data/life/trackables", {
+      method: "POST",
+      token: alice.apiToken,
+      body: {
+        id: "intention_followup",
+        label: "Intention follow-up",
+        shape: "noted",
+        prompt: "How did {intention} go?",
+        hint: "Be honest.",
+        refs: [{ token: "intention", fromTrackable: "daily_intention", within: "day", entry: "note" }],
+      },
+    });
+    expect(add.status).toBe(201);
+
+    const list = await req("/data/life/trackables", { token: alice.apiToken });
+    const t = (list.data.trackables as any[]).find((x) => x.id === "intention_followup");
+    expect(t).toMatchObject({
+      shape: "noted",
+      prompt: "How did {intention} go?",
+      hint: "Be honest.",
+      refs: [{ token: "intention", fromTrackable: "daily_intention", within: "day", entry: "note" }],
+    });
+  });
 });
 
 describe("life trackables: update patches + immutability", () => {

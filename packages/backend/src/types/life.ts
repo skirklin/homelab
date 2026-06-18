@@ -15,7 +15,7 @@ export interface SampleSchedule {
 }
 
 /**
- * The four event-recording shapes. A shape implies the input fields and the
+ * The event-recording shapes. A shape implies the input fields and the
  * canonical entries[] a NEW event carries (readers must stay name-agnostic —
  * history uses older names like dose/volume/drinks/intensity):
  *
@@ -25,8 +25,16 @@ export interface SampleSchedule {
  *               optional {name:"notes",  type:"text"}]
  *   happened → [{name:"count",    type:"number", value:1, unit:"ct"}]
  *   rated    → [{name:"rating",   type:"number", unit:"rating", scale:N}]
+ *   noted    → [{name:"note",     type:"text",   value}]
+ *
+ * `noted` is the REFLECTIVE shape — free text, no measurement. Aggregation
+ * skips text entries, so noted vocab never affects charts/goals/streaks. It is
+ * also the one shape EXCLUDED from every input/replay surface (the 2×2 grid,
+ * the global quick row, frecency chips, the habit board long-tail): replaying
+ * free text is meaningless, and noted vocab is captured only inside Views (see
+ * `isReflective`/`isInputEligible` in apps/life/.../lib/shapes.ts).
  */
-export type TrackableShape = "took" | "did" | "happened" | "rated";
+export type TrackableShape = "took" | "did" | "happened" | "rated" | "noted";
 
 /**
  * A replayable quick-action payload: the exact entries[]/labels{} a one-tap
@@ -38,6 +46,27 @@ export interface QuickPayload {
   label?: string;
   entries: LifeEntry[];
   labels?: Record<string, string>;
+}
+
+/**
+ * A template reference: when a vocab row is rendered inside a View, its
+ * `prompt`/`hint` text may carry `{token}` placeholders that are filled from
+ * the user's own recent history. Each ref pulls the most recent event for
+ * `fromTrackable` within `within` (the owner-local day or week), reads the
+ * `entry` (defaulting per shape), and substitutes it for `{token}`.
+ *
+ * Carried on the vocab row but UNUSED by capture in Phase A — the View renderer
+ * (Phase B) consumes it. Round-trips through the PB mapper + manifest ops here.
+ */
+export interface TemplateRef {
+  /** `{token}` placeholder in the prompt/hint/banner text. */
+  token: string;
+  /** A vocab id to pull a recent value from. */
+  fromTrackable: string;
+  /** Owner-local lookback window. */
+  within: "day" | "week";
+  /** Entry name to pull; defaults per the source shape when omitted. */
+  entry?: string;
 }
 
 /**
@@ -72,6 +101,16 @@ export interface LifeManifestTrackable {
   hidden?: boolean;
   /** Manual quick-action favorites, shown first in the quick row / sheet. */
   pinned?: QuickPayload[];
+  /**
+   * View-render metadata (UNUSED by capture in Phase A; consumed by the View
+   * renderer in Phase B). The question text shown when this row is captured
+   * inside a View. May contain `{token}`s resolved against `refs`.
+   */
+  prompt?: string;
+  /** View-render sub-label; may contain `{token}`s. Phase-B only. */
+  hint?: string;
+  /** Template references for `{token}`s in `prompt`/`hint`. Phase-B only. */
+  refs?: TemplateRef[];
 }
 
 /**

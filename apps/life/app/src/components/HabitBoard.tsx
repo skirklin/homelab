@@ -37,7 +37,7 @@ import type {
   TrackableShape,
 } from "@homelab/backend";
 import { evaluateGoal, zonedDateTime, type GoalProgress } from "@homelab/backend";
-import { buildEntries, formatUnitValue } from "../lib/shapes";
+import { buildEntries, formatUnitValue, isInputEligible } from "../lib/shapes";
 import { userTz } from "../lib/useUserTz";
 import { useLogEvent } from "../lib/useLogEvent";
 import { buildDayIndex } from "../lib/dayIndex";
@@ -291,6 +291,8 @@ function defaultEntriesFor(t: LifeManifestTrackable) {
       return buildEntries("did", { duration: t.defaultDuration ?? null });
     case "rated":
       return null; // a rating has no sensible default — open the sheet
+    case "noted":
+      return null; // reflective text has no default; never reaches here anyway
   }
 }
 
@@ -406,13 +408,15 @@ export function HabitBoard({
 
   // Trackables NOT already a goal's PRIMARY thing (thing-scope goals only — a
   // group goal doesn't claim its members as primaries, so they still show in the
-  // long tail). Hidden ones excluded. Rendered in manifest order.
+  // long tail). `isInputEligible` excludes hidden AND reflective (`noted`) rows
+  // — the long-tail is an input/tap-to-log surface, so reflective vocab (View-
+  // only) must not appear here. Rendered in manifest order.
   const goalThingIds = useMemo(
     () => new Set(visibleGoals.flatMap((g) => ("thing" in g.scope ? [g.scope.thing] : []))),
     [visibleGoals],
   );
   const longTail = useMemo(
-    () => trackables.filter((t) => !t.hidden && !goalThingIds.has(t.id)),
+    () => trackables.filter((t) => isInputEligible(t) && !goalThingIds.has(t.id)),
     [trackables, goalThingIds],
   );
 
@@ -495,8 +499,9 @@ export function HabitBoard({
     // this day so the user supplies a real value (never a silent wrong-day log).
     if (!logId || !userId) return;
     if (!thing) {
-      // Group scope: default to a member's shape for the sheet.
-      const shape = trackables.find((t) => subjectIds.includes(t.id) && !t.hidden)?.shape;
+      // Group scope: default to a member's shape for the sheet. Only an
+      // input-eligible member can drive a sheet (reflective `noted` has none).
+      const shape = trackables.find((t) => subjectIds.includes(t.id) && isInputEligible(t))?.shape;
       if (shape) onOpenShape(shape, date);
       return;
     }

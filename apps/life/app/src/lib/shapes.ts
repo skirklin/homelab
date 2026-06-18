@@ -1,5 +1,5 @@
 /**
- * The four event-recording shapes (took / did / happened / rated) and the
+ * The event-recording shapes (took / did / happened / rated / noted) and the
  * generic, NAME-AGNOSTIC event readers that go with them.
  *
  * Construction (new events) is canonical per shape:
@@ -9,11 +9,16 @@
  *               optional {name:"notes", type:"text"}]
  *   happened → [{name:"count",    type:"number", value:1, unit:"ct"}]
  *   rated    → [{name:"rating",   type:"number", value, unit:"rating", scale:N}]
+ *   noted    → [{name:"note",     type:"text",   value}]
  *
  * Reading is generic: history predates the shape model and uses old entry
  * names (dose, volume, drinks, intensity, …), so aggregation/trends/history
  * read "the number entries" — sum non-rating numbers per unit, average
  * rating-unit entries — and NEVER look entries up by name.
+ *
+ * `noted` is the REFLECTIVE shape and is treated specially everywhere a vocab
+ * row is enumerated for INPUT or REPLAY (see the EXCLUSION INVARIANT below):
+ * it is captured only inside Views, never on the dashboard input surfaces.
  */
 import type {
   LifeEvent,
@@ -24,6 +29,19 @@ import type {
 import { startOfDay, endOfDay } from "@homelab/backend";
 import { formatDuration, formatRating } from "./format";
 
+/**
+ * The shapes that get a dashboard input surface (the 2×2 ShapeCard grid + the
+ * per-shape ShapeSheet). This is DELIBERATELY a strict subset of
+ * `TrackableShape`: `noted` is OMITTED because reflective free-text is captured
+ * only inside Views, never inline on the dashboard. Keeping it out of
+ * `SHAPE_ORDER` is what keeps `noted` off the grid — `LifeDashboard` and the
+ * ShapeCard summaries iterate `SHAPE_ORDER`, so a shape absent here is never
+ * rendered as a card and its summary code never runs. See `isReflective` /
+ * `isInputEligible` for the EXCLUSION INVARIANT at every other enumeration site.
+ *
+ * NOTE: this array is intentionally non-exhaustive over `TrackableShape`. If a
+ * future non-reflective shape is added, add it here.
+ */
 export const SHAPE_ORDER: TrackableShape[] = ["took", "did", "happened", "rated"];
 
 export const SHAPE_META: Record<TrackableShape, { title: string; hint: string }> = {
@@ -31,7 +49,34 @@ export const SHAPE_META: Record<TrackableShape, { title: string; hint: string }>
   did: { title: "Did", hint: "exercise, focus, sleep…" },
   happened: { title: "Happened", hint: "one-tap counters" },
   rated: { title: "Rated", hint: "mood, energy…" },
+  noted: { title: "Noted", hint: "a few reflective words…" },
 };
+
+// ---------------------------------------------------------------------------
+// THE INPUT-SURFACE EXCLUSION INVARIANT
+//
+// Reflective (`noted`) vocab is NON-HIDDEN (so Phase-B Views can render it), so
+// `hidden` cannot be what keeps it off the input/replay surfaces. Instead the
+// `shape === "noted"` filter is the mechanism, and it lives HERE in ONE place.
+// Every site that enumerates vocab for INPUT or REPLAY — the 2×2 grid (via
+// SHAPE_ORDER), the global quick row / frecency chips, the habit-board
+// long-tail, ShapeSheet's typeahead (`thingsOfShape`) — routes its filter
+// through `isInputEligible`, so the invariant can never drift across sites.
+// ---------------------------------------------------------------------------
+
+/** True for the reflective free-text shape — captured only inside Views. */
+export function isReflective(shape: TrackableShape): boolean {
+  return shape === "noted";
+}
+
+/**
+ * True when a vocab row may appear on an INPUT/REPLAY surface: non-hidden AND
+ * non-reflective. The single home for the input-surface exclusion invariant —
+ * every quick-row / board / grid / sheet enumeration filters through this.
+ */
+export function isInputEligible(t: LifeManifestTrackable): boolean {
+  return !t.hidden && !isReflective(t.shape);
+}
 
 // ---------------------------------------------------------------------------
 // Shape → entries construction
@@ -50,6 +95,8 @@ export interface ShapeFormValues {
   scale?: number;
   /** did (optional) */
   notes?: string;
+  /** noted: the reflective free-text body. */
+  text?: string;
 }
 
 /**
@@ -83,6 +130,14 @@ export function buildEntries(shape: TrackableShape, values: ShapeFormValues): Li
       const scale = values.scale ?? 5;
       if (typeof r !== "number" || !Number.isFinite(r) || r < 1 || r > scale) return null;
       return [{ name: "rating", type: "number", value: r, unit: "rating", scale }];
+    }
+    case "noted": {
+      // Reflective free text. Entry name is `note` (singular) — distinct from
+      // the `did` shape's optional `notes` (plural) companion. Blank → null so
+      // we never write an empty entries[] (addEvent rejects it).
+      const text = (values.text ?? "").trim();
+      if (!text) return null;
+      return [{ name: "note", type: "text", value: text }];
     }
   }
 }
@@ -181,12 +236,19 @@ export function eventScalar(events: LifeEvent[]): { value: number; unit: string 
 // Vocab helpers
 // ---------------------------------------------------------------------------
 
-/** Vocab rows of one shape (hidden ones excluded), in manifest order. */
+/**
+ * Vocab rows of one shape for an INPUT surface (ShapeSheet typeahead), in
+ * manifest order. Filters through `isInputEligible`, so hidden rows AND
+ * reflective (`noted`) rows are excluded. `noted` would never reach here in
+ * practice (it has no ShapeCard / sheet — it's omitted from SHAPE_ORDER), but
+ * guarding here keeps the exclusion invariant total even if a caller passes
+ * `shape="noted"` directly.
+ */
 export function thingsOfShape(
   trackables: LifeManifestTrackable[],
   shape: TrackableShape,
 ): LifeManifestTrackable[] {
-  return trackables.filter((t) => t.shape === shape && !t.hidden);
+  return trackables.filter((t) => t.shape === shape && isInputEligible(t));
 }
 
 /**

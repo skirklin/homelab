@@ -248,6 +248,30 @@ describe("globalFrecentActions (cross-thing)", () => {
     expect(out.every((a) => a.trackable.id !== "secret")).toBe(true);
   });
 
+  it("excludes NON-HIDDEN reflective (noted) trackables — incl. their pins", () => {
+    // `noted` is visible vocab (Phase-B Views render it), so `hidden` can't be
+    // what keeps it off the quick row — the shape filter must. A noted row with
+    // history AND a pin must contribute NOTHING to the global quick row.
+    const gratitude: LifeManifestTrackable = {
+      id: "gratitude",
+      label: "Gratitude",
+      shape: "noted",
+      // a (nonsensical) pin to prove even pins are excluded for reflective rows
+      pinned: [{ label: "x", entries: num("count", 1, "ct") }],
+    };
+    const events = [
+      // text events don't even produce a replayable payload, but include a
+      // number-ish one to be doubly sure the shape filter — not the empty-
+      // payload skip — is what excludes it.
+      ev("gratitude", num("count", 1, "ct"), day(1)),
+      ev("gratitude", num("count", 1, "ct"), day(2)),
+      ev("coffee", num("volume", 8, "oz"), day(3)),
+    ];
+    const out = globalFrecentActions(events, [gratitude, coffee], { now: NOW, limit: 5 });
+    expect(out.every((a) => a.trackable.id !== "gratitude")).toBe(true);
+    expect(out.some((a) => a.trackable.id === "coffee")).toBe(true);
+  });
+
   it("surfaces pins first (vocab order), then frecency, deduped", () => {
     const withPin: LifeManifestTrackable = {
       ...edibles,

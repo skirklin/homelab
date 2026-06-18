@@ -24,7 +24,7 @@ export type {
 } from "./types/travel";
 export type {
   LifeLog, LifeEvent, LifeEntry, SampleSchedule,
-  LifeManifest, LifeManifestTrackable, TrackableShape, QuickPayload,
+  LifeManifest, LifeManifestTrackable, TrackableShape, QuickPayload, TemplateRef,
   LifeGoal, LifeGoalScope, LifeGoalKind, LifeGoalMetric,
 } from "./types/life";
 export { DEFAULT_LIFE_MANIFEST, defaultLifeManifest } from "./life-manifest-default";
