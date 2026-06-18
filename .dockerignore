@@ -1,9 +1,18 @@
-# Don't ship anything build-time — the Dockerfile reinstalls deps and rebuilds.
+# Don't ship anything build-time — most Dockerfiles reinstall deps and rebuild.
 # Excluding node_modules also avoids transient "invalid file request" failures
 # when pnpm's symlink farm shifts under us mid-context-transfer.
+#
+# EXCEPTION: frontend vite apps are now built on the HOST (turbo-cached) and the
+# thin app.Dockerfile just COPYs their pre-built output into nginx. So the dist/
+# (and recipes' build/) dirs under apps/ MUST be in the build context. We keep
+# the broad **/dist | **/build excludes (so packages/*/dist, service build dirs,
+# etc. stay out of the context) and re-include only the app output dirs via `!`.
 **/node_modules
 **/dist
 **/build
+!apps/*/dist
+!apps/*/app/dist
+!apps/recipes/app/build
 **/.turbo
 **/.next
 **/.cache
