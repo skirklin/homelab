@@ -17,7 +17,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
-import type { LifeEntry, LifeEvent } from "@homelab/backend";
+import type { LifeEntry, LifeEvent, LifeManifestTrackable } from "@homelab/backend";
 
 const addEvent = vi.fn().mockResolvedValue("evt1");
 const messageInfo = vi.fn();
@@ -91,20 +91,34 @@ function makeEvent(subjectId: string, entries: LifeEntry[]): LifeEvent {
   };
 }
 
-function Seed({ events, children }: { events: LogEvent[]; children: ReactNode }) {
+function Seed({
+  events,
+  trackables,
+  children,
+}: {
+  events: LogEvent[];
+  trackables?: LifeManifestTrackable[];
+  children: ReactNode;
+}) {
   const { dispatch } = useLifeContext();
   useEffect(() => {
-    dispatch({ type: "SET_LOG", log: BASE_LOG });
+    const log = trackables ? { ...BASE_LOG, manifest: { trackables } } : BASE_LOG;
+    dispatch({ type: "SET_LOG", log });
     if (events.length > 0) dispatch({ type: "SET_ENTRIES", entries: events });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return <>{children}</>;
 }
 
-function renderView(viewId: string, route: string, events: LogEvent[] = []) {
+function renderView(
+  viewId: string,
+  route: string,
+  events: LogEvent[] = [],
+  trackables?: LifeManifestTrackable[],
+) {
   return render(
     <LifeProvider>
-      <Seed events={events}>
+      <Seed events={events} trackables={trackables}>
         <MemoryRouter initialEntries={[route]}>
           <Routes>
             <Route path="/" element={<div data-testid="dashboard" />} />
@@ -322,6 +336,30 @@ describe("ViewRunner — byte-identical parity with answersToEntries", () => {
     // NOT `weekly_session`. This is the load-bearing LEGACY_SESSION_SUBJECT map.
     expect(subjectId).toBe("weekly_review_session");
     expect(entries).toEqual(expected);
+  });
+
+  it("DEFAULT_VIEW_TRACKABLES wins over a colliding-id user row (B2 parity preserved)", async () => {
+    // A live user already owns a trackable whose id collides with the reflective
+    // `energy` vocab, but at a DIFFERENT shape (`did`, not `rated`). The default
+    // view row MUST win, or the energy step would render the `did` text input
+    // and buildFatEntries would emit `unit:"min"` instead of the rating entry —
+    // silently breaking byte-parity for that user.
+    const user = userEvent.setup();
+    const userTrackables: LifeManifestTrackable[] = [
+      { id: "energy", label: "Energy minutes", shape: "did" },
+    ];
+    renderView("morning", "/morning", [], userTrackables);
+    await answerText(user, "What are you grateful for?", null, false);
+    await answerText(user, "What's the plan for today?", null, false);
+    // If the user's `did` row had won, this step would be a text Input with no
+    // "4" rating button — clicking it would fail.
+    await answerRating(user, "Energy", 4, true);
+
+    await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(1));
+    const [, subjectId, entries] = addEvent.mock.calls[0];
+    expect(subjectId).toBe("morning_session");
+    // Byte-identical to the rated default, NOT the `did` (unit:"min") shape.
+    expect(entries).toEqual([{ name: "energy", type: "number", value: 4, unit: "rating", scale: 5 }]);
   });
 
   it("all-skipped run writes nothing and surfaces the nothing-to-save notice", async () => {

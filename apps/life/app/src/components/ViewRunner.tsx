@@ -352,15 +352,24 @@ export function ViewRunner({ viewId }: ViewRunnerProps) {
   const life = useLifeBackend();
   const { message } = useFeedback();
 
-  // Vocab resolution: DEFAULT_VIEW_TRACKABLES ∪ the user's manifest trackables.
-  // The default reflective rows are NOT materialized into the manifest until B3,
-  // so DEFAULT_VIEW_TRACKABLES is the source for them; a user's own manifest row
-  // with the same id takes precedence (so custom prompt edits win once B3 lands).
+  // Vocab resolution: the user's manifest trackables ∪ DEFAULT_VIEW_TRACKABLES,
+  // with DEFAULT_VIEW_TRACKABLES applied LAST so it WINS on an id collision.
+  //
+  // B2-correct: the morning/evening/weekly wizards are fixed, code-defined
+  // views, and the parity gate's contract is "reproduce the fixed wizard
+  // verbatim". A live user may already own a trackable whose id collides with a
+  // reflective vocab id (`energy`, `gratitude`, `highlights`, …) but at a
+  // DIFFERENT shape; if their row won, the step would render the wrong input and
+  // `buildFatEntries` would emit the wrong entry — silently breaking byte-parity
+  // for that user. Defaults must win so the wizard is identical for everyone.
+  //
+  // B3 revisits this: once users can customize view prompts (`manifest.views` /
+  // custom vocab), user/custom rows should take precedence — flip back then.
   const userTrackables = useTrackables();
   const vocab = useMemo<Map<string, LifeManifestTrackable>>(() => {
     const m = new Map<string, LifeManifestTrackable>();
-    for (const t of DEFAULT_VIEW_TRACKABLES) m.set(t.id, t);
     for (const t of userTrackables) m.set(t.id, t);
+    for (const t of DEFAULT_VIEW_TRACKABLES) m.set(t.id, t);
     return m;
   }, [userTrackables]);
 
