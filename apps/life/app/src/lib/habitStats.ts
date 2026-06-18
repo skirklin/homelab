@@ -9,10 +9,7 @@
  *   - daily goal         → a DAY that is `met` (evaluator semantics).
  *   - weekly goal        → a WEEK that is `met` (evaluator semantics).
  *
- * For weekly goals the "period" is a week; for everything else it's a day. The
- * longest-streak walk bounds itself to [earliest event period .. today] so it
- * never walks infinitely (and an `at_most` cap's vacuously-met empty future
- * periods can't inflate it).
+ * For weekly goals the "period" is a week; for everything else it's a day.
  */
 import type { DayIndex } from "./dayIndex";
 import { dayHas, daySum } from "./dayIndex";
@@ -25,11 +22,6 @@ const DAY_MS = 24 * HOUR_MS;
 /** Next local day's start instant (DST-safe: +26h then re-snap to midnight). */
 function nextDayStart(dayStart: Date, tz: string): Date {
   return startOfDay(new Date(dayStart.getTime() + 26 * HOUR_MS), tz);
-}
-
-/** Next local week's start instant (DST-safe: +8d then re-snap to Sunday). */
-function nextWeekStart(weekStart: Date, tz: string): Date {
-  return startOfWeek(new Date(weekStart.getTime() + 8 * DAY_MS), tz);
 }
 
 /** End of a week given its start instant. */
@@ -137,86 +129,6 @@ function earliestTimestamp(subjectIds: string[], events: LifeEvent[]): Date | un
 }
 
 // ---------------------------------------------------------------------------
-// Longest + current streak (consecutive met periods).
-// ---------------------------------------------------------------------------
-
-export interface StreakStats {
-  current: number;
-  longest: number;
-}
-
-/**
- * Window bound for the streak walk (~3 years of days). The walk only ever looks
- * back this many periods from today — older history can't extend the longest
- * streak in practice, and clamping the START here (not the end) keeps the cap
- * away from today so the current streak is never truncated.
- */
-const MAX_PERIODS = 1100;
-
-/**
- * Longest AND current run of consecutive met periods over [earliest .. today].
- * Daily goals (and plain trackables) walk days; weekly goals walk weeks. The
- * walk starts at the earliest event's period and steps forward to the period
- * containing `today`; `current` is the trailing run ending at today's period.
- */
-export function computeStreaks(
-  subjectIds: string[],
-  goal: LifeGoal | null,
-  index: DayIndex,
-  events: LifeEvent[],
-  tz: string,
-  today: Date,
-): StreakStats {
-  const earliest = earliestTimestamp(subjectIds, events);
-  if (!earliest) return { current: 0, longest: 0 };
-
-  const weekly = goal?.period === "week";
-  const periodStart = (d: Date) => (weekly ? startOfWeek(d, tz) : startOfDay(d, tz));
-  const stepNext = (d: Date) => (weekly ? nextWeekStart(d, tz) : nextDayStart(d, tz));
-
-  const firstStart = periodStart(earliest);
-  const todayStart = periodStart(today);
-
-  // Clamp the walk's START to at most MAX_PERIODS periods before today, in the
-  // walk's period unit. This guarantees the iteration cap bites the OLD end of
-  // the range, so the recent run / current streak (anchored at today) is never
-  // truncated for habits older than ~MAX_PERIODS periods (the forward walk would
-  // otherwise hit the cap before reaching today). A window this size still
-  // captures the longest streak for any realistic habit.
-  const periodMs = weekly ? 7 * DAY_MS : DAY_MS;
-  const clampStart = periodStart(new Date(todayStart.getTime() - MAX_PERIODS * periodMs));
-  let cursor = firstStart.getTime() > clampStart.getTime() ? firstStart : clampStart;
-
-  // Hard iteration ceiling: at most MAX_PERIODS periods span clampStart..today,
-  // plus a small margin so a DST re-snap of clampStart can't leave the cap biting
-  // one period short of today and zeroing a valid current streak.
-  const maxIterations = MAX_PERIODS + 4;
-
-  let longest = 0;
-  let run = 0;
-  let current = 0;
-  for (let i = 0; i < maxIterations; i++) {
-    // A future-dated earliest event lands beyond today: stop before evaluating
-    // so a single future period can't inflate `longest`/`current`.
-    if (cursor.getTime() > todayStart.getTime()) break;
-    const met = periodMet(subjectIds, goal, cursor, tz, events, index);
-    if (met) {
-      run += 1;
-      if (run > longest) longest = run;
-    } else {
-      run = 0;
-    }
-    // The trailing run ending at today's period is the "current" streak.
-    if (cursor.getTime() === todayStart.getTime()) {
-      current = run;
-      break;
-    }
-    cursor = stepNext(cursor);
-  }
-  return { current, longest };
-}
-
-// ---------------------------------------------------------------------------
 // Per-month + per-year completion stats.
 // ---------------------------------------------------------------------------
 
@@ -283,15 +195,12 @@ export interface YearStats {
   /** Elapsed days in that window with data range (earliest event .. today). */
   elapsedDays: number;
   pct: number;
-  current: number;
-  longest: number;
 }
 
 /**
  * Year totals over the window [max(earliest, today−364d) .. today]: completed
- * days, completion %, plus current & longest streak (period-correct via
- * computeStreaks). Bounds to the earliest event so a brand-new habit doesn't
- * show a denominator of 365.
+ * days and completion %. Bounds to the earliest event so a brand-new habit
+ * doesn't show a denominator of 365.
  */
 export function yearStats(
   subjectIds: string[],
@@ -301,10 +210,9 @@ export function yearStats(
   tz: string,
   today: Date,
 ): YearStats {
-  const streaks = computeStreaks(subjectIds, goal, index, events, tz, today);
   const earliest = earliestTimestamp(subjectIds, events);
   if (!earliest) {
-    return { completedDays: 0, elapsedDays: 0, pct: 0, current: 0, longest: 0 };
+    return { completedDays: 0, elapsedDays: 0, pct: 0 };
   }
   // Window start = later of (earliest event day, 364 days ago).
   const windowStartCandidate = startOfDay(new Date(today.getTime() - 364 * DAY_MS), tz);
@@ -321,7 +229,7 @@ export function yearStats(
     cursor = nextDayStart(cursor, tz);
   }
   const pct = elapsedDays > 0 ? Math.round((completedDays / elapsedDays) * 100) : 0;
-  return { completedDays, elapsedDays, pct, current: streaks.current, longest: streaks.longest };
+  return { completedDays, elapsedDays, pct };
 }
 
 // ---------------------------------------------------------------------------

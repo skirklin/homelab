@@ -8,8 +8,8 @@
  *
  * Two sections:
  *   - Goals (top): each visible goal keeps its at-a-glance status (label,
- *     value/target, 🔥 streak, met ✓ / cap headroom-or-over, + Log for unmet
- *     at_least), with a goal-overlaid calendar below. Weekly goals add a
+ *     value/target, met ✓ / cap headroom-or-over, + Log for unmet at_least),
+ *     with a goal-overlaid calendar below. Weekly goals add a
  *     "this week N/target · last week M/target" context line.
  *   - All trackables (below, collapsible): every non-hidden trackable not
  *     already a goal's primary thing gets a plain (binary) calendar.
@@ -155,11 +155,6 @@ const Progress = styled.span<{ $over?: boolean }>`
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: ${(p) => (p.$over ? "var(--color-warning, #faad14)" : "var(--color-text)")};
-`;
-
-const Streak = styled.span`
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
 `;
 
 const WeekContext = styled.div`
@@ -563,16 +558,9 @@ export function HabitBoard({
                       ) : (
                         <Label>{goal.label}</Label>
                       )}
-                      <Sub>
-                        {isCap
-                          ? over
-                            ? "over cap"
-                            : `${fmtValue(goal, progress.remaining)} left`
-                          : null}
-                        {progress.streak > 0 && (
-                          <Streak>🔥 {progress.streak}{goal.period === "week" ? " wk" : ""}</Streak>
-                        )}
-                      </Sub>
+                      {isCap && (
+                        <Sub>{over ? "over cap" : `${fmtValue(goal, progress.remaining)} left`}</Sub>
+                      )}
                     </Body>
                     <Progress $over={over} data-testid="habit-progress">
                       {fmtValue(goal, progress.value)}/{fmtValue(goal, goal.target)}
