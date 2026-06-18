@@ -1,6 +1,7 @@
 /**
  * Shared argv helpers for the one-shot history rewrite scripts
- * (merge-sleep-quality.ts / split-category-subjects.ts).
+ * (merge-sleep-quality.ts / split-category-subjects.ts /
+ *  fanout-session-events.ts).
  *
  * Both mutate `argv` in place (splice out what they consume) so the caller
  * can reject leftovers as unknown args afterwards.

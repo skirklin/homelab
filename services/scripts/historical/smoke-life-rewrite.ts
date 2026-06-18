@@ -1,7 +1,8 @@
 /**
  * Integration smoke test for the 2026-06 life history rewrite scripts
- * (merge-sleep-quality.ts / split-category-subjects.ts) against a LOCAL
- * test PocketBase. Refuses to run against anything but localhost.
+ * (merge-sleep-quality.ts / split-category-subjects.ts /
+ *  fanout-session-events.ts) against a LOCAL test PocketBase. Refuses to run
+ * against anything but localhost.
  *
  * Seeds a throwaway user + life_log + events, runs each script as a child
  * process (dry-run first — asserting nothing changed — then --apply),
@@ -459,7 +460,90 @@ runScript("fanout-session-events.ts", ["--apply"], 0);
 const fanRerun = await fetchAll();
 check("fanout: rerun is a no-op", JSON.stringify([...state].sort()) === JSON.stringify([...fanRerun].sort()));
 
-void fanSeedIds;
+// Per-id final disposition of every fanout seed: the four fat sources are gone,
+// the live mood sample + the pre-created partial child survive untouched.
+const [seedMorning, seedEvening, seedWeekly, seedLiveMood, seedPartial, seedPartialChild] = fanSeedIds;
+check("fanout seed: 3 session sources + partial source all deleted",
+  ![seedMorning, seedEvening, seedWeekly, seedPartial].some((id) => state.has(id)));
+check("fanout seed: live mood + pre-created partial child both survive",
+  state.has(seedLiveMood) && state.has(seedPartialChild));
+
+// ---------------------------------------------------------------------------
+// Script 3b: data-loss guards (dup-source collision + non-numeric rated value).
+// Both must leave their sources INTACT and make --apply exit 2 (non-zero). We
+// seed these AFTER the happy path so they don't perturb the assertions above,
+// and tear them down immediately so the final-cleanup count stays predictable.
+// ---------------------------------------------------------------------------
+
+console.log("");
+console.log("  --- fanout guards: dup-source collision + NaN rated value ---");
+
+// LOW-1: two DISTINCT morning_session rows sharing (subject_id, timestamp) —
+// a genuine double-submit. The fanout child key is (newSubjectId, view_run=
+// timestamp), so without the guard the second source would emit delete-only and
+// lose its entries. Guard: both error, neither deleted, no children created.
+const dupTs = "2026-05-25 15:00:00.000Z";
+const dupA = await addEvent({
+  subject_id: "morning_session",
+  timestamp: dupTs,
+  entries: [{ name: "gratitude", type: "text", value: "first submit" }],
+  labels: { source: "manual" },
+});
+const dupB = await addEvent({
+  subject_id: "morning_session",
+  timestamp: dupTs,
+  entries: [{ name: "gratitude", type: "text", value: "second submit" }],
+  labels: { source: "manual" },
+});
+
+// MINOR-1: a non-numeric value on a rated id (mood) -> Number() = NaN. Must
+// error (not write NaN) and leave the source intact.
+const nanTs = "2026-05-26 04:00:00.000Z";
+const nanSource = await addEvent({
+  subject_id: "evening_session",
+  timestamp: nanTs,
+  entries: [
+    { name: "win", type: "text", value: "shipped" },
+    { name: "mood", type: "text", value: "not-a-number" },
+  ],
+  labels: { source: "manual" },
+});
+
+const guardOut = runScript("fanout-session-events.ts", ["--apply"], 2);
+check("fanout guards: --apply exits 2 with the loud unmapped/error trailer",
+  guardOut.includes("UNMAPPED ENTRY(IES)"));
+state = await fetchAll();
+
+// Dup-source: both colliding rows survive; no gratitude child was created for
+// the colliding timestamp.
+check("fanout dup-source: both colliding sources survive (no delete)",
+  state.has(dupA) && state.has(dupB));
+const dupChildren = [...state.values()].filter(
+  (r) => r.subject_id === "gratitude" && (r.labels as any)?.view_run === dupTs,
+);
+check("fanout dup-source: no children created for the colliding pair",
+  dupChildren.length === 0, `got ${dupChildren.length}`);
+
+// NaN guard: the source survives, and crucially NO mood child carrying NaN was
+// written for that timestamp.
+check("fanout NaN guard: source with non-numeric rated value survives",
+  state.has(nanSource));
+const nanMoodChildren = [...state.values()].filter(
+  (r) => r.subject_id === "mood" && (r.labels as any)?.view_run === nanTs,
+);
+check("fanout NaN guard: no NaN mood child written", nanMoodChildren.length === 0,
+  `got ${nanMoodChildren.length}`);
+const nanWinChild = [...state.values()].find(
+  (r) => r.subject_id === "daily_win" && (r.labels as any)?.view_run === nanTs,
+);
+// The other (valid) entry must NOT have been created either: an error on any
+// entry suppresses the source's delete, and a rerun would re-create the win as
+// a skip-or-create — to keep the source fully reversible the source is intact
+// AND its win child IS allowed to exist (create happened, delete suppressed).
+check("fanout NaN guard: the valid sibling entry still fanned out (win child present)",
+  nanWinChild?.entries?.[0]?.value === "shipped");
+// Guard seeds (dupA, dupB, nanSource) + the valid win child are swept by the
+// final cleanup loop below, which deletes every remaining event in the log.
 
 // ---------------------------------------------------------------------------
 // Cleanup + verdict

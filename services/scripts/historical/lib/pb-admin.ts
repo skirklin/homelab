@@ -1,6 +1,7 @@
 /**
  * Shared PocketBase plumbing for the one-shot life history rewrite scripts
- * (merge-sleep-quality.ts / split-category-subjects.ts).
+ * (merge-sleep-quality.ts / split-category-subjects.ts /
+ *  fanout-session-events.ts).
  *
  * Auth follows the recover-life-events.ts convention: superuser creds come
  * from the repo-root .env (`export $(grep -v '^#' .env | xargs)` before

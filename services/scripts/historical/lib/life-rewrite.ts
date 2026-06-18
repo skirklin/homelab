@@ -625,7 +625,7 @@ export function planSessionFanout(events: EventRow[]): SessionFanoutAction[] {
   const childKeys = new Set<string>();
   for (const ev of events) {
     const viewRun = ev.labels?.view_run;
-    if (viewRun) childKeys.add(`${ev.subject_id} ${viewRun}`);
+    if (viewRun) childKeys.add(`${ev.subject_id} ${viewRun}`);
   }
 
   const sources = events
@@ -636,6 +636,23 @@ export function planSessionFanout(events: EventRow[]): SessionFanoutAction[] {
       a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : a.id < b.id ? -1 : 1,
     );
 
+  // Detect duplicate (subject_id, timestamp) AMONG THE SOURCES themselves — two
+  // distinct fat-session rows sharing the same (subject_id, timestamp), i.e. a
+  // genuine double-submit. The child idempotency key is (newSubjectId,
+  // view_run=src.timestamp), so two such sources would BOTH reserve the same
+  // child keys: the first creates every child; the second sees them all present
+  // and would emit `delete-only`, silently deleting itself and losing its
+  // entries forever. Refuse the whole colliding cohort: each gets one `error`
+  // action and NO delete, so the driver leaves them intact and exits non-zero
+  // for the operator to investigate. This is INDEPENDENT of `childKeys` (which
+  // tracks legitimate PRIOR-RUN children) — a real prior-run child rightly
+  // shares the key, but two live sources must never.
+  const sourceTsCounts = new Map<string, number>();
+  for (const src of sources) {
+    const k = `${src.subject_id} ${src.timestamp}`;
+    sourceTsCounts.set(k, (sourceTsCounts.get(k) ?? 0) + 1);
+  }
+
   const actions: SessionFanoutAction[] = [];
   for (const src of sources) {
     const subject = src.subject_id;
@@ -644,9 +661,30 @@ export function planSessionFanout(events: EventRow[]): SessionFanoutAction[] {
     const map = SESSION_ID_MAP[subject];
     const source = (src.labels?.source as string) ?? "manual";
 
+    // Duplicate-source guard: this source shares its (subject_id, timestamp)
+    // with another live source. Emit one error, create nothing, delete nothing.
+    if ((sourceTsCounts.get(`${subject} ${viewRun}`) ?? 0) > 1) {
+      actions.push({
+        kind: "error",
+        sourceId: src.id,
+        subject,
+        entryName: "*",
+        reason: `source ${src.id} (${subject}) shares (subject_id, timestamp=${viewRun}) with another source — a double-submit whose fanout would collide and drop one source's entries; refusing both`,
+      });
+      continue;
+    }
+
     let hadError = false;
     let createdCount = 0;
     const sourceActions: SessionFanoutAction[] = [];
+    // Two entries within ONE source mapping to the same new id would collide on
+    // `key`; the reserve-after-check below would DEDUPE them to a single child
+    // (the second sees the key the first reserved -> `skip`), silently dropping
+    // the second entry. No current session view maps two entry names to the
+    // same new subject_id, so this can't fire today — but assert it here so a
+    // future SESSION_ID_MAP edit that introduces such a shape fails loud instead
+    // of losing data.
+    const reservedThisSource = new Set<string>();
 
     for (const entry of src.entries) {
       const newSubjectId = map[entry.name];
@@ -661,7 +699,39 @@ export function planSessionFanout(events: EventRow[]): SessionFanoutAction[] {
         });
         continue;
       }
-      const key = `${newSubjectId} ${viewRun}`;
+      const key = `${newSubjectId} ${viewRun}`;
+      // Two entries in THIS source mapping to the same new id collide on `key`.
+      // Fail loud instead of silently deduping (see reservedThisSource above).
+      if (reservedThisSource.has(key)) {
+        hadError = true;
+        sourceActions.push({
+          kind: "error",
+          sourceId: src.id,
+          subject,
+          entryName: entry.name,
+          reason: `entry "${entry.name}" on ${subject} maps to ${newSubjectId}, which another entry in the SAME source already maps to; SESSION_ID_MAP must be 1:1 per source or fanout would dedupe and drop one`,
+        });
+        continue;
+      }
+      // Rated child whose normalized value is non-finite (text/garbage on a
+      // numeric rated id) would write NaN as the rating. Fail loud, exactly like
+      // an unmapped name: error, no create, source survives, run exits non-zero.
+      if (RATED_NEW_IDS.has(newSubjectId)) {
+        const num = entry.type === "number" ? entry.value : Number(entry.value);
+        if (!Number.isFinite(num)) {
+          hadError = true;
+          sourceActions.push({
+            kind: "error",
+            sourceId: src.id,
+            subject,
+            entryName: entry.name,
+            reason: `rated entry "${entry.name}" on ${subject} to ${newSubjectId} has a non-numeric value (${JSON.stringify(
+              entry.value,
+            )}) that coerces to NaN; refusing to write NaN as a rating`,
+          });
+          continue;
+        }
+      }
       if (childKeys.has(key)) {
         sourceActions.push({
           kind: "skip",
@@ -673,9 +743,10 @@ export function planSessionFanout(events: EventRow[]): SessionFanoutAction[] {
         });
         continue;
       }
-      // Reserve this child key so two same-named entries in one source (or a
-      // collision across this run) each create exactly once.
+      // Reserve this child key (both the shared cross-run index and the
+      // per-source dedupe set) so a partial-run collision creates exactly once.
       childKeys.add(key);
+      reservedThisSource.add(key);
       createdCount++;
       sourceActions.push({
         kind: "create",
