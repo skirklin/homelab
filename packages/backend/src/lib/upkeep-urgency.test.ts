@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getUrgencyLevel, type UrgencyTask } from "./upkeep-urgency";
+import { getUrgencyLevel, isActionableOneShot, type UrgencyTask } from "./upkeep-urgency";
 
 /** Build a UrgencyTask with sane defaults; override per case. */
 function task(overrides: Partial<UrgencyTask> = {}): UrgencyTask {
@@ -9,6 +9,8 @@ function task(overrides: Partial<UrgencyTask> = {}): UrgencyTask {
     lastCompleted: null,
     deadline: null,
     snoozedUntil: null,
+    completed: false,
+    cleared: false,
     ...overrides,
   };
 }
@@ -67,5 +69,41 @@ describe("getUrgencyLevel — asap bucket", () => {
       }),
     );
     expect(level).not.toBe("asap");
+  });
+});
+
+describe("isActionableOneShot", () => {
+  it("open one_shot (not completed/cleared/snoozed) → true", () => {
+    expect(isActionableOneShot(task({ taskType: "one_shot" }))).toBe(true);
+  });
+
+  it("recurring task → false (gate is one_shot only)", () => {
+    expect(isActionableOneShot(task({ taskType: "recurring" }))).toBe(false);
+  });
+
+  it("completed one_shot → false", () => {
+    expect(isActionableOneShot(task({ taskType: "one_shot", completed: true }))).toBe(false);
+  });
+
+  it("cleared one_shot → false", () => {
+    expect(isActionableOneShot(task({ taskType: "one_shot", cleared: true }))).toBe(false);
+  });
+
+  it("snoozed one_shot (snoozedUntil in the future) → false", () => {
+    expect(
+      isActionableOneShot(task({ taskType: "one_shot", snoozedUntil: daysFromToday(2) })),
+    ).toBe(false);
+  });
+
+  it("expired snooze (snoozedUntil in the past) → true", () => {
+    expect(
+      isActionableOneShot(task({ taskType: "one_shot", snoozedUntil: daysFromToday(-2) })),
+    ).toBe(true);
+  });
+
+  it("ignores deadline and urgency — a far-future open todo is still actionable", () => {
+    expect(
+      isActionableOneShot(task({ taskType: "one_shot", deadline: daysFromToday(30) })),
+    ).toBe(true);
   });
 });

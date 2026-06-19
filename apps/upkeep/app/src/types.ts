@@ -4,6 +4,7 @@ import {
   daysUntilDue as sharedDaysUntilDue,
   getUrgencyLevel as sharedGetUrgencyLevel,
   isTaskSnoozed as sharedIsTaskSnoozed,
+  isActionableOneShot as sharedIsActionableOneShot,
   type UrgencyLevel as SharedUrgencyLevel,
 } from "@homelab/backend";
 export type { NotificationMode };
@@ -98,6 +99,7 @@ export function formatFrequency(frequency: Frequency): string {
 }
 
 export const isTaskSnoozed = (task: Task): boolean => sharedIsTaskSnoozed(task);
+export const isActionableOneShot = (task: Task): boolean => sharedIsActionableOneShot(task);
 
 export function formatSnoozeRemaining(task: Task): string {
   if (!task.snoozedUntil) return "";

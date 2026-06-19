@@ -109,6 +109,7 @@ export {
   daysUntilDue,
   getUrgencyLevel,
   isTaskSnoozed,
+  isActionableOneShot,
 } from "./lib/upkeep-urgency";
 export type { UrgencyLevel, UrgencyTask } from "./lib/upkeep-urgency";
 

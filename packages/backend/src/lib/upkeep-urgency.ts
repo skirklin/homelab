@@ -29,6 +29,8 @@ export interface UrgencyTask {
   lastCompleted: Date | null;
   deadline: Date | null;
   snoozedUntil: Date | null;
+  completed: boolean;
+  cleared: boolean;
 }
 
 /**
@@ -90,4 +92,22 @@ export function getUrgencyLevel(task: UrgencyTask): UrgencyLevel {
 export function isTaskSnoozed(task: UrgencyTask): boolean {
   if (!task.snoozedUntil) return false;
   return task.snoozedUntil.getTime() > Date.now();
+}
+
+/**
+ * Is this an open one-shot todo worth surfacing right now? True for a one_shot
+ * that is not completed, not cleared ("Clear done" soft-hide), and not snoozed.
+ *
+ * This is the gate every "actionable todo" UI shares — upkeep's outliner row
+ * badges and life's "tasks due" block. Snooze lives IN the predicate (all call
+ * sites exclude snoozed), so callers don't re-spell the boolean chain. It does
+ * NOT consider urgency level or deadline — layer those on at the call site.
+ */
+export function isActionableOneShot(task: UrgencyTask): boolean {
+  return (
+    task.taskType === "one_shot" &&
+    !task.completed &&
+    !task.cleared &&
+    !isTaskSnoozed(task)
+  );
 }
