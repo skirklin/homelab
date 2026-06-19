@@ -51,7 +51,18 @@ export type ManifestErrorCode =
   | "invalid_goal"
   | "duplicate_goal"
   | "goal_not_found"
-  | "immutable_goal";
+  | "immutable_goal"
+  // View layer (life-view-ops.ts) — same ManifestError, distinct codes.
+  | "invalid_view"
+  | "duplicate_view"
+  | "view_not_found"
+  | "immutable_view_id"
+  // Notification layer (life-view-ops.ts) — same ManifestError, distinct codes.
+  | "invalid_notification"
+  | "duplicate_notification"
+  | "notification_not_found"
+  | "immutable_notification_id"
+  | "immutable_notification_strategy_kind";
 
 export class ManifestError extends Error {
   code: ManifestErrorCode;
@@ -65,7 +76,12 @@ export class ManifestError extends Error {
 /** A trackable id must be a slug: lower-kebab, starts alnum. */
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
-function isSlug(s: unknown): s is string {
+/**
+ * A manifest id must be a slug: lower-kebab, starts alnum, <=64 chars. Shared
+ * by trackables, goals, views, and notifications so every per-user id obeys the
+ * same shape (used as event subject_id / labels.view / reminder_state keys).
+ */
+export function isSlug(s: unknown): s is string {
   return typeof s === "string" && s.length > 0 && s.length <= 64 && SLUG_RE.test(s);
 }
 
@@ -214,27 +230,27 @@ export function validatePins(raw: unknown): QuickPayload[] {
  * must round-trip through the manifest ops without being dropped or corrupted.
  * Returns the typed list, or undefined when absent. An empty array clears.
  */
-function validateRefs(raw: unknown): TemplateRef[] | undefined {
+export function validateRefs(raw: unknown, code: ManifestErrorCode = "invalid_default"): TemplateRef[] | undefined {
   if (raw === undefined || raw === null) return undefined;
-  if (!Array.isArray(raw)) throw new ManifestError("invalid_default", "refs must be an array");
+  if (!Array.isArray(raw)) throw new ManifestError(code, "refs must be an array");
   const out: TemplateRef[] = raw.map((r, i) => {
     if (!r || typeof r !== "object" || Array.isArray(r)) {
-      throw new ManifestError("invalid_default", `refs[${i}] must be an object`);
+      throw new ManifestError(code, `refs[${i}] must be an object`);
     }
     const ref = r as Record<string, unknown>;
     if (typeof ref.token !== "string" || ref.token.length === 0) {
-      throw new ManifestError("invalid_default", `refs[${i}].token must be a non-empty string`);
+      throw new ManifestError(code, `refs[${i}].token must be a non-empty string`);
     }
     if (typeof ref.fromTrackable !== "string" || ref.fromTrackable.length === 0) {
-      throw new ManifestError("invalid_default", `refs[${i}].fromTrackable must be a non-empty string`);
+      throw new ManifestError(code, `refs[${i}].fromTrackable must be a non-empty string`);
     }
     if (ref.within !== "day" && ref.within !== "week") {
-      throw new ManifestError("invalid_default", `refs[${i}].within must be "day" or "week"`);
+      throw new ManifestError(code, `refs[${i}].within must be "day" or "week"`);
     }
     const next: TemplateRef = { token: ref.token, fromTrackable: ref.fromTrackable, within: ref.within };
     if (ref.entry !== undefined) {
       if (typeof ref.entry !== "string" || ref.entry.length === 0) {
-        throw new ManifestError("invalid_default", `refs[${i}].entry must be a non-empty string`);
+        throw new ManifestError(code, `refs[${i}].entry must be a non-empty string`);
       }
       next.entry = ref.entry;
     }

@@ -24,6 +24,16 @@ import {
   removeGoal as removeGoalOp,
   reorderGoals as reorderGoalsOp,
   manifestGoals,
+  addView as addViewOp,
+  updateView as updateViewOp,
+  removeView as removeViewOp,
+  reorderViews as reorderViewsOp,
+  manifestViews,
+  addNotification as addNotificationOp,
+  updateNotification as updateNotificationOp,
+  removeNotification as removeNotificationOp,
+  reorderNotifications as reorderNotificationsOp,
+  manifestNotifications,
   evaluateGoal,
   type LifeManifest,
   type LifeEvent,
@@ -2396,8 +2406,12 @@ async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
 
 /** Map a ManifestError code to an HTTP status. */
 function manifestErrorStatus(code: ManifestError["code"]): 400 | 404 | 409 {
-  if (code === "not_found" || code === "goal_not_found") return 404;
-  if (code === "duplicate_id" || code === "duplicate_goal") return 409;
+  if (code === "not_found" || code === "goal_not_found" || code === "view_not_found" || code === "notification_not_found") {
+    return 404;
+  }
+  if (code === "duplicate_id" || code === "duplicate_goal" || code === "duplicate_view" || code === "duplicate_notification") {
+    return 409;
+  }
   return 400;
 }
 
@@ -2662,6 +2676,186 @@ dataRoutes.post("/life/goals/reorder", handler(async (c) => {
   const out = await applyManifestMutation(pb, userId, (cur) => reorderGoalsOp(cur, body.order));
   if (!out.ok) return c.json({ error: out.error }, out.status);
   return c.json({ goals: manifestGoals(out.manifest) });
+}));
+
+// ---- Life views (Unified Capture; manifest-only) ----
+//
+// Same identity scoping + read-modify-write pattern as the trackable/goal
+// routes: resolve the CALLER'S OWN log, run a pure view op, persist the whole
+// manifest. Views add no event data. `id` is IMMUTABLE (written to
+// life_events.labels.view). The pure ops enforce all validation.
+
+// List the caller's views.
+dataRoutes.get("/life/views", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const log = await getOrCreateOwnLifeLog(pb, userId);
+  const manifest = manifestFromValue(log.manifest) ?? emptyManifest();
+  return c.json({ log: log.id, views: manifestViews(manifest) });
+}));
+
+// Add a view to the caller's manifest.
+dataRoutes.post("/life/views", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{
+    id?: unknown;
+    title?: unknown;
+    greeting?: unknown;
+    icon?: unknown;
+    render?: unknown;
+    items?: unknown;
+  }>();
+  if (typeof body.id !== "string") {
+    return c.json({ error: "id is required (a slug string)" }, 400);
+  }
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    addViewOp(cur, {
+      id: body.id as string,
+      title: body.title,
+      greeting: body.greeting,
+      icon: body.icon,
+      render: body.render,
+      items: body.items,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ views: manifestViews(out.manifest) }, 201);
+}));
+
+// Patch a view. id is immutable (enforced in the pure op).
+dataRoutes.patch("/life/views/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const viewId = c.req.param("id")!;
+  const body = await c.req.json<{
+    id?: unknown;
+    title?: unknown;
+    greeting?: unknown;
+    icon?: unknown;
+    render?: unknown;
+    items?: unknown;
+  }>();
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    // Forward `id` so the pure op rejects any attempt to rename, rather than
+    // silently ignoring.
+    updateViewOp(cur, viewId, {
+      id: body.id as string | undefined,
+      title: body.title,
+      greeting: body.greeting,
+      icon: body.icon,
+      render: body.render,
+      items: body.items,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ views: manifestViews(out.manifest) });
+}));
+
+// Remove a view (manifest-only — never deletes life_events).
+dataRoutes.delete("/life/views/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const viewId = c.req.param("id")!;
+  const out = await applyManifestMutation(pb, userId, (cur) => removeViewOp(cur, viewId));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ success: true, views: manifestViews(out.manifest) });
+}));
+
+// Reorder views. order[] must be a permutation of the current view ids.
+dataRoutes.post("/life/views/reorder", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{ order?: unknown }>();
+  const out = await applyManifestMutation(pb, userId, (cur) => reorderViewsOp(cur, body.order));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ views: manifestViews(out.manifest) });
+}));
+
+// ---- Life notifications (Unified Capture; manifest-only) ----
+//
+// Same pattern. A notification defines WHEN to open a View. `id` is IMMUTABLE
+// (it keys reminder_state — the double-fire guard); `strategy.kind` is also
+// immutable (it decides how the notification fires). The pure ops validate
+// strategy by kind (fixed cadence/time/weekday/subsumes vs random
+// timesPerDay/activeHours).
+
+// List the caller's notifications.
+dataRoutes.get("/life/notifications", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const log = await getOrCreateOwnLifeLog(pb, userId);
+  const manifest = manifestFromValue(log.manifest) ?? emptyManifest();
+  return c.json({ log: log.id, notifications: manifestNotifications(manifest) });
+}));
+
+// Add a notification to the caller's manifest.
+dataRoutes.post("/life/notifications", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{
+    id?: unknown;
+    target?: unknown;
+    strategy?: unknown;
+    enabled?: unknown;
+  }>();
+  if (typeof body.id !== "string") {
+    return c.json({ error: "id is required (a slug string)" }, 400);
+  }
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    addNotificationOp(cur, {
+      id: body.id as string,
+      target: body.target,
+      strategy: body.strategy,
+      enabled: body.enabled,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ notifications: manifestNotifications(out.manifest) }, 201);
+}));
+
+// Patch a notification. id + strategy.kind are immutable (enforced in pure op).
+dataRoutes.patch("/life/notifications/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const notificationId = c.req.param("id")!;
+  const body = await c.req.json<{
+    id?: unknown;
+    target?: unknown;
+    strategy?: unknown;
+    enabled?: unknown;
+  }>();
+  const out = await applyManifestMutation(pb, userId, (cur) =>
+    // Forward `id` so the pure op rejects any rename attempt.
+    updateNotificationOp(cur, notificationId, {
+      id: body.id as string | undefined,
+      target: body.target,
+      strategy: body.strategy,
+      enabled: body.enabled,
+    }),
+  );
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ notifications: manifestNotifications(out.manifest) });
+}));
+
+// Remove a notification (manifest-only — never deletes life_events).
+dataRoutes.delete("/life/notifications/:id", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const notificationId = c.req.param("id")!;
+  const out = await applyManifestMutation(pb, userId, (cur) => removeNotificationOp(cur, notificationId));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ success: true, notifications: manifestNotifications(out.manifest) });
+}));
+
+// Reorder notifications. order[] must be a permutation of the current ids.
+dataRoutes.post("/life/notifications/reorder", handler(async (c) => {
+  const pb = c.get("pb");
+  const userId = c.get("userId") as string;
+  const body = await c.req.json<{ order?: unknown }>();
+  const out = await applyManifestMutation(pb, userId, (cur) => reorderNotificationsOp(cur, body.order));
+  if (!out.ok) return c.json({ error: out.error }, out.status);
+  return c.json({ notifications: manifestNotifications(out.manifest) });
 }));
 
 // Evaluate every goal for its current period (default today) via the shared

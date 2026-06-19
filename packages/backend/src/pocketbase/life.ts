@@ -13,7 +13,17 @@
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
-import type { LifeBackend, AddTrackableInput, UpdateTrackablePatch, AddGoalInput, UpdateGoalPatch } from "../interfaces/life";
+import type {
+  LifeBackend,
+  AddTrackableInput,
+  UpdateTrackablePatch,
+  AddGoalInput,
+  UpdateGoalPatch,
+  AddViewInput,
+  UpdateViewPatch,
+  AddNotificationInput,
+  UpdateNotificationPatch,
+} from "../interfaces/life";
 import type { LifeLog, LifeEvent, LifeEntry, LifeManifest } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
@@ -31,6 +41,16 @@ import {
   removeGoal as removeGoalOp,
   reorderGoals as reorderGoalsOp,
 } from "../life-goal-ops";
+import {
+  addView as addViewOp,
+  updateView as updateViewOp,
+  removeView as removeViewOp,
+  reorderViews as reorderViewsOp,
+  addNotification as addNotificationOp,
+  updateNotification as updateNotificationOp,
+  removeNotification as removeNotificationOp,
+  reorderNotifications as reorderNotificationsOp,
+} from "../life-view-ops";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 
@@ -228,6 +248,42 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
   reorderGoals(logId: string, orderedIds: string[]): Promise<LifeManifest> {
     return this.mutateManifest(logId, (cur) => reorderGoalsOp(cur, orderedIds));
+  }
+
+  addView(logId: string, input: AddViewInput): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => addViewOp(cur, input));
+  }
+
+  updateView(logId: string, viewId: string, patch: UpdateViewPatch): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => updateViewOp(cur, viewId, patch));
+  }
+
+  removeView(logId: string, viewId: string): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => removeViewOp(cur, viewId));
+  }
+
+  reorderViews(logId: string, orderedIds: string[]): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => reorderViewsOp(cur, orderedIds));
+  }
+
+  addNotification(logId: string, input: AddNotificationInput): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => addNotificationOp(cur, input));
+  }
+
+  updateNotification(
+    logId: string,
+    notificationId: string,
+    patch: UpdateNotificationPatch,
+  ): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => updateNotificationOp(cur, notificationId, patch));
+  }
+
+  removeNotification(logId: string, notificationId: string): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => removeNotificationOp(cur, notificationId));
+  }
+
+  reorderNotifications(logId: string, orderedIds: string[]): Promise<LifeManifest> {
+    return this.mutateManifest(logId, (cur) => reorderNotificationsOp(cur, orderedIds));
   }
 
   async addEvent(

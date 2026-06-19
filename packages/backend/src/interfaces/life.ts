@@ -17,6 +17,8 @@ import type {
   LifeGoalScope,
   LifeGoalKind,
   LifeGoalMetric,
+  LifeViewItem,
+  LifeNotifyStrategy,
 } from "../types/life";
 
 /** Goal-definition creation input (see LifeGoal + life-goal-ops validation). */
@@ -39,6 +41,40 @@ export interface UpdateGoalPatch {
   unit?: string;
   period?: "day" | "week";
   hidden?: boolean;
+}
+
+/** View-definition creation input (see LifeView + life-view-ops validation). */
+export interface AddViewInput {
+  id: string;
+  title: string;
+  greeting?: string;
+  icon?: string;
+  render?: "guided" | "inline";
+  items: LifeViewItem[];
+}
+
+/** View patch (id is immutable; everything else is editable). */
+export interface UpdateViewPatch {
+  title?: string;
+  greeting?: string | null;
+  icon?: string | null;
+  render?: "guided" | "inline" | null;
+  items?: LifeViewItem[];
+}
+
+/** Notification-definition creation input (see LifeNotification + life-view-ops). */
+export interface AddNotificationInput {
+  id: string;
+  target: string;
+  strategy: LifeNotifyStrategy;
+  enabled?: boolean;
+}
+
+/** Notification patch (id + strategy.kind are immutable). */
+export interface UpdateNotificationPatch {
+  target?: string;
+  strategy?: LifeNotifyStrategy;
+  enabled?: boolean;
 }
 
 /** Vocab-row creation input (see LifeManifestTrackable). */
@@ -156,6 +192,49 @@ export interface LifeBackend {
 
   /** Reorder goals. `orderedIds` must be a permutation of the current goal ids. */
   reorderGoals(logId: string, orderedIds: string[]): Promise<LifeManifest>;
+
+  // --- Views (Unified Capture; manifest-only) ---
+
+  /**
+   * Add a view to the log's `manifest.views[]`. Validates the full shape + id
+   * uniqueness (see life-view-ops). `id` is IMMUTABLE (it is written to
+   * `life_events.labels.view`). Manifest-only — never touches events.
+   */
+  addView(logId: string, input: AddViewInput): Promise<LifeManifest>;
+
+  /** Patch a view's title/greeting/icon/render/items. `id` is IMMUTABLE. */
+  updateView(logId: string, viewId: string, patch: UpdateViewPatch): Promise<LifeManifest>;
+
+  /** Remove a view from the manifest. Manifest-only — never touches events. */
+  removeView(logId: string, viewId: string): Promise<LifeManifest>;
+
+  /** Reorder views. `orderedIds` must be a permutation of the current view ids. */
+  reorderViews(logId: string, orderedIds: string[]): Promise<LifeManifest>;
+
+  // --- Notifications (Unified Capture; manifest-only) ---
+
+  /**
+   * Add a notification to the log's `manifest.notifications[]`. Validates the
+   * full shape + id uniqueness (see life-view-ops). `id` is IMMUTABLE (it keys
+   * `reminder_state`). Manifest-only — never touches events.
+   */
+  addNotification(logId: string, input: AddNotificationInput): Promise<LifeManifest>;
+
+  /**
+   * Patch a notification's target/strategy/enabled. `id` and `strategy.kind`
+   * are IMMUTABLE (id keys reminder_state; kind decides how it fires).
+   */
+  updateNotification(
+    logId: string,
+    notificationId: string,
+    patch: UpdateNotificationPatch,
+  ): Promise<LifeManifest>;
+
+  /** Remove a notification from the manifest. Manifest-only — never touches events. */
+  removeNotification(logId: string, notificationId: string): Promise<LifeManifest>;
+
+  /** Reorder notifications. `orderedIds` must be a permutation of current ids. */
+  reorderNotifications(logId: string, orderedIds: string[]): Promise<LifeManifest>;
 
   // --- Events ---
 
