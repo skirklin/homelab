@@ -320,6 +320,17 @@ export interface LifeLog {
    * in PocketBase, the mapper coerces any falsy value to `false`.
    */
   randomSamplingEnabled: boolean;
+  /**
+   * Per-log master switch for the whole Coach system. When false, the life app
+   * hides all Coach UI (the Coach tab, the /coach /insights /observations
+   * routes + every nav link into them) AND the api service's weekly observer
+   * cron skips this owner so no Anthropic tokens are spent on observations.
+   *
+   * Defaults to TRUE (Coach is on by default — unlike randomSamplingEnabled):
+   * the PB column is backfilled to true and the mapper reads `?? true`, so
+   * existing users are unaffected until they explicitly toggle it off.
+   */
+  coachEnabled: boolean;
   created: string;
   updated: string;
 }

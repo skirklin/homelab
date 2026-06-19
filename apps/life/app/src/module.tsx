@@ -3,7 +3,7 @@
  * the optional `LifeModule` (kept for parity with other domain packages).
  */
 import { useEffect, useMemo, useState, lazy, Suspense } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Spin } from "antd";
 import styled from "styled-components";
 import { useAuth, NotFound, getBackend, useFeedback } from "@kirkl/shared";
@@ -99,10 +99,16 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     );
   }
 
-  const coachRoute = (
+  // Coach master switch (default on). When off, every Coach route — the hub
+  // (/coach /insights /observations) and the observation detail thread — is a
+  // redirect to "/", so deep links can't land a disabled user on Coach UI.
+  const coachEnabled = state.log?.coachEnabled ?? true;
+  const coachRoute = coachEnabled ? (
     <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
       <Coach />
     </Suspense>
+  ) : (
+    <Navigate to="/" replace />
   );
 
   return (
@@ -126,9 +132,13 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
           </Suspense>
         } />
         <Route path="/observations/:id" element={
-          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-            <ObservationDetail />
-          </Suspense>
+          coachEnabled ? (
+            <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+              <ObservationDetail />
+            </Suspense>
+          ) : (
+            <Navigate to="/" replace />
+          )
         } />
         {/* /chat is intentionally unlinked from nav (no tab, no menu item, no
             badge) — reachable only by direct URL. Kept as a PM/product-iteration

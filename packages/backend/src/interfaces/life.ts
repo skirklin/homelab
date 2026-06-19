@@ -130,6 +130,13 @@ export interface LifeBackend {
    */
   setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void>;
 
+  /**
+   * Enable or disable the whole Coach system for this log. When disabled, the
+   * frontend hides all Coach UI and the api service's weekly observer cron
+   * skips this owner (no Anthropic tokens spent). Defaults to enabled.
+   */
+  setCoachEnabled(logId: string, enabled: boolean): Promise<void>;
+
   // --- Trackable manifest (P4) ---
 
   /**

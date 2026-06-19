@@ -87,6 +87,9 @@ function logFromRecord(r: RecordModel): LifeLog {
     // Coerce defensively — pre-migration rows surface as undefined for a
     // brief window before 20260522_221130 runs on a given environment.
     randomSamplingEnabled: !!r.random_sampling_enabled,
+    // Default TRUE: Coach is on by default, and legacy rows that predate the
+    // 20260619_190000 migration read as undefined → enabled.
+    coachEnabled: r.coach_enabled ?? true,
     created: r.created,
     updated: r.updated,
   };
@@ -161,6 +164,12 @@ export class PocketBaseLifeBackend implements LifeBackend {
       name: "Life Log",
       owner: userId,
       manifest: defaultLifeManifest(),
+      // Coach defaults ON. PB bool fields can't carry a non-false schema
+      // default, so a row created without this key would read back `false`
+      // (an explicit boolean, which the mapper's `?? true` does NOT rescue).
+      // Seed it true explicitly so new users get Coach on, matching the
+      // migration's backfill of existing rows.
+      coach_enabled: true,
     });
     return logFromRecord(r as RecordModel);
   }
@@ -172,6 +181,12 @@ export class PocketBaseLifeBackend implements LifeBackend {
   async setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void> {
     await this.wpb.collection("life_logs").update(logId, {
       random_sampling_enabled: enabled,
+    });
+  }
+
+  async setCoachEnabled(logId: string, enabled: boolean): Promise<void> {
+    await this.wpb.collection("life_logs").update(logId, {
+      coach_enabled: enabled,
     });
   }
 

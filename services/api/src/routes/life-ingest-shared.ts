@@ -91,7 +91,10 @@ export async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
     sort: "created",
   });
   if (logs.items.length > 0) return logs.items[0];
-  return pb.collection("life_logs").create({ name: "Life Log", owner: userId });
+  // Coach defaults ON. PB bool fields schema-default to `false`, and the
+  // mapper's `?? true` only rescues a genuinely-absent column — so a row
+  // created without this key reads back `false`. Seed it true explicitly.
+  return pb.collection("life_logs").create({ name: "Life Log", owner: userId, coach_enabled: true });
 }
 
 /**

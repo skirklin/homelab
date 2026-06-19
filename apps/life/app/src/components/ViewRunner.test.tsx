@@ -67,6 +67,7 @@ const BASE_LOG: LifeLog = {
   sampleSchedule: null,
   manifest: { trackables: [] },
   randomSamplingEnabled: false,
+  coachEnabled: true,
   created: "2026-06-01T00:00:00Z",
   updated: "2026-06-01T00:00:00Z",
 };

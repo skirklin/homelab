@@ -540,6 +540,9 @@ export async function createTestLifeLog(
     name: overrides?.name || "Test Life Log",
     owner: overrides?.owner || ctx.testUser!.id,
     manifest: { widgets: [] },
+    // Coach defaults ON (PB bool schema-default is `false`; the mapper's
+    // `?? true` only rescues an absent column, so seed it explicitly).
+    coach_enabled: true,
   });
   cleanup.track("life_logs", record.id);
   return { id: record.id };

@@ -76,6 +76,12 @@ describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () =>
 
     // And the mapped LifeLog surfaces an empty manifest.
     expect(log.manifest).toEqual({ trackables: [], views: [], notifications: [] });
+
+    // Coach defaults ON: the create payload must seed coach_enabled:true,
+    // because a PB bool field schema-defaults to false (no `?? true` rescue
+    // for a present-but-false value).
+    expect((payload as { coach_enabled: boolean }).coach_enabled).toBe(true);
+    expect(log.coachEnabled).toBe(true);
   });
 
   it("preserves an existing log's manifest (does NOT re-seed or overwrite)", async () => {
@@ -96,6 +102,28 @@ describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () =>
     const { backend } = makeLogBackend({ owned: { id: "log-legacy" } });
     const log = await backend.getOrCreateLog("user-legacy");
     expect(log.manifest).toBeNull();
+  });
+
+  it("maps coach_enabled defaulting TRUE (legacy/undefined → enabled)", async () => {
+    const { backend } = makeLogBackend({ owned: { id: "log-legacy" } });
+    const log = await backend.getOrCreateLog("user-legacy");
+    expect(log.coachEnabled).toBe(true);
+  });
+
+  it("maps an explicit coach_enabled=false through as disabled", async () => {
+    const { backend } = makeLogBackend({
+      owned: { id: "log-off", coach_enabled: false },
+    });
+    const log = await backend.getOrCreateLog("user-off");
+    expect(log.coachEnabled).toBe(false);
+  });
+
+  it("maps an explicit coach_enabled=true through as enabled", async () => {
+    const { backend } = makeLogBackend({
+      owned: { id: "log-on", coach_enabled: true },
+    });
+    const log = await backend.getOrCreateLog("user-on");
+    expect(log.coachEnabled).toBe(true);
   });
 });
 

@@ -2401,6 +2401,10 @@ async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
     name: "Life Log",
     owner: userId,
     manifest: defaultLifeManifest(),
+    // Coach defaults ON. PB bool fields schema-default to `false`, and the
+    // mapper's `?? true` only rescues a genuinely-absent column — so a row
+    // created without this key reads back `false`. Seed it true explicitly.
+    coach_enabled: true,
   });
 }
 
