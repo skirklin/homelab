@@ -370,12 +370,15 @@ function validateStrategy(raw: unknown): LifeNotifyStrategy {
  *   - target is a non-empty string (a View id)
  *   - strategy is validated by kind
  *   - enabled is an optional bool
+ *   - title/body are optional non-empty strings (custom push copy)
  */
 function validateNotificationShape(input: {
   id: string;
   target: unknown;
   strategy: unknown;
   enabled?: unknown;
+  title?: unknown;
+  body?: unknown;
 }): LifeNotification {
   if (!isSlug(input.id)) {
     throw new ManifestError(
@@ -389,6 +392,20 @@ function validateNotificationShape(input: {
   const strategy = validateStrategy(input.strategy);
   const notif: LifeNotification = { id: input.id, target: input.target, strategy };
   if (input.enabled !== undefined) notif.enabled = !!input.enabled;
+  // Optional custom push copy — non-empty strings when present (mirrors
+  // greeting/icon on views). Absent/""/null → leave unset (cron derives copy).
+  if (input.title !== undefined && input.title !== null && input.title !== "") {
+    if (typeof input.title !== "string") {
+      throw new ManifestError("invalid_notification", "title must be a string");
+    }
+    notif.title = input.title;
+  }
+  if (input.body !== undefined && input.body !== null && input.body !== "") {
+    if (typeof input.body !== "string") {
+      throw new ManifestError("invalid_notification", "body must be a string");
+    }
+    notif.body = input.body;
+  }
   return notif;
 }
 
@@ -408,6 +425,8 @@ export function addNotification(
     target: unknown;
     strategy: unknown;
     enabled?: unknown;
+    title?: unknown;
+    body?: unknown;
   },
 ): LifeManifest {
   const notifs = manifestNotifications(current);
@@ -422,8 +441,9 @@ export function addNotification(
  * UPDATE an existing notification. Patches only the provided keys. ENFORCES
  * immutability of `id` (it keys `reminder_state`) and `strategy.kind` (it
  * decides how the notification fires — like trackable.shape, changing it
- * requires remove+re-add). target/enabled + the within-kind strategy fields are
- * editable.
+ * requires remove+re-add). target/enabled/title/body + the within-kind strategy
+ * fields are editable; null/"" clears the optional custom-copy strings
+ * (title/body).
  */
 export function updateNotification(
   current: LifeManifest,
@@ -433,6 +453,8 @@ export function updateNotification(
     target?: unknown;
     strategy?: unknown;
     enabled?: unknown;
+    title?: unknown;
+    body?: unknown;
   },
 ): LifeManifest {
   const notifs = manifestNotifications(current);
@@ -468,6 +490,18 @@ export function updateNotification(
     next.strategy = nextStrategy;
   }
   if (patch.enabled !== undefined) next.enabled = !!patch.enabled;
+  // Custom push copy: null/"" clears, a non-empty string sets (mirrors
+  // greeting/icon on views).
+  if (patch.title !== undefined) {
+    if (patch.title === null || patch.title === "") delete next.title;
+    else if (typeof patch.title === "string") next.title = patch.title;
+    else throw new ManifestError("invalid_notification", "title must be a string or null");
+  }
+  if (patch.body !== undefined) {
+    if (patch.body === null || patch.body === "") delete next.body;
+    else if (typeof patch.body === "string") next.body = patch.body;
+    else throw new ManifestError("invalid_notification", "body must be a string or null");
+  }
 
   const out = notifs.slice();
   out[idx] = next;

@@ -2798,6 +2798,8 @@ dataRoutes.post("/life/notifications", handler(async (c) => {
     target?: unknown;
     strategy?: unknown;
     enabled?: unknown;
+    title?: unknown;
+    body?: unknown;
   }>();
   if (typeof body.id !== "string") {
     return c.json({ error: "id is required (a slug string)" }, 400);
@@ -2808,6 +2810,8 @@ dataRoutes.post("/life/notifications", handler(async (c) => {
       target: body.target,
       strategy: body.strategy,
       enabled: body.enabled,
+      title: body.title,
+      body: body.body,
     }),
   );
   if (!out.ok) return c.json({ error: out.error }, out.status);
@@ -2819,19 +2823,23 @@ dataRoutes.patch("/life/notifications/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const notificationId = c.req.param("id")!;
-  const body = await c.req.json<{
+  const reqBody = await c.req.json<{
     id?: unknown;
     target?: unknown;
     strategy?: unknown;
     enabled?: unknown;
+    title?: unknown;
+    body?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
     // Forward `id` so the pure op rejects any rename attempt.
     updateNotificationOp(cur, notificationId, {
-      id: body.id as string | undefined,
-      target: body.target,
-      strategy: body.strategy,
-      enabled: body.enabled,
+      id: reqBody.id as string | undefined,
+      target: reqBody.target,
+      strategy: reqBody.strategy,
+      enabled: reqBody.enabled,
+      title: reqBody.title,
+      body: reqBody.body,
     }),
   );
   if (!out.ok) return c.json({ error: out.error }, out.status);

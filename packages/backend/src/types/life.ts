@@ -175,6 +175,16 @@ export interface LifeNotification {
   strategy: LifeNotifyStrategy;
   /** Defaults to true when omitted. */
   enabled?: boolean;
+  /**
+   * Optional custom push copy. When present, `title`/`body` OVERRIDE the copy
+   * the cron would otherwise derive from the target View (or the generic
+   * fallback) — see `pushContentForTarget` in
+   * services/api/src/lib/notifications/life.ts. When absent, the cron derives
+   * copy from the target View as before. These are DISPLAY-ONLY metadata, NOT
+   * part of the immutable identity — freely patchable, and null/"" clears.
+   */
+  title?: string;
+  body?: string;
 }
 
 /**

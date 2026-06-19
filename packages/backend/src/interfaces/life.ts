@@ -68,13 +68,18 @@ export interface AddNotificationInput {
   target: string;
   strategy: LifeNotifyStrategy;
   enabled?: boolean;
+  /** Optional custom push copy; overrides the View-derived copy when set. */
+  title?: string;
+  body?: string;
 }
 
-/** Notification patch (id + strategy.kind are immutable). */
+/** Notification patch (id + strategy.kind are immutable; null/"" clears title/body). */
 export interface UpdateNotificationPatch {
   target?: string;
   strategy?: LifeNotifyStrategy;
   enabled?: boolean;
+  title?: string | null;
+  body?: string | null;
 }
 
 /** Vocab-row creation input (see LifeManifestTrackable). */

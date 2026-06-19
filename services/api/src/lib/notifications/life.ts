@@ -311,21 +311,33 @@ const LEGACY_REMINDER_CONTENT: Record<string, { title: string; body: string }> =
 };
 
 /**
- * Resolve the push title/body for a fixed notification's target View. Prefers
- * the byte-faithful legacy strings for the morning/evening/weekly targets (so
- * existing reminders are unchanged); otherwise derives from the target View's
- * `title` + `greeting`, resolved via `manifest.views ?? DEFAULT_VIEWS`.
+ * Resolve the push title/body for a fixed notification. Precedence:
+ *   1. the notification's OWN `title`/`body` (custom copy), when set;
+ *   2. the byte-faithful legacy strings for morning/evening/weekly targets (so
+ *      existing reminders without custom copy are unchanged);
+ *   3. the target View's `title` + `greeting` (`manifest.views ?? DEFAULT_VIEWS`);
+ *   4. a generic `{title:"Reminder", body:"Time to check in."}` fallback.
+ *
+ * A notification that sets ONLY `title` (or only `body`) still inherits the
+ * other field from the legacy/view-derived copy — the custom value wins
+ * field-by-field, so a partial override never blanks the other field.
  */
-function pushContentForTarget(
-  target: string,
+export function pushContentForTarget(
+  notif: { target: string; title?: string; body?: string },
   views: LifeView[] | undefined,
 ): { title: string; body: string } {
-  const legacy = LEGACY_REMINDER_CONTENT[target];
-  if (legacy) return legacy;
-  const view = views?.find((v) => v.id === target);
+  const derived =
+    LEGACY_REMINDER_CONTENT[notif.target] ??
+    (() => {
+      const view = views?.find((v) => v.id === notif.target);
+      return {
+        title: view?.title || "Reminder",
+        body: view?.greeting || "Time to check in.",
+      };
+    })();
   return {
-    title: view?.title || "Reminder",
-    body: view?.greeting || "Time to check in.",
+    title: notif.title || derived.title,
+    body: notif.body || derived.body,
   };
 }
 
@@ -484,7 +496,7 @@ export async function runLifeReminderCheck(
       // success lets a no-delivery tick retry within the ±1min window, while
       // the reminder_state[id]/legacy guard above prevents a second send once
       // one succeeds.
-      const content = pushContentForTarget(n.target, views);
+      const content = pushContentForTarget(n, views);
       try {
         const result = await sendPushToUser(pb, ownerId, {
           title: content.title,
