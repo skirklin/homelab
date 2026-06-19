@@ -4,6 +4,8 @@ import {
   updateTrackable,
   removeTrackable,
   reorderTrackables,
+  reorderById,
+  patchOptionalString,
   setPins,
   slugifyTrackableId,
   ManifestError,
@@ -215,6 +217,55 @@ describe("reorderTrackables", () => {
     const next = reorderTrackables(withGoals, ["mood", "floss", "coffee", "run"]);
     expect(next.trackables.map((t) => t.id)).toEqual(["mood", "floss", "coffee", "run"]);
     expect(next.goals).toEqual(withGoals.goals);
+  });
+});
+
+describe("reorderById (generic helper, shared by all four reorderX ops)", () => {
+  const items = () => [{ id: "a" }, { id: "b" }, { id: "c" }];
+
+  it("rebuilds the list in the requested permutation, never mutating the input", () => {
+    const cur = items();
+    const out = reorderById(cur, ["c", "a", "b"], "view");
+    expect(out.map((x) => x.id)).toEqual(["c", "a", "b"]);
+    expect(cur.map((x) => x.id)).toEqual(["a", "b", "c"]); // input untouched
+  });
+
+  it("threads the noun into every error message", () => {
+    expect(() => reorderById(items(), "nope", "goal")).toThrow(/order must be an array of goal ids/);
+    expect(() => reorderById(items(), [1, 2, 3], "goal")).toThrow(/order must be an array of goal ids/);
+    expect(() => reorderById(items(), ["a", "b"], "notification")).toThrow(
+      /permutation of the 3 current notification ids/,
+    );
+    expect(() => reorderById(items(), ["a", "a", "b"], "view")).toThrow(/permutation of the 3 current view ids/);
+    expect(() => reorderById(items(), ["a", "b", "ghost"], "trackable")).toThrow(
+      /order references unknown trackable id "ghost"/,
+    );
+  });
+
+  it("uses the invalid_order code for every rejection", () => {
+    let err: ManifestError | undefined;
+    try {
+      reorderById(items(), ["a", "b"], "view");
+    } catch (e) {
+      err = e as ManifestError;
+    }
+    expect(err?.code).toBe("invalid_order");
+  });
+});
+
+describe("patchOptionalString (shared set/clear dance)", () => {
+  it("sets a non-empty string, clears on null/empty, throws otherwise", () => {
+    const o: { greeting?: string } = { greeting: "hi" };
+    patchOptionalString(o, "greeting", "hello", "greeting", "invalid_view");
+    expect(o.greeting).toBe("hello");
+    patchOptionalString(o, "greeting", "", "greeting", "invalid_view");
+    expect(o.greeting).toBeUndefined();
+    o.greeting = "back";
+    patchOptionalString(o, "greeting", null, "greeting", "invalid_view");
+    expect(o.greeting).toBeUndefined();
+    expect(() => patchOptionalString(o, "greeting", 5, "greeting", "invalid_view")).toThrow(
+      /greeting must be a string or null/,
+    );
   });
 });
 

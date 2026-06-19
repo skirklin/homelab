@@ -97,6 +97,7 @@ export interface AddTrackableInput {
   /** View-render metadata (Phase-B consumers; round-trips through here). */
   prompt?: string;
   hint?: string;
+  placeholder?: string;
   refs?: TemplateRef[];
 }
 
@@ -113,6 +114,7 @@ export interface UpdateTrackablePatch {
   /** View-render metadata (Phase-B); null/"" clears. */
   prompt?: string | null;
   hint?: string | null;
+  placeholder?: string | null;
   refs?: TemplateRef[] | null;
 }
 
