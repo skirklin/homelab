@@ -26,7 +26,7 @@
  */
 import { useCallback } from "react";
 import styled from "styled-components";
-import { Button, Select, Switch, TimePicker, InputNumber } from "antd";
+import { Button, Input, Select, Switch, TimePicker, InputNumber } from "antd";
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { useFeedback, useLifeBackend } from "@kirkl/shared";
@@ -80,6 +80,15 @@ const Empty = styled.div`
   padding: var(--space-xs) 0;
 `;
 
+/**
+ * Reserved (non-View) notification destinations. `today` lands on the habit
+ * board (the `<Today/>` route renders `<HabitBoard/>`), so a user with NO Views
+ * (Angela) can still target a useful page. `viewUrl(target)` → `/today`. We
+ * deliberately do NOT offer an empty-string "Dashboard" target — empty-string
+ * sentinels are disallowed in this repo, and `viewUrl("")` would be "/".
+ */
+const RESERVED_TARGETS = [{ label: "Habit board", value: "today" }];
+
 const WEEKDAYS = [
   { label: "Sun", value: 0 },
   { label: "Mon", value: 1 },
@@ -110,7 +119,13 @@ export function NotificationsEditor({ logId, notifications, views, applyManifest
   const life = useLifeBackend();
   const { message } = useFeedback();
 
-  const viewOptions = views.map((v) => ({ label: v.title, value: v.id }));
+  // Target options = reserved destinations (Habit board) + the user's Views,
+  // deduped by value (a View whose id collides with a reserved id keeps its
+  // own label). A user with no Views (Angela) still gets the reserved options.
+  const baseTargetOptions = [
+    ...RESERVED_TARGETS.filter((r) => !views.some((v) => v.id === r.value)),
+    ...views.map((v) => ({ label: v.title, value: v.id })),
+  ];
 
   const run = useCallback(
     async (work: () => Promise<LifeManifest>) => {
@@ -126,11 +141,9 @@ export function NotificationsEditor({ logId, notifications, views, applyManifest
 
   const handleAdd = useCallback(() => {
     if (!logId) return;
-    const targetId = views[0]?.id;
-    if (!targetId) {
-      message.warning("Create a View first — a notification opens a View.");
-      return;
-    }
+    // Default to the first View if the user has any, else the habit board
+    // (`today`) so a user with NO Views (Angela) can still add a notification.
+    const targetId = views[0]?.id ?? RESERVED_TARGETS[0].value;
     // Slug id derived from the target; de-dupe with a numeric suffix so the
     // backend's uniqueness check never rejects the very first Add.
     const base = slugifyTrackableId(`${targetId}-reminder`) || "reminder";
@@ -146,7 +159,7 @@ export function NotificationsEditor({ logId, notifications, views, applyManifest
         enabled: true,
       }),
     );
-  }, [logId, views, notifications, life, run, message]);
+  }, [logId, views, notifications, life, run]);
 
   if (!logId) return <Empty>Loading…</Empty>;
 
@@ -160,13 +173,20 @@ export function NotificationsEditor({ logId, notifications, views, applyManifest
         const patchStrategy = (next: LifeNotifyStrategy) =>
           run(() => life.updateNotification(logId, n.id, { strategy: next }));
 
+        // Never silently drop an existing target: if `n.target` isn't a known
+        // option (a View was deleted, or it points at a page we don't list),
+        // surface it as a selectable option so the value stays visible.
+        const targetOptions = baseTargetOptions.some((o) => o.value === n.target)
+          ? baseTargetOptions
+          : [...baseTargetOptions, { label: n.target, value: n.target }];
+
         return (
           <Row key={n.id}>
             <RowHeader>
               <TargetSelect
                 size="small"
                 value={n.target}
-                options={viewOptions}
+                options={targetOptions}
                 onChange={(v) => run(() => life.updateNotification(logId, n.id, { target: v as string }))}
                 data-testid={`notif-target-${n.id}`}
               />
@@ -266,6 +286,32 @@ export function NotificationsEditor({ logId, notifications, views, applyManifest
                 />
               </Controls>
             )}
+
+            {/* Optional custom push copy. Commit on blur (like the View
+                title/greeting fields). Empty → null, which clears the custom
+                copy so the cron falls back to the target's derived copy. */}
+            <Controls>
+              <Input
+                size="small"
+                defaultValue={n.title ?? ""}
+                placeholder="Push title (optional)"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v !== (n.title ?? "")) void run(() => life.updateNotification(logId, n.id, { title: v || null }));
+                }}
+                data-testid={`notif-title-${n.id}`}
+              />
+              <Input
+                size="small"
+                defaultValue={n.body ?? ""}
+                placeholder="Push body (optional)"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v !== (n.body ?? "")) void run(() => life.updateNotification(logId, n.id, { body: v || null }));
+                }}
+                data-testid={`notif-body-${n.id}`}
+              />
+            </Controls>
           </Row>
         );
       })}

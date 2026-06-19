@@ -20,8 +20,9 @@ vi.mock("../push", () => ({ sendPushToUser: (...a: unknown[]) => sendPushToUser(
 const getAdminPb = vi.fn();
 vi.mock("../pb", () => ({ getAdminPb: () => getAdminPb() }));
 
-import { runLifeTrackerSampling, runLifeReminderCheck } from "./life";
+import { runLifeTrackerSampling, runLifeReminderCheck, pushContentForTarget } from "./life";
 import { RANDOM_SAMPLES } from "@homelab/backend";
+import type { LifeView } from "@homelab/backend";
 
 // ─── Fake PB ─────────────────────────────────────────────────────────────────
 
@@ -283,6 +284,42 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     expect(res.sent).toBe(1);
   });
 
+  it("uses the notification's CUSTOM title/body when set", async () => {
+    sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
+    const logs = [
+      {
+        id: "logCustom",
+        owner: "userA",
+        manifest: {
+          trackables: [],
+          // No legacy column; a manifest notification carrying custom copy and
+          // a habit-board target.
+          notifications: [
+            {
+              id: "evening-habits",
+              target: "today",
+              strategy: { kind: "fixed", cadence: "daily", time: "08:00" },
+              enabled: true,
+              title: "Check your habits",
+              body: "Tap to tick them off.",
+            },
+          ],
+        },
+      } as unknown as ReminderLog,
+    ];
+    const { pb } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(pb);
+
+    await runLifeReminderCheck(MONDAY_0800Z);
+
+    expect(sendPushToUser).toHaveBeenCalledTimes(1);
+    const pushArg = sendPushToUser.mock.calls[0][2] as { title: string; body: string; buildUrl: () => string };
+    expect(pushArg.title).toBe("Check your habits");
+    expect(pushArg.body).toBe("Tap to tick them off.");
+    // target "today" → /today (lands on the habit board, no SW/route change).
+    expect(pushArg.buildUrl()).toBe("/today");
+  });
+
   it("weekly reminder: marks only on sent>0 (Sunday)", async () => {
     // 2026-06-07 is a Sunday; 08:00 UTC matches the weekly target.
     const SUNDAY_0800Z = new Date("2026-06-07T08:00:00Z");
@@ -304,5 +341,60 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     const writes = reminderStateWrites(env.updates, "weekly-reminder");
     expect(writes).toHaveLength(1);
     expect((writes[0].data.reminder_state as Record<string, string>)["weekly-reminder"]).toBe("2026-06-07");
+  });
+});
+
+// ─── pushContentForTarget: custom-copy precedence + byte-identical fallback ──
+//
+// Custom title/body, when present, override the derived copy field-by-field.
+// When absent, the function returns EXACTLY the legacy/view/generic copy it did
+// before (so existing reminders are byte-unchanged).
+
+describe("pushContentForTarget — custom copy vs. derived fallback", () => {
+  const VIEWS: LifeView[] = [
+    { id: "custom-view", title: "My View", greeting: "Hello there", items: [] },
+  ];
+
+  it("prefers the notification's own title/body when set", () => {
+    expect(pushContentForTarget({ target: "morning", title: "Tick habits", body: "30s, promise" }, VIEWS)).toEqual({
+      title: "Tick habits",
+      body: "30s, promise",
+    });
+  });
+
+  it("falls back to the byte-identical legacy copy for morning/evening/weekly when no custom copy", () => {
+    expect(pushContentForTarget({ target: "morning" }, VIEWS)).toEqual({
+      title: "Morning check-in",
+      body: "Good morning. A few questions before the day gets going.",
+    });
+    expect(pushContentForTarget({ target: "evening" }, VIEWS)).toEqual({
+      title: "Evening wind-down",
+      body: "Wind-down time. A few quick reflections.",
+    });
+    expect(pushContentForTarget({ target: "weekly" }, VIEWS)).toEqual({
+      title: "Weekly review",
+      body: "Time to look back on the week.",
+    });
+  });
+
+  it("falls back to the target View's title/greeting for a non-legacy target", () => {
+    expect(pushContentForTarget({ target: "custom-view" }, VIEWS)).toEqual({
+      title: "My View",
+      body: "Hello there",
+    });
+  });
+
+  it("falls back to the generic copy for an unknown target", () => {
+    expect(pushContentForTarget({ target: "today" }, VIEWS)).toEqual({
+      title: "Reminder",
+      body: "Time to check in.",
+    });
+  });
+
+  it("applies a PARTIAL override field-by-field (custom title, derived body)", () => {
+    expect(pushContentForTarget({ target: "morning", title: "Just the title" }, VIEWS)).toEqual({
+      title: "Just the title",
+      body: "Good morning. A few questions before the day gets going.",
+    });
   });
 });

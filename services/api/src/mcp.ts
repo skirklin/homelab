@@ -902,12 +902,14 @@ server.tool(
 
 server.tool(
   "add_life_notification",
-  "Create a scheduled notification in the caller's manifest. `id` is an IMMUTABLE slug (it keys reminder_state — the double-fire guard). `target` is the View id to open. strategy is either {kind:'fixed', cadence:daily|weekly, time:'HH:MM' (or '' for never-deliver), weekday?, subsumes?} or {kind:'random', timesPerDay, activeHours:[start,end]}. `strategy.kind` is IMMUTABLE after creation.",
+  "Create a scheduled notification in the caller's manifest. `id` is an IMMUTABLE slug (it keys reminder_state — the double-fire guard). `target` is the page/View id to open (`today` lands on the habit board; otherwise a View id). strategy is either {kind:'fixed', cadence:daily|weekly, time:'HH:MM' (or '' for never-deliver), weekday?, subsumes?} or {kind:'random', timesPerDay, activeHours:[start,end]}. `strategy.kind` is IMMUTABLE after creation. Optional `title`/`body` set custom push copy; when omitted the push copy is derived from the target View.",
   {
     id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-])"),
-    target: z.string().describe("The View id to open when the nudge fires"),
+    target: z.string().describe("The page/View id to open when the nudge fires (e.g. `today` for the habit board)"),
     strategy: notifyStrategySchema.describe("How it fires: fixed wall-clock, or random sampling"),
     enabled: z.boolean().optional().describe("Defaults to true when omitted"),
+    title: z.string().optional().describe("Custom push notification title; overrides the View-derived copy when set"),
+    body: z.string().optional().describe("Custom push notification body; overrides the View-derived copy when set"),
   },
   async (args) => {
     const result = await api("/life/notifications", { method: "POST", body: JSON.stringify(args) });
@@ -917,12 +919,14 @@ server.tool(
 
 server.tool(
   "update_life_notification",
-  "Patch a notification's target/strategy/enabled (pass only what changes). `id` is IMMUTABLE (it keys reminder_state) and `strategy.kind` is IMMUTABLE (it decides how the notification fires); to change either, remove + re-add. Passing strategy replaces it wholesale (its kind must match the existing kind).",
+  "Patch a notification's target/strategy/enabled/title/body (pass only what changes). `id` is IMMUTABLE (it keys reminder_state) and `strategy.kind` is IMMUTABLE (it decides how the notification fires); to change either, remove + re-add. Passing strategy replaces it wholesale (its kind must match the existing kind). `title`/`body` set custom push copy; pass null or \"\" to clear and fall back to the View-derived copy.",
   {
     id: z.string().describe("The notification id to update (immutable; identifies which notification)"),
-    target: z.string().optional().describe("The View id to open"),
+    target: z.string().optional().describe("The page/View id to open (e.g. `today` for the habit board)"),
     strategy: notifyStrategySchema.optional().describe("Replaces the strategy (kind must be unchanged)"),
     enabled: z.boolean().optional(),
+    title: z.string().nullable().optional().describe("Custom push title; null/\"\" clears (falls back to View-derived copy)"),
+    body: z.string().nullable().optional().describe("Custom push body; null/\"\" clears (falls back to View-derived copy)"),
   },
   async ({ id, ...patch }) => {
     const result = await api(`/life/notifications/${id}`, { method: "PATCH", body: JSON.stringify(patch) });

@@ -299,6 +299,28 @@ describe("addNotification", () => {
   it("rejects an unknown strategy kind", () => {
     expect(() => addNotification(base(), { id: "x", target: "morning", strategy: { kind: "psychic" } })).toThrow(/strategy.kind must be one of/);
   });
+
+  it("carries optional custom title/body through, leaving siblings intact", () => {
+    const cur = base();
+    const next = addNotification(cur, { ...VALID_NOTIF, title: "Check your habits", body: "Tap to tick them off." });
+    const n = manifestNotifications(next).find((x) => x.id === "evening-reminder") as LifeNotification;
+    expect(n.title).toBe("Check your habits");
+    expect(n.body).toBe("Tap to tick them off.");
+    expect(next.trackables).toEqual(cur.trackables);
+    expect(next.notifications?.[0]).toEqual(cur.notifications?.[0]); // sibling untouched
+  });
+
+  it("omits title/body when absent or empty", () => {
+    const next = addNotification(base(), { ...VALID_NOTIF, title: "", body: undefined });
+    const n = manifestNotifications(next).find((x) => x.id === "evening-reminder") as LifeNotification;
+    expect(n.title).toBeUndefined();
+    expect(n.body).toBeUndefined();
+  });
+
+  it("rejects a non-string title/body", () => {
+    expect(() => addNotification(base(), { ...VALID_NOTIF, id: "a", title: 5 })).toThrow(/title must be a string/);
+    expect(() => addNotification(base(), { ...VALID_NOTIF, id: "b", body: {} })).toThrow(/body must be a string/);
+  });
 });
 
 describe("updateNotification", () => {
@@ -346,6 +368,32 @@ describe("updateNotification", () => {
     let err: ManifestError | undefined;
     try { updateNotification(base(), "nope", { enabled: true }); } catch (e) { err = e as ManifestError; }
     expect(err?.code).toBe("notification_not_found");
+  });
+
+  it("sets, then clears custom title/body, preserving siblings", () => {
+    const cur = base();
+    // Set both.
+    const withCopy = updateNotification(cur, "morning-reminder", { title: "Habits", body: "Check in" });
+    const set = manifestNotifications(withCopy).find((x) => x.id === "morning-reminder") as LifeNotification;
+    expect(set.title).toBe("Habits");
+    expect(set.body).toBe("Check in");
+    // Other manifest keys + the rest of the notification survive.
+    expect(withCopy.trackables).toEqual(cur.trackables);
+    expect(withCopy.views).toEqual(cur.views);
+    expect(set.target).toBe("morning");
+    expect(set.strategy).toEqual({ kind: "fixed", cadence: "daily", time: "08:00" });
+
+    // Clear with "" and null respectively.
+    const cleared = updateNotification(withCopy, "morning-reminder", { title: "", body: null });
+    const c = manifestNotifications(cleared).find((x) => x.id === "morning-reminder") as LifeNotification;
+    expect(c.title).toBeUndefined();
+    expect(c.body).toBeUndefined();
+    expect(c.target).toBe("morning"); // sibling fields intact
+  });
+
+  it("rejects a non-string title/body patch", () => {
+    expect(() => updateNotification(base(), "morning-reminder", { title: 5 as unknown as string })).toThrow(/title must be a string/);
+    expect(() => updateNotification(base(), "morning-reminder", { body: {} as unknown as string })).toThrow(/body must be a string/);
   });
 });
 
