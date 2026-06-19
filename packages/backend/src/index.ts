@@ -72,10 +72,27 @@ export {
   GOAL_METRICS,
   GOAL_PERIODS,
 } from "./life-goal-ops";
+export {
+  addView,
+  updateView,
+  removeView,
+  reorderViews,
+  manifestViews,
+  addNotification,
+  updateNotification,
+  removeNotification,
+  reorderNotifications,
+  manifestNotifications,
+  VIEW_ITEM_KINDS,
+  VIEW_RENDERS,
+  NOTIFY_KINDS,
+  NOTIFY_CADENCES,
+} from "./life-view-ops";
 export { evaluateGoal, startOfDay, endOfDay, dayKey, startOfWeek, zonedDateTime } from "./life-goal-eval";
 export type { GoalProgress } from "./life-goal-eval";
 export type {
   AddTrackableInput, UpdateTrackablePatch, AddGoalInput, UpdateGoalPatch,
+  AddViewInput, UpdateViewPatch, AddNotificationInput, UpdateNotificationPatch,
 } from "./interfaces/life";
 export type { ClaudeObservation } from "./types/observer";
 export type {

@@ -770,6 +770,186 @@ server.tool(
   },
 );
 
+// --- Life view tools ---
+//
+// A "view" is the Unified Capture primitive: a named, ordered set of capture
+// items rendered for human input (today's morning/evening/weekly sessions ARE
+// views rendered "guided"; the dashboard's inline shape-grid is conceptually a
+// view rendered "inline"). These tools manage the caller's OWN manifest (no
+// log-id param). IMMUTABILITY: `id` is the runner slug written to
+// life_events.labels.view (the history join key) and can NEVER change — to
+// rename, remove + re-add. Views add no event data; removal/edit never touches
+// life_events.
+
+const templateRefSchema = z.object({
+  token: z.string().describe("The {token} placeholder in the prompt/hint/banner text"),
+  fromTrackable: z.string().describe("A vocab id to pull a recent value from"),
+  within: z.enum(["day", "week"]).describe("Owner-local lookback window"),
+  entry: z.string().optional().describe("Entry name to pull; defaults per the source shape"),
+});
+
+const viewItemSchema = z.union([
+  z.object({
+    kind: z.literal("capture"),
+    trackableId: z.string().describe("The vocab id to prompt the user to log"),
+    optional: z.boolean().optional().describe("Whether this capture may be skipped"),
+  }),
+  z.object({ kind: z.literal("tasks_due") }).describe("Declarative header echoing upkeep tasks due today; writes no event"),
+  z.object({
+    kind: z.literal("banner"),
+    text: z.string().describe("Read-only templated echo text (may carry {token}s)"),
+    refs: z.array(templateRefSchema).describe("Template refs resolving the banner's {token}s"),
+  }),
+]);
+
+server.tool(
+  "list_life_views",
+  "List the caller's capture views (the Unified Capture primitive). Each has id, title, optional greeting/icon, optional render (guided|inline), and items[] (capture | tasks_due | banner). An empty result means the caller has no custom views (the app falls back to its defaults).",
+  {},
+  async () => {
+    const data = await api("/life/views");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_life_view",
+  "Create a capture view in the caller's manifest. `id` is an IMMUTABLE slug (it is written to life_events.labels.view — the history join key for a guided run's events). `items[]` is ordered: capture items name a vocab `trackableId` (the prompt/hint live on the vocab row, not here); `banner` items are read-only templated echoes; `tasks_due` echoes upkeep tasks. `render` is guided (stepped wizard) or inline (dashboard surface).",
+  {
+    id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-])"),
+    title: z.string().describe("Display title"),
+    greeting: z.string().optional().describe("One-line greeting at the top of a guided run"),
+    icon: z.string().optional().describe("Icon hint (e.g. sun/moon/calendar)"),
+    render: z.enum(["guided", "inline"]).optional().describe("guided=stepped wizard; inline=dashboard surface"),
+    items: z.array(viewItemSchema).describe("Ordered renderable items"),
+  },
+  async (args) => {
+    const result = await api("/life/views", { method: "POST", body: JSON.stringify(args) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_life_view",
+  "Patch a view's title/greeting/icon/render/items (pass only what changes). `id` is IMMUTABLE (it is written to life_events.labels.view); to rename, remove the view and add a new one. Passing items[] replaces the whole list. greeting/icon clear when set to empty string.",
+  {
+    id: z.string().describe("The view id to update (immutable; identifies which view)"),
+    title: z.string().optional(),
+    greeting: z.string().optional().describe("Empty string clears it"),
+    icon: z.string().optional().describe("Empty string clears it"),
+    render: z.enum(["guided", "inline"]).optional(),
+    items: z.array(viewItemSchema).optional().describe("Replaces the whole items list"),
+  },
+  async ({ id, ...patch }) => {
+    const result = await api(`/life/views/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_life_view",
+  "Remove a view from the caller's manifest. MANIFEST-ONLY: never deletes any life_events — events captured through this view persist (correlated by labels.view).",
+  { id: z.string().describe("The view id to remove") },
+  async ({ id }) => {
+    const result = await api(`/life/views/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "reorder_life_views",
+  "Set the order of the caller's views. `order` must be a permutation of all current view ids.",
+  { order: z.array(z.string()).describe("All current view ids in the desired order") },
+  async ({ order }) => {
+    const result = await api("/life/views/reorder", { method: "POST", body: JSON.stringify({ order }) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+// --- Life notification tools ---
+//
+// A "notification" is a scheduled nudge that targets a View — decoupled from
+// View content (a View defines WHAT to capture; a notification defines WHEN to
+// open it). These tools manage the caller's OWN manifest (no log-id param).
+// IMMUTABILITY: `id` keys reminder_state (the double-fire guard) and
+// `strategy.kind` decides HOW the notification fires — BOTH can NEVER change;
+// to change them, remove + re-add. Notifications add no event data.
+
+const notifyStrategySchema = z.union([
+  z.object({
+    kind: z.literal("fixed"),
+    cadence: z.enum(["daily", "weekly"]).describe("daily or weekly cadence"),
+    time: z.string().describe('"HH:MM" 24h local, or "" for never-deliver (e.g. a weekly-subsume notification)'),
+    weekday: z.number().int().min(0).max(6).optional().describe("0=Sunday..6=Saturday; only meaningful for weekly cadence"),
+    subsumes: z.array(z.string()).optional().describe("Notification ids this one REPLACES on its day"),
+  }),
+  z.object({
+    kind: z.literal("random"),
+    timesPerDay: z.number().int().positive().describe("Number of random pushes per day"),
+    activeHours: z.tuple([z.number().int().min(0).max(24), z.number().int().min(0).max(24)]).describe("[startHour, endHour] 24h local"),
+  }),
+]);
+
+server.tool(
+  "list_life_notifications",
+  "List the caller's scheduled notifications. Each has id, target (a View id to open), strategy (fixed wall-clock cadence/time, or random sampling), and optional enabled. An empty result means the caller has no custom notifications (the app falls back to its defaults).",
+  {},
+  async () => {
+    const data = await api("/life/notifications");
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+server.tool(
+  "add_life_notification",
+  "Create a scheduled notification in the caller's manifest. `id` is an IMMUTABLE slug (it keys reminder_state — the double-fire guard). `target` is the View id to open. strategy is either {kind:'fixed', cadence:daily|weekly, time:'HH:MM' (or '' for never-deliver), weekday?, subsumes?} or {kind:'random', timesPerDay, activeHours:[start,end]}. `strategy.kind` is IMMUTABLE after creation.",
+  {
+    id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-])"),
+    target: z.string().describe("The View id to open when the nudge fires"),
+    strategy: notifyStrategySchema.describe("How it fires: fixed wall-clock, or random sampling"),
+    enabled: z.boolean().optional().describe("Defaults to true when omitted"),
+  },
+  async (args) => {
+    const result = await api("/life/notifications", { method: "POST", body: JSON.stringify(args) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "update_life_notification",
+  "Patch a notification's target/strategy/enabled (pass only what changes). `id` is IMMUTABLE (it keys reminder_state) and `strategy.kind` is IMMUTABLE (it decides how the notification fires); to change either, remove + re-add. Passing strategy replaces it wholesale (its kind must match the existing kind).",
+  {
+    id: z.string().describe("The notification id to update (immutable; identifies which notification)"),
+    target: z.string().optional().describe("The View id to open"),
+    strategy: notifyStrategySchema.optional().describe("Replaces the strategy (kind must be unchanged)"),
+    enabled: z.boolean().optional(),
+  },
+  async ({ id, ...patch }) => {
+    const result = await api(`/life/notifications/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "remove_life_notification",
+  "Remove a notification from the caller's manifest. MANIFEST-ONLY: never deletes any life_events.",
+  { id: z.string().describe("The notification id to remove") },
+  async ({ id }) => {
+    const result = await api(`/life/notifications/${id}`, { method: "DELETE" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  "reorder_life_notifications",
+  "Set the order of the caller's notifications. `order` must be a permutation of all current notification ids.",
+  { order: z.array(z.string()).describe("All current notification ids in the desired order") },
+  async ({ order }) => {
+    const result = await api("/life/notifications/reorder", { method: "POST", body: JSON.stringify({ order }) });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
 // --- Observer tools ---
 
 server.tool(
