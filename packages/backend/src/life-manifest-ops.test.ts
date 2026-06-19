@@ -133,15 +133,14 @@ describe("updateTrackable", () => {
     const next = updateTrackable(base(), "run", { group: null });
     expect(next.trackables.find((x) => x.id === "run")!.group).toBeUndefined();
   });
-  it("rejects id change (immutable)", () => {
-    expect(() => updateTrackable(base(), "coffee", { id: "espresso" })).toThrow(/immutable/);
-  });
-  it("rejects shape change (immutable)", () => {
-    expect(() => updateTrackable(base(), "coffee", { shape: "did" })).toThrow(/shape is immutable/);
-  });
-  it("accepts a redundant same-shape patch", () => {
-    const next = updateTrackable(base(), "coffee", { shape: "took", label: "Coffee!" });
-    expect(next.trackables.find((x) => x.id === "coffee")!.label).toBe("Coffee!");
+  it("makes id/shape change a COMPILE error (structural immutability)", () => {
+    // The patch type is the trackable's PAYLOAD keyspace, so the frozen identity
+    // (`id`/`shape`) can't even be named — the type system rejects it, no
+    // runtime throw. @ts-expect-error fails the build if either becomes nameable.
+    // @ts-expect-error id is not part of the trackable payload patch
+    expect(() => updateTrackable(base(), "coffee", { id: "espresso" })).not.toThrow();
+    // @ts-expect-error shape is not part of the trackable payload patch
+    expect(() => updateTrackable(base(), "coffee", { shape: "did" })).not.toThrow();
   });
   it("patches and clears prefill defaults", () => {
     const patched = updateTrackable(base(), "coffee", { defaultAmount: 12, defaultUnit: "ml" });

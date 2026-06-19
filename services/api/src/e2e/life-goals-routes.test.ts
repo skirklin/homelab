@@ -1,9 +1,10 @@
 /**
  * E2E tests for the life-goal routes (`/data/life/goals/*`) exercised through
  * the same HTTP API the MCP tools call. Pins happy-path CRUD, the validation
- * rules (frequency⇒days, sum⇒unit, duplicate id, immutable id/scope/kind/
- * metric), cross-user isolation, and the progress evaluator (which shares the
- * pure evaluateGoal with the dashboard).
+ * rules (frequency⇒days, sum⇒unit, duplicate id), the STRUCTURAL immutability
+ * of id/scope/kind/metric (the route can't forward them, so a patch carrying
+ * them is a no-op — not a 400), cross-user isolation, and the progress
+ * evaluator (which shares the pure evaluateGoal with the dashboard).
  *
  * Requires `pnpm test:env:up`.
  */
@@ -132,13 +133,21 @@ describe("life goals: CRUD round-trip", () => {
     expect((patch.data.goals as any[]).find((g) => g.id === "hydrate")).toMatchObject({ target: 80, period: "week" });
   });
 
-  it("rejects scope/kind/metric mutation as immutable (400)", async () => {
+  it("ignores scope/kind/metric in a patch — immutability is structural", async () => {
+    // The route's patch type is the goal's PAYLOAD keyspace, so it cannot
+    // forward id/scope/kind/metric at all — a client passing them is a no-op,
+    // not a rejection (the old 400 immutability throw is gone). The identity
+    // stays exactly as created.
     const scope = await req("/data/life/goals/hydrate", { method: "PATCH", token: alice.apiToken, body: { scope: { thing: "coffee" } } });
-    expect(scope.status).toBe(400);
+    expect(scope.status).toBe(200);
     const kind = await req("/data/life/goals/hydrate", { method: "PATCH", token: alice.apiToken, body: { kind: "at_most" } });
-    expect(kind.status).toBe(400);
+    expect(kind.status).toBe(200);
     const metric = await req("/data/life/goals/hydrate", { method: "PATCH", token: alice.apiToken, body: { metric: "count" } });
-    expect(metric.status).toBe(400);
+    expect(metric.status).toBe(200);
+    // Identity unchanged despite the ignored fields.
+    expect((metric.data.goals as any[]).find((g) => g.id === "hydrate")).toMatchObject({
+      scope: { thing: "water" }, kind: "at_least", metric: "sum",
+    });
   });
 
   it("removes a goal (404 to patch afterward)", async () => {

@@ -22,6 +22,7 @@ import type {
   LifeManifest,
   LifeManifestTrackable,
   TrackableShape,
+  TrackablePayload,
   TemplateRef,
   QuickPayload,
   LifeEntry,
@@ -41,8 +42,6 @@ export type ManifestErrorCode =
   | "not_found"
   | "invalid_label"
   | "invalid_shape"
-  | "immutable_id"
-  | "immutable_shape"
   | "invalid_default"
   | "invalid_pin"
   | "invalid_pin_entry"
@@ -51,13 +50,14 @@ export type ManifestErrorCode =
   | "invalid_goal"
   | "duplicate_goal"
   | "goal_not_found"
-  | "immutable_goal"
   // View layer (life-view-ops.ts) — same ManifestError, distinct codes.
   | "invalid_view"
   | "duplicate_view"
   | "view_not_found"
-  | "immutable_view_id"
-  // Notification layer (life-view-ops.ts) — same ManifestError, distinct codes.
+  // Notification layer (life-view-ops.ts). EXEMPT from the Identity/Payload
+  // split: its frozen part is nested (`strategy.kind`), which doesn't split into
+  // a flat structural Identity — so `id` + `strategy.kind` stay runtime guards.
+  // These are the honest remaining runtime immutability checks.
   | "invalid_notification"
   | "duplicate_notification"
   | "notification_not_found"
@@ -387,50 +387,23 @@ export function addTrackable(
 }
 
 /**
- * UPDATE an existing trackable. Patches only the provided keys. ENFORCES
- * immutability:
- *   - `id` cannot change (it is the subject_id history join key).
- *   - `shape` cannot change (it is the entries[] contract for new events;
- *     changing it would fork the series' shape mid-history).
- * Everything else (label/group/hidden/defaults/ratingLabel/pinned) is freely
- * editable; nullable fields clear with `null`.
+ * UPDATE an existing trackable. Patches only the provided PAYLOAD keys
+ * (label/group/hidden/defaults/ratingLabel/pinned + the Phase-B view-render
+ * hints). Immutability of the identity (`id` — the subject_id history join key;
+ * `shape` — the entries[] contract for new events) is STRUCTURAL: the patch
+ * type is the trackable's payload keyspace, so neither frozen field can even be
+ * named (it's a compile error). Values stay `unknown` because raw-HTTP callers
+ * (data.ts) pass untyped bodies, so the op still VALIDATES each value at runtime
+ * (a different concern from immutability). Nullable fields clear with `null`.
  */
 export function updateTrackable(
   current: LifeManifest,
   trackableId: string,
-  patch: {
-    id?: string;
-    label?: string;
-    shape?: string;
-    group?: string | null;
-    hidden?: boolean;
-    defaultUnit?: unknown;
-    defaultAmount?: unknown;
-    defaultDuration?: unknown;
-    ratingLabel?: unknown;
-    pinned?: unknown;
-    prompt?: unknown;
-    hint?: unknown;
-    placeholder?: unknown;
-    refs?: unknown;
-  },
+  patch: Partial<Record<keyof TrackablePayload, unknown>>,
 ): LifeManifest {
   const idx = current.trackables.findIndex((t) => t.id === trackableId);
   if (idx === -1) throw new ManifestError("not_found", `no trackable with id "${trackableId}"`);
   const existing = current.trackables[idx];
-
-  if (patch.id !== undefined && patch.id !== trackableId) {
-    throw new ManifestError(
-      "immutable_id",
-      `trackable id is immutable (it is the subject_id history join key); cannot rename "${trackableId}" → "${patch.id}"`,
-    );
-  }
-  if (patch.shape !== undefined && patch.shape !== existing.shape) {
-    throw new ManifestError(
-      "immutable_shape",
-      `trackable shape is immutable (it is the entries[] contract for new events); cannot change "${existing.shape}" → "${patch.shape}"`,
-    );
-  }
 
   const next: LifeManifestTrackable = { ...existing };
 

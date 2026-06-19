@@ -19,7 +19,7 @@
  * the rest of the manifest byte-for-byte. Callers persist the returned manifest
  * wholesale.
  */
-import type { LifeManifest, LifeGoal, LifeGoalScope } from "./types/life";
+import type { LifeManifest, LifeGoal, LifeGoalScope, GoalPayload } from "./types/life";
 import { ManifestError, isSlug, reorderById } from "./life-manifest-ops";
 
 export const GOAL_KINDS = ["at_least", "at_most", "frequency"] as const;
@@ -143,48 +143,23 @@ export function addGoal(
 }
 
 /**
- * UPDATE an existing goal. Patches only the provided keys. ENFORCES
- * immutability of `id`, `scope`, `kind`, and `metric` — changing any of them
- * would redefine what the goal measures (create a new goal instead).
- * label/target/unit/period/hidden are freely editable. Because the validated
- * shape is re-derived, a patch that (say) sets period must still satisfy every
- * cross-field rule (sum ⇒ unit, etc.).
+ * UPDATE an existing goal. Patches only the provided PAYLOAD keys
+ * (label/target/unit/period/hidden). Immutability of the identity
+ * (id/scope/kind/metric — what the goal measures) is STRUCTURAL: the patch type
+ * is the goal's payload keyspace, so a frozen field can't even be named (it's a
+ * compile error). Values stay `unknown` because raw-HTTP callers (data.ts) pass
+ * untyped bodies — the op re-derives a fully-validated goal from existing +
+ * patch so cross-field invariants (sum ⇒ unit, frequency ⇒ days) hold post-patch.
  */
 export function updateGoal(
   current: LifeManifest,
   goalId: string,
-  patch: {
-    id?: string;
-    label?: unknown;
-    scope?: unknown;
-    kind?: unknown;
-    metric?: unknown;
-    target?: unknown;
-    unit?: unknown;
-    period?: unknown;
-    hidden?: unknown;
-  },
+  patch: Partial<Record<keyof GoalPayload, unknown>>,
 ): LifeManifest {
   const goals = manifestGoals(current);
   const idx = goals.findIndex((g) => g.id === goalId);
   if (idx === -1) throw new ManifestError("goal_not_found", `no goal with id "${goalId}"`);
   const existing = goals[idx];
-
-  if (patch.id !== undefined && patch.id !== goalId) {
-    throw new ManifestError("immutable_goal", `goal id is immutable; cannot rename "${goalId}" → "${String(patch.id)}"`);
-  }
-  if (patch.scope !== undefined) {
-    const nextScope = validateScope(patch.scope);
-    if (JSON.stringify(nextScope) !== JSON.stringify(existing.scope)) {
-      throw new ManifestError("immutable_goal", "goal scope is immutable (it defines what the goal measures); create a new goal instead");
-    }
-  }
-  if (patch.kind !== undefined && patch.kind !== existing.kind) {
-    throw new ManifestError("immutable_goal", `goal kind is immutable; cannot change "${existing.kind}" → ${JSON.stringify(patch.kind)}`);
-  }
-  if (patch.metric !== undefined && patch.metric !== existing.metric) {
-    throw new ManifestError("immutable_goal", `goal metric is immutable; cannot change "${existing.metric}" → ${JSON.stringify(patch.metric)}`);
-  }
 
   // Re-derive a fully-validated goal from existing + the mutable patch fields,
   // so cross-field invariants (sum ⇒ unit, frequency ⇒ days) hold post-patch.

@@ -80,13 +80,21 @@ export interface TemplateRef {
  * series' shape mid-history). Everything else is a prefill/display hint.
  * Removing a trackable from the manifest never deletes events; events persist
  * and re-link if a trackable with the same id is re-added.
+ *
+ * The record is the IDENTITY (frozen core — what the row IS and joins on) &
+ * PAYLOAD (the freely-patchable display/prefill hints) split that makes the
+ * immutability rule STRUCTURAL: `updateTrackable` only ever sees
+ * `Partial<TrackablePayload>`, so an immutable field cannot even be named in a
+ * patch (it is a compile error), and there is no runtime immutability check.
  */
-export interface LifeManifestTrackable {
+export interface TrackableIdentity {
   /** IMMUTABLE — becomes subject_id; the history join key. */
   id: string;
-  label: string;
   /** IMMUTABLE — which of the four shape widgets logs this thing. */
   shape: TrackableShape;
+}
+export interface TrackablePayload {
+  label: string;
   /** Semantic rollup (e.g. walk/run/bike share group "exercise"). */
   group?: string;
   /** Prefill hint: unit for `took` amounts ("mg", "oz", "drinks", …). */
@@ -115,6 +123,7 @@ export interface LifeManifestTrackable {
   /** Template references for `{token}`s in `prompt`/`hint`. Phase-B only. */
   refs?: TemplateRef[];
 }
+export type LifeManifestTrackable = TrackableIdentity & TrackablePayload;
 
 /**
  * A View is a named, ordered set of capture items rendered for human input —
@@ -125,10 +134,15 @@ export interface LifeManifestTrackable {
  * Stored on `life_logs.manifest.views`. UNUSED by any live surface in Phase B1
  * (sessions still run the old `SessionRunner`/`SESSIONS` path) — the data model
  * lands first, the ViewRunner consumes it in Phase B2.
+ *
+ * IDENTITY (`id` — the frozen runner slug) & PAYLOAD (everything else) split,
+ * so `updateView` only ever sees `Partial<ViewPayload>` and cannot name `id`.
  */
-export interface LifeView {
+export interface ViewIdentity {
   /** IMMUTABLE — runner slug; written to `life_events.labels.view`. */
   id: string;
+}
+export interface ViewPayload {
   title: string;
   /** One-line greeting shown at the top of a guided run. */
   greeting?: string;
@@ -138,6 +152,7 @@ export interface LifeView {
   render?: "guided" | "inline";
   items: LifeViewItem[];
 }
+export type LifeView = ViewIdentity & ViewPayload;
 
 /**
  * One renderable item in a View. A discriminated union on `kind`:
@@ -242,15 +257,21 @@ export type LifeGoalScope = { thing: string } | { group: string };
  * evaluator (apps/life/.../lib/goals.ts) reports adherence. `id` is the
  * immutable join key (so a goal can be referenced over time); everything else
  * but scope/kind/metric is freely patchable.
+ *
+ * IDENTITY (`id`/`scope`/`kind`/`metric` — what the goal MEASURES) & PAYLOAD
+ * (label/target/unit/period/hidden) split, so `updateGoal` only ever sees
+ * `Partial<GoalPayload>` and cannot name a frozen field.
  */
-export interface LifeGoal {
+export interface GoalIdentity {
   /** IMMUTABLE slug — stable identity for the goal across edits. */
   id: string;
-  label: string;
-  /** A vocab id (`{thing}`) or a group name (`{group}`) to interpret. */
+  /** IMMUTABLE — a vocab id (`{thing}`) or a group name (`{group}`). */
   scope: LifeGoalScope;
   kind: LifeGoalKind;
   metric: LifeGoalMetric;
+}
+export interface GoalPayload {
+  label: string;
   target: number;
   /**
    * REQUIRED when metric === "sum": selects which number entry to sum,
@@ -261,6 +282,7 @@ export interface LifeGoal {
   period: "day" | "week";
   hidden?: boolean;
 }
+export type LifeGoal = GoalIdentity & GoalPayload;
 
 /**
  * The per-user trackable manifest persisted on `life_logs.manifest`. Sessions

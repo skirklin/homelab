@@ -2498,15 +2498,14 @@ dataRoutes.post("/life/trackables", handler(async (c) => {
   return c.json({ trackables: out.manifest.trackables }, 201);
 }));
 
-// Patch a trackable. id and shape are immutable (enforced in the pure op).
+// Patch a trackable. id + shape are immutable — STRUCTURALLY (the pure op's
+// patch type is the payload keyspace, so they can't be passed at all).
 dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const trackableId = c.req.param("id")!;
   const body = await c.req.json<{
-    id?: string;
     label?: string;
-    shape?: string;
     group?: string | null;
     hidden?: boolean;
     defaultUnit?: unknown;
@@ -2520,12 +2519,12 @@ dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
     refs?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
-    // Forward `id`/`shape` so the pure op enforces immutability — a caller
-    // passing a differing value must be rejected, not silently ignored.
+    // The pure op's patch type is the trackable's PAYLOAD keyspace, so `id` /
+    // `shape` are structurally unnameable here — immutability is enforced by the
+    // type system, not a runtime throw. A caller's `id`/`shape` in the body is
+    // simply not forwarded (it can't be).
     updateTrackableOp(cur, trackableId, {
-      id: body.id,
       label: body.label,
-      shape: body.shape,
       group: body.group,
       hidden: body.hidden,
       defaultUnit: body.defaultUnit,
@@ -2627,31 +2626,22 @@ dataRoutes.post("/life/goals", handler(async (c) => {
   return c.json({ goals: manifestGoals(out.manifest) }, 201);
 }));
 
-// Patch a goal. id/scope/kind/metric are immutable (enforced in the pure op).
+// Patch a goal. id/scope/kind/metric are immutable — STRUCTURALLY (the pure
+// op's patch type is the payload keyspace, so they can't be passed at all).
 dataRoutes.patch("/life/goals/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const goalId = c.req.param("id")!;
   const body = await c.req.json<{
-    id?: unknown;
     label?: unknown;
-    scope?: unknown;
-    kind?: unknown;
-    metric?: unknown;
     target?: unknown;
     unit?: unknown;
     period?: unknown;
     hidden?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
-    // Forward id/scope/kind/metric so the pure op rejects any attempt to change
-    // them, rather than silently ignoring.
     updateGoalOp(cur, goalId, {
-      id: body.id as string | undefined,
       label: body.label,
-      scope: body.scope,
-      kind: body.kind,
-      metric: body.metric,
       target: body.target,
       unit: body.unit,
       period: body.period,
@@ -2727,13 +2717,13 @@ dataRoutes.post("/life/views", handler(async (c) => {
   return c.json({ views: manifestViews(out.manifest) }, 201);
 }));
 
-// Patch a view. id is immutable (enforced in the pure op).
+// Patch a view. id is immutable — STRUCTURALLY (the pure op's patch type is the
+// payload keyspace, so it can't be passed at all).
 dataRoutes.patch("/life/views/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
   const viewId = c.req.param("id")!;
   const body = await c.req.json<{
-    id?: unknown;
     title?: unknown;
     greeting?: unknown;
     icon?: unknown;
@@ -2741,10 +2731,7 @@ dataRoutes.patch("/life/views/:id", handler(async (c) => {
     items?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
-    // Forward `id` so the pure op rejects any attempt to rename, rather than
-    // silently ignoring.
     updateViewOp(cur, viewId, {
-      id: body.id as string | undefined,
       title: body.title,
       greeting: body.greeting,
       icon: body.icon,

@@ -89,16 +89,19 @@ describe("updateGoal", () => {
     expect(g.unit).toBe("oz"); // preserved
   });
 
-  it("rejects id/scope/kind/metric mutation as immutable", () => {
-    expect(() => updateGoal(base(), "hydrate", { id: "other" })).toThrow(/immutable/);
-    expect(() => updateGoal(base(), "hydrate", { scope: { thing: "run" } })).toThrow(/immutable/);
-    expect(() => updateGoal(base(), "hydrate", { kind: "at_most" })).toThrow(/immutable/);
-    expect(() => updateGoal(base(), "hydrate", { metric: "count" })).toThrow(/immutable/);
-  });
-
-  it("allows a no-op scope patch equal to the existing scope", () => {
-    const next = updateGoal(base(), "hydrate", { scope: { thing: "water" }, target: 70 });
-    expect(manifestGoals(next).find((g) => g.id === "hydrate")?.target).toBe(70);
+  it("makes id/scope/kind/metric mutation a COMPILE error (structural immutability)", () => {
+    // The patch type is the goal's PAYLOAD keyspace, so the frozen identity
+    // fields can't even be named — these are caught by the type system, not a
+    // runtime throw. @ts-expect-error fails the build if the field becomes
+    // nameable again.
+    // @ts-expect-error id is not part of the goal payload patch
+    expect(() => updateGoal(base(), "hydrate", { id: "other" })).not.toThrow();
+    // @ts-expect-error scope is not part of the goal payload patch
+    expect(() => updateGoal(base(), "hydrate", { scope: { thing: "run" } })).not.toThrow();
+    // @ts-expect-error kind is not part of the goal payload patch
+    expect(() => updateGoal(base(), "hydrate", { kind: "at_most" })).not.toThrow();
+    // @ts-expect-error metric is not part of the goal payload patch
+    expect(() => updateGoal(base(), "hydrate", { metric: "count" })).not.toThrow();
   });
 
   it("rejects patches that break a cross-field invariant", () => {
