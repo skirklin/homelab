@@ -344,7 +344,7 @@ export function OutlinerRow({
 
         {/* Deadline tag sits right after the name (not floated to the row edge).
             Overdue dated todos go red here. */}
-        {task.taskType === "one_shot" && task.deadline && !isSnoozed && !isDone && (() => {
+        {task.taskType === "one_shot" && task.deadline && !isSnoozed && !isDone && !task.cleared && (() => {
           const days = daysUntilDue(task);
           const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";
           return (
@@ -358,7 +358,7 @@ export function OutlinerRow({
             tag and used to carry no visual signal at all (they silently rotted
             in "later"). Overdue dated todos are already flagged red above, so
             this only fires for the no-deadline asap case. */}
-        {task.taskType === "one_shot" && !task.deadline && !isSnoozed && !isDone &&
+        {task.taskType === "one_shot" && !task.deadline && !isSnoozed && !isDone && !task.cleared &&
           getUrgencyLevel(task) === "asap" && (
             <Tag color="red" style={{ fontSize: 10, lineHeight: "16px", margin: "0 0 0 6px", flexShrink: 0 }}>
               Asap
