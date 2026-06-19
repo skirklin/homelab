@@ -36,7 +36,7 @@ import type {
   LifeNotifyStrategy,
   TemplateRef,
 } from "./types/life";
-import { ManifestError, isSlug, validateRefs } from "./life-manifest-ops";
+import { ManifestError, isSlug, validateRefs, patchOptionalString, reorderById } from "./life-manifest-ops";
 
 export const VIEW_ITEM_KINDS = ["capture", "tasks_due", "banner"] as const;
 export const VIEW_RENDERS = ["guided", "inline"] as const;
@@ -213,14 +213,10 @@ export function updateView(
     next.title = patch.title;
   }
   if (patch.greeting !== undefined) {
-    if (patch.greeting === null || patch.greeting === "") delete next.greeting;
-    else if (typeof patch.greeting === "string") next.greeting = patch.greeting;
-    else throw new ManifestError("invalid_view", "greeting must be a string or null");
+    patchOptionalString(next, "greeting", patch.greeting, "greeting", "invalid_view");
   }
   if (patch.icon !== undefined) {
-    if (patch.icon === null || patch.icon === "") delete next.icon;
-    else if (typeof patch.icon === "string") next.icon = patch.icon;
-    else throw new ManifestError("invalid_view", "icon must be a string or null");
+    patchOptionalString(next, "icon", patch.icon, "icon", "invalid_view");
   }
   if (patch.render !== undefined) {
     if (patch.render === null) {
@@ -257,25 +253,7 @@ export function removeView(current: LifeManifest, viewId: string): LifeManifest 
  * (same set, no dupes, no extras). Mirrors `reorderGoals`. Manifest-only.
  */
 export function reorderViews(current: LifeManifest, orderedIds: unknown): LifeManifest {
-  if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === "string")) {
-    throw new ManifestError("invalid_order", "order must be an array of view ids");
-  }
-  const views = manifestViews(current);
-  const wanted = orderedIds as string[];
-  if (wanted.length !== views.length || new Set(wanted).size !== wanted.length) {
-    throw new ManifestError(
-      "invalid_order",
-      `order must be a permutation of the ${views.length} current view ids`,
-    );
-  }
-  const byId = new Map(views.map((v) => [v.id, v]));
-  const reordered: LifeView[] = [];
-  for (const id of wanted) {
-    const v = byId.get(id);
-    if (!v) throw new ManifestError("invalid_order", `order references unknown view id "${id}"`);
-    reordered.push(v);
-  }
-  return { ...current, views: reordered };
+  return { ...current, views: reorderById(manifestViews(current), orderedIds, "view") };
 }
 
 // ───────────────────────────── Notifications ─────────────────────────────
@@ -355,6 +333,9 @@ function validateStrategy(raw: unknown): LifeNotifyStrategy {
       "invalid_notification",
       `strategy.activeHours must be a [startHour, endHour] tuple of integers 0..24; got ${JSON.stringify(hours)}`,
     );
+  }
+  if (hours[0] >= hours[1]) {
+    throw new ManifestError("invalid_notification", "activeHours start must be < end");
   }
   return {
     kind: "random",
@@ -493,14 +474,10 @@ export function updateNotification(
   // Custom push copy: null/"" clears, a non-empty string sets (mirrors
   // greeting/icon on views).
   if (patch.title !== undefined) {
-    if (patch.title === null || patch.title === "") delete next.title;
-    else if (typeof patch.title === "string") next.title = patch.title;
-    else throw new ManifestError("invalid_notification", "title must be a string or null");
+    patchOptionalString(next, "title", patch.title, "title", "invalid_notification");
   }
   if (patch.body !== undefined) {
-    if (patch.body === null || patch.body === "") delete next.body;
-    else if (typeof patch.body === "string") next.body = patch.body;
-    else throw new ManifestError("invalid_notification", "body must be a string or null");
+    patchOptionalString(next, "body", patch.body, "body", "invalid_notification");
   }
 
   const out = notifs.slice();
@@ -522,23 +499,8 @@ export function removeNotification(current: LifeManifest, notificationId: string
  * notification ids. Mirrors `reorderGoals`. Manifest-only.
  */
 export function reorderNotifications(current: LifeManifest, orderedIds: unknown): LifeManifest {
-  if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === "string")) {
-    throw new ManifestError("invalid_order", "order must be an array of notification ids");
-  }
-  const notifs = manifestNotifications(current);
-  const wanted = orderedIds as string[];
-  if (wanted.length !== notifs.length || new Set(wanted).size !== wanted.length) {
-    throw new ManifestError(
-      "invalid_order",
-      `order must be a permutation of the ${notifs.length} current notification ids`,
-    );
-  }
-  const byId = new Map(notifs.map((n) => [n.id, n]));
-  const reordered: LifeNotification[] = [];
-  for (const id of wanted) {
-    const n = byId.get(id);
-    if (!n) throw new ManifestError("invalid_order", `order references unknown notification id "${id}"`);
-    reordered.push(n);
-  }
-  return { ...current, notifications: reordered };
+  return {
+    ...current,
+    notifications: reorderById(manifestNotifications(current), orderedIds, "notification"),
+  };
 }

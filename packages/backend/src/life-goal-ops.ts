@@ -20,18 +20,11 @@
  * wholesale.
  */
 import type { LifeManifest, LifeGoal, LifeGoalScope } from "./types/life";
-import { ManifestError } from "./life-manifest-ops";
+import { ManifestError, isSlug, reorderById } from "./life-manifest-ops";
 
 export const GOAL_KINDS = ["at_least", "at_most", "frequency"] as const;
 export const GOAL_METRICS = ["count", "sum", "days"] as const;
 export const GOAL_PERIODS = ["day", "week"] as const;
-
-/** A goal id must be a slug: lower-kebab, starts alnum, <=64 chars. */
-const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
-
-function isSlug(s: unknown): s is string {
-  return typeof s === "string" && s.length > 0 && s.length <= 64 && SLUG_RE.test(s);
-}
 
 /** Validate + normalize a scope object: exactly one of {thing}|{group}. */
 function validateScope(raw: unknown): LifeGoalScope {
@@ -228,24 +221,5 @@ export function removeGoal(current: LifeManifest, goalId: string): LifeManifest 
  * Mirrors `reorderTrackables`. Manifest-only; never touches life_events.
  */
 export function reorderGoals(current: LifeManifest, orderedIds: unknown): LifeManifest {
-  if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === "string")) {
-    throw new ManifestError("invalid_order", "order must be an array of goal ids");
-  }
-  const goals = manifestGoals(current);
-  const currentIds = goals.map((g) => g.id);
-  const wanted = orderedIds as string[];
-  if (wanted.length !== currentIds.length || new Set(wanted).size !== wanted.length) {
-    throw new ManifestError(
-      "invalid_order",
-      `order must be a permutation of the ${currentIds.length} current goal ids`,
-    );
-  }
-  const byId = new Map(goals.map((g) => [g.id, g]));
-  const reordered: LifeGoal[] = [];
-  for (const id of wanted) {
-    const g = byId.get(id);
-    if (!g) throw new ManifestError("invalid_order", `order references unknown goal id "${id}"`);
-    reordered.push(g);
-  }
-  return { ...current, goals: reordered };
+  return { ...current, goals: reorderById(manifestGoals(current), orderedIds, "goal") };
 }

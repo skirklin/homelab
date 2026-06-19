@@ -52,7 +52,11 @@ export type {
 export {
   ManifestError,
   TRACKABLE_SHAPES,
+  isSlug,
   slugifyTrackableId,
+  validateOptionalString,
+  patchOptionalString,
+  reorderById,
   validatePins,
   emptyManifest,
   addTrackable,

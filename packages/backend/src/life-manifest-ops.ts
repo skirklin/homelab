@@ -103,11 +103,43 @@ export function slugifyTrackableId(label: string): string {
     .slice(0, 64);
 }
 
+/**
+ * Generic permutation-reorder over any `{id}`-keyed list. `orderedIds` must be a
+ * permutation of `current`'s ids (same set, no dupes, no extras); returns the
+ * list rebuilt in that order. Shared by reorderTrackables/Goals/Views/
+ * Notifications — they differ only in the `noun` used in error strings (all four
+ * use the `invalid_order` code). Pure: never mutates `current`.
+ */
+export function reorderById<T extends { id: string }>(
+  current: readonly T[],
+  orderedIds: unknown,
+  noun: string,
+): T[] {
+  if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === "string")) {
+    throw new ManifestError("invalid_order", `order must be an array of ${noun} ids`);
+  }
+  const wanted = orderedIds as string[];
+  if (wanted.length !== current.length || new Set(wanted).size !== wanted.length) {
+    throw new ManifestError(
+      "invalid_order",
+      `order must be a permutation of the ${current.length} current ${noun} ids`,
+    );
+  }
+  const byId = new Map(current.map((item) => [item.id, item]));
+  const reordered: T[] = [];
+  for (const id of wanted) {
+    const item = byId.get(id);
+    if (!item) throw new ManifestError("invalid_order", `order references unknown ${noun} id "${id}"`);
+    reordered.push(item);
+  }
+  return reordered;
+}
+
 function isShape(s: unknown): s is TrackableShape {
   return typeof s === "string" && (TRACKABLE_SHAPES as readonly string[]).includes(s);
 }
 
-function validateOptionalString(
+export function validateOptionalString(
   value: unknown,
   name: string,
   code: ManifestErrorCode,
@@ -117,6 +149,31 @@ function validateOptionalString(
     throw new ManifestError(code, `${name} must be a non-empty string`);
   }
   return value;
+}
+
+/**
+ * Patch a nullable optional-string field on an object IN PLACE: `null`/`""`
+ * deletes the key, a non-empty string validates + sets it, anything else throws
+ * `code`. This is the canonical "set-or-clear" dance used by every update path
+ * for greeting/icon/title/body and the trackable prefill hints — collapsing the
+ * hand-rolled `if (v === null || v === "") delete … else if (typeof v ===
+ * "string") … else throw` blocks into one helper with consistent per-field
+ * codes.
+ */
+export function patchOptionalString<K extends string>(
+  target: Partial<Record<K, string>>,
+  key: K,
+  value: unknown,
+  name: string,
+  code: ManifestErrorCode,
+): void {
+  if (value === null || value === "") {
+    delete target[key];
+  } else if (typeof value === "string") {
+    target[key] = value;
+  } else {
+    throw new ManifestError(code, `${name} must be a string or null`);
+  }
 }
 
 function validateOptionalNumber(value: unknown, name: string): number | undefined {
@@ -456,25 +513,7 @@ export function removeTrackable(current: LifeManifest, trackableId: string): Lif
  * trackables reordered to match.
  */
 export function reorderTrackables(current: LifeManifest, orderedIds: unknown): LifeManifest {
-  if (!Array.isArray(orderedIds) || !orderedIds.every((x) => typeof x === "string")) {
-    throw new ManifestError("invalid_order", "order must be an array of trackable ids");
-  }
-  const currentIds = current.trackables.map((t) => t.id);
-  const wanted = orderedIds as string[];
-  if (wanted.length !== currentIds.length || new Set(wanted).size !== wanted.length) {
-    throw new ManifestError(
-      "invalid_order",
-      `order must be a permutation of the ${currentIds.length} current trackable ids`,
-    );
-  }
-  const byId = new Map(current.trackables.map((t) => [t.id, t]));
-  const reordered: LifeManifestTrackable[] = [];
-  for (const id of wanted) {
-    const t = byId.get(id);
-    if (!t) throw new ManifestError("invalid_order", `order references unknown trackable id "${id}"`);
-    reordered.push(t);
-  }
-  return { ...current, trackables: reordered };
+  return { ...current, trackables: reorderById(current.trackables, orderedIds, "trackable") };
 }
 
 /**

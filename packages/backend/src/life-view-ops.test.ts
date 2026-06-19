@@ -294,6 +294,10 @@ describe("addNotification", () => {
     expect(() => addNotification(base(), { id: "x", target: "morning", strategy: { kind: "random", timesPerDay: 0, activeHours: [9, 21] } })).toThrow(/timesPerDay/);
     expect(() => addNotification(base(), { id: "y", target: "morning", strategy: { kind: "random", timesPerDay: 2, activeHours: [9] } })).toThrow(/activeHours/);
     expect(() => addNotification(base(), { id: "z", target: "morning", strategy: { kind: "random", timesPerDay: 2, activeHours: [9, 25] } })).toThrow(/activeHours/);
+    // start must be strictly before end — the consumer cron silently rejects
+    // start >= end, so an inverted/degenerate window must not persist.
+    expect(() => addNotification(base(), { id: "w", target: "morning", strategy: { kind: "random", timesPerDay: 2, activeHours: [21, 9] } })).toThrow(/activeHours start must be < end/);
+    expect(() => addNotification(base(), { id: "v", target: "morning", strategy: { kind: "random", timesPerDay: 2, activeHours: [9, 9] } })).toThrow(/activeHours start must be < end/);
   });
 
   it("rejects an unknown strategy kind", () => {
