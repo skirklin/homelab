@@ -17,6 +17,7 @@
     "life:merge-sleep-quality": "tsx historical/merge-sleep-quality.ts",
     "life:split-category-subjects": "tsx historical/split-category-subjects.ts",
     "life:fanout-session-events": "tsx historical/fanout-session-events.ts",
+    "life:migrate-reminder-columns": "tsx historical/migrate-reminder-columns-to-notifications.ts",
     "test": "vitest run"
   },
   "dependencies": {
