@@ -11,12 +11,14 @@
  * Mocks @kirkl/shared, ../subscription, and ../messaging so the dashboard
  * mounts without a real PocketBase, service worker, or push subscription.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import dayjs from "dayjs";
+import type { LogEvent } from "../types";
 
 // --- Mocks ---------------------------------------------------------------
 
@@ -77,7 +79,7 @@ vi.mock("../messaging", () => ({
 // --- Imports under test (after mocks) ------------------------------------
 
 import { LifeDashboard } from "./LifeDashboard";
-import { LifeProvider } from "../life-context";
+import { LifeProvider, useLifeContext } from "../life-context";
 
 // --- Helpers -------------------------------------------------------------
 
@@ -134,6 +136,66 @@ function renderDashboard(initialEntry: string) {
   const view = render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <LifeProvider>
+        <Routes>
+          <Route path="/" element={<LifeDashboard />} />
+        </Routes>
+        <LocationProbe onChange={probe} />
+      </LifeProvider>
+    </MemoryRouter>,
+  );
+  return { ...view, getLocation: () => current };
+}
+
+// --- Session-card seeding ------------------------------------------------
+
+type SessionView = "morning" | "evening" | "weekly";
+
+/**
+ * Build a per-item morning/evening/weekly run the way the ViewRunner writes
+ * it post-B3.3: N separate `life_events` rows, one per captured vocab id, each
+ * carrying `labels.view` + a shared `labels.view_run`. There is NO fat
+ * `<view>_session` event — the old "logged today?" scan looked for exactly
+ * that subject_id and is why the live dashboard showed "missed earlier?" after
+ * the fanout migration.
+ */
+function perItemRun(
+  view: SessionView,
+  vocabIds: string[],
+  when: Date,
+): LogEvent[] {
+  const viewRun = when.toISOString();
+  return vocabIds.map((vocabId) => ({
+    id: `${view}-${vocabId}-${when.getTime()}`,
+    log: "log1",
+    subjectId: vocabId,
+    timestamp: when,
+    entries: [{ name: "note", type: "text", value: `seed ${vocabId}` }],
+    labels: { view, view_run: viewRun },
+    createdBy: "user123",
+    created: when.toISOString(),
+    updated: when.toISOString(),
+  })) satisfies LogEvent[];
+}
+
+/** Dispatches seed events into the LifeContext on mount, before assertions. */
+function SeedEntries({ events }: { events: LogEvent[] }) {
+  const { dispatch } = useLifeContext();
+  useEffect(() => {
+    dispatch({ type: "SET_ENTRIES", entries: events });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
+
+function renderDashboardWithEntries(events: LogEvent[], initialEntry = "/") {
+  let current: LocationSnapshot = { pathname: "/", search: "" };
+  const probe = (loc: LocationSnapshot) => {
+    current = loc;
+  };
+  const view = render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <LifeProvider>
+        <SeedEntries events={events} />
         <Routes>
           <Route path="/" element={<LifeDashboard />} />
         </Routes>
@@ -336,5 +398,93 @@ describe("LifeDashboard (Log) — IA after the 4-mode split", () => {
     // No Chat button/link, and the unread badge is gone.
     expect(screen.queryByText(/^Chat/)).not.toBeInTheDocument();
     expect(container.querySelector("[href='/chat']")).toBeNull();
+  });
+});
+
+describe("LifeDashboard session cards — logged-today detection (B3.3 repoint)", () => {
+  // Pin the clock so session-card prominence + the not-logged prompt are
+  // deterministic regardless of when the suite runs. 14:00 local is afternoon:
+  // morning is past (so a missing morning run reads "missed earlier?"), and the
+  // logged chip still renders whenever a run exists.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const noon = new Date();
+    noon.setHours(14, 30, 0, 0);
+    vi.setSystemTime(noon);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A representative "today, this afternoon" instant for run timestamps. */
+  function todayAt(h: number, m: number): Date {
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d;
+  }
+
+  it("detects a logged morning from PER-ITEM events (no fat morning_session)", async () => {
+    // The regression: post-fanout, morning is stored as separate `gratitude` /
+    // `energy` events tagged labels.view="morning". The OLD dashboard scanned
+    // for subject_id === "morning_session" (now nonexistent) and so always
+    // showed "missed earlier?". The new normalizer path detects the run.
+    const when = todayAt(7, 45);
+    const events = perItemRun("morning", ["gratitude", "energy"], when);
+
+    renderDashboardWithEntries(events);
+    await screen.findByText("Sessions");
+
+    // The morning card shows the LOGGED affordance at the run's time, NOT the
+    // missed prompt. With the old `<id>_session` scan this assertion fails.
+    await screen.findByText(/logged at 7:45am/i);
+    expect(screen.queryByText("missed earlier?")).not.toBeInTheDocument();
+  });
+
+  it("shows the capture prompt when there is no morning run today", async () => {
+    // No seeded events at all — afternoon with no morning run reads "missed
+    // earlier?" and never the logged chip.
+    renderDashboardWithEntries([]);
+    await screen.findByText("Sessions");
+
+    await screen.findByText("missed earlier?");
+    expect(screen.queryByText(/logged at/i)).not.toBeInTheDocument();
+  });
+
+  it("a per-item run dated YESTERDAY does not count as logged today", async () => {
+    // Run-vs-today bucketing is by user-tz day key. A run from yesterday must
+    // not satisfy the morning card — otherwise "logged" would stick forever.
+    const yesterday = todayAt(7, 45);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const events = perItemRun("morning", ["gratitude", "energy"], yesterday);
+
+    renderDashboardWithEntries(events);
+    await screen.findByText("Sessions");
+
+    await screen.findByText("missed earlier?");
+    expect(screen.queryByText(/logged at/i)).not.toBeInTheDocument();
+  });
+
+  it("the morning card navigates to the `morning` route", async () => {
+    const { getLocation } = renderDashboardWithEntries([]);
+    const card = await screen.findByText("Morning");
+
+    fireEvent.click(card);
+
+    await waitFor(() => {
+      expect(getLocation().pathname).toBe("/morning");
+    });
+  });
+
+  it("the weekly card navigates to `weekly` (not the legacy `weekly_review`)", async () => {
+    const { getLocation } = renderDashboardWithEntries([]);
+    const card = await screen.findByText("Weekly review");
+
+    fireEvent.click(card);
+
+    await waitFor(() => {
+      expect(getLocation().pathname).toBe("/weekly");
+    });
   });
 });
