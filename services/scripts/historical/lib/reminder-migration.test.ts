@@ -5,8 +5,9 @@ import {
   MORNING_REMINDER_ID,
   SAMPLING_ID,
   WEEKLY_REMINDER_ID,
-} from "../../../api/src/lib/notifications/life-notifications";
-import { type RawLifeLog, planReminderMigration } from "./reminder-migration";
+  type RawLifeLog,
+  planReminderMigration,
+} from "./reminder-migration";
 
 function migrate(log: RawLifeLog) {
   const [action] = planReminderMigration([log]);

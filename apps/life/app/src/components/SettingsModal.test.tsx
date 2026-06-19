@@ -13,7 +13,6 @@ const mockUserBackend = {
 };
 const mockLifeBackend = {
   setRandomSamplingEnabled: vi.fn(),
-  updateReminderTimes: vi.fn(),
 };
 
 vi.mock("@kirkl/shared", async () => {

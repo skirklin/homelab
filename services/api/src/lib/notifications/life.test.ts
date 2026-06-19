@@ -31,6 +31,31 @@ interface FakeLog {
   owner: string;
   random_sampling_enabled: boolean;
   sample_schedule: unknown;
+  manifest?: { trackables: unknown[]; notifications?: unknown[] };
+}
+
+/**
+ * A `manifest.notifications` carrying one `random` sampling notification — the
+ * Phase-D source of truth for sampler opt-in (`random_sampling_enabled` gates
+ * schedule generation; the notification is what `randomNotificationFor`
+ * matches). Mirrors what the column→manifest migration materialized for a log
+ * that had sampling on.
+ */
+function samplingManifest() {
+  return {
+    trackables: [],
+    notifications: [
+      {
+        id: "sampling",
+        target: "sampling",
+        strategy: {
+          kind: "random",
+          timesPerDay: RANDOM_SAMPLES.timesPerDay,
+          activeHours: RANDOM_SAMPLES.activeHours,
+        },
+      },
+    ],
+  };
 }
 
 function makeFakePb(opts: {
@@ -84,8 +109,8 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
   it("schedules each log's times within its OWN owner's local active hours", async () => {
     const [startHour, endHour] = RANDOM_SAMPLES.activeHours;
     const logs: FakeLog[] = [
-      { id: "logA", owner: "userA", random_sampling_enabled: true, sample_schedule: null },
-      { id: "logB", owner: "userB", random_sampling_enabled: true, sample_schedule: null },
+      { id: "logA", owner: "userA", random_sampling_enabled: true, sample_schedule: null, manifest: samplingManifest() },
+      { id: "logB", owner: "userB", random_sampling_enabled: true, sample_schedule: null, manifest: samplingManifest() },
     ];
     const { pb, updates } = makeFakePb({
       logs,
@@ -119,8 +144,8 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
 
   it("Tokyo and LA owners get DIFFERENT UTC instants (proves no global-tz collapse)", async () => {
     const logs: FakeLog[] = [
-      { id: "logA", owner: "userA", random_sampling_enabled: true, sample_schedule: null },
-      { id: "logB", owner: "userB", random_sampling_enabled: true, sample_schedule: null },
+      { id: "logA", owner: "userA", random_sampling_enabled: true, sample_schedule: null, manifest: samplingManifest() },
+      { id: "logB", owner: "userB", random_sampling_enabled: true, sample_schedule: null, manifest: samplingManifest() },
     ];
     const { pb, updates } = makeFakePb({
       logs,
@@ -143,7 +168,7 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
     const [startHour, endHour] = RANDOM_SAMPLES.activeHours;
     const globalTz = RANDOM_SAMPLES.timezone || "UTC";
     const logs: FakeLog[] = [
-      { id: "logC", owner: "userC", random_sampling_enabled: true, sample_schedule: null },
+      { id: "logC", owner: "userC", random_sampling_enabled: true, sample_schedule: null, manifest: samplingManifest() },
     ];
     const { pb, updates } = makeFakePb({ logs, usersTz: { userC: undefined } });
     getAdminPb.mockResolvedValue(pb);
@@ -158,9 +183,12 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
     }
   });
 
-  it("skips logs with random sampling disabled (no schedule write)", async () => {
+  it("skips a log with no `random` notification in its manifest (no schedule write)", async () => {
+    // No `random` notification (and an empty manifest) → not opted into
+    // sampling → no schedule generated. (Post-Phase-D the opt-in lives in
+    // manifest.notifications, not the bare random_sampling_enabled flag.)
     const logs: FakeLog[] = [
-      { id: "logOff", owner: "userA", random_sampling_enabled: false, sample_schedule: null },
+      { id: "logOff", owner: "userA", random_sampling_enabled: false, sample_schedule: null, manifest: { trackables: [], notifications: [] } },
     ];
     const { pb, updates } = makeFakePb({ logs, usersTz: { userA: "America/Los_Angeles" } });
     getAdminPb.mockResolvedValue(pb);
@@ -177,20 +205,35 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
 // landed (result.sent > 0). A tick that delivers nothing (no live subs / all
 // failed) or throws must NOT mark the day, so the next within-window tick
 // retries. (croner protect:true makes the old mark-before-send double-fire
-// guard moot.) Post-B4 the go-forward idempotency store is the `reminder_state`
-// JSON map keyed by notification id; the column-derived ids are
-// `morning-reminder` / `evening-reminder` / `weekly-reminder`.
+// guard moot.) Post-Phase-D the SOLE idempotency store is the `reminder_state`
+// JSON map keyed by notification id; notifications come from
+// `manifest.notifications` only (the legacy `*_reminder_time` columns are
+// dropped). The fixed session-reminder ids are `morning-reminder` /
+// `evening-reminder` / `weekly-reminder`.
 
 interface ReminderLog {
   id: string;
   owner: string;
-  morning_reminder_time?: string;
-  evening_reminder_time?: string;
-  weekly_reminder_time?: string;
-  last_morning_reminder_sent?: string;
-  last_evening_reminder_sent?: string;
-  last_weekly_reminder_sent?: string;
+  manifest?: { trackables: unknown[]; notifications?: unknown[] };
   reminder_state?: Record<string, string>;
+}
+
+/** A `manifest.notifications` carrying one fixed daily reminder at `time`. */
+function dailyReminderManifest(id: string, target: string, time: string) {
+  return {
+    trackables: [],
+    notifications: [{ id, target, strategy: { kind: "fixed", cadence: "daily", time } }],
+  };
+}
+
+/** A `manifest.notifications` carrying one fixed weekly (Sunday) reminder. */
+function weeklyReminderManifest(id: string, target: string, time: string) {
+  return {
+    trackables: [],
+    notifications: [
+      { id, target, strategy: { kind: "fixed", cadence: "weekly", time, weekday: 0 } },
+    ],
+  };
 }
 
 /** Pull the latest `reminder_state` written for a log, keyed by notification id. */
@@ -242,7 +285,7 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
   it("does NOT mark reminder_state when delivery is 0", async () => {
     sendPushToUser.mockResolvedValue({ sent: 0, expired: 0, failed: 1 });
     const logs: ReminderLog[] = [
-      { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
+      { id: "log1", owner: "userA", manifest: dailyReminderManifest("morning-reminder", "morning", "08:00") },
     ];
     const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(pb);
@@ -257,7 +300,7 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
   it("does NOT mark when the send throws", async () => {
     sendPushToUser.mockRejectedValue(new Error("push backend down"));
     const logs: ReminderLog[] = [
-      { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
+      { id: "log1", owner: "userA", manifest: dailyReminderManifest("morning-reminder", "morning", "08:00") },
     ];
     const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(pb);
@@ -268,20 +311,41 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     expect(res.sent).toBe(0);
   });
 
-  it("DOES mark reminder_state when delivery succeeds", async () => {
+  it("DOES mark reminder_state when delivery succeeds (manifest.notifications drives the send)", async () => {
     sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
     const logs: ReminderLog[] = [
-      { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
+      { id: "log1", owner: "userA", manifest: dailyReminderManifest("morning-reminder", "morning", "08:00") },
     ];
     const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(pb);
 
     const res = await runLifeReminderCheck(MONDAY_0800Z);
 
+    expect(sendPushToUser).toHaveBeenCalledTimes(1);
     const writes = reminderStateWrites(updates, "morning-reminder");
     expect(writes).toHaveLength(1);
     expect((writes[0].data.reminder_state as Record<string, string>)["morning-reminder"]).toBe("2026-06-08");
     expect(res.sent).toBe(1);
+  });
+
+  it("reminder_state[id] === today suppresses a second send (idempotent within the day)", async () => {
+    sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
+    const logs: ReminderLog[] = [
+      {
+        id: "log1",
+        owner: "userA",
+        manifest: dailyReminderManifest("morning-reminder", "morning", "08:00"),
+        // Already delivered today → must not re-send.
+        reminder_state: { "morning-reminder": "2026-06-08" },
+      },
+    ];
+    const { pb } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(pb);
+
+    const res = await runLifeReminderCheck(MONDAY_0800Z);
+
+    expect(sendPushToUser).not.toHaveBeenCalled();
+    expect(res.sent).toBe(0);
   });
 
   it("uses the notification's CUSTOM title/body when set", async () => {
@@ -326,7 +390,9 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
 
     // Failure path: no mark.
     sendPushToUser.mockResolvedValue({ sent: 0, expired: 0, failed: 1 });
-    let logs: ReminderLog[] = [{ id: "logW", owner: "userA", weekly_reminder_time: "08:00" }];
+    let logs: ReminderLog[] = [
+      { id: "logW", owner: "userA", manifest: weeklyReminderManifest("weekly-reminder", "weekly", "08:00") },
+    ];
     let env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(env.pb);
     await runLifeReminderCheck(SUNDAY_0800Z);
@@ -334,7 +400,9 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
 
     // Success path: mark.
     sendPushToUser.mockResolvedValue({ sent: 2, expired: 0, failed: 0 });
-    logs = [{ id: "logW", owner: "userA", weekly_reminder_time: "08:00" }];
+    logs = [
+      { id: "logW", owner: "userA", manifest: weeklyReminderManifest("weekly-reminder", "weekly", "08:00") },
+    ];
     env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(env.pb);
     await runLifeReminderCheck(SUNDAY_0800Z);

@@ -1,68 +1,30 @@
 /**
- * Default life-tracker vocabulary for NEW users.
+ * Default life-tracker manifest for NEW users.
  *
- * A MINIMAL starter set — one trackable per SHAPE — copied into
- * `life_logs.manifest` on first `getOrCreateLog`. Generically named (Water,
- * Exercise, Floss, Mood) so a brand-new user gets a working dashboard that
- * demonstrates every shape widget, not the system owner's personal list.
+ * A brand-new log seeds EMPTY — no starter trackables, no Views, no
+ * notifications. The user builds their own vocab + capture surface from
+ * scratch. (Earlier this seeded a one-per-shape demo set + DEFAULT_VIEWS +
+ * DEFAULT_NOTIFICATIONS; that was dropped per the "start empty" directive.)
  *
- * Shape coverage:
- *   - took     → Water (8 oz)
- *   - did      → Exercise (30 min, optional intensity rating)
- *   - happened → Floss
- *   - rated    → Mood
+ * All three keys are EXPLICIT empty arrays, NOT `undefined`. This is
+ * load-bearing: the in-app View / notification editors edit `manifest.views`
+ * and `manifest.notifications` in place, and an `undefined` key would make an
+ * editor render the resolved DEFAULT_* fallback and then throw `*_not_found`
+ * on the first edit (it would be operating on an array that was never
+ * persisted). Seeding `[]` guarantees the editors always have a real array to
+ * mutate.
  *
  * Importable by both the seeding path (packages/backend/.../pocketbase/life.ts)
- * and tests. The PB shape migration rewrites EXISTING manifests separately in
- * goja JS — this module is ONLY the new-user starter set.
- *
- * `views` + `notifications` are seeded as the resolved defaults
- * (`DEFAULT_VIEWS` / `DEFAULT_NOTIFICATIONS`) so a brand-new log ALWAYS persists
- * both keys as arrays. The in-app View/Notification editor edits these keys
- * directly and would throw `*_not_found` if it rendered an unpersisted
- * resolved-default fallback. Existing logs are materialized separately by the
- * Phase D migration (migrate-reminder-columns-to-notifications.ts) — so this
- * seed only affects logs created after deploy, and the cron's column fallback
- * for existing users is unchanged. New users get the 3 default reminders
- * (07:30/21:00/19:00) + 3 session views by default (reminders only push if the
- * user actually subscribes to push).
+ * and tests. Existing logs are unaffected — they were materialized separately
+ * by the Phase D column→manifest migration; this seed only shapes logs created
+ * after that deploy.
  */
-import { DEFAULT_NOTIFICATIONS, DEFAULT_VIEWS } from "./life-view-defaults";
 import type { LifeManifest } from "./types/life";
 
 export const DEFAULT_LIFE_MANIFEST: LifeManifest = {
-  trackables: [
-    {
-      id: "water",
-      label: "Water",
-      shape: "took",
-      group: "body",
-      defaultUnit: "oz",
-      defaultAmount: 8,
-    },
-    {
-      id: "exercise",
-      label: "Exercise",
-      shape: "did",
-      group: "body",
-      defaultDuration: 30,
-      ratingLabel: "intensity",
-    },
-    {
-      id: "floss",
-      label: "Floss",
-      shape: "happened",
-      group: "body",
-    },
-    {
-      id: "mood",
-      label: "Mood",
-      shape: "rated",
-      group: "mind",
-    },
-  ],
-  views: DEFAULT_VIEWS,
-  notifications: DEFAULT_NOTIFICATIONS,
+  trackables: [],
+  views: [],
+  notifications: [],
 };
 
 /**

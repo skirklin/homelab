@@ -124,16 +124,6 @@ export interface LifeBackend {
   clearSampleSchedule(logId: string): Promise<void>;
 
   /**
-   * Set or clear morning/evening/weekly reminder times for a log. Each value
-   * is either a "HH:MM" 24h string or null to disable that reminder. Omitted
-   * keys are left untouched.
-   */
-  updateReminderTimes(
-    logId: string,
-    times: { morning?: string | null; evening?: string | null; weekly?: string | null },
-  ): Promise<void>;
-
-  /**
    * Opt the log in or out of random-sample push notifications. Gates the
    * per-5-minute cron in `services/api/src/lib/notifications/life.ts` — when
    * disabled, no schedule is generated and no pushes fire.

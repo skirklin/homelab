@@ -87,10 +87,6 @@ function logFromRecord(r: RecordModel): LifeLog {
     // Coerce defensively — pre-migration rows surface as undefined for a
     // brief window before 20260522_221130 runs on a given environment.
     randomSamplingEnabled: !!r.random_sampling_enabled,
-    morningReminderTime: r.morning_reminder_time || null,
-    eveningReminderTime: r.evening_reminder_time || null,
-    weeklyReminderTime: r.weekly_reminder_time || null,
-    lastWeeklyReminderSent: r.last_weekly_reminder_sent || null,
     created: r.created,
     updated: r.updated,
   };
@@ -171,24 +167,6 @@ export class PocketBaseLifeBackend implements LifeBackend {
 
   async clearSampleSchedule(logId: string): Promise<void> {
     await this.wpb.collection("life_logs").update(logId, { sample_schedule: null });
-  }
-
-  async updateReminderTimes(
-    logId: string,
-    times: { morning?: string | null; evening?: string | null; weekly?: string | null },
-  ): Promise<void> {
-    const patch: Record<string, unknown> = {};
-    if (Object.prototype.hasOwnProperty.call(times, "morning")) {
-      patch.morning_reminder_time = times.morning ?? "";
-    }
-    if (Object.prototype.hasOwnProperty.call(times, "evening")) {
-      patch.evening_reminder_time = times.evening ?? "";
-    }
-    if (Object.prototype.hasOwnProperty.call(times, "weekly")) {
-      patch.weekly_reminder_time = times.weekly ?? "";
-    }
-    if (Object.keys(patch).length === 0) return;
-    await this.wpb.collection("life_logs").update(logId, patch);
   }
 
   async setRandomSamplingEnabled(logId: string, enabled: boolean): Promise<void> {

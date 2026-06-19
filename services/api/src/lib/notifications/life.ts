@@ -1,9 +1,9 @@
 /**
- * Life notification cron — data-driven (Phase B4).
+ * Life notification cron — data-driven (Phase B4 + Phase D).
  *
  * Each `life_logs` row resolves to a list of `LifeNotification`s
- * (`resolveNotifications`: `manifest.notifications ?? buildNotificationsFromColumns`)
- * and the cron dispatches per `strategy.kind`:
+ * (`resolveNotifications`: `manifest.notifications`, or `[]` when unset) and the
+ * cron dispatches per `strategy.kind`:
  *
  *   - `fixed`  — a wall-clock reminder (daily, or weekly pinned to a weekday)
  *                that opens its target View. `subsumes` suppresses other
@@ -13,10 +13,9 @@
  *                state machine (per-5-min) is reused verbatim, now additionally
  *                gated on a `random` notification being present in the resolve.
  *
- * SAFETY: the resolve reconstructs today's exact behavior from the legacy
- * columns for any log without `manifest.notifications`, so existing users see
- * byte-identical send decisions with no data migration. See `life-notifications.ts`
- * and `life-byte-parity.test.ts` (the merge gate).
+ * Phase D retired the legacy `*_reminder_time` columns: every existing log's
+ * `manifest.notifications` was materialized from them first, so the manifest is
+ * now the sole source of truth and the resolve no longer falls back to columns.
  */
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
 import type { SampleSchedule, LifeView, LifeNotification, LifeNotifyStrategy } from "@homelab/backend";
@@ -25,11 +24,7 @@ import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { makeUserTzResolver, safeTz } from "./tz";
-import {
-  resolveNotifications,
-  isEnabled,
-  LEGACY_SENT_COLUMN,
-} from "./life-notifications";
+import { resolveNotifications, isEnabled } from "./life-notifications";
 
 // Life is now standalone at life.kirkl.in (the old kirkl.in/life module was
 // removed) — both session wizards and the sampling UI mount at root there, so
@@ -105,13 +100,10 @@ function generateSampleTimes(
 /**
  * Return the resolved `random` notification for a log, or null. Used as an
  * additional gate on the sampler so sampling is a notification STRATEGY, not a
- * standalone feature. In the transition this is purely additive: every log
- * without `manifest.notifications` gets a `random` notification iff
- * `random_sampling_enabled` (see `buildNotificationsFromColumns`), so the
- * combined gate `random_sampling_enabled && hasRandomNotification` is identical
- * to today's `random_sampling_enabled`-only gate. A log that explicitly sets
- * `manifest.notifications` (e.g. Angela's `[]`) opts OUT of sampling unless it
- * lists a `random` notification, which is the intended go-forward behavior.
+ * standalone feature. A log opts into sampling by listing a `random`
+ * notification in `manifest.notifications` (alongside the `random_sampling_enabled`
+ * flag, which gates schedule generation). A log without one (e.g. Angela's `[]`)
+ * never samples.
  */
 function randomNotificationFor(
   log: Record<string, unknown>,
@@ -138,13 +130,11 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   // Two layers of gating:
   //   1. `RANDOM_SAMPLES.enabled` — system-wide kill switch from @homelab/backend.
   //      If sampling is globally disabled or misconfigured we skip the whole tick.
-  //   2. A resolved `random` notification per log (B4) — which for legacy logs
-  //      means the per-log `random_sampling_enabled` opt-in
-  //      (20260522_221130_life_random_sampling_enabled), since
-  //      `buildNotificationsFromColumns` derives the `random` notification from
-  //      exactly that flag. Defaults to false so auto-created logs don't push
-  //      until the owner explicitly flips the toggle. Per-log check happens
-  //      inside the loop below.
+  //   2. A resolved `random` notification per log — a log opts in by listing a
+  //      `{kind:"random"}` notification in `manifest.notifications`. (Logs that
+  //      had `random_sampling_enabled` set were materialized with exactly such a
+  //      notification by the Phase D column→manifest migration.) Per-log check
+  //      happens inside the loop below.
   const config = RANDOM_SAMPLES;
   if (!config.enabled || !config.timesPerDay || config.timesPerDay < 1) {
     return { sent: 0, skipped: logs.length };
@@ -163,20 +153,18 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   const tzForOwner = makeUserTzResolver(pb, configTz);
 
   for (const logDoc of logs) {
-    // Per-log gate. The `random` notification must be present (and enabled) in
-    // the log's resolved notifications; for legacy logs this is exactly the
-    // `random_sampling_enabled` opt-in. Must come before schedule generation so
-    // ungated logs don't accumulate `sample_schedule` writes either.
+    // Per-log gate. An enabled `random` notification must be present in the
+    // log's resolved `manifest.notifications`. Must come before schedule
+    // generation so ungated logs don't accumulate `sample_schedule` writes.
     const randomStrategy = randomNotificationFor(logDoc);
     if (!randomStrategy) {
       totalSkipped++;
       continue;
     }
 
-    // The strategy carries its own timesPerDay/activeHours; legacy logs inherit
-    // them from RANDOM_SAMPLES via buildNotificationsFromColumns, so this stays
-    // byte-identical. Validate the strategy's hours the same way as the global
-    // config (a malformed manifest-set strategy is skipped, not crashed).
+    // The strategy carries its own timesPerDay/activeHours. Validate the
+    // strategy's hours the same way as the global config (a malformed
+    // manifest-set strategy is skipped, not crashed).
     const timesPerDay = randomStrategy.timesPerDay;
     const activeHours = randomStrategy.activeHours;
     if (!timesPerDay || timesPerDay < 1 ||
@@ -395,11 +383,10 @@ function fixedScheduledToday(
  * `fixed` one whose owner-local wall-clock matches `strategy.time` (±1 min),
  * unless it's subsumed by another notification scheduled to fire today.
  *
- * Idempotency is TRANSITION-SAFE: a notification counts as already-sent-today
- * iff `reminder_state[id] === today` OR (for the column-derived ids) the legacy
- * `last_{morning,evening,weekly}_reminder_sent === today`. Going forward we
- * write `reminder_state[id]` only; the legacy column read prevents a deploy-day
- * double-fire if a legacy reminder already went out today before the cutover.
+ * Idempotency: a notification counts as already-sent-today iff
+ * `reminder_state[id] === today`. (Pre-Phase-D this also OR'd the legacy
+ * `last_*_reminder_sent` columns; those columns are dropped — reminder_state is
+ * now the sole idempotency store.)
  *
  * Mark-after-success is preserved: `reminder_state[id]` is written only when a
  * push actually landed (result.sent > 0), so a no-delivery tick retries within
@@ -483,10 +470,12 @@ export async function runLifeReminderCheck(
         continue;
       }
 
-      // Transition-safe idempotency: reminder_state[id] OR the legacy column.
-      const legacyCol = LEGACY_SENT_COLUMN[n.id];
-      const legacySent = legacyCol ? ((logDoc[legacyCol] as string | undefined) || "") : "";
-      if (reminderState[n.id] === todayYmd || legacySent === todayYmd) {
+      // Idempotency: reminder_state[id] === today means already sent today.
+      // (Pre-Phase-D this also OR'd the legacy last_*_reminder_sent columns for
+      // a deploy-day double-fire guard; those columns are dropped and every
+      // reminder's reminder_state has keyed on the `*-reminder` ids since the
+      // B4 cron shipped 2026-06-18, so reminder_state alone is authoritative.)
+      if (reminderState[n.id] === todayYmd) {
         skipped++;
         continue;
       }
