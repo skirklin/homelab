@@ -1,3 +1,4 @@
+import { DEFAULT_VIEWS } from "@homelab/backend";
 import { describe, expect, it } from "vitest";
 import {
   EVENING_REMINDER_ID,
@@ -24,7 +25,8 @@ describe("planReminderMigration", () => {
       random_sampling_enabled: true,
     });
 
-    const ids = action.notifications.map((n) => n.id);
+    const notifications = action.notifications!;
+    const ids = notifications.map((n) => n.id);
     // Landmine guard: the *-reminder scheme, NOT bare morning/evening/weekly.
     expect(ids).toEqual([
       MORNING_REMINDER_ID,
@@ -34,13 +36,13 @@ describe("planReminderMigration", () => {
     ]);
     expect(ids).toEqual(["morning-reminder", "evening-reminder", "weekly-reminder", "sampling"]);
 
-    const morning = action.notifications.find((n) => n.id === MORNING_REMINDER_ID)!;
+    const morning = notifications.find((n) => n.id === MORNING_REMINDER_ID)!;
     expect(morning.strategy).toEqual({ kind: "fixed", cadence: "daily", time: "08:00" });
 
-    const evening = action.notifications.find((n) => n.id === EVENING_REMINDER_ID)!;
+    const evening = notifications.find((n) => n.id === EVENING_REMINDER_ID)!;
     expect(evening.strategy).toEqual({ kind: "fixed", cadence: "daily", time: "21:00" });
 
-    const weekly = action.notifications.find((n) => n.id === WEEKLY_REMINDER_ID)!;
+    const weekly = notifications.find((n) => n.id === WEEKLY_REMINDER_ID)!;
     expect(weekly.strategy).toEqual({
       kind: "fixed",
       cadence: "weekly",
@@ -49,10 +51,12 @@ describe("planReminderMigration", () => {
       subsumes: [EVENING_REMINDER_ID],
     });
 
-    // Manifest preserved + notifications added.
+    // Manifest preserved + notifications added. views was undefined, so it's
+    // materialized to DEFAULT_VIEWS too.
     expect(action.nextManifest).toEqual({
       trackables: [{ id: "water" }],
       notifications: action.notifications,
+      views: DEFAULT_VIEWS,
     });
   });
 
@@ -66,10 +70,14 @@ describe("planReminderMigration", () => {
       random_sampling_enabled: false,
     });
     expect(action.notifications).toEqual([]);
-    expect(action.nextManifest).toEqual({ trackables: [], notifications: [] });
+    expect(action.nextManifest).toEqual({
+      trackables: [],
+      notifications: [],
+      views: DEFAULT_VIEWS,
+    });
   });
 
-  it("skips an already-migrated log (manifest.notifications is an array)", () => {
+  it("skips a fully-migrated log (BOTH manifest.notifications + manifest.views are arrays)", () => {
     const [action] = planReminderMigration([
       {
         id: "log_done",
@@ -78,6 +86,7 @@ describe("planReminderMigration", () => {
           notifications: [
             { id: "morning-reminder", target: "morning", strategy: { kind: "fixed", cadence: "daily", time: "08:00" } },
           ],
+          views: DEFAULT_VIEWS,
         },
         morning_reminder_time: "09:00",
       },
@@ -85,18 +94,79 @@ describe("planReminderMigration", () => {
     expect(action.kind).toBe("skip");
   });
 
-  it("skips an already-migrated log with an explicit empty array (Angela)", () => {
+  it("skips a fully-migrated log with explicit empty arrays for both (Angela)", () => {
     const [action] = planReminderMigration([
       {
         id: "log_angela",
-        manifest: { trackables: [], notifications: [] },
+        manifest: { trackables: [], notifications: [], views: [] },
         evening_reminder_time: "21:00",
       },
     ]);
     expect(action.kind).toBe("skip");
   });
 
-  it("migrates a log with manifest: null → { trackables: [], notifications: [...] }", () => {
+  it("materializes BOTH keys when notifications + views are undefined; siblings preserved", () => {
+    const trackables = [{ id: "water", label: "Water" }] as any;
+    const goals = [{ id: "g1", label: "Hydrate" }] as any;
+    const action = migrate({
+      id: "log_both_undef",
+      manifest: { trackables, goals } as any,
+      morning_reminder_time: "08:00",
+    });
+    // Landmine guard: notifications use the *-reminder id scheme.
+    expect(action.notifications!.map((n) => n.id)).toEqual([MORNING_REMINDER_ID]);
+    // views materialize to DEFAULT_VIEWS verbatim.
+    expect(action.views).toBe(DEFAULT_VIEWS);
+    expect(action.nextManifest).toEqual({
+      trackables,
+      goals,
+      notifications: [
+        { id: MORNING_REMINDER_ID, target: "morning", strategy: { kind: "fixed", cadence: "daily", time: "08:00" } },
+      ],
+      views: DEFAULT_VIEWS,
+    });
+  });
+
+  it("materializes ONLY views when notifications is already an array but views is undefined", () => {
+    const notifications = [
+      { id: "morning-reminder", target: "morning", strategy: { kind: "fixed", cadence: "daily", time: "06:00" } },
+    ] as any;
+    const action = migrate({
+      id: "log_views_only",
+      manifest: { trackables: [], notifications } as any,
+      // A real column time that MUST be ignored — notifications already an array.
+      morning_reminder_time: "09:00",
+    });
+    // notifications untouched (NOT rebuilt from the 09:00 column).
+    expect(action.notifications).toBeNull();
+    expect(action.views).toBe(DEFAULT_VIEWS);
+    expect(action.nextManifest).toEqual({
+      trackables: [],
+      notifications, // preserved verbatim
+      views: DEFAULT_VIEWS,
+    });
+  });
+
+  it("materializes ONLY notifications when views is already an array but notifications is undefined", () => {
+    const views = [{ id: "morning" }] as any;
+    const action = migrate({
+      id: "log_notifs_only",
+      manifest: { trackables: [], views, somethingElse: { nested: true } } as any,
+      morning_reminder_time: "08:00",
+    });
+    expect(action.views).toBeNull();
+    expect(action.notifications!.map((n) => n.id)).toEqual([MORNING_REMINDER_ID]);
+    expect(action.nextManifest).toEqual({
+      trackables: [],
+      views, // preserved verbatim — NOT overwritten with DEFAULT_VIEWS
+      somethingElse: { nested: true },
+      notifications: [
+        { id: MORNING_REMINDER_ID, target: "morning", strategy: { kind: "fixed", cadence: "daily", time: "08:00" } },
+      ],
+    });
+  });
+
+  it("migrates a log with manifest: null → trackables + both keys materialized", () => {
     const action = migrate({
       id: "log_null",
       manifest: null,
@@ -107,26 +177,7 @@ describe("planReminderMigration", () => {
       notifications: [
         { id: MORNING_REMINDER_ID, target: "morning", strategy: { kind: "fixed", cadence: "daily", time: "07:30" } },
       ],
-    });
-  });
-
-  it("preserves existing trackables/goals/views byte-for-byte alongside the new notifications", () => {
-    const trackables = [{ id: "water", label: "Water" }] as any;
-    const goals = [{ id: "g1", label: "Hydrate" }] as any;
-    const views = [{ id: "morning" }] as any;
-    const action = migrate({
-      id: "log_full",
-      manifest: { trackables, goals, views, somethingElse: { nested: true } } as any,
-      morning_reminder_time: "08:00",
-    });
-    expect(action.nextManifest).toEqual({
-      trackables,
-      goals,
-      views,
-      somethingElse: { nested: true },
-      notifications: [
-        { id: MORNING_REMINDER_ID, target: "morning", strategy: { kind: "fixed", cadence: "daily", time: "08:00" } },
-      ],
+      views: DEFAULT_VIEWS,
     });
   });
 

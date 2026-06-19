@@ -81,7 +81,7 @@ console.log(`  Mode:       ${dryRun ? "DRY-RUN" : "APPLY"}`);
 console.log("");
 console.log("  !! BACKUP FIRST — before --apply, the operator must take a");
 console.log("  !! pre-migration backup (kept forever):");
-console.log("  !!     infra/scripts/pb-backup.sh pre-migration");
+console.log("  !!     infra/scripts/pb-backup.sh pre-migration-reminder-columns");
 console.log("  !! This script never takes the backup itself.");
 console.log("");
 
@@ -126,11 +126,17 @@ for (const a of actions) {
     continue;
   }
   totals.migrate++;
-  const ids = a.notifications.map((n) => n.id);
-  console.log(`  MIGRATE ${a.logId}: notifications=[${ids.join(", ") || "(none)"}]`);
+  const parts: string[] = [];
+  if (a.notifications !== null) {
+    parts.push(`notifications=[${a.notifications.map((n) => n.id).join(", ") || "(none)"}]`);
+  }
+  if (a.views !== null) {
+    parts.push(`views=[${a.views.map((v) => v.id).join(", ") || "(none)"}]`);
+  }
+  console.log(`  MIGRATE ${a.logId}: ${parts.join(" ")}`);
   // Show one full sample of the computed notifications so the operator can
   // eyeball the *-reminder id scheme + real times before committing.
-  if (!sampleShown && a.notifications.length > 0) {
+  if (!sampleShown && a.notifications && a.notifications.length > 0) {
     sampleShown = true;
     console.log("    sample notifications:");
     console.log(JSON.stringify(a.notifications, null, 2).replace(/^/gm, "    "));
