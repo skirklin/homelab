@@ -1,16 +1,20 @@
 /**
- * The global quick-row — the dashboard's primary input surface. Renders ALL
- * pins (vocab order) then global frecency fill; one tap replays the exact
- * payload (subjectId + entries + labels) as a NEW event. Hidden trackables
- * never surface. Logging goes through useLogEvent (append + Undo toast).
+ * The Favorites quick-row — the Daily surface's one-tap log row. Renders ONLY
+ * explicit favorites (pinned payloads, vocab order); there is NO frecency fill.
+ * A tap replays the exact payload (subjectId + entries + labels) as a NEW event;
+ * the ✕ un-favorites a chip inline. Empty → a quiet hint, not an empty bar.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { LifeManifestTrackable, LifeEvent, LifeEntry } from "@homelab/backend";
+import { App as AntApp } from "antd";
+import { MemoryRouter } from "react-router-dom";
+import type { LifeManifestTrackable, LifeEntry } from "@homelab/backend";
+import { LifeProvider } from "../life-context";
 
 const addEvent = vi.fn().mockResolvedValue("evt1");
 const deleteEvent = vi.fn().mockResolvedValue(undefined);
+const updateTrackable = vi.fn().mockResolvedValue({ trackables: [], views: [] });
 const messageOpen = vi.fn();
 
 vi.mock("@kirkl/shared", async () => {
@@ -20,113 +24,100 @@ vi.mock("@kirkl/shared", async () => {
     useFeedback: () => ({
       message: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), open: messageOpen, destroy: vi.fn() },
     }),
-    useLifeBackend: () => ({ addEvent, deleteEvent }),
+    useLifeBackend: () => ({ addEvent, deleteEvent, updateTrackable }),
   };
 });
 
 import { GlobalQuickRow } from "./GlobalQuickRow";
 
-let counter = 0;
-function ev(subjectId: string, entries: LifeEntry[], daysAgo: number, labels?: Record<string, string>): LifeEvent {
-  counter += 1;
-  const ts = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
-  return {
-    id: `e${counter}`,
-    log: "log1",
-    subjectId,
-    timestamp: ts,
-    entries,
-    labels,
-    createdBy: "u1",
-    created: ts.toISOString(),
-    updated: ts.toISOString(),
-  };
-}
 const num = (name: string, value: number, unit: string): LifeEntry[] => [
   { name, type: "number", value, unit },
 ];
 
 const edibles: LifeManifestTrackable = { id: "edibles", label: "Edibles", shape: "took", defaultUnit: "mg" };
-const coffee: LifeManifestTrackable = { id: "coffee", label: "Coffee", shape: "took", defaultUnit: "oz" };
-const secret: LifeManifestTrackable = { id: "secret", label: "Secret", shape: "happened", hidden: true };
+const coffee: LifeManifestTrackable = {
+  id: "coffee",
+  label: "Coffee",
+  shape: "took",
+  defaultUnit: "oz",
+  pinned: [{ label: "16 oz", entries: num("amount", 16, "oz") }],
+};
+const secret: LifeManifestTrackable = {
+  id: "secret",
+  label: "Secret",
+  shape: "happened",
+  hidden: true,
+  pinned: [{ label: "tap", entries: num("count", 1, "ct") }],
+};
 
-describe("GlobalQuickRow", () => {
+function renderRow(
+  trackables: LifeManifestTrackable[],
+  props: { logId?: string; timestamp?: Date; noLog?: boolean } = {},
+) {
+  return render(
+    <AntApp>
+      <MemoryRouter>
+        <LifeProvider>
+          <GlobalQuickRow
+            trackables={trackables}
+            userId="u1"
+            logId={props.noLog ? undefined : props.logId ?? "log1"}
+            timestamp={props.timestamp}
+          />
+        </LifeProvider>
+      </MemoryRouter>
+    </AntApp>,
+  );
+}
+
+describe("GlobalQuickRow (favorites only)", () => {
   beforeEach(() => {
     addEvent.mockClear();
+    updateTrackable.mockClear();
     messageOpen.mockClear();
   });
 
-  it("renders nothing with no history and no pins", () => {
-    render(
-      <GlobalQuickRow trackables={[edibles, coffee]} events={[]} userId="u1" logId="log1" />,
-    );
+  it("shows a quiet hint (not an empty bar) when there are no favorites", () => {
+    renderRow([edibles]);
     expect(screen.queryByTestId("global-quick-row")).not.toBeInTheDocument();
+    expect(screen.getByTestId("favorites-empty")).toBeInTheDocument();
   });
 
-  it("renders frecent chips across trackables; hidden things never surface", () => {
-    const events = [
-      ev("edibles", num("dose", 5, "mg"), 1),
-      ev("edibles", num("dose", 5, "mg"), 2),
-      ev("coffee", num("volume", 8, "oz"), 1),
-      ev("secret", num("count", 1, "ct"), 0),
-      ev("secret", num("count", 1, "ct"), 0),
-    ];
-    render(
-      <GlobalQuickRow trackables={[edibles, coffee, secret]} events={events} userId="u1" logId="log1" />,
-    );
+  it("renders ONLY pinned favorites — no frecency fill, hidden things never surface", () => {
+    renderRow([edibles, coffee, secret]);
     const chips = screen.getAllByTestId("global-quick-chip");
-    expect(chips.length).toBe(2);
-    expect(screen.getByText("Edibles")).toBeInTheDocument();
+    // Only coffee is pinned + visible; edibles has no pin, secret is hidden.
+    expect(chips.length).toBe(1);
     expect(screen.getByText("Coffee")).toBeInTheDocument();
+    expect(screen.getByText("16 oz")).toBeInTheDocument();
+    expect(screen.queryByText("Edibles")).not.toBeInTheDocument();
     expect(screen.queryByText("Secret")).not.toBeInTheDocument();
   });
 
-  it("renders ALL pins (vocab order) ahead of frecency fill", () => {
-    const pinnedCoffee: LifeManifestTrackable = {
-      ...coffee,
-      pinned: [{ label: "16 oz", entries: num("volume", 16, "oz") }],
-    };
-    const events = [
-      ev("edibles", num("dose", 5, "mg"), 0),
-      ev("edibles", num("dose", 5, "mg"), 1),
-    ];
-    render(
-      <GlobalQuickRow trackables={[edibles, pinnedCoffee]} events={events} userId="u1" logId="log1" />,
-    );
-    const chips = screen.getAllByTestId("global-quick-chip");
-    // Pin first even though edibles has the higher frecency score.
-    expect(chips[0]).toHaveTextContent("Coffee");
-    expect(chips[0]).toHaveTextContent("16 oz");
-    expect(chips[1]).toHaveTextContent("Edibles");
-  });
-
-  it("tapping a chip replays the exact payload (subjectId + entries + labels) at the given timestamp", async () => {
+  it("tapping a chip replays the exact payload at the given timestamp", async () => {
     const user = userEvent.setup();
     const ts = new Date("2026-05-20T12:00:00");
-    const events = [
-      ev("edibles", num("dose", 5, "mg"), 1, { category: "evening" }),
-      ev("edibles", num("dose", 5, "mg"), 2, { category: "evening" }),
-    ];
-    render(
-      <GlobalQuickRow trackables={[edibles]} events={events} userId="u1" logId="log1" timestamp={ts} />,
-    );
-    await user.click(screen.getAllByTestId("global-quick-chip")[0]);
+    renderRow([coffee], { timestamp: ts });
+    await user.click(screen.getByTestId("global-quick-chip"));
     expect(addEvent).toHaveBeenCalledWith(
       "log1",
-      "edibles",
-      num("dose", 5, "mg"),
+      "coffee",
+      num("amount", 16, "oz"),
       "u1",
-      { timestamp: ts, labels: { category: "evening" } },
+      { timestamp: ts, labels: undefined },
     );
-    // Post-log toast (with Undo) was opened.
     expect(messageOpen).toHaveBeenCalled();
   });
 
+  it("the ✕ un-favorites a chip (drops it from the trackable's pins)", async () => {
+    const user = userEvent.setup();
+    renderRow([coffee]);
+    await user.click(screen.getByTestId("global-quick-remove"));
+    expect(updateTrackable).toHaveBeenCalledWith("log1", "coffee", { pinned: [] });
+  });
+
   it("chips are disabled until the log id is known", () => {
-    const events = [ev("edibles", num("dose", 5, "mg"), 1)];
-    render(
-      <GlobalQuickRow trackables={[edibles]} events={events} userId="u1" logId={undefined} />,
-    );
-    expect(screen.getAllByTestId("global-quick-chip")[0]).toBeDisabled();
+    renderRow([coffee], { noLog: true });
+    expect(screen.getByTestId("global-quick-chip")).toBeDisabled();
   });
 });

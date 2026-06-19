@@ -11,7 +11,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import {
-  EditOutlined,
   CalendarOutlined,
   BookOutlined,
   RobotOutlined,
@@ -19,7 +18,7 @@ import {
 import type { ReactNode } from "react";
 import { useLifeContext } from "../life-context";
 
-export type LifeTab = "log" | "today" | "journal" | "coach";
+export type LifeTab = "daily" | "journal" | "coach";
 
 interface TabDef {
   tab: LifeTab;
@@ -29,20 +28,20 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { tab: "log", label: "Log", icon: <EditOutlined />, path: "/" },
-  { tab: "today", label: "Today", icon: <CalendarOutlined />, path: "/today" },
+  { tab: "daily", label: "Daily", icon: <CalendarOutlined />, path: "/" },
   { tab: "journal", label: "Journal", icon: <BookOutlined />, path: "/journal" },
   { tab: "coach", label: "Coach", icon: <RobotOutlined />, path: "/coach" },
 ];
 
 /**
- * Which tab owns a given pathname. Coach is the hub for the AI/analysis
- * surfaces, so its sub-routes resolve to Coach. Anything unrecognized falls
- * through to null (no tab highlighted) rather than guessing.
+ * Which tab owns a given pathname. The unified Daily surface lives at "/" (the
+ * legacy "/today" route still redirects there, so it never needs its own tab).
+ * Coach is the hub for the AI/analysis surfaces, so its sub-routes resolve to
+ * Coach. Anything unrecognized falls through to null (no tab highlighted)
+ * rather than guessing.
  */
 export function activeTabForPath(pathname: string): LifeTab | null {
-  if (pathname === "/" ) return "log";
-  if (pathname === "/today" || pathname.startsWith("/today/")) return "today";
+  if (pathname === "/") return "daily";
   if (pathname === "/journal" || pathname.startsWith("/journal/")) return "journal";
   if (
     pathname === "/coach" ||

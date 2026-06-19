@@ -30,13 +30,13 @@ import { startOfDay, endOfDay } from "@homelab/backend";
 import { formatDuration, formatRating } from "./format";
 
 /**
- * The shapes that get a dashboard input surface (the 2×2 ShapeCard grid + the
- * per-shape ShapeSheet). This is DELIBERATELY a strict subset of
- * `TrackableShape`: `noted` is OMITTED because reflective free-text is captured
- * only inside Views, never inline on the dashboard. Keeping it out of
- * `SHAPE_ORDER` is what keeps `noted` off the grid — `LifeDashboard` and the
- * ShapeCard summaries iterate `SHAPE_ORDER`, so a shape absent here is never
- * rendered as a card and its summary code never runs. See `isReflective` /
+ * The shapes that get a dashboard input surface (the "+ Log something else"
+ * shape picker on the Daily screen + the per-shape ShapeSheet). This is
+ * DELIBERATELY a strict subset of `TrackableShape`: `noted` is OMITTED because
+ * reflective free-text is captured only inside Views, never inline on the
+ * dashboard. Keeping it out of `SHAPE_ORDER` is what keeps `noted` off the
+ * picker — `LifeDashboard` iterates `SHAPE_ORDER` to render the shape options,
+ * so a shape absent here is never offered. See `isReflective` /
  * `isInputEligible` for the EXCLUSION INVARIANT at every other enumeration site.
  *
  * NOTE: this array is intentionally non-exhaustive over `TrackableShape`. If a

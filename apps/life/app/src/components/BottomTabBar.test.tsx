@@ -1,7 +1,9 @@
 /**
- * Bottom tab bar: renders the 4 primary destinations, derives the active tab
- * from the current route (including Coach sub-routes like /insights and
- * /observations/:id), and knows when to hide on full-screen flows.
+ * Bottom tab bar: renders the 3 primary destinations (Daily · Journal · Coach),
+ * derives the active tab from the current route (including Coach sub-routes like
+ * /insights and /observations/:id), and knows when to hide on full-screen flows.
+ * The unified Daily surface lives at "/"; the legacy /today route redirects
+ * there, so there is no separate Today tab.
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -30,33 +32,27 @@ function mockCoach(coachEnabled: boolean | undefined) {
 }
 
 describe("BottomTabBar", () => {
-  it("renders the 4 primary tabs", () => {
+  it("renders the 3 primary tabs", () => {
     renderBar("/");
-    expect(screen.getByTestId("tab-log")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-today")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-daily")).toBeInTheDocument();
+    expect(screen.queryByTestId("tab-today")).not.toBeInTheDocument();
     expect(screen.getByTestId("tab-journal")).toBeInTheDocument();
     expect(screen.getByTestId("tab-coach")).toBeInTheDocument();
-    expect(screen.getByText("Log")).toBeInTheDocument();
-    expect(screen.getByText("Today")).toBeInTheDocument();
+    expect(screen.getByText("Daily")).toBeInTheDocument();
     expect(screen.getByText("Journal")).toBeInTheDocument();
     expect(screen.getByText("Coach")).toBeInTheDocument();
   });
 
-  it("highlights Log on /", () => {
+  it("highlights Daily on /", () => {
     renderBar("/");
-    expect(screen.getByTestId("tab-log")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("tab-daily")).toHaveAttribute("aria-current", "page");
     expect(screen.getByTestId("tab-coach")).not.toHaveAttribute("aria-current");
-  });
-
-  it("highlights Today on /today", () => {
-    renderBar("/today");
-    expect(screen.getByTestId("tab-today")).toHaveAttribute("aria-current", "page");
   });
 
   it("highlights Coach on /insights", () => {
     renderBar("/insights");
     expect(screen.getByTestId("tab-coach")).toHaveAttribute("aria-current", "page");
-    expect(screen.getByTestId("tab-log")).not.toHaveAttribute("aria-current");
+    expect(screen.getByTestId("tab-daily")).not.toHaveAttribute("aria-current");
   });
 
   it("highlights Coach on /observations/:id", () => {
@@ -68,9 +64,8 @@ describe("BottomTabBar", () => {
     mockCoach(false);
     renderBar("/");
     expect(screen.queryByTestId("tab-coach")).not.toBeInTheDocument();
-    // The other three primary tabs still render.
-    expect(screen.getByTestId("tab-log")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-today")).toBeInTheDocument();
+    // The other two primary tabs still render.
+    expect(screen.getByTestId("tab-daily")).toBeInTheDocument();
     expect(screen.getByTestId("tab-journal")).toBeInTheDocument();
     vi.restoreAllMocks();
   });
@@ -85,8 +80,7 @@ describe("BottomTabBar", () => {
 
 describe("activeTabForPath", () => {
   it("maps the primary routes", () => {
-    expect(activeTabForPath("/")).toBe("log");
-    expect(activeTabForPath("/today")).toBe("today");
+    expect(activeTabForPath("/")).toBe("daily");
     expect(activeTabForPath("/journal")).toBe("journal");
     expect(activeTabForPath("/coach")).toBe("coach");
   });
@@ -97,7 +91,8 @@ describe("activeTabForPath", () => {
     expect(activeTabForPath("/observations/xyz")).toBe("coach");
   });
 
-  it("returns null for unrecognized / full-screen routes", () => {
+  it("returns null for unrecognized / full-screen routes (incl. the legacy /today before redirect)", () => {
+    expect(activeTabForPath("/today")).toBeNull();
     expect(activeTabForPath("/morning")).toBeNull();
     expect(activeTabForPath("/evening")).toBeNull();
     expect(activeTabForPath("/chat")).toBeNull();
@@ -105,8 +100,8 @@ describe("activeTabForPath", () => {
 });
 
 describe("showsBottomBar", () => {
-  it("shows on the 4 primary destinations + Coach sub-routes", () => {
-    for (const p of ["/", "/today", "/journal", "/coach", "/insights", "/observations"]) {
+  it("shows on the 3 primary destinations + Coach sub-routes", () => {
+    for (const p of ["/", "/journal", "/coach", "/insights", "/observations"]) {
       expect(showsBottomBar(p)).toBe(true);
     }
   });

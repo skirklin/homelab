@@ -71,11 +71,19 @@ function renderApp(at: string, embedded = false) {
 describe("life route tree — bottom tab bar", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("renders the bottom bar on Log (standalone)", async () => {
+  it("renders the bottom bar on the Daily surface (standalone)", async () => {
     renderApp("/");
     await waitFor(() => expect(screen.getByTestId("bottom-tab-bar")).toBeInTheDocument());
-    expect(screen.getByTestId("tab-log")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-daily")).toBeInTheDocument();
     expect(screen.getByTestId("tab-coach")).toBeInTheDocument();
+  });
+
+  it("redirects the legacy /today route to the Daily surface at /", async () => {
+    renderApp("/today");
+    // The redirect lands on "/", which renders the Daily surface with its bar +
+    // Daily tab (the old Today screen no longer exists).
+    await waitFor(() => expect(screen.getByTestId("bottom-tab-bar")).toBeInTheDocument());
+    expect(screen.getByTestId("tab-daily")).toHaveAttribute("aria-current", "page");
   });
 
   it("hides the bottom bar when embedded", async () => {

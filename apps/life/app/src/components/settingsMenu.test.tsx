@@ -1,6 +1,6 @@
 /**
- * Fix B — Settings reachable from every bottom-tab gear. Each of the four
- * bottom-tab screens (Log, Today, Journal, Coach) must surface the shared
+ * Fix B — Settings reachable from every bottom-tab gear. Each of the three
+ * bottom-tab screens (Daily, Journal, Coach) must surface the shared
  * "Settings" (+ "Sign Out" when not embedded) menu fragment that
  * LifeRoutesInner provides via SettingsMenuProvider.
  *
@@ -28,6 +28,7 @@ vi.mock("@kirkl/shared", async () => {
   return {
     ...actual,
     useAuth: () => ({ user: { uid: "u1" }, loading: false }),
+    useLifeBackend: () => ({ addEvent: vi.fn(), deleteEvent: vi.fn(), updateTrackable: vi.fn() }),
     useWpbDebug: () => ({ snapshot: () => ({ collections: {}, pending: 0 }), events: () => [] }),
     SyncDot: () => null,
     useObserverBackend: () => ({ listObservations: vi.fn().mockResolvedValue([]), getObservation: vi.fn() }),
@@ -48,7 +49,19 @@ vi.mock("@kirkl/shared", async () => {
   };
 });
 
-import { Today } from "./Today";
+// LifeDashboard reaches into messaging + the entries subscription; stub both so
+// the Daily surface mounts under happy-dom without a service worker or PB.
+vi.mock("../subscription", () => ({ useEntriesSubscription: () => {} }));
+vi.mock("../messaging", () => ({
+  initializeMessaging: vi.fn().mockResolvedValue(false),
+  requestNotificationPermission: vi.fn().mockResolvedValue(false),
+  disableNotifications: vi.fn().mockResolvedValue(undefined),
+  onForegroundMessage: vi.fn(() => () => {}),
+  listenForServiceWorkerMessages: vi.fn(() => () => {}),
+  getNotificationPermissionStatus: vi.fn(() => "unsupported"),
+}));
+
+import { LifeDashboard } from "./LifeDashboard";
 import { Coach } from "./Coach";
 import { Journal } from "./Journal";
 import { LifeProvider } from "../life-context";
@@ -80,8 +93,8 @@ function renderRoute(node: ReactNode, at: string) {
 describe("Settings reachable from every bottom-tab gear", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("Today exposes the shared Settings + Sign Out fragment", async () => {
-    renderRoute(<Today />, "/today");
+  it("Daily exposes the shared Settings + Sign Out fragment", async () => {
+    renderRoute(<LifeDashboard />, "/");
     expect(await screen.findByTestId("menu-settings")).toHaveTextContent("Settings");
     expect(screen.getByTestId("menu-logout")).toHaveTextContent("Sign Out");
   });
@@ -100,7 +113,7 @@ describe("Settings reachable from every bottom-tab gear", () => {
   });
 
   it("the Settings menu item opens settings (fires the provider's opener)", async () => {
-    renderRoute(<Today />, "/today");
+    renderRoute(<LifeDashboard />, "/");
     (await screen.findByTestId("menu-settings")).click();
     expect(openSettings).toHaveBeenCalledTimes(1);
   });
