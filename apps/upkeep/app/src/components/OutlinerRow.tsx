@@ -9,7 +9,7 @@ import {
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepBackend, AssigneePicker } from "@kirkl/shared";
-import { formatDueDate, formatDeadline, formatFrequency, isTaskSnoozed, formatSnoozeRemaining, daysUntilDue } from "../types";
+import { formatDueDate, formatDeadline, formatFrequency, isTaskSnoozed, formatSnoozeRemaining, daysUntilDue, getUrgencyLevel } from "../types";
 import type { Task, TaskNode } from "../types";
 
 type DropZone = "before" | "inside" | "after" | null;
@@ -342,8 +342,9 @@ export function OutlinerRow({
           <Name $completed={isDone} onClick={handleNameClick}>{task.name}</Name>
         )}
 
-        {/* Deadline tag sits right after the name (not floated to the row edge). */}
-        {task.taskType === "one_shot" && task.deadline && !isSnoozed && !isDone && (() => {
+        {/* Deadline tag sits right after the name (not floated to the row edge).
+            Overdue dated todos go red here. */}
+        {task.taskType === "one_shot" && task.deadline && !isSnoozed && !isDone && !task.cleared && (() => {
           const days = daysUntilDue(task);
           const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";
           return (
@@ -352,6 +353,17 @@ export function OutlinerRow({
             </Tag>
           );
         })()}
+
+        {/* "Asap" badge for an UNDEADLINED open todo — these have no deadline
+            tag and used to carry no visual signal at all (they silently rotted
+            in "later"). Overdue dated todos are already flagged red above, so
+            this only fires for the no-deadline asap case. */}
+        {task.taskType === "one_shot" && !task.deadline && !isSnoozed && !isDone && !task.cleared &&
+          getUrgencyLevel(task) === "asap" && (
+            <Tag color="red" style={{ fontSize: 10, lineHeight: "16px", margin: "0 0 0 6px", flexShrink: 0 }}>
+              Asap
+            </Tag>
+          )}
 
         <Spacer />
 

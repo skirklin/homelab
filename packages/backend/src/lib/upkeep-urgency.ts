@@ -10,7 +10,14 @@
 
 import type { Frequency, TaskType } from "../types/upkeep";
 
-export type UrgencyLevel = "today" | "thisWeek" | "later";
+/**
+ * Urgency buckets, most-urgent first. `asap` is the top bucket and applies ONLY
+ * to one-shot todos that need attention now: those with no deadline at all (an
+ * open todo that would otherwise silently rot in "later") or one whose deadline
+ * has already passed (overdue). Recurring tasks never produce `asap` — their
+ * "due now" state is `today`.
+ */
+export type UrgencyLevel = "asap" | "today" | "thisWeek" | "later";
 
 /**
  * Minimal shape needed to compute urgency. Both `Task` (from `@homelab/backend`)
@@ -65,11 +72,17 @@ export function daysUntilDue(task: UrgencyTask): number | null {
 export function getUrgencyLevel(task: UrgencyTask): UrgencyLevel {
   const diffDays = daysUntilDue(task);
 
-  // No due date: a never-done recurring task is due today; a one-shot without
-  // a deadline has no urgency and belongs in "later".
-  if (diffDays === null) return task.taskType === "recurring" ? "today" : "later";
+  // No due date: a never-done recurring task is due today; a one-shot WITHOUT a
+  // deadline is "asap" — it has no scheduled prompt and used to rot silently in
+  // "later" (matched no notification path), so the user could forget it forever.
+  if (diffDays === null) return task.taskType === "recurring" ? "today" : "asap";
 
-  if (diffDays <= 0) return "today";
+  // An overdue one-shot (deadline already passed) is also "asap" — it's past
+  // due and needs action now. Recurring overdue stays "today" (recurring never
+  // produces "asap", so the Kanban board's recurring-only columns are unaffected).
+  if (diffDays < 0) return task.taskType === "one_shot" ? "asap" : "today";
+
+  if (diffDays === 0) return "today";
   if (diffDays <= 7) return "thisWeek";
   return "later";
 }

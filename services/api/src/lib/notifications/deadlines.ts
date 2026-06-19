@@ -1,9 +1,17 @@
 /**
- * One-shot todo deadline notifications.
+ * One-shot todo attention notifications (the daily "asap" nag).
  *
  * Modeled on runUpkeepNotifications (sibling upkeep.ts), but for one-shot
- * tasks with an explicit `deadline` + per-task `deadline_lead_days`. Evaluated
- * by the same daily task-notification cron — no new cron/endpoint.
+ * todos. Evaluated by the same daily task-notification cron — no new
+ * cron/endpoint. Surfaces two kinds of one-shot:
+ *   - DATED, within its `deadline_lead_days` lead window (incl. overdue: a
+ *     negative daysUntil still satisfies `<= leadDays`); and
+ *   - UNDEADLINED — a one-shot with no deadline at all. These used to map to
+ *     urgency "later" and matched NO notification path, so a real todo could be
+ *     forgotten forever. They're the "asap" bucket: nag daily until the user
+ *     acts (do it, set a deadline, complete, clear, or snooze).
+ * A single per-user push covers both kinds, idempotent via the per-user
+ * `last_deadline_notification` date stamp (one morning nag, not two).
  *
  * Recipients are resolved by an `inherit`-strategy cascade over the task's
  * ancestor chain (resolveNotifyRecipients, shared with upkeep.ts — see
@@ -59,27 +67,33 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
 
   console.log(`[deadlines] Starting notification check for ${today}`);
 
-  // Only one-shot, incomplete, un-cleared tasks that actually have a deadline.
+  // Every one-shot, incomplete, un-cleared todo. (Was gated on `deadline != ""`;
+  // now we also surface UNDEADLINED todos — the "asap" bucket — so the deadline
+  // is no longer part of the PB filter and the JS first-pass decides per task.)
   const tasks = await pb.collection("tasks").getFullList({
-    filter: 'task_type = "one_shot" && completed = false && cleared = false && deadline != ""',
+    filter: 'task_type = "one_shot" && completed = false && cleared = false',
     expand: "list,list.owners",
     $autoCancel: false,
   });
 
-  // First pass: filter to the tasks that are actually due today.
+  // First pass: the todos that need attention today. A DATED todo qualifies
+  // when it's within its lead window (overdue counts — negative daysUntil still
+  // satisfies `<= leadDays`); an UNDEADLINED todo always qualifies (asap). Both
+  // respect snooze.
   const dueRaw = tasks.filter((task) => {
-    const deadline = new Date(task.deadline as string);
-    if (isNaN(deadline.getTime())) return false;
-
-    const leadDays = (task.deadline_lead_days as number) ?? 0;
-    if (daysUntil(deadline) > leadDays) return false;
-
-    // Respect snooze
+    // Respect snooze first — applies to dated and undeadlined alike.
     if (task.snoozed_until) {
       const snoozeEnd = new Date(task.snoozed_until);
       if (snoozeEnd > new Date()) return false;
     }
-    return true;
+
+    const hasDeadline = !!task.deadline;
+    if (!hasDeadline) return true; // undeadlined one-shot → asap, always nag
+
+    const deadline = new Date(task.deadline as string);
+    if (isNaN(deadline.getTime())) return false;
+    const leadDays = (task.deadline_lead_days as number) ?? 0;
+    return daysUntil(deadline) <= leadDays;
   });
 
   // Recipients cascade up the ancestor chain (`inherit` strategy). Ancestors
@@ -87,23 +101,24 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
   // proper-ancestor id referenced by any due task's `path` (shared helper).
   const ancestorsById = await fetchAncestorsByPath(pb, dueRaw as NotifyNode[]);
 
-  const dueTasks: { taskName: string; recipientIds: string[] }[] = [];
+  const dueTasks: { taskName: string; dated: boolean; recipientIds: string[] }[] = [];
   for (const task of dueRaw) {
     const listOwnerIds: string[] = task.expand?.list?.owners || [];
     const recipientIds = resolveNotifyRecipients(task as NotifyNode, ancestorsById, listOwnerIds);
-    dueTasks.push({ taskName: task.name, recipientIds });
+    dueTasks.push({ taskName: task.name, dated: !!task.deadline, recipientIds });
   }
 
-  console.log(`[deadlines] Found ${dueTasks.length} due tasks`);
+  console.log(`[deadlines] Found ${dueTasks.length} todos needing attention`);
 
   if (dueTasks.length === 0) return { notified: 0, skipped: 0 };
 
-  // Aggregate per recipient.
-  const tasksByUser = new Map<string, string[]>();
+  // Aggregate per recipient. Track each todo's name + whether it's dated so the
+  // single-todo copy can read "is due" (dated) vs "needs attention" (asap).
+  const tasksByUser = new Map<string, { name: string; dated: boolean }[]>();
   for (const t of dueTasks) {
     for (const userId of t.recipientIds) {
       const list = tasksByUser.get(userId) || [];
-      list.push(t.taskName);
+      list.push({ name: t.taskName, dated: t.dated });
       tasksByUser.set(userId, list);
     }
   }
@@ -143,19 +158,23 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
       }
     }
 
+    // Copy: a single dated todo reads "{name} is due"; a single undeadlined
+    // todo reads "{name} needs attention" (no date to cite). Any multiple
+    // (dated, undeadlined, or mixed) collapses to "{count} todos need attention".
     const title = userTasks.length === 1
-      ? `${userTasks[0]} is due`
-      : `${userTasks.length} todos due soon`;
+      ? (userTasks[0].dated ? `${userTasks[0].name} is due` : `${userTasks[0].name} needs attention`)
+      : `${userTasks.length} todos need attention`;
 
+    const names = userTasks.map((t) => t.name);
     const body = userTasks.length === 1
       ? "Tap to view details"
-      : userTasks.slice(0, 3).join(", ") + (userTasks.length > 3 ? ` and ${userTasks.length - 3} more` : "");
+      : names.slice(0, 3).join(", ") + (names.length > 3 ? ` and ${names.length - 3} more` : "");
 
     const result = await sendPushToUser(pb, userId, {
       title,
       body,
       buildUrl: (origin) => tasksUrl(origin),
-      data: { type: "task_deadline_due", taskCount: String(userTasks.length) },
+      data: { type: "task_attention", taskCount: String(userTasks.length) },
     }, { preferredOrigins: UPKEEP_ORIGINS });
 
     console.log(`[deadlines] User ${userId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);

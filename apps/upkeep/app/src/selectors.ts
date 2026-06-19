@@ -9,7 +9,12 @@ export function getTasksFromState(state: UpkeepState) {
   return Array.from(state.tasks.values());
 }
 
-/** Get recurring tasks grouped by urgency (for Kanban view). */
+/**
+ * Get recurring tasks grouped by urgency (for the Kanban view). The board is
+ * recurring-only and has no "asap" column — recurring tasks never produce the
+ * "asap" urgency (that level is reserved for one-shot todos), so the `asap`
+ * case below is unreachable here and exists only to keep the switch total.
+ */
 export function getTasksByUrgency(state: UpkeepState) {
   const tasks = getTasksFromState(state).filter((t) => t.taskType === "recurring");
   const grouped = {
@@ -25,6 +30,12 @@ export function getTasksByUrgency(state: UpkeepState) {
       continue;
     }
     const urgency = getUrgencyLevel(task);
+    // Recurring tasks can't be "asap"; fold the defensive case into "today" so
+    // a future change that lets recurring tasks go asap can't silently drop them.
+    if (urgency === "asap") {
+      grouped.today.push(task);
+      continue;
+    }
     grouped[urgency].push(task);
   }
 
