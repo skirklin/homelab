@@ -237,7 +237,7 @@ describe("life.ts viewUrl — same-origin relative path", () => {
   });
 });
 
-// task_deadline_due taps open the unified task outliner at /tasks — but ONLY
+// task_attention taps open the unified task outliner at /tasks — but ONLY
 // the home app (kirkl.in) serves that route. Standalone upkeep has no /tasks
 // route (it would match the `/:slug` catch-all → "list doesn't exist"), so on
 // the upkeep origin the link must fall back to `/` (the usable ListPicker).

@@ -2,7 +2,16 @@ import styled from "styled-components";
 import { TaskCard } from "./TaskCard";
 import type { Task, UrgencyLevel } from "../types";
 
-const urgencyStyles = {
+// Keyed by UrgencyLevel. The Kanban board is recurring-only and never renders
+// an "asap" column (only one-shot todos can be asap), but the map must be total
+// over the union so the styled-component index is type-safe; reuse the "today"
+// palette as the fallback for that unreachable case.
+const urgencyStyles: Record<UrgencyLevel, { bg: string; border: string; headerColor: string }> = {
+  asap: {
+    bg: "var(--color-today-bg)",
+    border: "var(--color-today)",
+    headerColor: "var(--color-today)",
+  },
   today: {
     bg: "var(--color-today-bg)",
     border: "var(--color-today)",

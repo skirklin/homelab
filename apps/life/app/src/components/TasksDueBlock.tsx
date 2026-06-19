@@ -134,8 +134,23 @@ export function TasksDueBlock() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [tasksByList]);
 
-  // One-shot todos with a deadline within 3 days (or overdue). Sorted by
-  // deadline ascending so the most urgent is on top.
+  // "Asap" one-shots: the urgency-model union of undeadlined todos (no prompt,
+  // would otherwise rot) AND overdue dated todos. Not completed/cleared/snoozed.
+  // Undeadlined sort last (no date); overdue sort by how overdue, most first.
+  const asapTasks = useMemo(() => {
+    const all: BackendTask[] = [];
+    for (const tasks of tasksByList.values()) all.push(...tasks);
+    return all
+      .filter((t) => t.taskType === "one_shot")
+      .filter((t) => !isTaskSnoozed(t))
+      .filter((t) => !t.completed && !t.cleared)
+      .filter((t) => getUrgencyLevel(t) === "asap")
+      .sort((a, b) => (a.deadline?.getTime() ?? Infinity) - (b.deadline?.getTime() ?? Infinity));
+  }, [tasksByList]);
+
+  // One-shot todos with a FUTURE deadline within 3 days. Overdue + undeadlined
+  // are handled by the Asap group above (so they aren't double-listed here).
+  // Sorted by deadline ascending so the most urgent is on top.
   const dueSoonTasks = useMemo(() => {
     const all: BackendTask[] = [];
     for (const tasks of tasksByList.values()) all.push(...tasks);
@@ -145,7 +160,7 @@ export function TasksDueBlock() {
       .filter((t) => !t.completed && !t.cleared)
       .filter((t) => {
         const d = daysUntilDue(t);
-        return d !== null && d <= 3;
+        return d !== null && d >= 0 && d <= 3;
       })
       .sort((a, b) => (a.deadline?.getTime() ?? 0) - (b.deadline?.getTime() ?? 0));
   }, [tasksByList]);
@@ -157,16 +172,31 @@ export function TasksDueBlock() {
     !slugs ||
     listIds.length === 0 ||
     tasksByList.size < listIds.length ||
-    (todayTasks.length === 0 && dueSoonTasks.length === 0)
+    (todayTasks.length === 0 && asapTasks.length === 0 && dueSoonTasks.length === 0)
   ) {
     return null;
   }
 
   return (
     <Wrapper aria-label="Today's upkeep">
+      {asapTasks.length > 0 && (
+        <>
+          <Label>Asap</Label>
+          <TaskList>
+            {asapTasks.map((t) => (
+              <TaskItem key={t.id}>
+                {t.name}
+                {t.deadline ? ` — ${formatDeadline(t.deadline)}` : ""}
+              </TaskItem>
+            ))}
+          </TaskList>
+        </>
+      )}
       {todayTasks.length > 0 && (
         <>
-          <Label>Today&apos;s upkeep</Label>
+          <Label style={{ marginTop: asapTasks.length > 0 ? "var(--space-md)" : undefined }}>
+            Today&apos;s upkeep
+          </Label>
           <TaskList>
             {todayTasks.map((t) => (
               <TaskItem key={t.id}>{t.name}</TaskItem>
@@ -176,7 +206,12 @@ export function TasksDueBlock() {
       )}
       {dueSoonTasks.length > 0 && (
         <>
-          <Label style={{ marginTop: todayTasks.length > 0 ? "var(--space-md)" : undefined }}>
+          <Label
+            style={{
+              marginTop:
+                asapTasks.length > 0 || todayTasks.length > 0 ? "var(--space-md)" : undefined,
+            }}
+          >
             Due soon
           </Label>
           <TaskList>
