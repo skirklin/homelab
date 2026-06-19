@@ -1,13 +1,16 @@
-import { useState, useEffect } from "react";
-import { Modal, Button, TimePicker, Switch } from "antd";
+import { useCallback, useState, useEffect } from "react";
+import { Modal, Button, Switch } from "antd";
 import { ReloadOutlined, DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
-import dayjs, { type Dayjs } from "dayjs";
 import styled from "styled-components";
 import { useLifeContext } from "../life-context";
 import type { LifeLog } from "../types";
+import type { LifeManifest } from "@homelab/backend";
 import { RANDOM_SAMPLES } from "../manifest";
 import { useUserBackend, useLifeBackend, useFeedback } from "@kirkl/shared";
-import { useUserTz } from "../lib/useUserTz";
+import { useViews, useNotifications } from "../lib/views";
+import { useTrackables } from "../lib/trackables";
+import { NotificationsEditor } from "./NotificationsEditor";
+import { ViewsEditor } from "./ViewsEditor";
 
 const SettingRow = styled.div`
   display: flex;
@@ -45,25 +48,6 @@ const SectionTitle = styled.div`
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-sm);
-`;
-
-const SectionTz = styled.span`
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  font-weight: 400;
-`;
-
-const ReminderRow = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--space-xs) 0;
-  gap: var(--space-sm);
-`;
-
-const ReminderLabel = styled.div`
-  flex: 1;
-  font-weight: 500;
 `;
 
 const ReminderControls = styled.div`
@@ -136,31 +120,27 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
   const [showDebug, setShowDebug] = useState(false);
   const [fcmTokenCount, setFcmTokenCount] = useState<number | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(false);
-  const [savingMorning, setSavingMorning] = useState(false);
-  const [savingEvening, setSavingEvening] = useState(false);
-  const [savingWeekly, setSavingWeekly] = useState(false);
   const [savingSampling, setSavingSampling] = useState(false);
 
   const schedule = log?.sampleSchedule;
   const config = RANDOM_SAMPLES;
   const now = Date.now();
 
-  // The single tz source for the whole app — reads the log owner's saved
-  // timezone (Intl fallback), the same value all day/week bucketing uses.
-  const userTz = useUserTz();
-
-  // Parse "HH:MM" without relying on the customParseFormat plugin.
-  const parseHHmm = (s: string | null | undefined): Dayjs | null => {
-    if (!s) return null;
-    const m = s.match(/^(\d{1,2}):(\d{2})$/);
-    if (!m) return null;
-    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
-    const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
-    return dayjs().hour(h).minute(min).second(0).millisecond(0);
-  };
-  const morningValue: Dayjs | null = parseHHmm(log?.morningReminderTime);
-  const eveningValue: Dayjs | null = parseHHmm(log?.eveningReminderTime);
-  const weeklyValue: Dayjs | null = parseHHmm(log?.weeklyReminderTime);
+  // Unified Capture editors read the resolved manifest (Views / Notifications /
+  // trackables) and mutate it through this RMW wrapper — mirror of ShapeSheet's
+  // applyManifest: persist via the backend op, then re-dispatch SET_LOG so every
+  // `useViews`/`useNotifications`/`useTrackables` consumer re-renders.
+  const views = useViews();
+  const notifications = useNotifications();
+  const trackables = useTrackables();
+  const applyManifest = useCallback(
+    async (work: () => Promise<LifeManifest>) => {
+      const manifest = await work();
+      if (log) dispatch({ type: "SET_LOG", log: { ...log, manifest } });
+      return manifest;
+    },
+    [log, dispatch],
+  );
 
   const toggleRandomSampling = async (next: boolean) => {
     if (!log?.id) return;
@@ -176,36 +156,6 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
       message.error("Failed to update random check-in setting");
     } finally {
       setSavingSampling(false);
-    }
-  };
-
-  const saveReminder = async (
-    which: "morning" | "evening" | "weekly",
-    value: Dayjs | null,
-  ) => {
-    if (!log?.id) return;
-    const formatted = value ? value.format("HH:mm") : null;
-    const setSaving =
-      which === "morning"
-        ? setSavingMorning
-        : which === "evening"
-          ? setSavingEvening
-          : setSavingWeekly;
-    setSaving(true);
-    try {
-      await life.updateReminderTimes(log.id, { [which]: formatted });
-      const nextLog: LifeLog = {
-        ...log,
-        morningReminderTime: which === "morning" ? formatted : log.morningReminderTime,
-        eveningReminderTime: which === "evening" ? formatted : log.eveningReminderTime,
-        weeklyReminderTime: which === "weekly" ? formatted : log.weeklyReminderTime,
-      };
-      dispatch({ type: "SET_LOG", log: nextLog });
-    } catch (err) {
-      console.error(`Failed to save ${which} reminder:`, err);
-      message.error(`Failed to save ${which} reminder`);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -274,54 +224,27 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
 
       <Section>
         <SectionTitle>
-          <span>Reminders</span>
-          <SectionTz>times in {userTz}</SectionTz>
+          <span>Notifications</span>
         </SectionTitle>
         <SettingDescription>
-          Push notification to start a session. Leave empty to disable.
+          Scheduled nudges that open a View. Times are in your local timezone.
         </SettingDescription>
-        <ReminderRow>
-          <ReminderLabel>Morning</ReminderLabel>
-          <ReminderControls>
-            <TimePicker
-              format="HH:mm"
-              minuteStep={5}
-              value={morningValue}
-              onChange={(v) => saveReminder("morning", v)}
-              allowClear
-              disabled={savingMorning || !log?.id}
-              placeholder="Off"
-            />
-          </ReminderControls>
-        </ReminderRow>
-        <ReminderRow>
-          <ReminderLabel>Evening</ReminderLabel>
-          <ReminderControls>
-            <TimePicker
-              format="HH:mm"
-              minuteStep={5}
-              value={eveningValue}
-              onChange={(v) => saveReminder("evening", v)}
-              allowClear
-              disabled={savingEvening || !log?.id}
-              placeholder="Off"
-            />
-          </ReminderControls>
-        </ReminderRow>
-        <ReminderRow>
-          <ReminderLabel>Weekly review (Sunday)</ReminderLabel>
-          <ReminderControls>
-            <TimePicker
-              format="HH:mm"
-              minuteStep={5}
-              value={weeklyValue}
-              onChange={(v) => saveReminder("weekly", v)}
-              allowClear
-              disabled={savingWeekly || !log?.id}
-              placeholder="Off"
-            />
-          </ReminderControls>
-        </ReminderRow>
+        <NotificationsEditor
+          logId={log?.id}
+          notifications={notifications}
+          views={views}
+          applyManifest={applyManifest}
+        />
+      </Section>
+
+      <Section>
+        <SectionTitle>
+          <span>Views</span>
+        </SectionTitle>
+        <SettingDescription>
+          The capture sessions a notification can open. Each View is an ordered set of prompts.
+        </SettingDescription>
+        <ViewsEditor logId={log?.id} views={views} trackables={trackables} applyManifest={applyManifest} />
       </Section>
 
       {onExport && (
