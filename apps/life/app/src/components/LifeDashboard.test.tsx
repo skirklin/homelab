@@ -404,20 +404,20 @@ describe("LifeDashboard (unified Daily surface)", () => {
     // No favorites by default → quiet hint, not an empty bar.
     expect(screen.getByTestId("favorites-empty")).toBeInTheDocument();
     expect(screen.getByTestId("habit-board")).toBeInTheDocument();
-    expect(screen.getByTestId("log-more-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("log-more-shapes")).toBeInTheDocument();
   });
 
-  it("'+ Log something else' reveals the four shape entry points", async () => {
+  it("shows the four shape entry points directly (no expand click) and tapping one opens the ShapeSheet", async () => {
     const user = userEvent.setup();
     renderDashboard("/");
-    const toggle = await screen.findByTestId("log-more-toggle");
-    // Collapsed by default: the shape grid is not in the DOM.
-    expect(screen.queryByTestId("log-more-shapes")).not.toBeInTheDocument();
-    await user.click(toggle);
+    // Always visible — no toggle to expand.
     expect(await screen.findByTestId("log-more-shapes")).toBeInTheDocument();
     for (const shape of ["took", "did", "happened", "rated"]) {
       expect(screen.getByTestId(`log-shape-${shape}`)).toBeInTheDocument();
     }
+    // Tapping a shape button opens the ShapeSheet.
+    await user.click(screen.getByTestId("log-shape-took"));
+    expect(await screen.findByTestId("shape-sheet-search")).toBeInTheDocument();
   });
 
   it("keeps the Sessions session-View cards when the log has them", async () => {

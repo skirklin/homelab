@@ -8,7 +8,6 @@ import {
   MoonOutlined,
   CheckCircleFilled,
   CalendarOutlined,
-  PlusOutlined,
   HistoryOutlined,
 } from "@ant-design/icons";
 import {
@@ -93,28 +92,6 @@ const SessionRow = styled.div<{ $hasPrimary: boolean }>`
  * ShapeSheet (typeahead-to-pick-or-create + per-thing inputs + star-to-favorite).
  * Replaces the always-visible 2×2 ShapeCard grid.
  */
-const LogMoreToggle = styled.button`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
-  width: 100%;
-  min-height: 48px;
-  padding: var(--space-sm);
-  background: var(--color-bg);
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-primary);
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-
-  .anticon { font-size: 14px; }
-
-  &:hover { border-color: var(--color-primary); background: var(--color-bg-muted); }
-`;
-
 const ShapeGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -235,8 +212,6 @@ export function LifeDashboard() {
   const { menuItems } = useSettingsMenu();
   // Which shape's bottom sheet is open (null = closed).
   const [openShape, setOpenShape] = useState<TrackableShape | null>(null);
-  // The "+ Log something else" shape picker (collapsed by default).
-  const [logMoreOpen, setLogMoreOpen] = useState(false);
   // When the habit board backfills via the sheet, it passes the tapped day;
   // that overrides the viewed day so the sheet logs to the right bucket.
   const [shapeBackfillDay, setShapeBackfillDay] = useState<Date | null>(null);
@@ -578,29 +553,20 @@ export function LifeDashboard() {
           </Section>
 
           <Section>
-            <LogMoreToggle
-              type="button"
-              aria-expanded={logMoreOpen}
-              onClick={() => setLogMoreOpen((o) => !o)}
-              data-testid="log-more-toggle"
-            >
-              <PlusOutlined /> Log something else
-            </LogMoreToggle>
-            {logMoreOpen && (
-              <ShapeGrid data-testid="log-more-shapes">
-                {SHAPE_ORDER.map((shape) => (
-                  <ShapeButton
-                    key={shape}
-                    type="button"
-                    onClick={() => openShapeForBackfill(shape)}
-                    data-testid={`log-shape-${shape}`}
-                  >
-                    <ShapeButtonTitle>{SHAPE_META[shape].title}</ShapeButtonTitle>
-                    <ShapeButtonHint>{SHAPE_META[shape].hint}</ShapeButtonHint>
-                  </ShapeButton>
-                ))}
-              </ShapeGrid>
-            )}
+            <SectionTitle>Log something else</SectionTitle>
+            <ShapeGrid data-testid="log-more-shapes">
+              {SHAPE_ORDER.map((shape) => (
+                <ShapeButton
+                  key={shape}
+                  type="button"
+                  onClick={() => openShapeForBackfill(shape)}
+                  data-testid={`log-shape-${shape}`}
+                >
+                  <ShapeButtonTitle>{SHAPE_META[shape].title}</ShapeButtonTitle>
+                  <ShapeButtonHint>{SHAPE_META[shape].hint}</ShapeButtonHint>
+                </ShapeButton>
+              ))}
+            </ShapeGrid>
           </Section>
         </DateNav>
       </PageContainer>
