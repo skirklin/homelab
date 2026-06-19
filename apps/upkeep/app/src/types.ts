@@ -2,12 +2,12 @@ import type { LifeEvent, NotificationMode } from "@kirkl/shared";
 import {
   calculateDueDate as sharedCalculateDueDate,
   daysUntilDue as sharedDaysUntilDue,
-  getUrgencyLevel as sharedGetUrgencyLevel,
+  urgencyOf as sharedUrgencyOf,
   isTaskSnoozed as sharedIsTaskSnoozed,
   isActionableOneShot as sharedIsActionableOneShot,
-  type UrgencyLevel as SharedUrgencyLevel,
+  type UrgencyState,
 } from "@homelab/backend";
-export type { NotificationMode };
+export type { NotificationMode, UrgencyState };
 
 /**
  * Task completion record. Same unified shape as life events — entries[] is the
@@ -25,36 +25,53 @@ export interface Frequency {
 
 export type TaskType = "recurring" | "one_shot";
 
-// Task as used in the app (with Date objects)
-export interface Task {
+export type {
+  OneShotSchedule,
+  RecurringTask as BackendRecurringTask,
+  OneShotTask as BackendOneShotTask,
+} from "@homelab/backend";
+
+// Task as used in the app — same discriminated union as the backend `Task`,
+// but with Date `createdAt`/`updatedAt` instead of string `created`/`updated`.
+// The "someday" state is named (schedule.kind), not inferred from a null
+// deadline; variant-specific fields can't be set on the wrong variant.
+interface TaskBase {
   id: string;
   parentId: string;
   path: string;
   position: number;
   name: string;
   description: string;
-  taskType: TaskType;
-  frequency: Frequency;
-  lastCompleted: Date | null;
-  /** One-shot todos only — recurring tasks ignore deadline. */
-  deadline: Date | null;
-  /** Remind this many days before the deadline (default 0 = day-of + overdue). */
-  deadlineLeadDays: number | null;
-  completed: boolean;
   snoozedUntil: Date | null;
   assignees: string[];
   createdBy: string;
   tags: string[];
   collapsed: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface RecurringTask extends TaskBase {
+  taskType: "recurring";
+  frequency: Frequency;
+  lastCompleted: Date | null;
+}
+
+export interface OneShotTask extends TaskBase {
+  taskType: "one_shot";
+  schedule:
+    | { kind: "dated"; deadline: Date; leadDays: number }
+    | { kind: "someday" };
+  completed: boolean;
   /**
    * "Clear done" hides completed one_shot tasks without deleting them.
    * Default outliner view filters these out; the row remains so the user
    * can re-show it by toggling the field off.
    */
   cleared: boolean;
-  createdAt: Date;
-  updatedAt: Date;
 }
+
+export type Task = RecurringTask | OneShotTask;
 
 // Tree node for outliner rendering
 export interface TaskNode {
@@ -85,12 +102,18 @@ export interface TaskList {
 
 export type { UserProfile, UserProfileStore } from "@kirkl/shared";
 
-// Urgency levels for Kanban columns — canonical impl in @homelab/backend so
-// life's morning header can reuse the same bucketing without cross-app imports.
-export type UrgencyLevel = SharedUrgencyLevel;
+// Urgency projection — canonical impl in @homelab/backend so life's morning
+// header can reuse it without cross-app imports. `urgencyOf` takes `now` so the
+// clock is threaded explicitly (no per-call-site midnight-boundary drift).
 export const calculateDueDate = (task: Task): Date | null => sharedCalculateDueDate(task);
-export const daysUntilDue = (task: Task): number | null => sharedDaysUntilDue(task);
-export const getUrgencyLevel = (task: Task): UrgencyLevel => sharedGetUrgencyLevel(task);
+export const daysUntilDue = (task: Task, now: Date = new Date()): number | null =>
+  sharedDaysUntilDue(task, now);
+export const urgencyOf = (task: Task, now: Date = new Date()): UrgencyState =>
+  sharedUrgencyOf(task, now);
+
+/** The one-shot deadline, or null for recurring / someday tasks. */
+export const taskDeadline = (task: Task): Date | null =>
+  task.taskType === "one_shot" && task.schedule.kind === "dated" ? task.schedule.deadline : null;
 
 export function formatFrequency(frequency: Frequency): string {
   const { value, unit } = frequency;
@@ -134,16 +157,17 @@ export function formatDueDate(task: Task): string {
 }
 
 /**
- * Human-readable label for a one-shot task's deadline. Reads `task.deadline`
- * directly (not calculateDueDate) to be explicit that this is the one-shot
- * deadline surface. Returns "" when there is no deadline.
+ * Human-readable label for a one-shot task's deadline. Reads the dated
+ * schedule directly (via `taskDeadline`, not calculateDueDate) to be explicit
+ * that this is the one-shot deadline surface. Returns "" for someday/recurring.
  */
 export function formatDeadline(task: Task): string {
-  if (!task.deadline) return "";
+  const deadline = taskDeadline(task);
+  if (!deadline) return "";
 
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDateOnly = new Date(task.deadline.getFullYear(), task.deadline.getMonth(), task.deadline.getDate());
+  const dueDateOnly = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
   const diffDays = Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
   if (diffDays < -1) return `${Math.abs(diffDays)} days overdue`;
@@ -151,7 +175,7 @@ export function formatDeadline(task: Task): string {
   if (diffDays === 0) return "Due today";
   if (diffDays === 1) return "Due tomorrow";
   if (diffDays <= 7) return `Due in ${diffDays} days`;
-  return `Due ${task.deadline.toLocaleDateString()}`;
+  return `Due ${deadline.toLocaleDateString()}`;
 }
 
 // Build a tree from flat task array

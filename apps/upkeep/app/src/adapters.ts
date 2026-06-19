@@ -9,28 +9,25 @@ import type {
 import type { Task, TaskList, Completion } from "./types";
 
 export function taskFromBackend(t: BackendTask): Task {
-  return {
+  const base = {
     id: t.id,
     parentId: t.parentId,
     path: t.path,
     position: t.position,
     name: t.name,
     description: t.description,
-    taskType: t.taskType,
-    frequency: t.frequency,
-    lastCompleted: t.lastCompleted,
-    deadline: t.deadline,
-    deadlineLeadDays: t.deadlineLeadDays,
-    completed: t.completed,
     snoozedUntil: t.snoozedUntil,
     assignees: t.assignees,
     createdBy: t.createdBy,
     tags: t.tags,
     collapsed: t.collapsed,
-    cleared: t.cleared,
     createdAt: new Date(t.created),
     updatedAt: new Date(t.updated),
   };
+  if (t.taskType === "one_shot") {
+    return { ...base, taskType: "one_shot", schedule: t.schedule, completed: t.completed, cleared: t.cleared };
+  }
+  return { ...base, taskType: "recurring", frequency: t.frequency, lastCompleted: t.lastCompleted };
 }
 
 export function listFromBackend(l: BackendTaskList): TaskList {

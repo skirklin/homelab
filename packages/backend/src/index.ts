@@ -16,7 +16,11 @@ export type {
   RecipeBox, Recipe, RecipeData, RecipeInstruction, EnrichmentStatus,
   PendingChanges, CookingLogEvent,
 } from "./types/recipes";
-export type { TaskList, Task, TaskCompletion, Frequency, TaskType } from "./types/upkeep";
+export type {
+  TaskList, Task, RecurringTask, OneShotTask, OneShotSchedule, TaskBase, TaskUpdate,
+  TaskCompletion, Frequency, TaskType,
+} from "./types/upkeep";
+export type { NewTask } from "./interfaces/upkeep";
 export type {
   TravelLog, Trip, Activity, ActivityVerdict, Itinerary, ItineraryDay,
   ActivitySlot, FlightSlot, FlightInfo,
@@ -111,11 +115,11 @@ export { RANDOM_SAMPLES } from "./types/life-config";
 export {
   calculateDueDate,
   daysUntilDue,
-  getUrgencyLevel,
+  urgencyOf,
   isTaskSnoozed,
   isActionableOneShot,
 } from "./lib/upkeep-urgency";
-export type { UrgencyLevel, UrgencyTask } from "./lib/upkeep-urgency";
+export type { UrgencyState, UrgencyTask } from "./lib/upkeep-urgency";
 
 // --- Assignee resolution (client mirror of server resolveNotifyRecipients) ---
 export { resolveAssignees } from "./lib/assignee-resolution";

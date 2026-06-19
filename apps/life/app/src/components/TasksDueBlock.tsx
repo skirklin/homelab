@@ -16,11 +16,17 @@ import styled from "styled-components";
 import { useAuth, useUpkeepBackend, useUserBackend } from "@kirkl/shared";
 import {
   daysUntilDue,
-  getUrgencyLevel,
-  isTaskSnoozed,
+  urgencyOf,
   isActionableOneShot,
   type Task as BackendTask,
 } from "@homelab/backend";
+
+/** The dated-schedule deadline, or null for recurring / someday tasks. */
+function taskDeadline(task: BackendTask): Date | null {
+  return task.taskType === "one_shot" && task.schedule.kind === "dated"
+    ? task.schedule.deadline
+    : null;
+}
 
 /**
  * Tiny deadline formatter. Inlined here rather than importing upkeep's
@@ -126,40 +132,50 @@ export function TasksDueBlock() {
   }, [user?.uid, listIdsKey, upkeep]);
 
   const todayTasks = useMemo(() => {
+    const now = new Date();
     const all: BackendTask[] = [];
     for (const tasks of tasksByList.values()) all.push(...tasks);
     return all
       .filter((t) => t.taskType === "recurring")
-      .filter((t) => !isTaskSnoozed(t))
-      .filter((t) => getUrgencyLevel(t) === "today")
+      .filter((t) => urgencyOf(t, now).kind === "dueToday")
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [tasksByList]);
 
-  // "Asap" one-shots: the urgency-model union of undeadlined todos (no prompt,
-  // would otherwise rot) AND overdue dated todos. Not completed/cleared/snoozed.
-  // Undeadlined sort last (no date); overdue sort by how overdue, most first.
+  // "Asap" one-shots: the union of OVERDUE dated todos (past their date) and
+  // SOMEDAY undated todos (no prompt, would otherwise rot). These were one
+  // conflated "asap" state; now they're distinct UrgencyState kinds. Overdue
+  // sort first (most overdue on top); someday follow (no date to sort by).
   const asapTasks = useMemo(() => {
+    const now = new Date();
     const all: BackendTask[] = [];
     for (const tasks of tasksByList.values()) all.push(...tasks);
     return all
-      .filter(isActionableOneShot)
-      .filter((t) => getUrgencyLevel(t) === "asap")
-      .sort((a, b) => (a.deadline?.getTime() ?? Infinity) - (b.deadline?.getTime() ?? Infinity));
+      .filter((t) => isActionableOneShot(t, now))
+      .map((t) => ({ t, u: urgencyOf(t, now) }))
+      .filter(({ u }) => u.kind === "overdue" || u.kind === "someday")
+      .sort((a, b) => {
+        // overdue (with a date) before someday; among overdue, most-overdue first.
+        const aDays = a.u.kind === "overdue" ? a.u.days : -Infinity;
+        const bDays = b.u.kind === "overdue" ? b.u.days : -Infinity;
+        return bDays - aDays;
+      })
+      .map(({ t }) => t);
   }, [tasksByList]);
 
-  // One-shot todos with a FUTURE deadline within 3 days. Overdue + undeadlined
-  // are handled by the Asap group above (so they aren't double-listed here).
+  // One-shot todos with a FUTURE deadline within 3 days. Overdue + someday are
+  // handled by the Asap group above (so they aren't double-listed here).
   // Sorted by deadline ascending so the most urgent is on top.
   const dueSoonTasks = useMemo(() => {
+    const now = new Date();
     const all: BackendTask[] = [];
     for (const tasks of tasksByList.values()) all.push(...tasks);
     return all
-      .filter(isActionableOneShot)
+      .filter((t) => isActionableOneShot(t, now))
       .filter((t) => {
-        const d = daysUntilDue(t);
+        const d = daysUntilDue(t, now);
         return d !== null && d >= 0 && d <= 3;
       })
-      .sort((a, b) => (a.deadline?.getTime() ?? 0) - (b.deadline?.getTime() ?? 0));
+      .sort((a, b) => (taskDeadline(a)?.getTime() ?? 0) - (taskDeadline(b)?.getTime() ?? 0));
   }, [tasksByList]);
 
   // Empty / loading / no-lists: render nothing.
@@ -180,12 +196,15 @@ export function TasksDueBlock() {
         <>
           <Label>Asap</Label>
           <TaskList>
-            {asapTasks.map((t) => (
-              <TaskItem key={t.id}>
-                {t.name}
-                {t.deadline ? ` — ${formatDeadline(t.deadline)}` : ""}
-              </TaskItem>
-            ))}
+            {asapTasks.map((t) => {
+              const deadline = taskDeadline(t);
+              return (
+                <TaskItem key={t.id}>
+                  {t.name}
+                  {deadline ? ` — ${formatDeadline(deadline)}` : ""}
+                </TaskItem>
+              );
+            })}
           </TaskList>
         </>
       )}
@@ -212,11 +231,14 @@ export function TasksDueBlock() {
             Due soon
           </Label>
           <TaskList>
-            {dueSoonTasks.map((t) => (
-              <TaskItem key={t.id}>
-                {t.name} — {t.deadline ? formatDeadline(t.deadline) : ""}
-              </TaskItem>
-            ))}
+            {dueSoonTasks.map((t) => {
+              const deadline = taskDeadline(t);
+              return (
+                <TaskItem key={t.id}>
+                  {t.name} — {deadline ? formatDeadline(deadline) : ""}
+                </TaskItem>
+              );
+            })}
           </TaskList>
         </>
       )}

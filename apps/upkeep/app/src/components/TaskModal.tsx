@@ -67,8 +67,12 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
       if (task) {
         setName(task.name);
         setDescription(task.description);
-        setFrequencyValue(task.frequency.value);
-        setFrequencyUnit(task.frequency.unit);
+        // This modal is the recurring-only Kanban editor; a one-shot has no
+        // frequency, so fall back to the default if one is ever passed.
+        if (task.taskType === "recurring") {
+          setFrequencyValue(task.frequency.value);
+          setFrequencyUnit(task.frequency.unit);
+        }
       } else {
         setName("");
         setDescription("");
@@ -105,14 +109,10 @@ export function TaskModal({ open, task, onClose }: TaskModalProps) {
           taskType: "recurring",
           frequency,
           lastCompleted: null,
-          deadline: null,
-          deadlineLeadDays: null,
-          completed: false,
           snoozedUntil: null,
           assignees: [],
           tags: [],
           collapsed: false,
-          cleared: false,
         });
         message.success("Task added");
       }

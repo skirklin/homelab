@@ -391,7 +391,9 @@ export function CompleteTaskModal({ open, task, onClose, initialTab = "complete"
     >
       <TaskInfo>
         <TaskName>{task.name}</TaskName>
-        <TaskFrequency>{formatFrequency(task.frequency)}</TaskFrequency>
+        {task.taskType === "recurring" && (
+          <TaskFrequency>{formatFrequency(task.frequency)}</TaskFrequency>
+        )}
       </TaskInfo>
 
       <Tabs
