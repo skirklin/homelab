@@ -3,8 +3,15 @@
  * Capture primitive). A View is a named, ordered set of capture items rendered
  * for human input (the morning/evening/weekly wizards are Views). This editor
  * lists the user's Views, edits each View's metadata (title/greeting/icon/
- * render) and its `items[]` (capture / tasks_due / banner), and mutates the
- * manifest via the add/update/remove/reorder backend ops + `applyManifest`.
+ * render) and its `items[]` (capture / tasks_due / banner), and mutates
+ * `manifest.views` in place via the `add/update/remove/reorderView` backend ops,
+ * each wrapped in the `applyManifest`→`SET_LOG` pattern.
+ *
+ * `manifest.views` is guaranteed to be a real, persisted array: EXISTING logs
+ * are materialized with `DEFAULT_VIEWS` by the Phase D3 column→manifest
+ * migration, and NEW logs are seeded from `defaultLifeManifest` at creation —
+ * so this editor always operates on a concrete array, never a fallback-rendered
+ * default.
  *
  * `view.id` is IMMUTABLE (it is written to `life_events.labels.view`, the
  * history join key). We generate it ONCE from the title on create and never
@@ -353,7 +360,15 @@ interface BannerEditorProps {
   onChange: (next: Extract<LifeViewItem, { kind: "banner" }>) => void;
 }
 
-/** Edits a banner's `text` + its `refs[]` (token / fromTrackable / within / entry). */
+/**
+ * Edits a banner's `text` + its `refs[]` (token / fromTrackable / within / entry).
+ * Free-text fields (banner text, ref token, ref entry) are controlled by AntD's
+ * own input draft (`defaultValue`) and commit on `onBlur` so typing doesn't fire
+ * one full manifest read-modify-write per keystroke — matching the title/greeting/
+ * icon fields above. Selects and add/remove commit immediately (single discrete
+ * action). `key`s include the field value so AntD re-seeds `defaultValue` when a
+ * ref is reordered/removed.
+ */
 function BannerEditor({ item, trackableOptions, onChange }: BannerEditorProps) {
   const refs = item.refs ?? [];
   const setRef = (i: number, next: TemplateRef) => {
@@ -372,19 +387,23 @@ function BannerEditor({ item, trackableOptions, onChange }: BannerEditorProps) {
     <div>
       <Input
         size="small"
-        value={item.text}
+        defaultValue={item.text}
         placeholder="Banner text — use {token} placeholders"
-        onChange={(e) => onChange({ ...item, text: e.target.value })}
+        onBlur={(e) => {
+          if (e.target.value !== item.text) onChange({ ...item, text: e.target.value });
+        }}
         style={{ marginBottom: 4 }}
       />
       {refs.map((ref, i) => (
-        <RefRow key={i}>
+        <RefRow key={`${i}-${ref.token}`}>
           <Input
             size="small"
-            value={ref.token}
+            defaultValue={ref.token}
             placeholder="token"
             style={{ width: 70 }}
-            onChange={(e) => setRef(i, { ...ref, token: e.target.value })}
+            onBlur={(e) => {
+              if (e.target.value !== ref.token) setRef(i, { ...ref, token: e.target.value });
+            }}
           />
           <Select
             size="small"
@@ -406,10 +425,13 @@ function BannerEditor({ item, trackableOptions, onChange }: BannerEditorProps) {
           />
           <Input
             size="small"
-            value={ref.entry ?? ""}
+            defaultValue={ref.entry ?? ""}
             placeholder="entry"
             style={{ width: 80 }}
-            onChange={(e) => setRef(i, { ...ref, entry: e.target.value || undefined })}
+            onBlur={(e) => {
+              const next = e.target.value || undefined;
+              if (next !== ref.entry) setRef(i, { ...ref, entry: next });
+            }}
           />
           <Button size="small" type="text" danger icon={<DeleteOutlined />} aria-label="Remove ref" onClick={() => removeRef(i)} />
         </RefRow>
