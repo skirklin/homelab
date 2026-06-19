@@ -20,9 +20,9 @@
  *
  * Catch-up: a k8s CronJob gets a retry window if the service is down at the
  * scheduled minute; an in-process timer does not. For the daily upkeep job —
- * whose lib fns are idempotent (per-user `last_task_notification` /
- * `last_deadline_notification` date guards) — we additionally fire once on
- * startup IF today's scheduled time has already passed. The idempotency makes a
+ * whose lib fns are idempotent (the `notification_log` ledger's
+ * once-per-(user, kind, day) guard) — we additionally fire once on startup IF
+ * today's scheduled time has already passed. The idempotency makes a
  * redundant run a no-op, and the time-gate stops us from firing early. The
  * other jobs don't get catch-up: life-reminders/life-sample use tight ±windows
  * (catch-up inapplicable), travel-tick is hourly (self-covers within an hour),
@@ -133,7 +133,8 @@ export async function runObserverWeekly(): Promise<void> {
 export function startScheduler(): void {
   // life-reminders-check — every minute (was `* * * * *`). The lib fn decides
   // per-log whether the current minute matches the owner's morning/evening
-  // reminder time (±1 min) in their tz; idempotent via last_*_reminder_sent.
+  // reminder time (±1 min) in their tz; idempotent via the notification_log
+  // ledger (kind="life_reminder:<id>", bucket=owner-local day).
   jobs.push(new Cron("* * * * *", { name: "life-reminders", protect: true }, () =>
     guard("life-reminders", async () => {
       const r = await runLifeReminderCheck();

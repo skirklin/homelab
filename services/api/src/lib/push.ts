@@ -3,6 +3,7 @@
  * Used by both the /push/send HTTP endpoint and the notification triggers.
  */
 import type PocketBase from "pocketbase";
+import type { NotificationType } from "@homelab/backend";
 import webpush from "web-push";
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
@@ -40,7 +41,13 @@ export interface PushPayload {
    * receive `""`.
    */
   buildUrl?: (origin: string) => string;
-  data?: Record<string, unknown>;
+  /**
+   * Arbitrary payload echoed to the service worker. `type` is constrained to a
+   * registered `NotificationType` (see `@homelab/backend` notification-types) so
+   * a sender can't ship a `data.type` the SW doesn't route — the exact drift
+   * that left `task_attention` / `life_reminder` / `travel_*` un-routed.
+   */
+  data?: { type?: NotificationType } & Record<string, unknown>;
 }
 
 export interface PushResult {

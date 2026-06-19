@@ -17,9 +17,9 @@
 import type PocketBase from "pocketbase";
 import { formatInTimeZone } from "date-fns-tz";
 import { getAdminPb } from "../pb";
-import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { makeUserTzResolver } from "./tz";
+import { notifyOnce } from "./ledger";
 
 const TRAVEL_ORIGINS = [`https://travel.${DOMAIN}`, `https://${DOMAIN}`];
 // The home shell (kirkl.in) is the ONLY origin where travel is mounted under a
@@ -181,30 +181,6 @@ function summarizeTodayActivities(ctx: ActiveContext): string {
   return `${all.slice(0, 3).join(", ")} and ${all.length - 3} more`;
 }
 
-interface DedupState {
-  morning?: Record<string, string>;
-  evening?: Record<string, string>;
-}
-
-function readDedup(user: { travel_notif_state?: unknown }): DedupState {
-  const v = user.travel_notif_state;
-  if (v && typeof v === "object" && !Array.isArray(v)) return v as DedupState;
-  return {};
-}
-
-async function writeDedup(
-  pb: PocketBase,
-  userId: string,
-  current: DedupState,
-  kind: "morning" | "evening",
-  tripId: string,
-  ymd: string,
-): Promise<void> {
-  const next = { ...current };
-  next[kind] = { ...(current[kind] ?? {}), [tripId]: ymd };
-  await pb.collection("users").update(userId, { travel_notif_state: next }, { $autoCancel: false });
-}
-
 /**
  * Run morning + evening checks against `now`. Designed to be called once
  * per hour by the cron; per-user-tz hour gating handles the actual timing.
@@ -218,15 +194,6 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
   if (contexts.length === 0) {
     console.log(`[travel-tick] No active trips`);
     return { morning: { notified: 0, skipped: 0 }, evening: { notified: 0, skipped: 0 } };
-  }
-
-  const userCache = new Map<string, Record<string, unknown>>();
-  async function loadUser(userId: string): Promise<Record<string, unknown>> {
-    const cached = userCache.get(userId);
-    if (cached) return cached;
-    const u = await pb.collection("users").getOne(userId, { $autoCancel: false }) as unknown as Record<string, unknown>;
-    userCache.set(userId, u);
-    return u;
   }
 
   // For evening: prefetch today's day notes to suppress if already journaled.
@@ -278,42 +245,53 @@ export async function runTravelNotificationsTick(now: Date = new Date()): Promis
     const isEvening = ctx.hourInTz === EVENING_HOUR;
     if (!isMorning && !isEvening) continue;
 
-    const user = await loadUser(ctx.userId);
-    const dedup = readDedup(user as { travel_notif_state?: unknown });
-
+    // Once-per-(trip, owner-local-day) idempotency via the shared ledger. The
+    // bucket is `ctx.todayInTz` (the trip-owner-local day), and the trip id is
+    // folded into `kind` so two concurrent trips don't collide. notifyOnce owns
+    // the "already sent?" check + mark-after-success (an UPGRADE over the old
+    // travel_notif_state path, which stamped UNCONDITIONALLY and could suppress
+    // a day after a 0-delivery tick). The evening "already journaled" check
+    // below stays a pre-send skip — it's a content gate, not an idempotency
+    // stamp, so it must short-circuit before notifyOnce.
     if (isMorning) {
-      const last = dedup.morning?.[ctx.tripId];
-      if (last === ctx.todayInTz) { mSkipped++; continue; }
       const buildUrl = (origin: string) => ctx.todayDay
         ? dayUrl(origin, ctx.tripId, ctx.todayInTz)
         : tripUrl(origin, ctx.tripId);
-      const result = await sendPushToUser(pb, ctx.userId, {
-        title: `Today in ${ctx.tripDestination}`,
-        body: summarizeTodayActivities(ctx),
-        buildUrl,
-        data: { type: "travel_morning", tripId: ctx.tripId, date: ctx.todayInTz },
-      }, { preferredOrigins: TRAVEL_ORIGINS });
-      console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
-      await writeDedup(pb, ctx.userId, dedup, "morning", ctx.tripId, ctx.todayInTz);
-      mNotified++;
+      const result = await notifyOnce(pb, {
+        user: ctx.userId,
+        kind: `travel_morning:${ctx.tripId}`,
+        bucket: ctx.todayInTz,
+        payload: {
+          title: `Today in ${ctx.tripDestination}`,
+          body: summarizeTodayActivities(ctx),
+          buildUrl,
+          data: { type: "travel_morning", tripId: ctx.tripId, date: ctx.todayInTz },
+        },
+        preferredOrigins: TRAVEL_ORIGINS,
+      });
+      console.log(`[travel-morning] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result}`);
+      if (result === "sent") mNotified++; else mSkipped++;
     }
 
     if (isEvening) {
       if (journaled.has(`${ctx.userId}|${ctx.tripId}|${ctx.todayInTz}`)) { eSkipped++; continue; }
-      const last = dedup.evening?.[ctx.tripId];
-      if (last === ctx.todayInTz) { eSkipped++; continue; }
       const buildUrl = (origin: string) => ctx.todayDay
         ? dayUrl(origin, ctx.tripId, ctx.todayInTz)
         : tripUrl(origin, ctx.tripId);
-      const result = await sendPushToUser(pb, ctx.userId, {
-        title: `How was today in ${ctx.tripDestination}?`,
-        body: "Tap to record what you'll want to remember.",
-        buildUrl,
-        data: { type: "travel_evening", tripId: ctx.tripId, date: ctx.todayInTz },
-      }, { preferredOrigins: TRAVEL_ORIGINS });
-      console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
-      await writeDedup(pb, ctx.userId, dedup, "evening", ctx.tripId, ctx.todayInTz);
-      eNotified++;
+      const result = await notifyOnce(pb, {
+        user: ctx.userId,
+        kind: `travel_evening:${ctx.tripId}`,
+        bucket: ctx.todayInTz,
+        payload: {
+          title: `How was today in ${ctx.tripDestination}?`,
+          body: "Tap to record what you'll want to remember.",
+          buildUrl,
+          data: { type: "travel_evening", tripId: ctx.tripId, date: ctx.todayInTz },
+        },
+        preferredOrigins: TRAVEL_ORIGINS,
+      });
+      console.log(`[travel-evening] User ${ctx.userId} trip ${ctx.tripId} (${ctx.userTz}): ${result}`);
+      if (result === "sent") eNotified++; else eSkipped++;
     }
   }
 

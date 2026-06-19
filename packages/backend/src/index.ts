@@ -107,6 +107,10 @@ export type {
 export type { LifeSampleQuestion, LifeRandomSamplesConfig } from "./types/life-config";
 export { RANDOM_SAMPLES } from "./types/life-config";
 
+// --- Web-Push notification type registry (SW routing source of truth) ---
+export { NOTIFICATION_TYPES } from "./notification-types";
+export type { NotificationType, NotificationRouting } from "./notification-types";
+
 // --- Upkeep urgency (canonical impl shared by upkeep UI + life morning header) ---
 export {
   calculateDueDate,

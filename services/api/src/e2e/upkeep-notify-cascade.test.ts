@@ -258,42 +258,65 @@ describe("upkeep recurring cron — due/aggregate seam", () => {
 
 /**
  * Drives the REAL runUpkeepNotifications() against the test PB and asserts on
- * observable PB state — the `last_task_notification` stamp the cron writes on
- * every user it notifies. The push layer is mocked to report a successful send
- * (sent:1), so the cron stamps + counts each selected user and the stamp is the
- * ground-truth signal of "who would be notified." This is the case that
- * actually exercises the union-retirement and
- * the in-cron `off` check (the helper-level tests above re-implement the cron's
- * logic inline; this one runs the cron itself).
+ * observable PB state — the `notification_log` ledger row (kind="upkeep") the
+ * cron writes for every user it notifies. The push layer is mocked to report a
+ * successful send (sent:1), so the cron stamps + counts each selected user and
+ * the ledger row is the ground-truth signal of "who would be notified." This is
+ * the case that actually exercises the union-retirement and the in-cron `off`
+ * check (the helper-level tests above re-implement the cron's logic inline;
+ * this one runs the cron itself).
  */
 describe("upkeep recurring cron — runUpkeepNotifications drives PB state", () => {
   const todayLA = () =>
     new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 
-  /** Pacific calendar day of a stamp, or null if unset. */
-  const stampDay = (v: unknown): string | null =>
-    v ? new Date(v as string).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }) : null;
+  /** The upkeep cron's ledger key for a user on today's Pacific day. */
+  const upkeepLedgerFilter = (id: string) =>
+    adminPb.filter("user = {:u} && kind = {:k} && bucket = {:b}", {
+      u: id, k: "upkeep", b: todayLA(),
+    });
 
   /**
-   * Neutralize every user in the PB by stamping last_task_notification = today
-   * (so the cron's per-user-per-day idempotency check skips them), THEN clear
-   * the stamp on just the users this case cares about. This makes the cron's
-   * global {notified, skipped} counts deterministic regardless of tasks/users
-   * left over from earlier describe blocks in this same file.
+   * Neutralize every user in the PB by pre-writing an "upkeep" ledger row for
+   * today (so the cron's per-user-per-day idempotency check skips them), THEN
+   * delete that row for just the users this case cares about. This makes the
+   * cron's global {notified, skipped} counts deterministic regardless of
+   * tasks/users left over from earlier describe blocks in this same file.
    */
   async function isolateUsers(clearIds: string[]): Promise<void> {
-    const now = new Date().toISOString();
+    const bucket = todayLA();
     const all = await adminPb.collection("users").getFullList({ $autoCancel: false });
+    const clear = new Set(clearIds);
     for (const u of all) {
-      await adminPb.collection("users").update(u.id, { last_task_notification: now }, { $autoCancel: false });
+      if (clear.has(u.id)) continue;
+      // Idempotent seed: skip if already present (UNIQUE index would throw).
+      const existing = await adminPb.collection("notification_log").getFullList({
+        filter: upkeepLedgerFilter(u.id), $autoCancel: false,
+      });
+      if (existing.length === 0) {
+        await adminPb.collection("notification_log").create(
+          { user: u.id, kind: "upkeep", bucket, sent_at: new Date().toISOString() },
+          { $autoCancel: false },
+        );
+      }
     }
     for (const id of clearIds) {
-      await adminPb.collection("users").update(id, { last_task_notification: null }, { $autoCancel: false });
+      const rows = await adminPb.collection("notification_log").getFullList({
+        filter: upkeepLedgerFilter(id), $autoCancel: false,
+      });
+      for (const r of rows) {
+        await adminPb.collection("notification_log").delete(r.id, { $autoCancel: false });
+      }
     }
   }
 
-  const stampOf = async (id: string): Promise<string | null> =>
-    stampDay((await adminPb.collection("users").getOne(id)).last_task_notification);
+  /** Today's Pacific day if a ledger row exists for this user's upkeep send, else null. */
+  const stampOf = async (id: string): Promise<string | null> => {
+    const rows = await adminPb.collection("notification_log").getFullList({
+      filter: upkeepLedgerFilter(id), $autoCancel: false,
+    });
+    return rows.length > 0 ? todayLA() : null;
+  };
 
   it("bare recurring chore created_by=A on a {A,B} list stamps A only, NOT B (union retired)", async () => {
     const a = await makeActor("cron-a");

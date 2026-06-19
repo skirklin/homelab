@@ -58,8 +58,9 @@ interface DayNote {
  */
 function makeFakePb(opts: { owners: string[]; dayNotes: DayNote[] }) {
   const userUpdates: Array<{ id: string; data: Record<string, unknown> }> = [];
-  // Per-user mutable travel_notif_state so the dedup read/write round-trips.
-  const notifState: Record<string, unknown> = {};
+  // notification_log rows the ledger (notifyOnce) creates. The fixtures start
+  // empty (nothing sent today), so every eligible reminder fires once.
+  const ledgerRows: Array<Record<string, unknown>> = [];
 
   const pb = {
     filter: (expr: string, _params?: Record<string, unknown>) => expr,
@@ -86,14 +87,19 @@ function makeFakePb(opts: { owners: string[]; dayNotes: DayNote[] }) {
           return { getFullList: async () => opts.dayNotes };
         case "users":
           return {
-            getOne: async (id: string) => ({
-              id,
-              timezone: TZ,
-              travel_notif_state: notifState[id],
-            }),
+            getOne: async (id: string) => ({ id, timezone: TZ }),
             update: async (id: string, data: Record<string, unknown>) => {
               userUpdates.push({ id, data });
-              if ("travel_notif_state" in data) notifState[id] = data.travel_notif_state;
+              return data;
+            },
+          };
+        case "notification_log":
+          return {
+            // The ledger fixtures start empty; getList always reports "nothing
+            // sent yet" so a same-day duplicate guard isn't exercised here.
+            getList: async () => ({ totalItems: 0, items: [] }),
+            create: async (data: Record<string, unknown>) => {
+              ledgerRows.push(data);
               return data;
             },
           };

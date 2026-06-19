@@ -24,7 +24,6 @@ export interface UserProfile {
   household_slugs?: Record<string, string>;
   travel_slugs?: Record<string, string>;
   upkeep_notification_mode?: NotificationMode;
-  last_task_notification?: string;
 }
 
 export type UserProfileStore = UserProfile;
