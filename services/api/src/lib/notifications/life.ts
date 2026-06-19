@@ -1,14 +1,35 @@
 /**
- * Life Tracker random sampling notification trigger.
- * Generates random sample times daily and sends push notifications when they're due.
+ * Life notification cron — data-driven (Phase B4).
+ *
+ * Each `life_logs` row resolves to a list of `LifeNotification`s
+ * (`resolveNotifications`: `manifest.notifications ?? buildNotificationsFromColumns`)
+ * and the cron dispatches per `strategy.kind`:
+ *
+ *   - `fixed`  — a wall-clock reminder (daily, or weekly pinned to a weekday)
+ *                that opens its target View. `subsumes` suppresses other
+ *                notifications on the day it fires (weekly subsumes evening on
+ *                Sunday). Handled here in `runLifeReminderCheck` (per-minute).
+ *   - `random` — random sampling check-ins. The existing `runLifeTrackerSampling`
+ *                state machine (per-5-min) is reused verbatim, now additionally
+ *                gated on a `random` notification being present in the resolve.
+ *
+ * SAFETY: the resolve reconstructs today's exact behavior from the legacy
+ * columns for any log without `manifest.notifications`, so existing users see
+ * byte-identical send decisions with no data migration. See `life-notifications.ts`
+ * and `life-byte-parity.test.ts` (the merge gate).
  */
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
-import type { SampleSchedule } from "@homelab/backend";
-import { RANDOM_SAMPLES } from "@homelab/backend";
+import type { SampleSchedule, LifeView, LifeNotification, LifeNotifyStrategy } from "@homelab/backend";
+import { RANDOM_SAMPLES, DEFAULT_VIEWS } from "@homelab/backend";
 import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { makeUserTzResolver, safeTz } from "./tz";
+import {
+  resolveNotifications,
+  isEnabled,
+  LEGACY_SENT_COLUMN,
+} from "./life-notifications";
 
 // Life is now standalone at life.kirkl.in (the old kirkl.in/life module was
 // removed) — both session wizards and the sampling UI mount at root there, so
@@ -20,15 +41,17 @@ import { makeUserTzResolver, safeTz } from "./tz";
 const LIFE_ORIGINS = [`https://life.${DOMAIN}`, `https://${DOMAIN}`];
 
 /**
- * Origin-aware deep link for the morning/evening/weekly session wizards.
- * Life is standalone-only, so the path is just root-relative (`/morning` …);
- * the service worker resolves it against the delivery origin. Same shape as
- * travel's tripUrl/dayUrl — passed to sendPushToUser as `buildUrl` so the
- * emitted url is SAME-ORIGIN relative (never an absolute https://life.kirkl.in
- * URL, which would cold-load an empty per-origin authStore = forced sign-out).
+ * Origin-aware deep link for a target View. Life is standalone-only, so the
+ * path is just root-relative (`/<view>`); the service worker resolves it
+ * against the delivery origin. Same shape as travel's tripUrl/dayUrl — passed
+ * to sendPushToUser as `buildUrl` so the emitted url is SAME-ORIGIN relative
+ * (never an absolute https://life.kirkl.in URL, which would cold-load an empty
+ * per-origin authStore = forced sign-out). The morning/evening/weekly target
+ * ids match today's `sessionUrl(kind)` exactly, so existing reminders deep-link
+ * to the same `/morning` `/evening` `/weekly` URLs.
  */
-export function sessionUrl(kind: "morning" | "evening" | "weekly"): string {
-  return `/${kind}`;
+export function viewUrl(target: string): string {
+  return `/${target}`;
 }
 
 // Used when RANDOM_SAMPLES.timezone is missing/garbage. Differs from travel's
@@ -79,6 +102,26 @@ function generateSampleTimes(
   return times.sort((a, b) => a - b);
 }
 
+/**
+ * Return the resolved `random` notification for a log, or null. Used as an
+ * additional gate on the sampler so sampling is a notification STRATEGY, not a
+ * standalone feature. In the transition this is purely additive: every log
+ * without `manifest.notifications` gets a `random` notification iff
+ * `random_sampling_enabled` (see `buildNotificationsFromColumns`), so the
+ * combined gate `random_sampling_enabled && hasRandomNotification` is identical
+ * to today's `random_sampling_enabled`-only gate. A log that explicitly sets
+ * `manifest.notifications` (e.g. Angela's `[]`) opts OUT of sampling unless it
+ * lists a `random` notification, which is the intended go-forward behavior.
+ */
+function randomNotificationFor(
+  log: Record<string, unknown>,
+): (LifeNotifyStrategy & { kind: "random" }) | null {
+  for (const n of resolveNotifications(log as never)) {
+    if (isEnabled(n) && n.strategy.kind === "random") return n.strategy;
+  }
+  return null;
+}
+
 export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped: number }> {
   const pb = await getAdminPb();
   const now = Date.now();
@@ -95,10 +138,12 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   // Two layers of gating:
   //   1. `RANDOM_SAMPLES.enabled` — system-wide kill switch from @homelab/backend.
   //      If sampling is globally disabled or misconfigured we skip the whole tick.
-  //   2. `life_logs.random_sampling_enabled` — per-log opt-in
-  //      (20260522_221130_life_random_sampling_enabled). Defaults to false so
-  //      auto-created logs don't push until the owner explicitly flips the
-  //      toggle in the life app's Settings modal. Per-log check happens
+  //   2. A resolved `random` notification per log (B4) — which for legacy logs
+  //      means the per-log `random_sampling_enabled` opt-in
+  //      (20260522_221130_life_random_sampling_enabled), since
+  //      `buildNotificationsFromColumns` derives the `random` notification from
+  //      exactly that flag. Defaults to false so auto-created logs don't push
+  //      until the owner explicitly flips the toggle. Per-log check happens
   //      inside the loop below.
   const config = RANDOM_SAMPLES;
   if (!config.enabled || !config.timesPerDay || config.timesPerDay < 1) {
@@ -118,9 +163,24 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
   const tzForOwner = makeUserTzResolver(pb, configTz);
 
   for (const logDoc of logs) {
-    // Per-log opt-in gate. Must come before schedule generation so disabled
-    // logs don't accumulate `sample_schedule` writes either.
-    if (!logDoc.random_sampling_enabled) {
+    // Per-log gate. The `random` notification must be present (and enabled) in
+    // the log's resolved notifications; for legacy logs this is exactly the
+    // `random_sampling_enabled` opt-in. Must come before schedule generation so
+    // ungated logs don't accumulate `sample_schedule` writes either.
+    const randomStrategy = randomNotificationFor(logDoc);
+    if (!randomStrategy) {
+      totalSkipped++;
+      continue;
+    }
+
+    // The strategy carries its own timesPerDay/activeHours; legacy logs inherit
+    // them from RANDOM_SAMPLES via buildNotificationsFromColumns, so this stays
+    // byte-identical. Validate the strategy's hours the same way as the global
+    // config (a malformed manifest-set strategy is skipped, not crashed).
+    const timesPerDay = randomStrategy.timesPerDay;
+    const activeHours = randomStrategy.activeHours;
+    if (!timesPerDay || timesPerDay < 1 ||
+        !Array.isArray(activeHours) || activeHours.length !== 2 || activeHours[0] >= activeHours[1]) {
       totalSkipped++;
       continue;
     }
@@ -136,7 +196,7 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
 
     // Generate new schedule for today if needed
     if (!schedule || schedule.date !== today) {
-      const times = generateSampleTimes(config.timesPerDay, config.activeHours, today, timezone);
+      const times = generateSampleTimes(timesPerDay, activeHours, today, timezone);
       schedule = { date: today, times, sentTimes: [] };
       await pb.collection("life_logs").update(logDoc.id, {
         sample_schedule: schedule,
@@ -226,13 +286,16 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
 }
 
 // ---------------------------------------------------------------------------
-// Morning / evening session reminders
+// Fixed-strategy session reminders (morning / evening / weekly + any
+// manifest-defined fixed notification)
 // ---------------------------------------------------------------------------
 
-// Greetings shown as the push body. Kept in sync with the SESSIONS entries in
-// apps/life/app/src/manifest.ts. Duplicated here rather than imported because
-// the api service doesn't depend on the life app and the strings rarely move.
-const SESSION_REMINDERS = {
+// Push body/title for the column-derived session reminders, kept byte-faithful
+// to the pre-B4 cron so existing users' pushes are unchanged. The DEFAULT_VIEWS
+// greetings already match these bodies, but the TITLES differ ("Morning" vs
+// "Morning check-in"), so for the three legacy targets we keep these exact
+// strings. Any other target falls back to the resolved View's title/greeting.
+const LEGACY_REMINDER_CONTENT: Record<string, { title: string; body: string }> = {
   morning: {
     title: "Morning check-in",
     body: "Good morning. A few questions before the day gets going.",
@@ -245,7 +308,26 @@ const SESSION_REMINDERS = {
     title: "Weekly review",
     body: "Time to look back on the week.",
   },
-} as const;
+};
+
+/**
+ * Resolve the push title/body for a fixed notification's target View. Prefers
+ * the byte-faithful legacy strings for the morning/evening/weekly targets (so
+ * existing reminders are unchanged); otherwise derives from the target View's
+ * `title` + `greeting`, resolved via `manifest.views ?? DEFAULT_VIEWS`.
+ */
+function pushContentForTarget(
+  target: string,
+  views: LifeView[] | undefined,
+): { title: string; body: string } {
+  const legacy = LEGACY_REMINDER_CONTENT[target];
+  if (legacy) return legacy;
+  const view = views?.find((v) => v.id === target);
+  return {
+    title: view?.title || "Reminder",
+    body: view?.greeting || "Time to check in.",
+  };
+}
 
 /**
  * Returns true if `target` ("HH:MM") matches `current` ("HH:MM") within a
@@ -270,30 +352,46 @@ function withinWindow(target: string, current: string, windowMin: number): boole
   return diff <= windowMin;
 }
 
-interface ReminderKind {
-  field: "morning_reminder_time" | "evening_reminder_time";
-  sentField: "last_morning_reminder_sent" | "last_evening_reminder_sent";
-  kind: "morning" | "evening";
-}
-
-const REMINDER_KINDS: ReminderKind[] = [
-  {
-    field: "morning_reminder_time",
-    sentField: "last_morning_reminder_sent",
-    kind: "morning",
-  },
-  {
-    field: "evening_reminder_time",
-    sentField: "last_evening_reminder_sent",
-    kind: "evening",
-  },
-];
+/**
+ * Map JS `Date.getDay()`-style weekday (0=Sun..6=Sat) from a tz-rendered day
+ * name. date-fns-tz's `EEEE` token gives the English day name regardless of
+ * locale config, which we map to 0..6.
+ */
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
+};
 
 /**
- * Per-minute cron tick. Fires the morning or evening session reminder to
- * each log's owner when their local wall-clock time matches the configured
- * "HH:MM" (within ±1 min). Idempotent via last_{morning,evening}_reminder_sent
- * = "YYYY-MM-DD" in the user's tz.
+ * Is a `fixed` notification scheduled to fire TODAY (in `tz`)? "Today" gates on
+ * cadence: daily fires every day; weekly fires only on `weekday` (0=Sun). This
+ * is the day-level predicate — the ±1min time match is checked separately. It's
+ * also what `subsumes` consults: a notification only suppresses others on a day
+ * it is itself scheduled.
+ */
+function fixedScheduledToday(
+  strategy: LifeNotifyStrategy & { kind: "fixed" },
+  weekdayIdx: number,
+): boolean {
+  if (strategy.cadence === "weekly") {
+    return weekdayIdx === (strategy.weekday ?? 0);
+  }
+  return true;
+}
+
+/**
+ * Per-minute cron tick. For each log, resolves its notifications and fires any
+ * `fixed` one whose owner-local wall-clock matches `strategy.time` (±1 min),
+ * unless it's subsumed by another notification scheduled to fire today.
+ *
+ * Idempotency is TRANSITION-SAFE: a notification counts as already-sent-today
+ * iff `reminder_state[id] === today` OR (for the column-derived ids) the legacy
+ * `last_{morning,evening,weekly}_reminder_sent === today`. Going forward we
+ * write `reminder_state[id]` only; the legacy column read prevents a deploy-day
+ * double-fire if a legacy reminder already went out today before the cutover.
+ *
+ * Mark-after-success is preserved: `reminder_state[id]` is written only when a
+ * push actually landed (result.sent > 0), so a no-delivery tick retries within
+ * the ±1min window.
  */
 export async function runLifeReminderCheck(
   now: Date = new Date(),
@@ -314,132 +412,102 @@ export async function runLifeReminderCheck(
   const tzForUser = makeUserTzResolver(pb, FALLBACK_TZ);
 
   for (const logDoc of logs) {
-    for (const kind of REMINDER_KINDS) {
-      const target = (logDoc[kind.field] as string | undefined) || "";
-      if (!target) continue;
+    const notifications = resolveNotifications(logDoc as never);
+    // Only fixed notifications fire here; random is handled by the sampler.
+    const fixedNotifs = notifications.filter(
+      (n): n is LifeNotification & { strategy: LifeNotifyStrategy & { kind: "fixed" } } =>
+        isEnabled(n) && n.strategy.kind === "fixed",
+    );
+    if (fixedNotifs.length === 0) continue;
+
+    const ownerId: string = (logDoc.owner as string) || "";
+
+    // Per-owner tz, resolved once per log (every fixed notification on a log
+    // shares the owner's clock).
+    const tz = ownerId ? await tzForUser(ownerId) : FALLBACK_TZ;
+    const currentHHmm = formatInTimeZone(now, tz, "HH:mm");
+    const todayYmd = formatInTimeZone(now, tz, "yyyy-MM-dd");
+    const weekdayIdx = WEEKDAY_INDEX[formatInTimeZone(now, tz, "EEEE")] ?? 0;
+
+    // Which notifications are scheduled to fire today (used by `subsumes`).
+    const scheduledTodayIds = new Set(
+      fixedNotifs.filter((n) => fixedScheduledToday(n.strategy, weekdayIdx)).map((n) => n.id),
+    );
+    // A notification is subsumed today iff some notification scheduled to fire
+    // today lists its id in `subsumes`. (Weekly subsumes evening on Sunday.)
+    const subsumedIds = new Set<string>();
+    for (const n of fixedNotifs) {
+      if (!scheduledTodayIds.has(n.id)) continue;
+      for (const victim of n.strategy.subsumes ?? []) subsumedIds.add(victim);
+    }
+
+    const reminderState = (logDoc.reminder_state as Record<string, string> | null | undefined) || {};
+
+    // Resolve the log's Views once for push title/body (manifest.views ??
+    // DEFAULT_VIEWS), mirroring resolveNotifications' fallback shape.
+    const manifestViews = (logDoc.manifest as { views?: LifeView[] | null } | null | undefined)?.views;
+    const views = Array.isArray(manifestViews) ? manifestViews : DEFAULT_VIEWS;
+
+    for (const n of fixedNotifs) {
+      const strategy = n.strategy;
       checked++;
 
-      // life_logs is single-owner (migration 0028).
-      const ownerId: string = (logDoc.owner as string) || "";
       if (!ownerId) {
         skipped++;
         continue;
       }
-
-      const tz = await tzForUser(ownerId);
-      const currentHHmm = formatInTimeZone(now, tz, "HH:mm");
-      const todayYmd = formatInTimeZone(now, tz, "yyyy-MM-dd");
-
-      // On Sundays, the weekly review subsumes the evening reflection —
-      // skip the evening reminder so the user gets one Sunday-evening
-      // nudge (weekly), not two competing ones.
-      if (kind.kind === "evening" && formatInTimeZone(now, tz, "EEEE") === "Sunday") {
+      // Weekly cadence: only its weekday.
+      if (!fixedScheduledToday(strategy, weekdayIdx)) {
+        skipped++;
+        continue;
+      }
+      // Subsumed today (e.g. evening on Sunday): skip.
+      if (subsumedIds.has(n.id)) {
+        skipped++;
+        continue;
+      }
+      if (!withinWindow(strategy.time, currentHHmm, 1)) {
         skipped++;
         continue;
       }
 
-      if (!withinWindow(target, currentHHmm, 1)) {
-        skipped++;
-        continue;
-      }
-
-      const lastSent = (logDoc[kind.sentField] as string | undefined) || "";
-      if (lastSent === todayYmd) {
+      // Transition-safe idempotency: reminder_state[id] OR the legacy column.
+      const legacyCol = LEGACY_SENT_COLUMN[n.id];
+      const legacySent = legacyCol ? ((logDoc[legacyCol] as string | undefined) || "") : "";
+      if (reminderState[n.id] === todayYmd || legacySent === todayYmd) {
         skipped++;
         continue;
       }
 
       // Mark as sent only AFTER a delivery actually landed (result.sent > 0).
-      // The old code marked BEFORE pushing to avoid a concurrent double-fire,
-      // but that's moot now: the in-process scheduler runs this job with
-      // croner `protect: true` (scheduler.ts), so ticks never overlap. Marking
-      // before send had a real cost — a tick that delivered nothing (no live
-      // subs / all failed) or threw still burned the day, silently losing the
-      // reminder with no retry. Now we mark after success; if nothing was
-      // delivered we leave sentField untouched so the next within-window tick
-      // retries. The ±1min withinWindow guard bounds retries to ~1-2 ticks, and
-      // the lastSent === todayYmd skip above still prevents a second send once
+      // croner protect:true removes the double-fire concern; marking after
+      // success lets a no-delivery tick retry within the ±1min window, while
+      // the reminder_state[id]/legacy guard above prevents a second send once
       // one succeeds.
-      const payload = SESSION_REMINDERS[kind.kind];
+      const content = pushContentForTarget(n.target, views);
       try {
         const result = await sendPushToUser(pb, ownerId, {
-          title: payload.title,
-          body: payload.body,
-          buildUrl: () => sessionUrl(kind.kind),
-          data: { type: `life_${kind.kind}_reminder`, logId: logDoc.id },
+          title: content.title,
+          body: content.body,
+          buildUrl: () => viewUrl(n.target),
+          data: { type: `life_${n.target}_reminder`, logId: logDoc.id },
         }, { preferredOrigins: LIFE_ORIGINS });
-        console.log(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
+        console.log(`[life-reminder/${n.id}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
         if (result.sent > 0) {
+          // Merge into the existing reminder_state map (don't clobber siblings).
+          const nextState = { ...reminderState, [n.id]: todayYmd };
+          reminderState[n.id] = todayYmd;
           await pb.collection("life_logs").update(
             logDoc.id,
-            { [kind.sentField]: todayYmd },
+            { reminder_state: nextState },
             { $autoCancel: false },
           );
           sent++;
         } else {
-          console.warn(`[life-reminder/${kind.kind}] 0 delivered — not marking, will retry within window`);
+          console.warn(`[life-reminder/${n.id}] 0 delivered — not marking, will retry within window`);
         }
       } catch (err) {
-        console.error(`[life-reminder/${kind.kind}] log ${logDoc.id} → user ${ownerId}:`, err);
-      }
-    }
-
-    // Weekly review — Sunday only in the user's tz. Same window + idempotency
-    // pattern, but the gate is (a) day-of-week and (b) last_weekly_reminder_sent
-    // ≠ today's date.
-    const weeklyTarget = (logDoc.weekly_reminder_time as string | undefined) || "";
-    if (weeklyTarget) {
-      checked++;
-      const ownerId: string = (logDoc.owner as string) || "";
-      if (!ownerId) {
-        skipped++;
-      } else {
-        const tz = await tzForUser(ownerId);
-        const currentHHmm = formatInTimeZone(now, tz, "HH:mm");
-        const todayYmd = formatInTimeZone(now, tz, "yyyy-MM-dd");
-        // date-fns `e` token: 1..7 with default weekStartsOn=0 (Sun). Using
-        // the `i` token would be ISO (Mon=1..Sun=7); easier is to pull the
-        // day directly via the JS-style `c` token, but the simplest robust
-        // route is parsing the day name.
-        const dayName = formatInTimeZone(now, tz, "EEEE"); // "Sunday"...
-        const isSunday = dayName === "Sunday";
-
-        if (!isSunday) {
-          skipped++;
-        } else if (!withinWindow(weeklyTarget, currentHHmm, 1)) {
-          skipped++;
-        } else {
-          const lastSent = (logDoc.last_weekly_reminder_sent as string | undefined) || "";
-          if (lastSent === todayYmd) {
-            skipped++;
-          } else {
-            // Mark-after-success, same rationale as morning/evening above:
-            // protect:true removes the double-fire concern, and marking only
-            // when result.sent > 0 lets a no-delivery tick retry within window.
-            const payload = SESSION_REMINDERS.weekly;
-            try {
-              const result = await sendPushToUser(pb, ownerId, {
-                title: payload.title,
-                body: payload.body,
-                buildUrl: () => sessionUrl("weekly"),
-                data: { type: "life_weekly_reminder", logId: logDoc.id },
-              }, { preferredOrigins: LIFE_ORIGINS });
-              console.log(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
-              if (result.sent > 0) {
-                await pb.collection("life_logs").update(
-                  logDoc.id,
-                  { last_weekly_reminder_sent: todayYmd },
-                  { $autoCancel: false },
-                );
-                sent++;
-              } else {
-                console.warn(`[life-reminder/weekly] 0 delivered — not marking, will retry within window`);
-              }
-            } catch (err) {
-              console.error(`[life-reminder/weekly] log ${logDoc.id} → user ${ownerId}:`, err);
-            }
-          }
-        }
+        console.error(`[life-reminder/${n.id}] log ${logDoc.id} → user ${ownerId}:`, err);
       }
     }
   }

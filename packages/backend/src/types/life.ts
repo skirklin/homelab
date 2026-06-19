@@ -274,6 +274,17 @@ export interface LifeManifest {
    * The user's scheduled nudges. Same RESOLVE SEMANTICS as `views`
    * (`undefined` → `DEFAULT_NOTIFICATIONS`; `[]` → explicitly none). UNUSED by
    * the cron in Phase B1 (Phase B4 wires strategy dispatch).
+   *
+   * ⚠️ The `undefined → DEFAULT_NOTIFICATIONS` resolve above is the
+   * new-user/editor default ONLY. The B4 CRON's actual `undefined` fallback is
+   * column-reconstruction (`resolveNotifications` →
+   * `buildNotificationsFromColumns` in
+   * `services/api/src/lib/notifications/life-notifications.ts`), which emits
+   * `*-reminder` ids + real column times — NOT `DEFAULT_NOTIFICATIONS`'s bare
+   * ids + placeholder times. Phase D's column→manifest seeding must reconcile to
+   * the `*-reminder` id scheme so the `reminder_state` double-fire guard keeps
+   * matching (see that file + `DEFAULT_NOTIFICATIONS` in
+   * `packages/backend/src/life-view-defaults.ts`).
    */
   notifications?: LifeNotification[];
 }
