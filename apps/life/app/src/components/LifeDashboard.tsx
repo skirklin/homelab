@@ -2,7 +2,14 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Switch, Tooltip } from "antd";
-import { BellOutlined, SunOutlined, MoonOutlined, CheckCircleFilled, CalendarOutlined } from "@ant-design/icons";
+import {
+  BellOutlined,
+  SunOutlined,
+  MoonOutlined,
+  CheckCircleFilled,
+  CalendarOutlined,
+  PlusOutlined,
+} from "@ant-design/icons";
 import {
   useAuth,
   PageContainer,
@@ -27,7 +34,7 @@ const TitleWithStatus = styled.div`
 import { useLifeContext } from "../life-context";
 import { useSettingsMenu } from "../settings-menu";
 import { GlobalQuickRow } from "./GlobalQuickRow";
-import { ShapeCard } from "./ShapeCard";
+import { HabitBoard } from "./HabitBoard";
 import { ShapeSheet } from "./ShapeSheet";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { DateNav } from "./DateNav";
@@ -35,9 +42,9 @@ import { Hint } from "./Hint";
 import { RANDOM_SAMPLES } from "../manifest";
 import { normalizeSessionRuns, type SessionView } from "@homelab/backend";
 import { useViews } from "../lib/views";
-import { useTrackables } from "../lib/trackables";
+import { useTrackables, useGoals } from "../lib/trackables";
 import { useSelectedDate, getDateString } from "../lib/useSelectedDate";
-import { SHAPE_ORDER } from "../lib/shapes";
+import { SHAPE_ORDER, SHAPE_META } from "../lib/shapes";
 import type { TrackableShape } from "@homelab/backend";
 import {
   initializeMessaging,
@@ -77,10 +84,67 @@ const SessionRow = styled.div<{ $hasPrimary: boolean }>`
   gap: var(--space-xs);
 `;
 
+/**
+ * "+ Log something else" — the entry point for anything not on Favorites. A
+ * toggle reveals the four shape options; each opens the existing per-shape
+ * ShapeSheet (typeahead-to-pick-or-create + per-thing inputs + star-to-favorite).
+ * Replaces the always-visible 2×2 ShapeCard grid.
+ */
+const LogMoreToggle = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-sm);
+  background: var(--color-bg);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+
+  .anticon { font-size: 14px; }
+
+  &:hover { border-color: var(--color-primary); background: var(--color-bg-muted); }
+`;
+
 const ShapeGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-xs);
+  margin-top: var(--space-xs);
+`;
+
+const ShapeButton = styled.button`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  min-height: 56px;
+  transition: border-color 0.15s, background 0.15s;
+
+  &:hover { border-color: var(--color-primary); background: var(--color-bg-muted); }
+`;
+
+const ShapeButtonTitle = styled.span`
+  font-weight: 600;
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+`;
+
+const ShapeButtonHint = styled.span`
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 `;
 
 const SessionCard = styled.button<{ $size: "primary" | "secondary"; $muted: boolean }>`
@@ -140,6 +204,15 @@ export function LifeDashboard() {
   const { menuItems } = useSettingsMenu();
   // Which shape's bottom sheet is open (null = closed).
   const [openShape, setOpenShape] = useState<TrackableShape | null>(null);
+  // The "+ Log something else" shape picker (collapsed by default).
+  const [logMoreOpen, setLogMoreOpen] = useState(false);
+  // When the habit board backfills via the sheet, it passes the tapped day;
+  // that overrides the viewed day so the sheet logs to the right bucket.
+  const [shapeBackfillDay, setShapeBackfillDay] = useState<Date | null>(null);
+  const openShapeForBackfill = useCallback((shape: TrackableShape, backfillDay?: Date) => {
+    setShapeBackfillDay(backfillDay ?? null);
+    setOpenShape(shape);
+  }, []);
   const [showSampleModal, setShowSampleModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
@@ -164,9 +237,11 @@ export function LifeDashboard() {
   // inherits today's events from a single feed.
   const allEntries = Array.from(state.entries.values());
 
-  // The vocabulary comes from the per-user manifest. Layout is by SHAPE (four
-  // cards), not by group — `group` is a semantic rollup for trends.
+  // The vocabulary + goals come from the per-user manifest. The HabitBoard is
+  // the day's review/check-off surface; favorites + "+ Log something else" are
+  // the capture surfaces.
   const trackables = useTrackables();
+  const goals = useGoals();
 
   // The session cards mirror the capture Views (morning / evening / weekly).
   // Each card navigates to the View's id (== its route slug) and reads its
@@ -435,40 +510,68 @@ export function LifeDashboard() {
         </Section>
         )}
 
-        <Section>
-          <SectionTitle>Track</SectionTitle>
-          <DateNav date={date}>
+        <DateNav date={date}>
+          <Section>
+            <SectionTitle>Favorites</SectionTitle>
             <GlobalQuickRow
               trackables={trackables}
-              events={allEntries}
               userId={user?.uid ?? ""}
               logId={state.log?.id}
               timestamp={getSelectedTimestamp()}
             />
-            <ShapeGrid>
-              {SHAPE_ORDER.map((shape) => (
-                <ShapeCard
-                  key={shape}
-                  shape={shape}
-                  trackables={trackables}
-                  events={allEntries}
-                  day={selectedDate}
-                  onOpen={setOpenShape}
-                />
-              ))}
-            </ShapeGrid>
-          </DateNav>
-        </Section>
+          </Section>
+
+          <Section>
+            <HabitBoard
+              trackables={trackables}
+              goals={goals}
+              events={allEntries}
+              day={selectedDate}
+              userId={user?.uid ?? ""}
+              logId={state.log?.id}
+              onOpenShape={openShapeForBackfill}
+            />
+          </Section>
+
+          <Section>
+            <LogMoreToggle
+              type="button"
+              aria-expanded={logMoreOpen}
+              onClick={() => setLogMoreOpen((o) => !o)}
+              data-testid="log-more-toggle"
+            >
+              <PlusOutlined /> Log something else
+            </LogMoreToggle>
+            {logMoreOpen && (
+              <ShapeGrid data-testid="log-more-shapes">
+                {SHAPE_ORDER.map((shape) => (
+                  <ShapeButton
+                    key={shape}
+                    type="button"
+                    onClick={() => openShapeForBackfill(shape)}
+                    data-testid={`log-shape-${shape}`}
+                  >
+                    <ShapeButtonTitle>{SHAPE_META[shape].title}</ShapeButtonTitle>
+                    <ShapeButtonHint>{SHAPE_META[shape].hint}</ShapeButtonHint>
+                  </ShapeButton>
+                ))}
+              </ShapeGrid>
+            )}
+          </Section>
+        </DateNav>
       </PageContainer>
 
       <ShapeSheet
         shape={openShape}
-        onClose={() => setOpenShape(null)}
+        onClose={() => {
+          setOpenShape(null);
+          setShapeBackfillDay(null);
+        }}
         trackables={trackables}
         events={allEntries}
         userId={user?.uid ?? ""}
         logId={state.log?.id}
-        day={selectedDate}
+        day={shapeBackfillDay ?? selectedDate}
       />
 
       <SampleResponseModal

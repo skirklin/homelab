@@ -10,7 +10,6 @@ import { useAuth, NotFound, getBackend, useFeedback } from "@kirkl/shared";
 import { LifeProvider, useLifeContext } from "./life-context";
 import { BackendProvider, useLifeBackend } from "@kirkl/shared";
 import { LifeDashboard } from "./components/LifeDashboard";
-import { Today } from "./components/Today";
 import { ViewRunner } from "./components/ViewRunner";
 import { SettingsModal } from "./components/SettingsModal";
 import { SettingsMenuProvider, buildSettingsMenuItems } from "./settings-menu";
@@ -115,7 +114,9 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     <SettingsMenuProvider value={settingsMenu}>
       <Routes>
         <Route path="/" element={<LifeDashboard />} />
-        <Route path="/today" element={<Today />} />
+        {/* The unified Daily surface lives at "/". /today was the old review
+            lens (Timeline · Habits); preserve deep links by redirecting it. */}
+        <Route path="/today" element={<Navigate to="/" replace />} />
         <Route path="/morning" element={<ViewRunner viewId="morning" />} />
         <Route path="/evening" element={<ViewRunner viewId="evening" />} />
         <Route path="/weekly" element={<ViewRunner viewId="weekly" />} />

@@ -27,6 +27,9 @@ const mockLifeBackend = {
   addEvent: vi.fn(),
   updateEvent: vi.fn(),
   deleteEvent: vi.fn(),
+  updateTrackable: vi.fn(),
+  reorderTrackables: vi.fn(),
+  reorderGoals: vi.fn(),
   subscribeToEvents: vi.fn(() => () => {}),
   clearSampleSchedule: vi.fn(),
 };
@@ -390,15 +393,36 @@ describe("LifeDashboard URL date plumbing", () => {
   });
 });
 
-describe("LifeDashboard (Log) — IA after the 4-mode split", () => {
+describe("LifeDashboard (unified Daily surface)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("keeps the Sessions + Track capture surface", async () => {
+  it("renders the Favorites row, the habit board, and the + Log entry point", async () => {
+    renderDashboard("/");
+    await screen.findByText("Favorites");
+    // No favorites by default → quiet hint, not an empty bar.
+    expect(screen.getByTestId("favorites-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("habit-board")).toBeInTheDocument();
+    expect(screen.getByTestId("log-more-toggle")).toBeInTheDocument();
+  });
+
+  it("'+ Log something else' reveals the four shape entry points", async () => {
+    const user = userEvent.setup();
+    renderDashboard("/");
+    const toggle = await screen.findByTestId("log-more-toggle");
+    // Collapsed by default: the shape grid is not in the DOM.
+    expect(screen.queryByTestId("log-more-shapes")).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(await screen.findByTestId("log-more-shapes")).toBeInTheDocument();
+    for (const shape of ["took", "did", "happened", "rated"]) {
+      expect(screen.getByTestId(`log-shape-${shape}`)).toBeInTheDocument();
+    }
+  });
+
+  it("keeps the Sessions session-View cards when the log has them", async () => {
     renderDashboard("/");
     await screen.findByText("Sessions");
-    expect(screen.getByText("Track")).toBeInTheDocument();
   });
 
   it("hides the Sessions header entirely when the log has no views (Angela)", async () => {
@@ -414,25 +438,27 @@ describe("LifeDashboard (Log) — IA after the 4-mode split", () => {
         </LifeProvider>
       </MemoryRouter>,
     );
-    await screen.findByText("Track");
+    await screen.findByText("Favorites");
     expect(screen.queryByText("Sessions")).not.toBeInTheDocument();
   });
 
-  it("no longer renders the Timeline/Habits lens toggle (moved to Today)", async () => {
+  it("no longer renders the Timeline/Habits lens toggle (the board is the only review surface)", async () => {
     renderDashboard("/");
-    await screen.findByText("Track");
+    await screen.findByText("Favorites");
     expect(screen.queryByTestId("review-lens-toggle")).not.toBeInTheDocument();
   });
 
-  it("no longer renders the Streaks section (moved to Today)", async () => {
+  it("no longer renders the 2×2 ShapeCard grid", async () => {
     renderDashboard("/");
-    await screen.findByText("Track");
-    expect(screen.queryByText("Streaks")).not.toBeInTheDocument();
+    await screen.findByText("Favorites");
+    for (const shape of ["took", "did", "happened", "rated"]) {
+      expect(screen.queryByTestId(`shape-card-${shape}`)).not.toBeInTheDocument();
+    }
   });
 
   it("has no nav affordance pointing at /chat", async () => {
     const { container } = renderDashboard("/");
-    await screen.findByText("Track");
+    await screen.findByText("Favorites");
     // No Chat button/link, and the unread badge is gone.
     expect(screen.queryByText(/^Chat/)).not.toBeInTheDocument();
     expect(container.querySelector("[href='/chat']")).toBeNull();

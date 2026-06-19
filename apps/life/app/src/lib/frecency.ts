@@ -158,29 +158,19 @@ export interface GlobalAction {
 }
 
 /**
- * Aggregate the most-frecent actions across all INPUT-ELIGIBLE vocab rows for
- * the global quick-log row. ALL pins come first (stable, in vocab order,
- * flagged, NEVER trimmed — they are deliberate favorites), then frecency
- * fills any remaining slots up to `limit`, deduped against the pins.
- *
- * Eligibility is `isInputEligible` (non-hidden AND non-reflective): replaying a
- * free-text `noted` action is meaningless, so reflective vocab is excluded here
- * as well as from its pins. This is one site of the EXCLUSION INVARIANT.
+ * The Favorites quick row: ONLY the user's explicit pins, in vocab order
+ * (never trimmed, deduped within each trackable). NO frecency fill — favorites
+ * are a deliberately curated row, so a thing only appears once the user stars a
+ * value for it (the ShapeSheet star). Reflective (`noted`) vocab is excluded via
+ * `isInputEligible` — replaying a free-text note is meaningless (one site of the
+ * EXCLUSION INVARIANT).
  */
-export function globalFrecentActions(
-  events: LifeEvent[],
+export function pinnedActions(
   trackables: LifeManifestTrackable[],
-  options: FrecencyOptions = {},
 ): GlobalAction[] {
-  const now = options.now ?? new Date();
-  const halfLife = options.halfLifeDays ?? DEFAULT_HALF_LIFE_DAYS;
-  const limit = options.limit ?? 8;
-  const visible = trackables.filter(isInputEligible);
-
-  // Pins first — stable, in vocab order, deduped within each trackable.
   const out: GlobalAction[] = [];
   const seen = new Set<string>();
-  for (const t of visible) {
+  for (const t of trackables.filter(isInputEligible)) {
     for (const p of t.pinned ?? []) {
       const key = payloadKey(t.id, p);
       if (seen.has(key)) continue;
@@ -188,20 +178,6 @@ export function globalFrecentActions(
       out.push({ trackable: t, payload: p, pinned: true });
     }
   }
-
-  // Frecency across all visible things, excluding each thing's pins.
-  const candidates: Array<GlobalAction & { score: number; lastTs: number }> = [];
-  for (const t of visible) {
-    const pinKeys = new Set((t.pinned ?? []).map((p) => payloadKey(t.id, p)));
-    for (const b of bucketize(events, t.id, now, halfLife, pinKeys).values()) {
-      candidates.push({ trackable: t, payload: b.payload, pinned: false, score: b.score, lastTs: b.lastTs });
-    }
-  }
-  candidates.sort((a, b) => (b.score - a.score) || (b.lastTs - a.lastTs));
-
-  for (const c of candidates) {
-    if (out.length >= limit) break;
-    out.push({ trackable: c.trackable, payload: c.payload, pinned: false });
-  }
   return out;
 }
+
