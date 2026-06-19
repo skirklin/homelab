@@ -432,7 +432,12 @@ function runText(run: SessionRun, vocabId: string): string | undefined {
   return undefined;
 }
 
-/** All text-bearing vocab ids in a run except the explicitly-handled ones. */
+/** All text-bearing vocab ids in a run except the explicitly-handled ones.
+ *  Sorted by vocab id so the output is deterministic regardless of source:
+ *  `run.values` key order differs between a fat run (entry order) and its
+ *  per-item equivalent (stream order). No default session vocab reaches this
+ *  path today — every prompt id is special-cased above — so it's only live for
+ *  custom views; the sort future-proofs fat↔per-item parity for those. */
 function runOtherTexts(run: SessionRun, handled: string[]): Array<{ vocabId: string; value: string }> {
   const out: Array<{ vocabId: string; value: string }> = [];
   for (const vocabId of Object.keys(run.values)) {
@@ -440,6 +445,7 @@ function runOtherTexts(run: SessionRun, handled: string[]): Array<{ vocabId: str
     const value = runText(run, vocabId);
     if (value) out.push({ vocabId, value });
   }
+  out.sort((a, b) => a.vocabId.localeCompare(b.vocabId));
   return out;
 }
 
@@ -471,9 +477,22 @@ function renderEveningRun(run: SessionRun): string | null {
   return lines.join(" ");
 }
 
-/** Weekly review: render every text vocab id (no special phrasing) — the
- *  legacy renderer humanized each entry name; the new vocab ids humanize to the
- *  same labels (highlights → "Highlights", weekly_intention → "Weekly intention"). */
+/** Weekly review: render every text vocab id (no special phrasing) by
+ *  humanizing its vocab id.
+ *
+ *  INTENTIONAL wording change (NOT byte-identical to the pre-cutover render):
+ *  the new disambiguated vocab ids humanize to more-specific labels for the
+ *  Coach context — `weekly_lesson` → "Weekly lesson:" and `weekly_intention` →
+ *  "Weekly intention:" (the legacy renderer humanized the bare entry names
+ *  `lesson`/`intention` → "Lesson:"/"Intention:"). These are kept because they
+ *  disambiguate the weekly reflection from the daily `lesson` / `daily_intention`.
+ *  `highlights` / `lows` are unchanged ("Highlights:" / "Lows:").
+ *
+ *  The safety-critical property that DOES hold: a fat `weekly_review_session`
+ *  and its migrated per-item run render IDENTICALLY to each other — both route
+ *  through `SESSION_ID_MAP` → `renderWeeklyRun`, so the per-day prose is the
+ *  same regardless of source. Dedup (transient `--apply` window) and
+ *  deploy/migration ordering are therefore unaffected by this label change. */
 function renderWeeklyRun(run: SessionRun): string | null {
   // Stable order: highlights, lows, weekly_lesson, weekly_intention, then any
   // others — mirrors the View's prompt order.

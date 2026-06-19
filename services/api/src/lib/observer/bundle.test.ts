@@ -397,18 +397,97 @@ describe("assembleBundle", () => {
       ).markdown;
     }
 
+    // Per-item evening run equivalent to a fat evening_session: win/lesson route
+    // to their vocab ids; mood is the LIVE rated series.
+    function perItemEvening(day: number, win: string, lesson: string, intentionFollowup?: string) {
+      const ts = `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`;
+      const run = { source: "manual", view: "evening", view_run: ts };
+      const events: unknown[] = [
+        { id: `pi_w_${day}`, subject_id: "daily_win", timestamp: ts, entries: [{ name: "note", type: "text", value: win }], labels: run },
+        { id: `pi_l_${day}`, subject_id: "daily_lesson", timestamp: ts, entries: [{ name: "note", type: "text", value: lesson }], labels: run },
+        { id: `pi_m_${day}`, subject_id: "mood", timestamp: ts, entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], labels: run },
+      ];
+      if (intentionFollowup) {
+        events.unshift({ id: `pi_if_${day}`, subject_id: "intention_followup", timestamp: ts, entries: [{ name: "note", type: "text", value: intentionFollowup }], labels: run });
+      }
+      return events;
+    }
+
+    // A fat weekly_review_session. Entry names map (SESSION_ID_MAP) to:
+    // highlights→highlights, lows→lows, lesson→weekly_lesson,
+    // intention→weekly_intention, mood_rating→mood (LIVE rated series).
+    function weeklySession(day: number, highlights: string, lows: string, lesson: string, intention: string) {
+      return {
+        id: `weekly_${day}`,
+        subject_id: "weekly_review_session",
+        timestamp: `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`,
+        entries: [
+          { name: "highlights", type: "text", value: highlights },
+          { name: "lows", type: "text", value: lows },
+          { name: "lesson", type: "text", value: lesson },
+          { name: "intention", type: "text", value: intention },
+          { name: "mood_rating", type: "number", value: 4, unit: "rating" },
+        ],
+        labels: null,
+      };
+    }
+
+    // Per-item weekly run equivalent: each text item under its mapped vocab id.
+    function perItemWeekly(day: number, highlights: string, lows: string, lesson: string, intention: string) {
+      const ts = `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`;
+      const run = { source: "manual", view: "weekly", view_run: ts };
+      return [
+        { id: `pi_h_${day}`, subject_id: "highlights", timestamp: ts, entries: [{ name: "note", type: "text", value: highlights }], labels: run },
+        { id: `pi_lo_${day}`, subject_id: "lows", timestamp: ts, entries: [{ name: "note", type: "text", value: lows }], labels: run },
+        { id: `pi_wl_${day}`, subject_id: "weekly_lesson", timestamp: ts, entries: [{ name: "note", type: "text", value: lesson }], labels: run },
+        { id: `pi_wi_${day}`, subject_id: "weekly_intention", timestamp: ts, entries: [{ name: "note", type: "text", value: intention }], labels: run },
+        { id: `pi_wm_${day}`, subject_id: "mood", timestamp: ts, entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], labels: run },
+      ];
+    }
+
+    const perDayOf = (md: string) => md.split("### Activity summary")[0];
+
     it("a fat morning_session and its per-item equivalent produce the SAME per-day narrative", async () => {
       const fatMd = await bundleFor([morningSession(0, "good sleep", "ship the cutover")]);
       const perItemMd = await bundleFor(perItemMorning(0, "good sleep", "ship the cutover"));
 
       // Compare only the per-day narrative section (the related-event-id list and
       // tracker rollups differ in event count, but the prose must be identical).
-      const perDayOf = (md: string) => md.split("### Activity summary")[0];
       expect(perDayOf(perItemMd)).toBe(perDayOf(fatMd));
       // Sanity: the shared prose carries the session labels + verbatim text.
       expect(perDayOf(fatMd)).toContain("*Morning session.*");
       expect(perDayOf(fatMd)).toContain("Grateful for: good sleep");
       expect(perDayOf(fatMd)).toContain("Plan for the day: ship the cutover");
+    });
+
+    it("a fat evening_session and its per-item equivalent produce the SAME per-day narrative", async () => {
+      const fatMd = await bundleFor([eveningSession(0, "shipped it", "rest matters", "stayed focused")]);
+      const perItemMd = await bundleFor(perItemEvening(0, "shipped it", "rest matters", "stayed focused"));
+
+      expect(perDayOf(perItemMd)).toBe(perDayOf(fatMd));
+      expect(perDayOf(fatMd)).toContain("*Evening session.*");
+      expect(perDayOf(fatMd)).toContain("Win: shipped it");
+      expect(perDayOf(fatMd)).toContain("Lesson: rest matters");
+      expect(perDayOf(fatMd)).toContain("On the morning plan: stayed focused");
+    });
+
+    it("a fat weekly_review_session and its per-item equivalent produce the SAME per-day narrative", async () => {
+      const fatMd = await bundleFor([
+        weeklySession(0, "great hikes", "slow Monday", "pace yourself", "more sleep"),
+      ]);
+      const perItemMd = await bundleFor(
+        perItemWeekly(0, "great hikes", "slow Monday", "pace yourself", "more sleep"),
+      );
+
+      expect(perDayOf(perItemMd)).toBe(perDayOf(fatMd));
+      expect(perDayOf(fatMd)).toContain("*Weekly review.*");
+      expect(perDayOf(fatMd)).toContain("Highlights: great hikes");
+      expect(perDayOf(fatMd)).toContain("Lows: slow Monday");
+      // Intentional disambiguated labels (B3.2): weekly_lesson / weekly_intention
+      // humanize to "Weekly lesson:" / "Weekly intention:", NOT the legacy
+      // bare "Lesson:" / "Intention:".
+      expect(perDayOf(fatMd)).toContain("Weekly lesson: pace yourself");
+      expect(perDayOf(fatMd)).toContain("Weekly intention: more sleep");
     });
 
     it("per-item run children are NOT double-counted as trackers in the activity summary", async () => {
