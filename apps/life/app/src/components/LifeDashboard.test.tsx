@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import dayjs from "dayjs";
@@ -550,5 +550,49 @@ describe("LifeDashboard session cards — logged-today detection (B3.3 repoint)"
     await waitFor(() => {
       expect(getLocation().pathname).toBe("/weekly");
     });
+  });
+});
+
+describe("LifeDashboard session-history drill-down", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("Sessions header exposes a history affordance that opens the grid drawer", async () => {
+    const user = userEvent.setup();
+    renderDashboard("/");
+    await screen.findByText("Sessions");
+
+    // The drawer is closed initially — neither the drawer chrome nor the grid
+    // legend is in the DOM (destroyOnClose).
+    expect(screen.queryByTestId("session-history")).not.toBeInTheDocument();
+
+    const openBtn = await screen.findByTestId("session-history-open");
+    await user.click(openBtn);
+
+    // Drawer opens and renders the SessionStreakGrid (its legend labels the
+    // three split-cell tracks).
+    expect(await screen.findByTestId("session-history")).toBeInTheDocument();
+    const drawer = screen.getByTestId("session-history");
+    expect(within(drawer).getByText("morning")).toBeInTheDocument();
+    expect(within(drawer).getByText("evening")).toBeInTheDocument();
+    expect(within(drawer).getByText("weekly")).toBeInTheDocument();
+  });
+
+  it("no session-history affordance when the log has no views (Angela)", async () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <LifeProvider>
+          <SeedLog views={[]} />
+          <Routes>
+            <Route path="/" element={<LifeDashboard />} />
+          </Routes>
+        </LifeProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Favorites");
+    // The whole Sessions block is gated on sessionViews.length > 0, so the
+    // history affordance must be absent too — Angela sees nothing.
+    expect(screen.queryByTestId("session-history-open")).not.toBeInTheDocument();
   });
 });

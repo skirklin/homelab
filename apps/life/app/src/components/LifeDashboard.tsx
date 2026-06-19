@@ -9,6 +9,7 @@ import {
   CheckCircleFilled,
   CalendarOutlined,
   PlusOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import {
   useAuth,
@@ -38,10 +39,12 @@ import { HabitBoard } from "./HabitBoard";
 import { ShapeSheet } from "./ShapeSheet";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { DateNav } from "./DateNav";
+import { SessionHistory } from "./SessionHistory";
 import { Hint } from "./Hint";
 import { RANDOM_SAMPLES } from "../manifest";
 import { normalizeSessionRuns, type SessionView } from "@homelab/backend";
 import { useViews } from "../lib/views";
+import { userTz } from "../lib/useUserTz";
 import { useTrackables, useGoals } from "../lib/trackables";
 import { useSelectedDate, getDateString } from "../lib/useSelectedDate";
 import { SHAPE_ORDER, SHAPE_META } from "../lib/shapes";
@@ -147,6 +150,34 @@ const ShapeButtonHint = styled.span`
   color: var(--color-text-secondary);
 `;
 
+/**
+ * The Sessions header's drill-into-history affordance — a subtle icon button
+ * that sits next to the "Sessions" title and opens the SessionStreakGrid drawer.
+ * Parallel to tapping a trackable's name on the board to open HabitHistory.
+ */
+const SessionsHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+`;
+
+const HistoryButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 4px;
+  margin: -4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: color 0.15s;
+
+  &:hover { color: var(--color-primary); }
+`;
+
 const SessionCard = styled.button<{ $size: "primary" | "secondary"; $muted: boolean }>`
   display: flex;
   flex-direction: column;
@@ -214,6 +245,9 @@ export function LifeDashboard() {
     setOpenShape(shape);
   }, []);
   const [showSampleModal, setShowSampleModal] = useState(false);
+  // Session-history drill-down (parallel to HabitHistory): the Sessions header
+  // opens this bottom drawer; the SessionCards keep their start-session onClick.
+  const [sessionHistoryOpen, setSessionHistoryOpen] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
   // Suppress the push-subscription affordance entirely on non-phone devices.
@@ -460,7 +494,17 @@ export function LifeDashboard() {
       <PageContainer>
         {sessionViews.length > 0 && (
         <Section>
-          <SectionTitle>Sessions</SectionTitle>
+          <SessionsHeader>
+            <SectionTitle>Sessions</SectionTitle>
+            <HistoryButton
+              type="button"
+              onClick={() => setSessionHistoryOpen(true)}
+              data-testid="session-history-open"
+              aria-label="Session history"
+            >
+              <HistoryOutlined /> History
+            </HistoryButton>
+          </SessionsHeader>
           <SessionRow $hasPrimary={sessionContext.primary !== null}>
             {sessionViews
               .filter((v): v is typeof v & { id: SessionView } =>
@@ -572,6 +616,13 @@ export function LifeDashboard() {
         userId={user?.uid ?? ""}
         logId={state.log?.id}
         day={shapeBackfillDay ?? selectedDate}
+      />
+
+      <SessionHistory
+        open={sessionHistoryOpen}
+        onClose={() => setSessionHistoryOpen(false)}
+        events={allEntries}
+        tz={userTz()}
       />
 
       <SampleResponseModal
