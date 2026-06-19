@@ -18,6 +18,7 @@ import {
   daysUntilDue,
   getUrgencyLevel,
   isTaskSnoozed,
+  isActionableOneShot,
   type Task as BackendTask,
 } from "@homelab/backend";
 
@@ -141,9 +142,7 @@ export function TasksDueBlock() {
     const all: BackendTask[] = [];
     for (const tasks of tasksByList.values()) all.push(...tasks);
     return all
-      .filter((t) => t.taskType === "one_shot")
-      .filter((t) => !isTaskSnoozed(t))
-      .filter((t) => !t.completed && !t.cleared)
+      .filter(isActionableOneShot)
       .filter((t) => getUrgencyLevel(t) === "asap")
       .sort((a, b) => (a.deadline?.getTime() ?? Infinity) - (b.deadline?.getTime() ?? Infinity));
   }, [tasksByList]);
@@ -155,9 +154,7 @@ export function TasksDueBlock() {
     const all: BackendTask[] = [];
     for (const tasks of tasksByList.values()) all.push(...tasks);
     return all
-      .filter((t) => t.taskType === "one_shot")
-      .filter((t) => !isTaskSnoozed(t))
-      .filter((t) => !t.completed && !t.cleared)
+      .filter(isActionableOneShot)
       .filter((t) => {
         const d = daysUntilDue(t);
         return d !== null && d >= 0 && d <= 3;
