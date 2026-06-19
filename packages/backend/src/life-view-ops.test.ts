@@ -168,10 +168,13 @@ describe("updateView", () => {
     expect(v.items).toEqual([{ kind: "capture", trackableId: "water" }]);
   });
 
-  it("rejects id mutation as immutable", () => {
-    let err: ManifestError | undefined;
-    try { updateView(base(), "morning", { id: "other" }); } catch (e) { err = e as ManifestError; }
-    expect(err?.code).toBe("immutable_view_id");
+  it("makes id mutation a COMPILE error (structural immutability)", () => {
+    // The patch type is the view's PAYLOAD keyspace, so `id` (the frozen runner
+    // slug written to life_events.labels.view) can't even be named — caught by
+    // the type system, not a runtime throw. @ts-expect-error fails the build if
+    // `id` becomes nameable again.
+    // @ts-expect-error id is not part of the view payload patch
+    expect(() => updateView(base(), "morning", { id: "other" })).not.toThrow();
   });
 
   it("re-validates patched items", () => {

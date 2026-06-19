@@ -3,7 +3,8 @@
  * exercised through the same HTTP API the MCP tools call. Each request carries
  * an `hlk_` token (admin-PB auth), so the route layer is the only ownership
  * gate — these tests pin both the happy-path CRUD and the cross-user isolation
- * + immutability guarantees (id AND shape are immutable in the vocab model).
+ * + the STRUCTURAL immutability of id AND shape (the route can't forward them,
+ * so a patch carrying them is a no-op — not a 400).
  *
  * Requires `pnpm test:env:up`.
  */
@@ -254,24 +255,30 @@ describe("life trackables: update patches + immutability", () => {
     expect(t.ratingLabel).toBeUndefined();
   });
 
-  it("rejects renaming the trackable id", async () => {
+  it("ignores a trackable id in a patch — immutability is structural", async () => {
+    // The route's patch type is the trackable's PAYLOAD keyspace, so it cannot
+    // forward `id` — a client passing it is a no-op, not a 400. The identity
+    // (id + shape) stays exactly as created.
     const upd = await req("/data/life/trackables/chinese", {
       method: "PATCH",
       token: alice.apiToken,
       body: { id: "mandarin" },
     });
-    expect(upd.status).toBe(400);
-    expect(String(upd.data.error)).toMatch(/immutable/);
+    expect(upd.status).toBe(200);
+    expect((upd.data.trackables as any[]).map((t) => t.id)).toContain("chinese");
+    expect((upd.data.trackables as any[]).map((t) => t.id)).not.toContain("mandarin");
   });
 
-  it("rejects changing the shape", async () => {
+  it("ignores a shape change in a patch — immutability is structural", async () => {
+    // `shape` is likewise unnameable in the payload patch — passing it is a
+    // no-op, not a 400. The shape stays "did".
     const upd = await req("/data/life/trackables/chinese", {
       method: "PATCH",
       token: alice.apiToken,
       body: { shape: "took" },
     });
-    expect(upd.status).toBe(400);
-    expect(String(upd.data.error)).toMatch(/shape is immutable/);
+    expect(upd.status).toBe(200);
+    expect((upd.data.trackables as any[]).find((x) => x.id === "chinese")).toMatchObject({ shape: "did" });
   });
 });
 

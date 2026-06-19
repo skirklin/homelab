@@ -13,11 +13,14 @@ import type {
   QuickPayload,
   LifeManifest,
   TrackableShape,
+  TrackablePayload,
   TemplateRef,
   LifeGoalScope,
   LifeGoalKind,
   LifeGoalMetric,
+  GoalPayload,
   LifeViewItem,
+  ViewPayload,
   LifeNotifyStrategy,
 } from "../types/life";
 
@@ -34,14 +37,12 @@ export interface AddGoalInput {
   hidden?: boolean;
 }
 
-/** Goal patch (id/scope/kind/metric are immutable; only these are editable). */
-export interface UpdateGoalPatch {
-  label?: string;
-  target?: number;
-  unit?: string;
-  period?: "day" | "week";
-  hidden?: boolean;
-}
+/**
+ * Goal patch. STRUCTURALLY the goal's mutable PAYLOAD only — the frozen
+ * identity (id/scope/kind/metric) cannot be named here, so immutability is a
+ * compile error, not a runtime throw. Same type the pure `updateGoal` op takes.
+ */
+export type UpdateGoalPatch = Partial<GoalPayload>;
 
 /** View-definition creation input (see LifeView + life-view-ops validation). */
 export interface AddViewInput {
@@ -53,14 +54,18 @@ export interface AddViewInput {
   items: LifeViewItem[];
 }
 
-/** View patch (id is immutable; everything else is editable). */
-export interface UpdateViewPatch {
-  title?: string;
+/**
+ * View patch. STRUCTURALLY the view's mutable PAYLOAD only — `id` (the frozen
+ * identity) cannot be named here. The nullable-clearing fields are widened with
+ * `null`; the rest of the payload (title/items) carries through unchanged.
+ * (Omit-then-augment, not intersect: a bare `& { greeting?: string | null }`
+ * would intersect to `string` and drop the `null` clear-affordance.)
+ */
+export type UpdateViewPatch = Partial<Omit<ViewPayload, "greeting" | "icon" | "render">> & {
   greeting?: string | null;
   icon?: string | null;
   render?: "guided" | "inline" | null;
-  items?: LifeViewItem[];
-}
+};
 
 /** Notification-definition creation input (see LifeNotification + life-view-ops). */
 export interface AddNotificationInput {
@@ -101,22 +106,36 @@ export interface AddTrackableInput {
   refs?: TemplateRef[];
 }
 
-/** Vocab-row patch (id + shape are immutable; null clears nullable hints). */
-export interface UpdateTrackablePatch {
-  label?: string;
+/**
+ * Vocab-row patch. STRUCTURALLY the trackable's mutable PAYLOAD only — `id` +
+ * `shape` (the frozen identity) cannot be named here, so immutability is a
+ * compile error. The nullable-clearing fields are widened with `null`; the rest
+ * of the payload (label/hidden/pinned) carries through unchanged. (Omit-then-
+ * augment, not intersect: a bare `& { group?: string | null }` would intersect
+ * to `string` and drop the `null` clear-affordance.)
+ */
+type ClearableTrackableField =
+  | "group"
+  | "defaultUnit"
+  | "defaultAmount"
+  | "defaultDuration"
+  | "ratingLabel"
+  | "prompt"
+  | "hint"
+  | "placeholder"
+  | "refs";
+export type UpdateTrackablePatch = Partial<Omit<TrackablePayload, ClearableTrackableField>> & {
   group?: string | null;
-  hidden?: boolean;
   defaultUnit?: string | null;
   defaultAmount?: number | null;
   defaultDuration?: number | null;
   ratingLabel?: string | null;
-  pinned?: QuickPayload[];
   /** View-render metadata (Phase-B); null/"" clears. */
   prompt?: string | null;
   hint?: string | null;
   placeholder?: string | null;
   refs?: TemplateRef[] | null;
-}
+};
 
 export interface LifeBackend {
   // --- Log ---

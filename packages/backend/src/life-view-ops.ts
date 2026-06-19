@@ -31,6 +31,7 @@
 import type {
   LifeManifest,
   LifeView,
+  ViewPayload,
   LifeViewItem,
   LifeNotification,
   LifeNotifyStrategy,
@@ -175,34 +176,23 @@ export function addView(
 }
 
 /**
- * UPDATE an existing view. Patches only the provided keys. ENFORCES
- * immutability of `id` (it is written to `life_events.labels.view` — the
- * history join key). title/greeting/icon/render/items are freely editable;
+ * UPDATE an existing view. Patches only the provided PAYLOAD keys
+ * (title/greeting/icon/render/items). Immutability of `id` (the runner slug
+ * written to `life_events.labels.view` — the history join key) is STRUCTURAL:
+ * the patch type is the view's payload keyspace, so `id` can't even be named
+ * (it's a compile error). Values stay `unknown` because raw-HTTP callers
+ * (data.ts) pass untyped bodies — the op still VALIDATES each value at runtime.
  * null/"" clears the optional strings (greeting/icon) and unsets render.
  */
 export function updateView(
   current: LifeManifest,
   viewId: string,
-  patch: {
-    id?: string;
-    title?: unknown;
-    greeting?: unknown;
-    icon?: unknown;
-    render?: unknown;
-    items?: unknown;
-  },
+  patch: Partial<Record<keyof ViewPayload, unknown>>,
 ): LifeManifest {
   const views = manifestViews(current);
   const idx = views.findIndex((v) => v.id === viewId);
   if (idx === -1) throw new ManifestError("view_not_found", `no view with id "${viewId}"`);
   const existing = views[idx];
-
-  if (patch.id !== undefined && patch.id !== viewId) {
-    throw new ManifestError(
-      "immutable_view_id",
-      `view id is immutable (it is written to life_events.labels.view); cannot rename "${viewId}" → "${String(patch.id)}"`,
-    );
-  }
 
   const next: LifeView = { ...existing };
 
