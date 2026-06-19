@@ -41,7 +41,6 @@ export {
   SESSION_VIEW,
   SESSION_ID_MAP,
   RATED_NEW_IDS,
-  FAT_NAME_TO_VOCAB,
 } from "./life-session-runs";
 export type {
   SessionRun,

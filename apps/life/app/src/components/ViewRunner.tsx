@@ -16,12 +16,8 @@
  *
  * One shared `runTs` / `view_run` for the whole run so the N events co-group as
  * a single session run (see `normalizeSessionRuns` in @homelab/backend, which
- * every reader funnels through to render fat AND per-item runs identically).
- *
- * The §4 fanout migration converts ALL historical fat `*_session` events into
- * this same per-item shape; the normalizer dedups the transient window when both
- * shapes coexist. `synthesizeViewEvents` (below) remains ONLY as a templating
- * read-bridge for any fat history not yet migrated — removed in B3.3.
+ * every reader funnels through). Templating refs (`{plan}`, `{wk}`) resolve
+ * against the real per-item events in `state.entries` directly.
  */
 import { useState, useEffect, useMemo, type ChangeEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -40,50 +36,12 @@ import type { LifeEntry, LifeView, LifeViewItem, LifeManifestTrackable } from "@
 import { useLifeContext } from "../life-context";
 import { useViews } from "../lib/views";
 import { useTrackables } from "../lib/trackables";
-import { DEFAULT_VIEW_TRACKABLES, FAT_NAME_TO_VOCAB } from "@homelab/backend";
+import { DEFAULT_VIEW_TRACKABLES } from "@homelab/backend";
 import { buildEntries } from "../lib/shapes";
 import { resolveTemplate } from "../lib/templating";
 import { userTz } from "../lib/useUserTz";
 import type { LogEvent } from "../types";
 import { TasksDueBlock } from "./TasksDueBlock";
-
-// TRANSITIONAL (B3.3-REMOVABLE): legacy fat-event subject_id → (legacy entry
-// name → new vocab id). The inverse-by-subject of the shared `SESSION_ID_MAP`
-// (`FAT_NAME_TO_VOCAB`). Used by `synthesizeViewEvents` to make any not-yet-
-// migrated fat `*_session` history resolvable by templating refs that point at
-// the NEW split vocab ids (e.g. evening's `{plan}` ref → `daily_intention`).
-// Once the §4 migration has run, no fat events remain and this synthesis is a
-// no-op — DELETE it (and this map) in B3.3.
-const FAT_SUBJECT_TO_VOCAB: Record<string, Record<string, string>> = FAT_NAME_TO_VOCAB;
-
-/**
- * TRANSITIONAL (B3-REMOVABLE): project today's fat `*_session` events into
- * synthetic per-vocab events keyed by the NEW split vocab ids, so templating
- * refs (which point at the new ids) resolve against real B2 history. One
- * synthetic event per (fat event, mapped entry), carrying just that entry with
- * the same timestamp. Returns the originals PLUS the synthetics (templating only
- * reads by subject_id, so the extras are inert for non-matching refs).
- *
- * Pure. In B3, real per-item events live under the new ids and this is deleted.
- */
-export function synthesizeViewEvents(events: LogEvent[]): LogEvent[] {
-  const synthetic: LogEvent[] = [];
-  for (const ev of events) {
-    const map = FAT_SUBJECT_TO_VOCAB[ev.subjectId];
-    if (!map) continue;
-    for (const entry of ev.entries) {
-      const vocabId = map[entry.name];
-      if (!vocabId) continue;
-      synthetic.push({
-        ...ev,
-        id: `${ev.id}::${vocabId}`,
-        subjectId: vocabId,
-        entries: [entry],
-      });
-    }
-  }
-  return synthetic.length > 0 ? [...events, ...synthetic] : events;
-}
 
 const VIEW_ICONS: Record<string, ReactNode> = {
   sun: <SunOutlined />,
@@ -293,12 +251,12 @@ export function ViewRunner({ viewId }: ViewRunnerProps) {
   }, [userTrackables]);
 
   const tz = userTz();
-  // Resolve templating against the user's own events (the in-memory entries
-  // map), PLUS synthetic per-vocab projections of today's fat `*_session`
-  // history so refs pointing at the new split vocab ids resolve in B2 (see
-  // synthesizeViewEvents). Recompute when the event set changes.
+  // Resolve templating against the user's own per-item events (the in-memory
+  // entries map). Refs like evening's `{plan}` (→ `daily_intention`) and
+  // morning's `{wk}` (→ `weekly_intention`) point at the per-item vocab ids the
+  // ViewRunner writes, so they resolve directly. Recompute when the set changes.
   const events = useMemo<LogEvent[]>(
-    () => synthesizeViewEvents(Array.from(state.entries.values())),
+    () => Array.from(state.entries.values()),
     [state.entries],
   );
 

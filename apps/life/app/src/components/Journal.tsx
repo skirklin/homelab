@@ -27,7 +27,6 @@ import { useLogEvent } from "../lib/useLogEvent";
 import { useTrackables } from "../lib/trackables";
 import { useViews } from "../lib/views";
 import { userTz } from "../lib/useUserTz";
-import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEvent } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
 import { eventsForDay, labelFor } from "../lib/shapes";
@@ -220,28 +219,24 @@ const RatingPill = styled.span`
 // Helpers
 // ---------------------------------------------------------------------------
 
-type FilterKey = "all" | Session["id"] | "journal";
+type FilterKey = "all" | SessionView | "journal";
 
-const FILTER_VALUES: readonly FilterKey[] = ["all", "morning", "evening", "weekly_review", "journal"] as const;
+const FILTER_VALUES: readonly FilterKey[] = ["all", "morning", "evening", "weekly", "journal"] as const;
 function parseFilter(raw: string | null): FilterKey {
   return raw && (FILTER_VALUES as readonly string[]).includes(raw) ? (raw as FilterKey) : "all";
 }
 
-// The filter chips key on the legacy session ids (`weekly_review`) for URL
-// stability, but normalized runs key on the view id (`weekly`). Map between.
-const SESSION_TO_VIEW: Record<Session["id"], SessionView> = {
-  morning: "morning",
-  evening: "evening",
-  weekly_review: "weekly",
-};
-const VIEW_TO_SESSION: Record<SessionView, Session["id"]> = {
-  morning: "morning",
-  evening: "evening",
-  weekly: "weekly_review",
-};
+// The three reflective session views, keyed by view id — the value normalized
+// runs carry (`run.view`) and the filter chips select on. Title + icon for the
+// chip label and run-card header.
+const SESSION_VIEWS: { id: SessionView; title: string }[] = [
+  { id: "morning", title: "Morning" },
+  { id: "evening", title: "Evening" },
+  { id: "weekly", title: "Weekly review" },
+];
 
-function sessionForId(id: Session["id"]): Session | undefined {
-  return SESSIONS.find((s) => s.id === id);
+function titleForView(view: SessionView): string {
+  return SESSION_VIEWS.find((v) => v.id === view)?.title ?? view;
 }
 
 // "journal" subject_id is reserved for freeform / Journey-backfilled entries
@@ -249,9 +244,9 @@ function sessionForId(id: Session["id"]): Session | undefined {
 // rows surface in the filter without needing a data migration.
 const JOURNAL_SUBJECTS = new Set(["journal", "freeform_journal"]);
 
-function iconForSessionId(id: Session["id"]) {
-  if (id === "morning") return <SunOutlined />;
-  if (id === "evening") return <MoonOutlined />;
+function iconForView(view: SessionView) {
+  if (view === "morning") return <SunOutlined />;
+  if (view === "evening") return <MoonOutlined />;
   return <CalendarOutlined />;
 }
 
@@ -282,20 +277,13 @@ function formatTime(d: Date): string {
 // Component
 // ---------------------------------------------------------------------------
 
-const SESSION_SUBJECT_IDS = new Set(SESSIONS.map((s) => sessionSubjectId(s.id)));
-
-/** A per-item run child carries labels.view + labels.view_run. */
-function isRunChild(entry: LogEvent): boolean {
-  return Boolean(entry.labels?.view && entry.labels?.view_run);
-}
-
 /**
- * Events that are part of a session run — a fat `*_session` event OR a per-item
- * run child. These are rendered as run cards (via normalizeSessionRuns), not as
- * individual journal/measurement rows.
+ * Events that are part of a session run — a per-item run child carrying
+ * labels.view + labels.view_run. These are rendered as run cards (via
+ * normalizeSessionRuns), not as individual journal/measurement rows.
  */
 function isRunEvent(entry: LogEvent): boolean {
-  return SESSION_SUBJECT_IDS.has(entry.subjectId) || isRunChild(entry);
+  return Boolean(entry.labels?.view && entry.labels?.view_run);
 }
 
 export function Journal() {
@@ -415,8 +403,8 @@ export function Journal() {
         if (filter === "journal") {
           if (it.kind !== "journal") return false;
         } else {
-          // filter is a session id; map to the run's view id.
-          if (it.kind !== "run" || it.view !== SESSION_TO_VIEW[filter]) return false;
+          // filter is a session view id; runs carry the same `view`.
+          if (it.kind !== "run" || it.view !== filter) return false;
         }
       }
       if (!q) return true;
@@ -555,14 +543,13 @@ export function Journal() {
             <OnThisDayRow>
               {onThisDay.map(({ label, item }) => {
                 const isRun = item.kind === "run";
-                const sessionId = isRun ? VIEW_TO_SESSION[item.view] : undefined;
-                const title = sessionId ? sessionForId(sessionId)?.title : undefined;
+                const title = isRun ? titleForView(item.view) : undefined;
                 const firstText = isRun
                   ? item.run.blocks.find((b) => b.kind === "text" && b.text)?.text
                   : firstTextOf(item.event);
                 return (
                   <OnThisDayCard key={`${label}-${item.id}`}>
-                    {sessionId ? iconForSessionId(sessionId) : <BookOutlined />}
+                    {isRun ? iconForView(item.view) : <BookOutlined />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <OnThisDayLabel>
                         {label} · {dayjs(item.timestamp).format("MMM D, YYYY")}
@@ -599,13 +586,13 @@ export function Journal() {
             <Chip $active={filter === "all"} onClick={() => setFilter("all")}>
               All
             </Chip>
-            {SESSIONS.map((s) => (
+            {SESSION_VIEWS.map((v) => (
               <Chip
-                key={s.id}
-                $active={filter === s.id}
-                onClick={() => setFilter(s.id)}
+                key={v.id}
+                $active={filter === v.id}
+                onClick={() => setFilter(v.id)}
               >
-                {iconForSessionId(s.id)} {s.title}
+                {iconForView(v.id)} {v.title}
               </Chip>
             ))}
             <Chip $active={filter === "journal"} onClick={() => setFilter("journal")}>
@@ -637,16 +624,14 @@ export function Journal() {
                 <DateHeader>{formatDateHeader(g.date, tz)}</DateHeader>
                 {g.items.map((it) => {
                   if (it.kind === "run") {
-                    // A session run (fat OR per-item) renders each captured item
-                    // as a labeled prompt block. Identical output for both shapes
-                    // because both normalize through toJournalRun. Non-interactive
+                    // A session run renders each captured per-item value as a
+                    // labeled prompt block (via toJournalRun). Non-interactive
                     // (composite, not a single editable event).
-                    const sessionId = VIEW_TO_SESSION[it.view];
-                    const title = sessionForId(sessionId)?.title ?? it.view;
+                    const title = titleForView(it.view);
                     return (
                       <EntryCard key={it.id}>
                         <EntryHeader>
-                          {iconForSessionId(sessionId)}
+                          {iconForView(it.view)}
                           <EntryKind>{title}</EntryKind>
                           <span>·</span>
                           <EntryTime>{formatTime(it.timestamp)}</EntryTime>

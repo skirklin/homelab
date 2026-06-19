@@ -1,26 +1,22 @@
 /**
- * Shared session-run normalizer for the Unified Capture cutover (Phase B3.2).
+ * Shared session-run normalizer for the Unified Capture model (Phase B3.3).
  *
- * A "session run" is one morning / evening / weekly reflection. Through the
- * cutover, a run exists on disk in EITHER of two shapes:
- *
- *   - FAT (legacy): a single `*_session` event whose `entries[]` carries every
- *     prompt, keyed by the legacy `entries[].name`. This is what B2 writes and
- *     what all of history holds until the §4 fanout migration runs.
- *   - PER-ITEM (new): N events, one per captured item, each under its own vocab
- *     `subject_id`, correlated by `labels.view` + `labels.view_run`. This is
- *     what B3.2's ViewRunner writes and what the migration converts history to.
+ * A "session run" is one morning / evening / weekly reflection. On disk a run is
+ * N PER-ITEM `life_events` rows — one per captured item, each under its own
+ * vocab `subject_id`, correlated by `labels.view` + `labels.view_run`. This is
+ * what the ViewRunner writes; the B3 fanout migration converted ALL historical
+ * fat `*_session` events into this same per-item shape, so no fat events remain.
  *
  * EVERY reader — the frontend (DayTimeline / SessionStreakGrid / Journal) AND
- * the api Coach bundle — must render a run IDENTICALLY regardless of shape. So
- * they all funnel their `life_events` through `normalizeSessionRuns` here, which
- * collapses both shapes into one uniform `SessionRun[]`. This is the ONE place
- * that understands the fat↔per-item duality; readers never branch on it.
+ * the api Coach bundle — funnels its `life_events` through `normalizeSessionRuns`
+ * here, which collapses the per-item stream into a uniform `SessionRun[]`.
  *
- * The legacy-name → vocab-id map (`SESSION_ID_MAP`) is the SAME map the B3.1
- * fanout migration uses (it re-exports from here), so the write path, the
- * migration, and the read path can never diverge on how a prompt maps to a
- * vocab id.
+ * The shared id-map constants (`SESSION_SUBJECTS` / `SESSION_VIEW` /
+ * `SESSION_ID_MAP` / `RATED_NEW_IDS`) are NO LONGER used by this read path —
+ * they survive ONLY because the one-shot fanout migration
+ * (`services/scripts/historical/lib/life-rewrite.ts`) re-exports them. They are
+ * the single source of truth for how a legacy prompt mapped to a vocab id and
+ * must stay in lockstep with that migration's planner.
  *
  * Pure: no PocketBase, no I/O, no clock. Works on a plain event shape so both
  * the camelCase frontend `LifeEvent` and the snake_case api `LifeEventRecord`
@@ -30,10 +26,12 @@
 import type { LifeEntry } from "./types/life";
 
 // ───────────────────────────────────────────────────────────────────────────
-// The shared id-map (single source of truth for write / migration / read).
+// The shared id-map (single source of truth for the fanout migration).
+// KEPT EXPORTED for `services/scripts/historical/lib/life-rewrite.ts`, which
+// re-exports these. The read path below no longer references them.
 // ───────────────────────────────────────────────────────────────────────────
 
-/** The three fat session subjects the cutover consumes. */
+/** The three legacy fat session subjects the migration consumes. */
 export const SESSION_SUBJECTS = [
   "morning_session",
   "evening_session",
@@ -45,8 +43,9 @@ export type SessionSubject = (typeof SESSION_SUBJECTS)[number];
 export type SessionView = "morning" | "evening" | "weekly";
 
 /**
- * Fat session subject → its view id. NOTE weekly's view id is `weekly` (matching
- * the ViewRunner's `labels.view` and `DEFAULT_VIEWS`), NOT `weekly_review`.
+ * Legacy fat session subject → its view id. NOTE weekly's view id is `weekly`
+ * (matching the ViewRunner's `labels.view` and `DEFAULT_VIEWS`), NOT
+ * `weekly_review`.
  */
 export const SESSION_VIEW: Record<SessionSubject, SessionView> = {
   morning_session: "morning",
@@ -55,15 +54,14 @@ export const SESSION_VIEW: Record<SessionSubject, SessionView> = {
 };
 
 /**
- * The fully-decided id map (design §3 + the B1 mood decision). For each fat
- * session subject, legacy `entries[].name` → the new per-item `subject_id`.
+ * The fully-decided id map (design §3 + the B1 mood decision). For each legacy
+ * fat session subject, legacy `entries[].name` → the new per-item `subject_id`.
  *
  * `mood` / `mood_rating` route into the LIVE `mood` series; all others are the
  * §3 reflective vocab ids (distinct, de-collided across sessions).
  *
  * The fanout migration HARD-FAILS on any entry name not present here for its
- * subject; the normalizer simply skips unmapped names (a reader must never
- * crash on unexpected legacy data — it renders what it understands).
+ * subject.
  */
 export const SESSION_ID_MAP: Record<SessionSubject, Record<string, string>> = {
   morning_session: {
@@ -127,131 +125,57 @@ export interface RunItem {
 export interface SessionRun {
   /** The run's view id. */
   view: SessionView;
-  /** The run's representative timestamp (the fat event's, or the per-item
-   *  group's earliest child). */
+  /** The run's representative timestamp (the per-item group's earliest child). */
   timestamp: Date;
   /** vocab id → its captured item(s) in this run. */
   values: Record<string, RunItem[]>;
-  /** A stable id: the fat event's id, or `<view>:<view_run>` for per-item. */
+  /** A stable id: `<view>:<view_run>`. */
   id: string;
-  /** Where the run came from — `fat` (legacy event) or `per-item` (new). */
-  source: "fat" | "per-item";
-}
-
-/** Build the inverse map: fat subject → (legacy name → vocab id), the same as
- *  SESSION_ID_MAP. Exposed so callers (e.g. the synthesize bridge) can reuse it. */
-export const FAT_NAME_TO_VOCAB = SESSION_ID_MAP;
-
-/**
- * Normalize a legacy fat-session entry into the canonical per-item entry for its
- * new subject id — mirrors the migration's `normalizeEntry` so a fat run reads
- * identically to its migrated per-item equivalent. RATED ids →
- * `{name:"rating", unit:"rating", scale}`; everything else → `{name:"note"}`.
- *
- * Returns null when a RATED id has a non-finite value (garbage) so the reader
- * drops it rather than surfacing NaN.
- */
-function normalizeFatEntry(vocabId: string, src: LifeEntry): LifeEntry | null {
-  if (RATED_NEW_IDS.has(vocabId)) {
-    const value = src.type === "number" ? src.value : Number((src as { value: unknown }).value);
-    if (!Number.isFinite(value)) return null;
-    const scale = src.type === "number" ? src.scale ?? 5 : 5;
-    return { name: "rating", type: "number", value, unit: "rating", scale };
-  }
-  const value = src.type === "text" ? src.value : String((src as { value: unknown }).value);
-  return { name: "note", type: "text", value };
 }
 
 /**
- * Collapse a mixed `life_events` stream into uniform session runs.
- *
- * Two run shapes are recognized and merged:
- *
- *   - PER-ITEM runs: events carrying `labels.view` (one of morning/evening/
- *     weekly) AND `labels.view_run`, grouped by `(view, view_run)`. Each event's
- *     `subjectId` is the vocab id.
- *   - FAT runs: each `*_session` event, mapped through `SESSION_ID_MAP`.
- *     `weekly_review_session` → view `weekly`.
- *
- * DEDUP (the transient window while the migration runs): a fat run and a
- * per-item run for the same run describe the SAME thing — the per-item is the
- * migrated form, so the fat one is DROPPED. The collision key is
- * `view + " " + <instant>` where `<instant>` is the run's epoch-ms via
- * `runInstantKey` — canonicalized so the fat side (the event timestamp's ISO
- * string) and the per-item side (`labels.view_run`, which the migration sets to
- * the source's raw PB timestamp string) compare equal despite differing string
- * representations of the same instant.
- *
- * Unmapped fat entry names are skipped (readers never crash on unexpected data).
- * Events with no run signal (plain trackers, freeform journal) are ignored.
- */
-/**
- * Canonicalize a `view_run` (or fat event timestamp) to an epoch instant so the
- * per-item side (`labels.view_run`, which the migration sets to the source's raw
- * PB timestamp string `"YYYY-MM-DD HH:MM:SS.mmmZ"` with a space) and the fat side
- * (`ev.timestamp.toISOString()`, with a "T") dedup to the SAME key despite
- * differing string forms of the same instant. PB's space separator doesn't parse
- * everywhere, so normalize it to "T" first.
+ * Canonicalize a `view_run` to an epoch instant so per-item children whose
+ * `labels.view_run` differ only in string form (e.g. the migration set it to
+ * the source's raw PB timestamp `"YYYY-MM-DD HH:MM:SS.mmmZ"` with a space, while
+ * a fresh run sets it to an ISO string with a "T") group into the SAME run. PB's
+ * space separator doesn't parse everywhere, so normalize it to "T" first.
  */
 function runInstantKey(viewRun: string): string {
   const ms = Date.parse(viewRun.replace(" ", "T"));
   return Number.isNaN(ms) ? viewRun : String(ms);
 }
 
+/**
+ * Collapse a `life_events` stream into uniform session runs.
+ *
+ * Per-item runs: events carrying `labels.view` (one of morning/evening/weekly)
+ * AND `labels.view_run`, grouped by `(view, view_run)`. Each event's `subjectId`
+ * is the vocab id. Events with no run signal (plain trackers, freeform journal)
+ * are ignored.
+ */
 export function normalizeSessionRuns(events: NormalizerEvent[]): SessionRun[] {
-  // 1. Per-item runs, keyed by (view, run-instant).
-  const perItem = new Map<string, SessionRun>();
+  const runs = new Map<string, SessionRun>();
   for (const ev of events) {
     const view = ev.labels?.view as SessionView | undefined;
     const viewRun = ev.labels?.view_run;
     if (!view || !viewRun) continue;
     if (view !== "morning" && view !== "evening" && view !== "weekly") continue;
     const key = `${view} ${runInstantKey(viewRun)}`;
-    let run = perItem.get(key);
+    let run = runs.get(key);
     if (!run) {
       run = {
         view,
         timestamp: ev.timestamp,
         values: {},
         id: `${view}:${viewRun}`,
-        source: "per-item",
       };
-      perItem.set(key, run);
+      runs.set(key, run);
     }
     // Earliest child timestamp represents the run.
     if (ev.timestamp.getTime() < run.timestamp.getTime()) run.timestamp = ev.timestamp;
     (run.values[ev.subjectId] ??= []).push({ vocabId: ev.subjectId, entries: ev.entries });
   }
-
-  // 2. Fat runs, mapped through SESSION_ID_MAP — dropped when a per-item run
-  //    already covers the same (view, view_run=timestamp ISO).
-  const fat: SessionRun[] = [];
-  for (const ev of events) {
-    if (!(SESSION_SUBJECTS as readonly string[]).includes(ev.subjectId)) continue;
-    const subject = ev.subjectId as SessionSubject;
-    const view = SESSION_VIEW[subject];
-    const dedupKey = `${view} ${runInstantKey(ev.timestamp.toISOString())}`;
-    if (perItem.has(dedupKey)) continue; // migrated -> the per-item run wins.
-
-    const map = SESSION_ID_MAP[subject];
-    const values: Record<string, RunItem[]> = {};
-    for (const entry of ev.entries) {
-      const vocabId = map[entry.name];
-      if (!vocabId) continue; // unmapped legacy name → skip (don't crash).
-      const normalized = normalizeFatEntry(vocabId, entry);
-      if (!normalized) continue;
-      (values[vocabId] ??= []).push({ vocabId, entries: [normalized] });
-    }
-    fat.push({
-      view,
-      timestamp: ev.timestamp,
-      values,
-      id: ev.id,
-      source: "fat",
-    });
-  }
-
-  return [...perItem.values(), ...fat];
+  return [...runs.values()];
 }
 
 /**

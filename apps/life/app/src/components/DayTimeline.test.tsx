@@ -187,11 +187,17 @@ describe("DayTimeline", () => {
     expect(await screen.findByText(/Edit · deleted_thing/)).toBeInTheDocument();
   });
 
-  it("renders session events as labeled, non-interactive rows", async () => {
+  it("renders a session run as a labeled, non-interactive row", async () => {
     const user = userEvent.setup();
-    renderTimeline({
-      events: [ev("morning_session", [{ name: "intention", type: "text", value: "ship it" }], TODAY, 7)],
-    });
+    const runIso = (() => {
+      const d = new Date(TODAY);
+      d.setHours(7, 0, 0, 0);
+      return d.toISOString();
+    })();
+    const child = ev("daily_intention", [{ name: "note", type: "text", value: "ship it" }], TODAY, 7);
+    child.timestamp = new Date(runIso);
+    child.labels = { source: "manual", view: "morning", view_run: runIso };
+    renderTimeline({ events: [child] });
     const row = screen.getByTestId("day-timeline-row");
     expect(row).toHaveTextContent("Morning session");
     expect(row).toBeDisabled();
@@ -224,23 +230,6 @@ describe("DayTimeline", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveTextContent("Morning session");
     expect(rows[0]).toBeDisabled();
-  });
-
-  it("dedups: a fat run + its per-item run on the same timestamp render as ONE row", () => {
-    const runIso = (() => {
-      const d = new Date(TODAY);
-      d.setHours(7, 0, 0, 0);
-      return d.toISOString();
-    })();
-    const fat = ev("morning_session", [{ name: "gratitude", type: "text", value: "coffee" }], TODAY, 7);
-    fat.timestamp = new Date(runIso);
-    const child = ev("gratitude", [{ name: "note", type: "text", value: "coffee" }], TODAY, 7);
-    child.timestamp = new Date(runIso);
-    child.labels = { source: "manual", view: "morning", view_run: runIso };
-    renderTimeline({ events: [fat, child] });
-    const rows = screen.getAllByTestId("day-timeline-row");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toHaveTextContent("Morning session");
   });
 
   it("shows a quiet empty hint and no list when nothing was logged", () => {

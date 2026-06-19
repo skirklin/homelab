@@ -504,7 +504,7 @@ server.tool(
   "Record a life event. One event per moment per subject_id. `entries[]` carries every named typed value (e.g. duration in min, rating 1-5, text note). `labels{}` carries categorical dimensions like source (manual|sample|journey), category, tz.",
   {
     log: z.string().describe("The life log ID"),
-    subject_id: z.string().describe("The trackable / session id (sleep, mood, morning_session, journal, etc.)"),
+    subject_id: z.string().describe("The trackable / vocab id (sleep, mood, gratitude, journal, etc.)"),
     entries: z.array(lifeEntrySchema).describe("Named typed values captured at this moment"),
     labels: z.record(z.string()).optional().describe("Categorical labels (string→string). Conventions: source, category, tz."),
     timestamp: z.string().optional().describe("ISO timestamp (defaults to now)"),

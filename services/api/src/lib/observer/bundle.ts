@@ -102,8 +102,6 @@ interface ActivityRecord {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SESSION_SUBJECTS = ["morning_session", "evening_session", "weekly_review_session"];
-
 /**
  * Adapt a snake_case `LifeEventRecord` into the camelCase `NormalizerEvent` the
  * shared `normalizeSessionRuns` consumes. Entries are passed through as-is (the
@@ -121,11 +119,10 @@ function toNormalizer(r: LifeEventRecord): NormalizerEvent {
   };
 }
 
-/** Is this event part of a session run? A fat `*_session` event OR a per-item
- *  run child (carrying labels.view + labels.view_run). Such events are rendered
- *  via runs, NOT as standalone trackers / activity-summary rows. */
+/** Is this event part of a session run? A per-item run child carrying
+ *  labels.view + labels.view_run. Such events are rendered via runs, NOT as
+ *  standalone trackers / activity-summary rows. */
 function isRunEvent(e: LifeEventRecord): boolean {
-  if (SESSION_SUBJECTS.includes(e.subject_id)) return true;
   return Boolean(e.labels?.view && e.labels?.view_run);
 }
 
@@ -191,7 +188,7 @@ function extractCategoryEntries(
     .map((e) => ({ name: e.name, value: (e.value as string).trim() }));
 }
 
-/** Title-case a snake_case identifier ("morning_session" -> "Morning session"). */
+/** Title-case a snake_case identifier ("daily_intention" -> "Daily intention"). */
 function humanize(snake: string): string {
   const words = snake.replace(/_/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : words;
@@ -397,8 +394,8 @@ type DayEntry =
  * (poop=1, floss=1, coffee=8oz) are operational noise — they live in the
  * activity summary instead.
  *
- * Run events (fat `*_session` AND per-item run children) are handled by the
- * session-run path, so they are excluded here.
+ * Run events (per-item run children) are handled by the session-run path, so
+ * they are excluded here.
  */
 function trackerNarrativeKind(event: LifeEventRecord): "tracker_text" | "exercise" | null {
   if (isRunEvent(event)) return null;
@@ -409,13 +406,12 @@ function trackerNarrativeKind(event: LifeEventRecord): "tracker_text" | "exercis
   return null;
 }
 
-// ── Session-run rendering (dual-shape) ─────────────────────────────────────
+// ── Session-run rendering ──────────────────────────────────────────────────
 //
-// A session run is read by VOCAB ID (the normalizer maps both fat and per-item
-// shapes to the same `run.values: vocabId -> RunItem[]`). The narrative phrasing
-// is keyed off the new vocab ids, preserving the exact labels the legacy fat
-// renderers produced (e.g. `daily_intention` → "Plan for the day"). Only text
-// values are rendered (energy/mood ratings are non-narrative, as before).
+// A session run is read by VOCAB ID (the normalizer groups per-item children
+// into `run.values: vocabId -> RunItem[]`). The narrative phrasing is keyed off
+// the new vocab ids (e.g. `daily_intention` → "Plan for the day"). Only text
+// values are rendered (energy/mood ratings are non-narrative).
 
 /** The single text value captured for a vocab id in a run (trimmed, non-empty),
  *  or undefined. */
@@ -433,11 +429,9 @@ function runText(run: SessionRun, vocabId: string): string | undefined {
 }
 
 /** All text-bearing vocab ids in a run except the explicitly-handled ones.
- *  Sorted by vocab id so the output is deterministic regardless of source:
- *  `run.values` key order differs between a fat run (entry order) and its
- *  per-item equivalent (stream order). No default session vocab reaches this
- *  path today — every prompt id is special-cased above — so it's only live for
- *  custom views; the sort future-proofs fat↔per-item parity for those. */
+ *  Sorted by vocab id so the output is deterministic regardless of the children's
+ *  stream order. No default session vocab reaches this path today — every prompt
+ *  id is special-cased above — so it's only live for custom views. */
 function runOtherTexts(run: SessionRun, handled: string[]): Array<{ vocabId: string; value: string }> {
   const out: Array<{ vocabId: string; value: string }> = [];
   for (const vocabId of Object.keys(run.values)) {
@@ -486,13 +480,7 @@ function renderEveningRun(run: SessionRun): string | null {
  *  "Weekly intention:" (the legacy renderer humanized the bare entry names
  *  `lesson`/`intention` → "Lesson:"/"Intention:"). These are kept because they
  *  disambiguate the weekly reflection from the daily `lesson` / `daily_intention`.
- *  `highlights` / `lows` are unchanged ("Highlights:" / "Lows:").
- *
- *  The safety-critical property that DOES hold: a fat `weekly_review_session`
- *  and its migrated per-item run render IDENTICALLY to each other — both route
- *  through `SESSION_ID_MAP` → `renderWeeklyRun`, so the per-day prose is the
- *  same regardless of source. Dedup (transient `--apply` window) and
- *  deploy/migration ordering are therefore unaffected by this label change. */
+ *  `highlights` / `lows` are unchanged ("Highlights:" / "Lows:"). */
 function renderWeeklyRun(run: SessionRun): string | null {
   // Stable order: highlights, lows, weekly_lesson, weekly_intention, then any
   // others — mirrors the View's prompt order.
@@ -570,10 +558,9 @@ function buildPerDayNarrative(
     byDay.set(key, list);
   };
 
-  // Session runs (dual-shape): normalize the whole stream once, then bucket each
-  // run by the LOCAL day of its representative timestamp. This collapses both
-  // fat `*_session` events and per-item run children into uniform runs (and
-  // dedups the transient migration window).
+  // Session runs: normalize the whole stream once, then bucket each run by the
+  // LOCAL day of its representative timestamp. This groups per-item run children
+  // into uniform runs.
   for (const run of normalizeSessionRuns(lifeEvents.map(toNormalizer))) {
     const key = localDayKey(run.timestamp.toISOString(), tz);
     push(key, { kind: "session", run });
@@ -654,9 +641,9 @@ function buildActivitySummary(
   // Tracker aggregation: V2 from DATA_COLLECTION.md.
   // Bucket per (subjectId, localDay) first so 8 same-day floss events
   // count as one day with sum 8, not 8 events. Then aggregate across days.
-  // Exclude session runs (fat events AND per-item run children) — they are
-  // narrative, not operational trackers. A per-item `energy`/`mood` rating event
-  // carries labels.view/view_run, so isRunEvent keeps it out of the rollup.
+  // Exclude session runs (per-item run children) — they are narrative, not
+  // operational trackers. A per-item `energy`/`mood` rating event carries
+  // labels.view/view_run, so isRunEvent keeps it out of the rollup.
   const trackerEvents = lifeEvents.filter((e) => !isRunEvent(e));
   if (trackerEvents.length > 0) {
     // subject -> day -> { count: number, sum: number, unit: string }
