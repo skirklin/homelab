@@ -1267,4 +1267,32 @@ describe("Life", () => {
     expect(rating?.value).toBe(4);
     expect(rating?.unit).toBe("rating");
   });
+
+  it("auto-created life log defaults Coach ON (coach_enabled=true)", async () => {
+    // A user with NO existing life log hits a /life/* route, which triggers
+    // getOrCreateOwnLifeLog. PB bool fields schema-default to `false`, so the
+    // create payload MUST seed coach_enabled:true or new users land Coach-off.
+    const email = `coach-default-${Date.now()}@example.com`;
+    const password = "testpassword123";
+    const freshUser = await adminPb.collection("users").create({
+      email, password, passwordConfirm: password, name: "Coach Default User",
+    });
+    const freshPb = new PocketBase(PB_URL);
+    freshPb.autoCancellation(false);
+    await freshPb.collection("users").authWithPassword(email, password);
+
+    // Trigger the get-or-create path (no log exists yet for this user).
+    const { status } = await apiReq("/data/life/trackables", { token: freshPb.authStore.token });
+    expect(status).toBe(200);
+
+    const logs = await adminPb.collection("life_logs").getList(1, 1, {
+      filter: adminPb.filter("owner = {:uid}", { uid: freshUser.id }),
+    });
+    expect(logs.items.length).toBe(1);
+    expect(logs.items[0].coach_enabled).toBe(true);
+
+    // Cleanup
+    await adminPb.collection("life_logs").delete(logs.items[0].id);
+    await adminPb.collection("users").delete(freshUser.id);
+  });
 });
