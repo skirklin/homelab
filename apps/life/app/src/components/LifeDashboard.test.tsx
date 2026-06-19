@@ -187,6 +187,26 @@ function SeedEntries({ events }: { events: LogEvent[] }) {
   return null;
 }
 
+/** Seeds a log with an explicit (possibly empty) `manifest.views` on mount. */
+function SeedLog({ views }: { views: { id: string; title: string; items: [] }[] }) {
+  const { dispatch } = useLifeContext();
+  useEffect(() => {
+    dispatch({
+      type: "SET_LOG",
+      log: {
+        id: "log1",
+        sampleSchedule: null,
+        manifest: { trackables: [], views },
+        randomSamplingEnabled: false,
+        created: "",
+        updated: "",
+      } as never,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
+
 function renderDashboardWithEntries(events: LogEvent[], initialEntry = "/") {
   let current: LocationSnapshot = { pathname: "/", search: "" };
   const probe = (loc: LocationSnapshot) => {
@@ -378,6 +398,23 @@ describe("LifeDashboard (Log) — IA after the 4-mode split", () => {
     renderDashboard("/");
     await screen.findByText("Sessions");
     expect(screen.getByText("Track")).toBeInTheDocument();
+  });
+
+  it("hides the Sessions header entirely when the log has no views (Angela)", async () => {
+    // manifest.views = [] resolves to NO views (not the DEFAULT_VIEWS fallback),
+    // so the Sessions section header must not render — no orphaned heading.
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <LifeProvider>
+          <SeedLog views={[]} />
+          <Routes>
+            <Route path="/" element={<LifeDashboard />} />
+          </Routes>
+        </LifeProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByText("Track");
+    expect(screen.queryByText("Sessions")).not.toBeInTheDocument();
   });
 
   it("no longer renders the Timeline/Habits lens toggle (moved to Today)", async () => {

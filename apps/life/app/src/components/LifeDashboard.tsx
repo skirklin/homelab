@@ -174,6 +174,14 @@ export function LifeDashboard() {
   // any custom view falls back to the calendar glyph.
   const views = useViews();
 
+  // Only the three reflective views (morning/evening/weekly) render as session
+  // cards. When none are present (Angela has `manifest.views = []`), suppress
+  // the whole Sessions section — header included — so no orphaned heading shows.
+  const sessionViews = useMemo(
+    () => views.filter((v) => v.id === "morning" || v.id === "evening" || v.id === "weekly"),
+    [views],
+  );
+
   // Context-aware session prominence: drive sizing and ordering off the
   // current hour + day in the user's local tz. Also surface a "logged at
   // HH:MM" chip on whichever session was already done today.
@@ -375,12 +383,11 @@ export function LifeDashboard() {
       />
 
       <PageContainer>
+        {sessionViews.length > 0 && (
         <Section>
           <SectionTitle>Sessions</SectionTitle>
           <SessionRow $hasPrimary={sessionContext.primary !== null}>
-            {views
-              // Only the three reflective views (morning/evening/weekly) are
-              // session cards; ignore any other custom view here.
+            {sessionViews
               .filter((v): v is typeof v & { id: SessionView } =>
                 v.id === "morning" || v.id === "evening" || v.id === "weekly")
               // On Sundays the weekly review subsumes evening reflection — hide
@@ -426,6 +433,7 @@ export function LifeDashboard() {
               })}
           </SessionRow>
         </Section>
+        )}
 
         <Section>
           <SectionTitle>Track</SectionTitle>
