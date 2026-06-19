@@ -33,18 +33,16 @@ import {
   type NotifyNode,
 } from "../lib/notifications/recipients";
 
-// upkeep.ts → push.ts reads VAPID keys at import-time and `sendPushToUser`
-// calls ensureVapid()/setVapidDetails() (which validates key length) before its
-// zero-subscription early return. Generate a REAL, well-formed VAPID keypair —
-// dummy strings fail web-push's 65-byte validation. With no push_subscriptions
-// in the test PB, sendPushToUser still returns {sent:0} without touching the
-// network, but the cron stamps the user, which is what these tests observe.
-vi.hoisted(async () => {
-  const { default: webpush } = await import("web-push");
-  const keys = webpush.generateVAPIDKeys();
-  process.env.VAPID_PUBLIC_KEY = keys.publicKey;
-  process.env.VAPID_PRIVATE_KEY = keys.privateKey;
-});
+// The cron now stamps `last_task_notification` ONLY when a push actually landed
+// (result.sent > 0) — a user with momentarily-dead subscriptions must not be
+// marked "notified" and suppressed (reconciled with the life cron). The stamp
+// is still these tests' ground-truth "who was selected" signal, so mock the
+// push layer to report one successful send; these cases verify SELECTION
+// (cascade / union-retirement / `off`), not push transport.
+const sendPushToUser = vi.fn().mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
+vi.mock("../lib/push", () => ({
+  sendPushToUser: (...a: unknown[]) => sendPushToUser(...a),
+}));
 
 process.env.PB_URL = getPbTestUrl();
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
@@ -261,10 +259,10 @@ describe("upkeep recurring cron — due/aggregate seam", () => {
 /**
  * Drives the REAL runUpkeepNotifications() against the test PB and asserts on
  * observable PB state — the `last_task_notification` stamp the cron writes on
- * every user it notifies. With no push_subscriptions in the test PB,
- * sendPushToUser is a no-op (returns {sent:0}), but the cron still stamps +
- * counts the user, so the stamp is the ground-truth signal of "who would be
- * notified." This is the case that actually exercises the union-retirement and
+ * every user it notifies. The push layer is mocked to report a successful send
+ * (sent:1), so the cron stamps + counts each selected user and the stamp is the
+ * ground-truth signal of "who would be notified." This is the case that
+ * actually exercises the union-retirement and
  * the in-cron `off` check (the helper-level tests above re-implement the cron's
  * logic inline; this one runs the cron itself).
  */

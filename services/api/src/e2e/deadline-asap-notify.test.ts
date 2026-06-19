@@ -24,17 +24,16 @@ import PocketBase from "pocketbase";
 import { randomBytes } from "crypto";
 import { getPbTestUrl } from "./pb-test-url";
 
-// runDeadlineNotifications → push.ts reads VAPID keys at import-time and
-// sendPushToUser validates key length before its zero-subscription early
-// return. Generate a real, well-formed keypair; with no push_subscriptions the
-// send is a network no-op but the cron still stamps the user, which is what we
-// observe here. (Mirrors upkeep-notify-cascade.test.ts.)
-vi.hoisted(async () => {
-  const { default: webpush } = await import("web-push");
-  const keys = webpush.generateVAPIDKeys();
-  process.env.VAPID_PUBLIC_KEY = keys.publicKey;
-  process.env.VAPID_PRIVATE_KEY = keys.privateKey;
-});
+// The cron now stamps `last_deadline_notification` ONLY when a push actually
+// landed (result.sent > 0) — a user with momentarily-dead subscriptions must
+// not be marked "notified" and suppressed (reconciled with the life cron). So
+// the stamp can't double as the "who was selected" signal unless a delivery
+// succeeds. These tests verify SELECTION (aggregation/snooze/cleared/opt-out),
+// not push transport, so mock the push layer to report one successful send.
+const sendPushToUser = vi.fn().mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
+vi.mock("../lib/push", () => ({
+  sendPushToUser: (...a: unknown[]) => sendPushToUser(...a),
+}));
 
 process.env.PB_URL = getPbTestUrl();
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";

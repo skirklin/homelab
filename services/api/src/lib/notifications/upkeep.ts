@@ -14,9 +14,9 @@
  * recipient of."
  */
 import { getAdminPb } from "../pb";
-import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { todayPacific } from "./tz";
+import { notifyUsersOnce } from "./notify-once";
 import {
   resolveNotifyRecipients,
   fetchAncestorsByPath,
@@ -109,67 +109,30 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
     }
   }
 
-  // Fetch user preferences (honor the global upkeep off opt-out + idempotency stamp).
-  const userIds = [...tasksByUser.keys()];
-  const users = await pb.collection("users").getFullList({
-    filter: userIds.length > 0
-      ? userIds.map(id => pb.filter("id = {:id}", { id })).join(" || ")
-      : "1 = 0",
-    $autoCancel: false,
+  // Fan out via the shared once-a-day tail (off opt-out, idempotency stamp,
+  // mark-after-success). This cron owns only the per-user copy + data.
+  const { notified, skipped } = await notifyUsersOnce({
+    pb,
+    tasksByUser,
+    stampColumn: "last_task_notification",
+    preferredOrigins: UPKEEP_ORIGINS,
+    logPrefix: "upkeep",
+    buildPush: (userTasks) => {
+      const title = userTasks.length === 1
+        ? `${userTasks[0]} needs doing`
+        : `${userTasks.length} household tasks need doing`;
+
+      const body = userTasks.length === 1
+        ? "Tap to view details"
+        : userTasks.slice(0, 3).join(", ") + (userTasks.length > 3 ? ` and ${userTasks.length - 3} more` : "");
+
+      return {
+        title,
+        body,
+        data: { type: "household_task_due", taskCount: String(userTasks.length) },
+      };
+    },
   });
-
-  const userMap = new Map(users.map(u => [u.id, u]));
-
-  let notified = 0;
-  let skipped = 0;
-
-  for (const [userId, userTasks] of tasksByUser) {
-    const user = userMap.get(userId);
-    if (!user) {
-      skipped++;
-      continue;
-    }
-
-    // `upkeep_notification_mode` is now a binary opt-out: only `off` mutes.
-    // The legacy `all` / `subscribed` values are equivalent ("on").
-    const mode = (user.upkeep_notification_mode as string) || "subscribed";
-    if (mode === "off") {
-      skipped++;
-      continue;
-    }
-
-    // Check if already notified today
-    if (user.last_task_notification) {
-      const lastNotif = new Date(user.last_task_notification).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-      if (lastNotif === today) {
-        skipped++;
-        continue;
-      }
-    }
-
-    const title = userTasks.length === 1
-      ? `${userTasks[0]} needs doing`
-      : `${userTasks.length} household tasks need doing`;
-
-    const body = userTasks.length === 1
-      ? "Tap to view details"
-      : userTasks.slice(0, 3).join(", ") + (userTasks.length > 3 ? ` and ${userTasks.length - 3} more` : "");
-
-    const result = await sendPushToUser(pb, userId, {
-      title,
-      body,
-      data: { type: "household_task_due", taskCount: String(userTasks.length) },
-    }, { preferredOrigins: UPKEEP_ORIGINS });
-
-    console.log(`[upkeep] User ${userId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
-
-    // Mark as notified today
-    await pb.collection("users").update(userId, {
-      last_task_notification: new Date().toISOString(),
-    }, { $autoCancel: false });
-
-    notified++;
-  }
 
   console.log(`[upkeep] Done: ${notified} notified, ${skipped} skipped`);
   return { notified, skipped };

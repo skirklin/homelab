@@ -410,6 +410,49 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     expect(writes).toHaveLength(1);
     expect((writes[0].data.reminder_state as Record<string, string>)["weekly-reminder"]).toBe("2026-06-07");
   });
+
+  it("weekly reminder subsumes the same-time evening reminder on Sunday (only weekly fires)", async () => {
+    // 2026-06-07 is a Sunday; both reminders target 08:00 UTC. The weekly
+    // reminder lists "evening-reminder" in `subsumes`, so on the day it's
+    // scheduled (Sunday) the evening daily reminder must be suppressed — exactly
+    // one push fires (the weekly), and only the weekly stamps reminder_state.
+    const SUNDAY_0800Z = new Date("2026-06-07T08:00:00Z");
+    sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
+
+    const logs: ReminderLog[] = [
+      {
+        id: "logSun",
+        owner: "userA",
+        manifest: {
+          trackables: [],
+          notifications: [
+            {
+              id: "weekly-reminder",
+              target: "weekly",
+              strategy: { kind: "fixed", cadence: "weekly", time: "08:00", weekday: 0, subsumes: ["evening-reminder"] },
+            },
+            {
+              id: "evening-reminder",
+              target: "evening",
+              strategy: { kind: "fixed", cadence: "daily", time: "08:00" },
+            },
+          ],
+        },
+      },
+    ];
+    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    getAdminPb.mockResolvedValue(pb);
+
+    const res = await runLifeReminderCheck(SUNDAY_0800Z);
+
+    // Only the weekly fired; the evening was subsumed.
+    expect(sendPushToUser).toHaveBeenCalledTimes(1);
+    const pushData = sendPushToUser.mock.calls[0][2] as { data: { type: string } };
+    expect(pushData.data.type).toBe("life_weekly_reminder");
+    expect(res.sent).toBe(1);
+    expect(reminderStateWrites(updates, "weekly-reminder")).toHaveLength(1);
+    expect(reminderStateWrites(updates, "evening-reminder")).toHaveLength(0);
+  });
 });
 
 // ─── pushContentForTarget: custom-copy precedence + byte-identical fallback ──

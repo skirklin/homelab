@@ -18,9 +18,9 @@
  * recipients.ts) — NOT the old "union of all list owners" rule.
  */
 import { getAdminPb } from "../pb";
-import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { todayPacific } from "./tz";
+import { notifyUsersOnce } from "./notify-once";
 import {
   resolveNotifyRecipients,
   fetchAncestorsByPath,
@@ -123,68 +123,35 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
     }
   }
 
-  // Fetch user preferences (honor the global upkeep off opt-out + idempotency stamp).
-  const userIds = [...tasksByUser.keys()];
-  const users = await pb.collection("users").getFullList({
-    filter: userIds.length > 0
-      ? userIds.map(id => pb.filter("id = {:id}", { id })).join(" || ")
-      : "1 = 0",
-    $autoCancel: false,
+  // Fan out via the shared once-a-day tail (off opt-out, idempotency stamp,
+  // mark-after-success). This cron owns only the per-user copy + data.
+  const { notified, skipped } = await notifyUsersOnce({
+    pb,
+    tasksByUser,
+    stampColumn: "last_deadline_notification",
+    preferredOrigins: UPKEEP_ORIGINS,
+    logPrefix: "deadlines",
+    buildPush: (userTasks) => {
+      // Copy: a single dated todo reads "{name} is due"; a single undeadlined
+      // todo reads "{name} needs attention" (no date to cite). Any multiple
+      // (dated, undeadlined, or mixed) collapses to "{count} todos need attention".
+      const title = userTasks.length === 1
+        ? (userTasks[0].dated ? `${userTasks[0].name} is due` : `${userTasks[0].name} needs attention`)
+        : `${userTasks.length} todos need attention`;
+
+      const names = userTasks.map((t) => t.name);
+      const body = userTasks.length === 1
+        ? "Tap to view details"
+        : names.slice(0, 3).join(", ") + (names.length > 3 ? ` and ${names.length - 3} more` : "");
+
+      return {
+        title,
+        body,
+        buildUrl: (origin) => tasksUrl(origin),
+        data: { type: "task_attention", taskCount: String(userTasks.length) },
+      };
+    },
   });
-  const userMap = new Map(users.map(u => [u.id, u]));
-
-  let notified = 0;
-  let skipped = 0;
-
-  for (const [userId, userTasks] of tasksByUser) {
-    const user = userMap.get(userId);
-    if (!user) {
-      skipped++;
-      continue;
-    }
-
-    const mode = (user.upkeep_notification_mode as string) || "subscribed";
-    if (mode === "off") {
-      skipped++;
-      continue;
-    }
-
-    // Already notified today? (separate stamp from last_task_notification)
-    if (user.last_deadline_notification) {
-      const lastNotif = new Date(user.last_deadline_notification).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-      if (lastNotif === today) {
-        skipped++;
-        continue;
-      }
-    }
-
-    // Copy: a single dated todo reads "{name} is due"; a single undeadlined
-    // todo reads "{name} needs attention" (no date to cite). Any multiple
-    // (dated, undeadlined, or mixed) collapses to "{count} todos need attention".
-    const title = userTasks.length === 1
-      ? (userTasks[0].dated ? `${userTasks[0].name} is due` : `${userTasks[0].name} needs attention`)
-      : `${userTasks.length} todos need attention`;
-
-    const names = userTasks.map((t) => t.name);
-    const body = userTasks.length === 1
-      ? "Tap to view details"
-      : names.slice(0, 3).join(", ") + (names.length > 3 ? ` and ${names.length - 3} more` : "");
-
-    const result = await sendPushToUser(pb, userId, {
-      title,
-      body,
-      buildUrl: (origin) => tasksUrl(origin),
-      data: { type: "task_attention", taskCount: String(userTasks.length) },
-    }, { preferredOrigins: UPKEEP_ORIGINS });
-
-    console.log(`[deadlines] User ${userId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
-
-    await pb.collection("users").update(userId, {
-      last_deadline_notification: new Date().toISOString(),
-    }, { $autoCancel: false });
-
-    notified++;
-  }
 
   console.log(`[deadlines] Done: ${notified} notified, ${skipped} skipped`);
   return { notified, skipped };
