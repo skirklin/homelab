@@ -34,7 +34,7 @@ vi.mock("web-push", () => ({
 
 import { sendPushToUser } from "./push";
 import { tripUrl, dayUrl } from "./notifications/travel";
-import { sessionUrl } from "./notifications/life";
+import { viewUrl } from "./notifications/life";
 import { tasksUrl } from "./notifications/deadlines";
 
 beforeEach(() => {
@@ -220,16 +220,16 @@ describe("travel.ts tripUrl/dayUrl — real origin branching", () => {
 // (/morning, /evening, /weekly). The push must carry a SAME-ORIGIN RELATIVE
 // path, never an absolute https://life.kirkl.in/... URL (which would cold-load
 // an empty per-origin authStore and present as a forced sign-out).
-describe("life.ts sessionUrl — same-origin relative path", () => {
+describe("life.ts viewUrl — same-origin relative path", () => {
   it("emits a root-relative path for each session kind", () => {
-    expect(sessionUrl("morning")).toBe("/morning");
-    expect(sessionUrl("evening")).toBe("/evening");
-    expect(sessionUrl("weekly")).toBe("/weekly");
+    expect(viewUrl("morning")).toBe("/morning");
+    expect(viewUrl("evening")).toBe("/evening");
+    expect(viewUrl("weekly")).toBe("/weekly");
   });
 
   it("never emits an absolute life.kirkl.in URL", () => {
     for (const kind of ["morning", "evening", "weekly"] as const) {
-      const url = sessionUrl(kind);
+      const url = viewUrl(kind);
       expect(url.startsWith("/")).toBe(true);
       expect(url).not.toContain("https://life.kirkl.in");
       expect(url).not.toContain("https://");
@@ -268,7 +268,7 @@ describe("life + deadline buildUrl delivered through sendPushToUser", () => {
     await sendPushToUser(
       pb,
       "user1",
-      { title: "Morning check-in", buildUrl: () => sessionUrl("morning") },
+      { title: "Morning check-in", buildUrl: () => viewUrl("morning") },
       { preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"] },
     );
     const url = pushedUrlFor("https://push.example/l1");

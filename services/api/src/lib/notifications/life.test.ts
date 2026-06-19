@@ -172,11 +172,13 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
 
 // ─── runLifeReminderCheck: mark-after-successful-delivery ────────────────────
 //
-// The reminder loop must write `last_*_reminder_sent` only when a push actually
+// The reminder loop must write `reminder_state[id]` only when a push actually
 // landed (result.sent > 0). A tick that delivers nothing (no live subs / all
 // failed) or throws must NOT mark the day, so the next within-window tick
 // retries. (croner protect:true makes the old mark-before-send double-fire
-// guard moot.)
+// guard moot.) Post-B4 the go-forward idempotency store is the `reminder_state`
+// JSON map keyed by notification id; the column-derived ids are
+// `morning-reminder` / `evening-reminder` / `weekly-reminder`.
 
 interface ReminderLog {
   id: string;
@@ -187,6 +189,19 @@ interface ReminderLog {
   last_morning_reminder_sent?: string;
   last_evening_reminder_sent?: string;
   last_weekly_reminder_sent?: string;
+  reminder_state?: Record<string, string>;
+}
+
+/** Pull the latest `reminder_state` written for a log, keyed by notification id. */
+function reminderStateWrites(
+  updates: Array<{ id: string; data: Record<string, unknown> }>,
+  notificationId: string,
+) {
+  return updates.filter(
+    (u) =>
+      u.data.reminder_state &&
+      (u.data.reminder_state as Record<string, string>)[notificationId] !== undefined,
+  );
 }
 
 function makeReminderPb(opts: { logs: ReminderLog[]; usersTz: Record<string, string | undefined> }) {
@@ -218,16 +233,12 @@ function makeReminderPb(opts: { logs: ReminderLog[]; usersTz: Record<string, str
   return { pb, updates };
 }
 
-function sentWrites(updates: Array<{ id: string; data: Record<string, unknown> }>, field: string) {
-  return updates.filter((u) => field in u.data);
-}
-
 describe("runLifeReminderCheck — mark only after successful delivery", () => {
   // A Monday so the morning reminder fires and the Sunday-only weekly/evening
   // suppression rules don't interfere. 2026-06-08 is a Monday; pick 08:00 UTC.
   const MONDAY_0800Z = new Date("2026-06-08T08:00:00Z");
 
-  it("does NOT mark last_morning_reminder_sent when delivery is 0", async () => {
+  it("does NOT mark reminder_state when delivery is 0", async () => {
     sendPushToUser.mockResolvedValue({ sent: 0, expired: 0, failed: 1 });
     const logs: ReminderLog[] = [
       { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
@@ -238,7 +249,7 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     const res = await runLifeReminderCheck(MONDAY_0800Z);
 
     expect(sendPushToUser).toHaveBeenCalledTimes(1);
-    expect(sentWrites(updates, "last_morning_reminder_sent")).toHaveLength(0);
+    expect(reminderStateWrites(updates, "morning-reminder")).toHaveLength(0);
     expect(res.sent).toBe(0);
   });
 
@@ -252,11 +263,11 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
 
     const res = await runLifeReminderCheck(MONDAY_0800Z);
 
-    expect(sentWrites(updates, "last_morning_reminder_sent")).toHaveLength(0);
+    expect(reminderStateWrites(updates, "morning-reminder")).toHaveLength(0);
     expect(res.sent).toBe(0);
   });
 
-  it("DOES mark last_morning_reminder_sent when delivery succeeds", async () => {
+  it("DOES mark reminder_state when delivery succeeds", async () => {
     sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
     const logs: ReminderLog[] = [
       { id: "log1", owner: "userA", morning_reminder_time: "08:00" },
@@ -266,9 +277,9 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
 
     const res = await runLifeReminderCheck(MONDAY_0800Z);
 
-    const writes = sentWrites(updates, "last_morning_reminder_sent");
+    const writes = reminderStateWrites(updates, "morning-reminder");
     expect(writes).toHaveLength(1);
-    expect(writes[0].data.last_morning_reminder_sent).toBe("2026-06-08");
+    expect((writes[0].data.reminder_state as Record<string, string>)["morning-reminder"]).toBe("2026-06-08");
     expect(res.sent).toBe(1);
   });
 
@@ -282,7 +293,7 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     let env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(env.pb);
     await runLifeReminderCheck(SUNDAY_0800Z);
-    expect(sentWrites(env.updates, "last_weekly_reminder_sent")).toHaveLength(0);
+    expect(reminderStateWrites(env.updates, "weekly-reminder")).toHaveLength(0);
 
     // Success path: mark.
     sendPushToUser.mockResolvedValue({ sent: 2, expired: 0, failed: 0 });
@@ -290,8 +301,8 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(env.pb);
     await runLifeReminderCheck(SUNDAY_0800Z);
-    const writes = sentWrites(env.updates, "last_weekly_reminder_sent");
+    const writes = reminderStateWrites(env.updates, "weekly-reminder");
     expect(writes).toHaveLength(1);
-    expect(writes[0].data.last_weekly_reminder_sent).toBe("2026-06-07");
+    expect((writes[0].data.reminder_state as Record<string, string>)["weekly-reminder"]).toBe("2026-06-07");
   });
 });
