@@ -146,6 +146,22 @@ export function buildNotificationsFromColumns(log: ResolvableLog): LifeNotificat
  * used verbatim. `undefined`/`null` falls back to the column-derived
  * reconstruction. This preserves today's behavior for every existing user (who
  * has no manifest.notifications) with no data migration.
+ *
+ * ⚠️ PHASE D ID-SCHEME LANDMINE — the fallback intentionally reconstructs from
+ * the legacy columns (`buildNotificationsFromColumns`), NOT from
+ * `DEFAULT_NOTIFICATIONS`, so it stays byte-identical to the pre-B4 cron AND so
+ * it emits the column-derived `*-reminder` ids (`morning-reminder` /
+ * `evening-reminder` / `weekly-reminder`) with each log's REAL column times.
+ * Those `*-reminder` ids are what `reminder_state[id]` keys on and what the
+ * transition-safe double-fire guard maps through `LEGACY_SENT_COLUMN`. When
+ * Phase D seeds/migrates `manifest.notifications` from the columns it MUST keep
+ * the `*-reminder` ids and copy the real column times — `DEFAULT_NOTIFICATIONS`
+ * (in `life-view-defaults.ts`) uses BARE ids (`morning`/`evening`/`weekly`) +
+ * placeholder times and is only the new-user/editor default. Seeding the bare
+ * ids would make the legacy guard stop matching and reminders could double-fire
+ * on the seed day. (Cross-refs: `LifeManifest.notifications` doc in
+ * `packages/backend/src/types/life.ts`; `DEFAULT_NOTIFICATIONS` in
+ * `packages/backend/src/life-view-defaults.ts`.)
  */
 export function resolveNotifications(log: ResolvableLog): LifeNotification[] {
   const fromManifest = log.manifest?.notifications;

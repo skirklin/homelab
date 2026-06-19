@@ -197,6 +197,18 @@ export const DEFAULT_VIEWS: LifeView[] = [
  * The weekly notification fires on Sunday (`weekday: 0`) and `subsumes` the
  * evening reminder on its day, reproducing today's "evening is suppressed when
  * the weekly review fires" Sunday behavior.
+ *
+ * ⚠️ PHASE D ID-SCHEME LANDMINE — these BARE ids (`morning`/`evening`/`weekly`)
+ * + placeholder times DIFFER from the B4 cron's column-derived ids
+ * (`morning-reminder` / `evening-reminder` / `weekly-reminder` + real column
+ * times) emitted by `buildNotificationsFromColumns` in
+ * `services/api/src/lib/notifications/life-notifications.ts`. The `*-reminder`
+ * ids are what `reminder_state` + the `LEGACY_SENT_COLUMN` double-fire guard
+ * key on. When Phase D migrates the columns into `manifest.notifications`, it
+ * MUST use the `*-reminder` ids + each log's real times — NOT this default — or
+ * the guard stops matching and reminders could double-fire on the seed day.
+ * (Cross-ref: `LifeManifest.notifications` doc in
+ * `packages/backend/src/types/life.ts`.)
  */
 export const DEFAULT_NOTIFICATIONS: LifeNotification[] = [
   {
