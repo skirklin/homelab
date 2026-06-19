@@ -150,14 +150,10 @@ describe("Task Operations", () => {
       taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -191,10 +187,7 @@ describe("Task Operations", () => {
       parentId: "",
       position: 0,
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
       snoozedUntil: null,
       assignees: [],
@@ -227,14 +220,10 @@ describe("Task Operations", () => {
       taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -267,14 +256,10 @@ describe("Task Operations", () => {
       taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
 
     await upkeep.deleteTask(taskId);
@@ -332,12 +317,10 @@ describe("Task Completion", () => {
       taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: twoDaysAgo,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -379,14 +362,10 @@ describe("Task Completion", () => {
       taskType: "recurring",
       frequency: { value: 2, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -433,14 +412,10 @@ describe("Task Completion", () => {
       taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -483,14 +458,10 @@ describe("Task Completion", () => {
       taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -530,14 +501,10 @@ describe("Task Completion", () => {
       taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -572,14 +539,10 @@ describe("Task Completion", () => {
       taskType: "recurring",
       frequency: { value: 30, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -619,14 +582,10 @@ describe("Snooze Operations", () => {
       taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -733,14 +692,10 @@ describe("Notification Operations", () => {
       taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -789,14 +744,10 @@ describe("Multi-user Scenarios", () => {
       taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -852,14 +803,10 @@ describe("Multi-user Scenarios", () => {
       taskType: "recurring",
       frequency: { value: 7, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -902,14 +849,10 @@ describe("Frequency Edge Cases", () => {
       taskType: "recurring",
       frequency: { value: 0, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -936,14 +879,10 @@ describe("Frequency Edge Cases", () => {
       taskType: "recurring",
       frequency: { value: 999999, unit: "days" },
       lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -973,12 +912,10 @@ describe("Frequency Edge Cases", () => {
       taskType: "recurring",
       frequency: { value: 1, unit: "days" },
       lastCompleted: fiveDaysAgo,
-      completed: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     cleanup.track("tasks", taskId);
 
@@ -1037,10 +974,7 @@ describe("Assignees — UI write path + client resolver", () => {
       parentId: "",
       position: 0,
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
       snoozedUntil: null,
       assignees: [],
@@ -1081,10 +1015,7 @@ describe("Assignees — UI write path + client resolver", () => {
       parentId: "",
       position: 0,
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
       snoozedUntil: null,
       assignees: [],
@@ -1100,10 +1031,7 @@ describe("Assignees — UI write path + client resolver", () => {
       parentId,
       position: 0,
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
       snoozedUntil: null,
       assignees: [],

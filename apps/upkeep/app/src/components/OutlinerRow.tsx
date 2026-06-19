@@ -9,7 +9,7 @@ import {
 } from "@ant-design/icons";
 import styled from "styled-components";
 import { useUpkeepBackend, AssigneePicker } from "@kirkl/shared";
-import { formatDueDate, formatDeadline, formatFrequency, isTaskSnoozed, isActionableOneShot, formatSnoozeRemaining, daysUntilDue, getUrgencyLevel } from "../types";
+import { formatDueDate, formatDeadline, formatFrequency, isTaskSnoozed, isActionableOneShot, formatSnoozeRemaining, urgencyOf } from "../types";
 import type { Task, TaskNode } from "../types";
 
 type DropZone = "before" | "inside" | "after" | null;
@@ -168,7 +168,7 @@ export function OutlinerRow({
   const hasChildren = children.length > 0;
   const isFocused = focusedId === task.id;
   const isOneShot = task.taskType === "one_shot";
-  const isDone = isOneShot ? task.completed : false;
+  const isDone = task.taskType === "one_shot" ? task.completed : false;
   const isSnoozed = isTaskSnoozed(task);
 
   useEffect(() => {
@@ -342,28 +342,35 @@ export function OutlinerRow({
           <Name $completed={isDone} onClick={handleNameClick}>{task.name}</Name>
         )}
 
-        {/* Deadline tag sits right after the name (not floated to the row edge).
-            Overdue dated todos go red here. */}
-        {isActionableOneShot(task) && task.deadline && (() => {
-          const days = daysUntilDue(task);
-          const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";
+        {/* Urgency badge — sits right after the name (not floated to the row
+            edge). Switches on the structured urgency state instead of
+            re-deriving `!task.deadline`: a dated todo shows its deadline (red
+            overdue / orange due-soon), an undated todo shows a "Someday" badge
+            (it has no deadline tag and used to carry no signal at all). */}
+        {isActionableOneShot(task) && (() => {
+          const u = urgencyOf(task);
+          if (u.kind === "someday") {
+            return (
+              <Tag color="default" style={{ fontSize: 10, lineHeight: "16px", margin: "0 0 0 6px", flexShrink: 0 }}>
+                Someday
+              </Tag>
+            );
+          }
+          if (u.kind === "snoozed") return null; // handled by the snooze tag below
+          // Preserve prior coloring: overdue → red; due today or within 3 days
+          // → orange; further out → default.
+          const color =
+            u.kind === "overdue"
+              ? "red"
+              : u.kind === "dueToday" || (u.kind === "dueSoon" && u.days <= 3)
+                ? "orange"
+                : "default";
           return (
             <Tag color={color} style={{ fontSize: 10, lineHeight: "16px", margin: "0 0 0 6px", flexShrink: 0 }}>
               {formatDeadline(task)}
             </Tag>
           );
         })()}
-
-        {/* "Asap" badge for an UNDEADLINED open todo — these have no deadline
-            tag and used to carry no visual signal at all (they silently rotted
-            in "later"). Overdue dated todos are already flagged red above, so
-            this only fires for the no-deadline asap case. */}
-        {isActionableOneShot(task) && !task.deadline &&
-          getUrgencyLevel(task) === "asap" && (
-            <Tag color="red" style={{ fontSize: 10, lineHeight: "16px", margin: "0 0 0 6px", flexShrink: 0 }}>
-              Asap
-            </Tag>
-          )}
 
         <Spacer />
 

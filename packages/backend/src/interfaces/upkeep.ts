@@ -4,7 +4,20 @@
  * Covers: task lists, tree-structured tasks, completions, notification preferences.
  */
 import type { Unsubscribe } from "../types/common";
-import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
+import type { TaskList, Task, TaskCompletion, TaskUpdate } from "../types/upkeep";
+
+/**
+ * Shape passed to `addTask`. A full task variant minus the server-stamped
+ * read fields. The conditional makes `Omit` DISTRIBUTE over the `Task` union
+ * (a bare `Omit<A | B, K>` collapses to the intersection of keys and loses the
+ * discriminant), so a recurring create can't carry a `schedule` and a one-shot
+ * create can't carry a `frequency`.
+ */
+export type NewTask = Task extends infer T
+  ? T extends Task
+    ? Omit<T, "id" | "list" | "path" | "created" | "updated" | "createdBy">
+    : never
+  : never;
 
 export interface UpkeepBackend {
   // --- List CRUD ---
@@ -16,14 +29,8 @@ export interface UpkeepBackend {
 
   // --- Task CRUD (tree-aware) ---
 
-  addTask(
-    listId: string,
-    task: Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">,
-  ): Promise<string>;
-  updateTask(
-    taskId: string,
-    updates: Partial<Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">>,
-  ): Promise<void>;
+  addTask(listId: string, task: NewTask): Promise<string>;
+  updateTask(taskId: string, updates: Partial<TaskUpdate>): Promise<void>;
   deleteTask(taskId: string): Promise<void>;
   moveTask(taskId: string, newParentId: string | null, position: number): Promise<void>;
 

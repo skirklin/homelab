@@ -17,8 +17,8 @@
  */
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
-import type { UpkeepBackend } from "../interfaces/upkeep";
-import type { TaskList, Task, TaskCompletion } from "../types/upkeep";
+import type { UpkeepBackend, NewTask } from "../interfaces/upkeep";
+import type { TaskList, Task, RecurringTask, TaskCompletion, TaskUpdate } from "../types/upkeep";
 import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
@@ -74,9 +74,17 @@ function listFromRecord(r: RecordModel | RawRecord): TaskList {
   };
 }
 
+/**
+ * THE choke point. The flat PB columns (`task_type`, `deadline`,
+ * `deadline_lead_days`, `frequency`, `last_completed`, `completed`, `cleared`)
+ * are mapped INTO the discriminated `Task` union here — and nowhere else. The
+ * "someday" state is derived from `deadline === null && task_type ===
+ * "one_shot"`; a present deadline becomes `{kind:"dated", deadline, leadDays}`.
+ * The wire format is untouched (no migration); only this read mapping changes.
+ */
 function taskFromRecord(r: RecordModel | RawRecord): Task {
   const x = r as Record<string, unknown>;
-  return {
+  const base = {
     id: r.id,
     list: x.list as string,
     parentId: (x.parent_id as string) || "",
@@ -84,23 +92,36 @@ function taskFromRecord(r: RecordModel | RawRecord): Task {
     position: (x.position as number) ?? 0,
     name: (x.name as string) || "",
     description: (x.description as string) || "",
-    taskType: (x.task_type as Task["taskType"]) || "recurring",
-    // Schema/type mismatch: backend Task declares `frequency: Frequency` but
-    // PB stores it as either an object or a number; preserve the original
-    // pass-through behavior (`r.frequency || 0`) here.
-    frequency: (x.frequency || 0) as Task["frequency"],
-    lastCompleted: x.last_completed ? new Date(x.last_completed as string) : null,
-    deadline: x.deadline ? new Date(x.deadline as string) : null,
-    deadlineLeadDays: (x.deadline_lead_days as number) ?? null,
-    completed: !!x.completed,
     snoozedUntil: x.snoozed_until ? new Date(x.snoozed_until as string) : null,
     assignees: Array.isArray(x.assignees) ? (x.assignees as string[]) : [],
     createdBy: (x.created_by as string) || "",
     tags: Array.isArray(x.tags) ? (x.tags as string[]) : [],
     collapsed: !!x.collapsed,
-    cleared: !!x.cleared,
     created: x.created as string,
     updated: x.updated as string,
+  };
+
+  if ((x.task_type as string) === "one_shot") {
+    const deadline = x.deadline ? new Date(x.deadline as string) : null;
+    return {
+      ...base,
+      taskType: "one_shot",
+      schedule: deadline
+        ? { kind: "dated", deadline, leadDays: (x.deadline_lead_days as number) ?? 0 }
+        : { kind: "someday" },
+      completed: !!x.completed,
+      cleared: !!x.cleared,
+    };
+  }
+
+  return {
+    ...base,
+    taskType: "recurring",
+    // Schema/type mismatch: backend Task declares `frequency: Frequency` but
+    // PB stores it as either an object or a number; preserve the original
+    // pass-through behavior (`r.frequency || 0`) here.
+    frequency: (x.frequency || 0) as RecurringTask["frequency"],
+    lastCompleted: x.last_completed ? new Date(x.last_completed as string) : null,
   };
 }
 
@@ -171,10 +192,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     }
   }
 
-  async addTask(
-    listId: string,
-    task: Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">,
-  ): Promise<string> {
+  async addTask(listId: string, task: NewTask): Promise<string> {
     const id = newId();
     const parentPath = task.parentId ? await this.resolveParentPath(task.parentId) : null;
     const path = parentPath ? `${parentPath}/${id}` : id;
@@ -193,6 +211,26 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     // POST /tasks so UI- and API-created tasks behave the same.
     const assignees = task.assignees ?? [];
 
+    // Flatten the variant back to the PB columns. recurring → frequency +
+    // last_completed; one_shot → deadline (someday = null) + completed.
+    const variant = task.taskType === "one_shot"
+      ? {
+          task_type: "one_shot",
+          frequency: 0,
+          last_completed: null,
+          deadline: task.schedule.kind === "dated" ? task.schedule.deadline.toISOString() : null,
+          deadline_lead_days: task.schedule.kind === "dated" ? task.schedule.leadDays : null,
+          completed: task.completed || false,
+        }
+      : {
+          task_type: "recurring",
+          frequency: task.frequency,
+          last_completed: task.lastCompleted?.toISOString() || null,
+          deadline: null,
+          deadline_lead_days: null,
+          completed: false,
+        };
+
     await this.wpb.collection("tasks").create({
       id,
       list: listId,
@@ -201,12 +239,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
       position: task.position ?? 0,
       name: task.name,
       description: task.description || "",
-      task_type: task.taskType || "recurring",
-      frequency: task.frequency,
-      last_completed: task.lastCompleted?.toISOString() || null,
-      deadline: task.deadline?.toISOString() || null,
-      deadline_lead_days: task.deadlineLeadDays ?? null,
-      completed: task.completed || false,
+      ...variant,
       snoozed_until: null,
       assignees,
       created_by: createdBy,
@@ -218,10 +251,7 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
     return id;
   }
 
-  async updateTask(
-    taskId: string,
-    updates: Partial<Omit<Task, "id" | "list" | "path" | "created" | "updated" | "createdBy">>,
-  ): Promise<void> {
+  async updateTask(taskId: string, updates: Partial<TaskUpdate>): Promise<void> {
     const data: Record<string, unknown> = {};
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.description !== undefined) data.description = updates.description;

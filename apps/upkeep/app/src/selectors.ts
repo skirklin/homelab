@@ -1,8 +1,8 @@
 /**
  * Selector functions for deriving views from UpkeepState.
  */
-import { getUrgencyLevel, isTaskSnoozed, buildTree } from "./types";
-import type { Task, TaskNode } from "./types";
+import { urgencyOf, buildTree } from "./types";
+import type { Task, RecurringTask, TaskNode } from "./types";
 import type { UpkeepState } from "./upkeep-context";
 
 export function getTasksFromState(state: UpkeepState) {
@@ -10,13 +10,15 @@ export function getTasksFromState(state: UpkeepState) {
 }
 
 /**
- * Get recurring tasks grouped by urgency (for the Kanban view). The board is
- * recurring-only and has no "asap" column — recurring tasks never produce the
- * "asap" urgency (that level is reserved for one-shot todos), so the `asap`
- * case below is unreachable here and exists only to keep the switch total.
+ * Get recurring tasks grouped by Kanban column (for the board). The board is
+ * recurring-only, so the only `UrgencyState` kinds that can occur are
+ * `dueToday` / `dueSoon` / `later` / `snoozed` — `overdue` and `someday` are
+ * one-shot-only and the union proves they can't appear here.
  */
 export function getTasksByUrgency(state: UpkeepState) {
-  const tasks = getTasksFromState(state).filter((t) => t.taskType === "recurring");
+  const tasks = getTasksFromState(state).filter(
+    (t): t is RecurringTask => t.taskType === "recurring",
+  );
   const grouped = {
     today: [] as Task[],
     thisWeek: [] as Task[],
@@ -24,24 +26,29 @@ export function getTasksByUrgency(state: UpkeepState) {
     snoozed: [] as Task[],
   };
 
+  const now = new Date();
   for (const task of tasks) {
-    if (isTaskSnoozed(task)) {
-      grouped.snoozed.push(task);
-      continue;
+    const u = urgencyOf(task, now);
+    switch (u.kind) {
+      case "snoozed":
+        grouped.snoozed.push(task);
+        break;
+      case "dueSoon":
+        grouped.thisWeek.push(task);
+        break;
+      case "later":
+        grouped.later.push(task);
+        break;
+      // dueToday — and the overdue/someday cases that recurring can't produce
+      // (folded in defensively so a future model change can't silently drop them).
+      default:
+        grouped.today.push(task);
     }
-    const urgency = getUrgencyLevel(task);
-    // Recurring tasks can't be "asap"; fold the defensive case into "today" so
-    // a future change that lets recurring tasks go asap can't silently drop them.
-    if (urgency === "asap") {
-      grouped.today.push(task);
-      continue;
-    }
-    grouped[urgency].push(task);
   }
 
   const sortByDue = (a: Task, b: Task) => {
-    const aDate = a.lastCompleted?.getTime() ?? 0;
-    const bDate = b.lastCompleted?.getTime() ?? 0;
+    const aDate = a.taskType === "recurring" ? a.lastCompleted?.getTime() ?? 0 : 0;
+    const bDate = b.taskType === "recurring" ? b.lastCompleted?.getTime() ?? 0 : 0;
     return aDate - bDate;
   };
 
@@ -73,7 +80,10 @@ export function getTaskTree(
   { includeCleared = false }: { includeCleared?: boolean } = {},
 ): TaskNode[] {
   const all = getTasksFromState(state);
-  const filtered = includeCleared ? all : all.filter((t) => !t.cleared);
+  // Only one-shot tasks can be cleared; recurring never carry the flag.
+  const filtered = includeCleared
+    ? all
+    : all.filter((t) => !(t.taskType === "one_shot" && t.cleared));
   return buildTree(filtered);
 }
 

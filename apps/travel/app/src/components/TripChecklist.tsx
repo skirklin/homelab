@@ -71,6 +71,11 @@ function extractActivityId(task: Task): string | null {
   return tag ? tag.slice("activity:".length) : null;
 }
 
+// Trip checklist tasks are all one-shot; recurring tasks (which carry neither
+// flag) never appear here. These guards keep the union honest at the call sites.
+const isDone = (task: Task): boolean => task.taskType === "one_shot" && task.completed;
+const isCleared = (task: Task): boolean => task.taskType === "one_shot" && task.cleared;
+
 interface TripChecklistProps {
   trip: Trip;
   activities?: Activity[];
@@ -105,7 +110,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
   }, [trips, tripTag]);
   // Rendered list also hides cleared items, mirroring the outliner's default
   // "Clear done" view — but they still count toward the fraction above.
-  const tasks = useMemo(() => tripTasks.filter((t) => !t.cleared), [tripTasks]);
+  const tasks = useMemo(() => tripTasks.filter((t) => !isCleared(t)), [tripTasks]);
 
   // Keyed by id for the AssigneePicker's inheritance walk (covers container
   // ancestors too, so an item inherits from its trip/Trips container if set).
@@ -145,7 +150,7 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
 
   const { done, total, pct } = useMemo(() => {
     const total = tripTasks.length;
-    const done = tripTasks.filter((t) => t.completed).length;
+    const done = tripTasks.filter((t) => isDone(t)).length;
     return { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
   }, [tripTasks]);
 
@@ -187,60 +192,54 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
     if (!listId) throw new Error("No list");
 
     // Find or create "Trips" root container
-    let tripsRoot = allTasks.find(
+    const existingRoot = allTasks.find(
       (t) => !t.parentId && t.tags?.includes("container:trips"),
     );
-    if (!tripsRoot) {
+    let tripsRootId = existingRoot?.id;
+    if (!tripsRootId) {
       const maxRootPos = allTasks
         .filter((t) => !t.parentId)
         .reduce((m, t) => Math.max(m, t.position), 0);
-      const id = await upkeep.addTask(listId, {
+      tripsRootId = await upkeep.addTask(listId, {
         parentId: "",
         position: maxRootPos + 1,
         name: "Trips",
         description: "",
         taskType: "one_shot",
-        frequency: { value: 1, unit: "days" },
-        lastCompleted: null,
-        deadline: null,
-        deadlineLeadDays: null,
+        schedule: { kind: "someday" },
         completed: false,
+        cleared: false,
         snoozedUntil: null,
         assignees: [],
         tags: ["container:trips"],
         collapsed: false,
-        cleared: false,
       });
-      tripsRoot = { id, parentId: "" } as Task;
     }
 
     // Find or create this trip's container under Trips
-    let tripContainer = allTasks.find((t) => t.tags?.includes(tripContainerTag));
-    if (!tripContainer) {
+    const existingContainer = allTasks.find((t) => t.tags?.includes(tripContainerTag));
+    let tripContainerId = existingContainer?.id;
+    if (!tripContainerId) {
       const childPos = allTasks
-        .filter((t) => t.parentId === tripsRoot!.id)
+        .filter((t) => t.parentId === tripsRootId)
         .reduce((m, t) => Math.max(m, t.position), 0);
-      const id = await upkeep.addTask(listId, {
-        parentId: tripsRoot.id,
+      tripContainerId = await upkeep.addTask(listId, {
+        parentId: tripsRootId,
         position: childPos + 1,
         name: trip.destination,
         description: "",
         taskType: "one_shot",
-        frequency: { value: 1, unit: "days" },
-        lastCompleted: null,
-        deadline: null,
-        deadlineLeadDays: null,
+        schedule: { kind: "someday" },
         completed: false,
+        cleared: false,
         snoozedUntil: null,
         assignees: [],
         tags: [tripContainerTag],
         collapsed: false,
-        cleared: false,
       });
-      tripContainer = { id, parentId: tripsRoot.id } as Task;
     }
 
-    return tripContainer.id;
+    return tripContainerId;
   };
 
   const handleAdd = async () => {
@@ -255,16 +254,13 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
       name: text,
       description: "",
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
+      cleared: false,
       snoozedUntil: null,
       assignees: [],
       tags: [tripTag],
       collapsed: false,
-      cleared: false,
     });
     setNewItemText("");
   };
@@ -320,8 +316,8 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
         <GroupHeader>General prep</GroupHeader>
       )}
       {generalTasks.map((task) => (
-        <Item key={task.id} $done={task.completed}>
-          <Checkbox checked={task.completed} onChange={() => handleToggle(task)} />
+        <Item key={task.id} $done={isDone(task)}>
+          <Checkbox checked={isDone(task)} onChange={() => handleToggle(task)} />
           <span style={{ flex: 1 }}>{task.name}</span>
           <AssigneePicker task={task} tasksById={tasksById} ownerIds={ownerIds} compact />
           <Button
@@ -343,8 +339,8 @@ export function TripChecklist({ trip, activities = [] }: TripChecklistProps) {
             <GroupHint>linked to activity</GroupHint>
           </GroupHeader>
           {groupTasks.map((task) => (
-            <Item key={task.id} $done={task.completed}>
-              <Checkbox checked={task.completed} onChange={() => handleToggle(task)} />
+            <Item key={task.id} $done={isDone(task)}>
+              <Checkbox checked={isDone(task)} onChange={() => handleToggle(task)} />
               <span style={{ flex: 1 }}>{task.name}</span>
               <AssigneePicker task={task} tasksById={tasksById} ownerIds={ownerIds} compact />
               <Button

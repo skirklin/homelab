@@ -131,16 +131,13 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       name: "New task",
       description: "",
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
+      cleared: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     setFocusedId(id);
   }, [listId, allTasks, upkeep]);
@@ -155,16 +152,13 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       name: "New task",
       description: "",
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
+      cleared: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     const parent = allTasks.find((t) => t.id === parentId);
     if (parent?.collapsed) {
@@ -183,16 +177,13 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       name: "New task",
       description: "",
       taskType: "one_shot",
-      frequency: { value: 1, unit: "days" },
-      lastCompleted: null,
-      deadline: null,
-      deadlineLeadDays: null,
+      schedule: { kind: "someday" },
       completed: false,
+      cleared: false,
       snoozedUntil: null,
       assignees: [],
       tags: [],
       collapsed: false,
-      cleared: false,
     });
     setFocusedId(id);
   }, [listId, allTasks, upkeep]);
@@ -289,7 +280,7 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
 
   const handleToggleOneShot = useCallback(async (taskId: string) => {
     const task = allTasks.find((t) => t.id === taskId);
-    if (!task) return;
+    if (!task || task.taskType !== "one_shot") return;
     const newState = !task.completed;
     // Cascade to one-shot descendants
     const ids = getSubtreeIds(taskId);
@@ -484,7 +475,7 @@ function DetailPanel({ task, tasksById, ownerIds, onUpdate, onTagAdd, onTagRemov
         <DetailField>
           <FieldLabel>Deadline</FieldLabel>
           <DatePicker
-            value={task.deadline ? dayjs(task.deadline) : null}
+            value={task.schedule.kind === "dated" ? dayjs(task.schedule.deadline) : null}
             onChange={(value) => onUpdate("deadline", value ? value.toDate() : null)}
             style={{ width: "100%" }}
           />
@@ -492,7 +483,7 @@ function DetailPanel({ task, tasksById, ownerIds, onUpdate, onTagAdd, onTagRemov
             <FieldLabel>Remind me ___ days before</FieldLabel>
             <InputNumber
               min={0}
-              value={task.deadlineLeadDays ?? 0}
+              value={task.schedule.kind === "dated" ? task.schedule.leadDays : 0}
               onChange={(n) => onUpdate("deadlineLeadDays", n ?? 0)}
               style={{ width: 80 }}
             />

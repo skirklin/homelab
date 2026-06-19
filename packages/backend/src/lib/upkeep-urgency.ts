@@ -1,45 +1,65 @@
 /**
- * Shared urgency helpers for recurring tasks.
+ * Shared urgency projection for tasks.
  *
  * Lifted out of `apps/upkeep/app/src/types.ts` so other apps (e.g. life's
  * morning session header) can bucket tasks without cross-app imports. Typed
- * against a structural subset so both the backend `Task` (created/updated as
- * strings) and the upkeep app's local `Task` (createdAt/updatedAt as Dates)
- * pass without ceremony.
+ * against a structural subset of the discriminated `Task` union so both the
+ * backend `Task` (created/updated as strings) and the upkeep app's local
+ * `Task` (createdAt/updatedAt as Dates) pass without ceremony.
+ *
+ * `urgencyOf(task, now)` is the single source of truth. It takes `now` as a
+ * parameter (the clock used to be read independently at several call sites — a
+ * latent midnight-boundary bug) and folds snooze IN, so callers can't check it
+ * inconsistently.
  */
 
-import type { Frequency, TaskType } from "../types/upkeep";
+import type { Frequency } from "../types/upkeep";
 
 /**
- * Urgency buckets, most-urgent first. `asap` is the top bucket and applies ONLY
- * to one-shot todos that need attention now: those with no deadline at all (an
- * open todo that would otherwise silently rot in "later") or one whose deadline
- * has already passed (overdue). Recurring tasks never produce `asap` — their
- * "due now" state is `today`.
+ * Structured urgency. Replaces the old `UrgencyLevel` enum, which conflated
+ * two genuinely different one-shot states under `"asap"`: an OVERDUE dated
+ * commitment (maximally urgent) and a SOMEDAY undated todo (unscheduled, not
+ * urgent). The union carries the distinction so consumers don't reconstruct
+ * it. `days` is the whole-day delta to the due date (overdue counts how many
+ * days past; dueSoon/later how many days ahead).
  */
-export type UrgencyLevel = "asap" | "today" | "thisWeek" | "later";
+export type UrgencyState =
+  | { kind: "overdue"; days: number }
+  | { kind: "dueToday" }
+  | { kind: "dueSoon"; days: number }
+  | { kind: "later"; days: number }
+  | { kind: "someday" }
+  | { kind: "snoozed"; until: Date };
 
 /**
- * Minimal shape needed to compute urgency. Both `Task` (from `@homelab/backend`)
- * and the upkeep app's local `Task` satisfy this.
+ * Minimal structural shape needed to compute urgency. Mirrors the `Task` union
+ * on `taskType`; both `Task` (from `@homelab/backend`) and the upkeep app's
+ * local `Task` satisfy it.
  */
-export interface UrgencyTask {
-  taskType: TaskType;
-  frequency: Frequency;
-  lastCompleted: Date | null;
-  deadline: Date | null;
-  snoozedUntil: Date | null;
-  completed: boolean;
-  cleared: boolean;
-}
+export type UrgencyTask =
+  | {
+      taskType: "recurring";
+      frequency: Frequency;
+      lastCompleted: Date | null;
+      snoozedUntil: Date | null;
+    }
+  | {
+      taskType: "one_shot";
+      schedule: { kind: "dated"; deadline: Date; leadDays: number } | { kind: "someday" };
+      completed: boolean;
+      cleared: boolean;
+      snoozedUntil: Date | null;
+    };
 
 /**
- * Next due date. For one-shots this is the explicit `deadline` (or null).
- * For recurring tasks it's last_completed + frequency (null if never done).
+ * Next due date. For one-shots this is the explicit deadline (or null when
+ * someday). For recurring tasks it's last_completed + frequency (null if never
+ * done, which means immediately due).
  */
 export function calculateDueDate(task: UrgencyTask): Date | null {
-  if (task.taskType === "one_shot") return task.deadline ?? null;
-  if (task.taskType !== "recurring") return null;
+  if (task.taskType === "one_shot") {
+    return task.schedule.kind === "dated" ? task.schedule.deadline : null;
+  }
   if (!task.lastCompleted) return null; // Never done = immediately due
 
   const due = new Date(task.lastCompleted);
@@ -57,41 +77,64 @@ export function calculateDueDate(task: UrgencyTask): Date | null {
   return due;
 }
 
+/** Whole-day difference between two dates, comparing local midnights. */
+function dayDelta(from: Date, to: Date): number {
+  const a = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const b = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
 /**
  * Whole-day difference between today (local midnight) and the task's due date.
  * Negative = overdue, 0 = due today. `null` when there is no due date — i.e. a
- * recurring task that's never been done, or a one-shot with no deadline.
+ * recurring task that's never been done, or a someday one-shot.
+ *
+ * Defaults `now` to the wall clock for the legacy callers that don't pass it;
+ * prefer threading an explicit `now` through `urgencyOf`.
  */
-export function daysUntilDue(task: UrgencyTask): number | null {
+export function daysUntilDue(task: UrgencyTask, now: Date = new Date()): number | null {
   const dueDate = calculateDueDate(task);
   if (!dueDate) return null;
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-  return Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return dayDelta(now, dueDate);
 }
 
-export function getUrgencyLevel(task: UrgencyTask): UrgencyLevel {
-  const diffDays = daysUntilDue(task);
-
-  // No due date: a never-done recurring task is due today; a one-shot WITHOUT a
-  // deadline is "asap" — it has no scheduled prompt and used to rot silently in
-  // "later" (matched no notification path), so the user could forget it forever.
-  if (diffDays === null) return task.taskType === "recurring" ? "today" : "asap";
-
-  // An overdue one-shot (deadline already passed) is also "asap" — it's past
-  // due and needs action now. Recurring overdue stays "today" (recurring never
-  // produces "asap", so the Kanban board's recurring-only columns are unaffected).
-  if (diffDays < 0) return task.taskType === "one_shot" ? "asap" : "today";
-
-  if (diffDays === 0) return "today";
-  if (diffDays <= 7) return "thisWeek";
-  return "later";
+export function isTaskSnoozed(task: UrgencyTask, now: Date = new Date()): boolean {
+  return !!task.snoozedUntil && task.snoozedUntil.getTime() > now.getTime();
 }
 
-export function isTaskSnoozed(task: UrgencyTask): boolean {
-  if (!task.snoozedUntil) return false;
-  return task.snoozedUntil.getTime() > Date.now();
+/**
+ * The urgency projection. Snooze is folded in (a snoozed task is always
+ * `{kind:"snoozed"}` regardless of deadline) so call sites can't check it
+ * inconsistently. The two old `"asap"` cases split into their real meanings:
+ * an overdue dated one-shot → `overdue`; an undated one-shot → `someday`.
+ * Recurring tasks never produce `overdue`/`someday` — a due/overdue recurring
+ * is `dueToday`, so the Kanban board's recurring-only columns are unaffected.
+ */
+export function urgencyOf(task: UrgencyTask, now: Date): UrgencyState {
+  if (isTaskSnoozed(task, now)) {
+    return { kind: "snoozed", until: task.snoozedUntil as Date };
+  }
+
+  // Undated one-shot: a genuinely unscheduled todo. Named, not inferred.
+  if (task.taskType === "one_shot" && task.schedule.kind === "someday") {
+    return { kind: "someday" };
+  }
+
+  const diffDays = daysUntilDue(task, now);
+
+  // No due date here means a never-done recurring task → due now.
+  if (diffDays === null) return { kind: "dueToday" };
+
+  if (diffDays < 0) {
+    // An overdue one-shot is maximally urgent; an overdue recurring is just
+    // "due now" (recurring never surfaces as overdue).
+    return task.taskType === "one_shot"
+      ? { kind: "overdue", days: -diffDays }
+      : { kind: "dueToday" };
+  }
+  if (diffDays === 0) return { kind: "dueToday" };
+  if (diffDays <= 7) return { kind: "dueSoon", days: diffDays };
+  return { kind: "later", days: diffDays };
 }
 
 /**
@@ -103,11 +146,11 @@ export function isTaskSnoozed(task: UrgencyTask): boolean {
  * sites exclude snoozed), so callers don't re-spell the boolean chain. It does
  * NOT consider urgency level or deadline — layer those on at the call site.
  */
-export function isActionableOneShot(task: UrgencyTask): boolean {
+export function isActionableOneShot(task: UrgencyTask, now: Date = new Date()): boolean {
   return (
     task.taskType === "one_shot" &&
     !task.completed &&
     !task.cleared &&
-    !isTaskSnoozed(task)
+    !isTaskSnoozed(task, now)
   );
 }

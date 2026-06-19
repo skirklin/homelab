@@ -212,7 +212,7 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
             </SnoozeInfo>
           ) : task.taskType === "one_shot" ? (
             // Completed todos are done — no deadline/overdue badge.
-            task.deadline && !task.completed ? (
+            task.schedule.kind === "dated" && !task.completed ? (
               (() => {
                 const days = daysUntilDue(task);
                 const color = days !== null && days < 0 ? "red" : days !== null && days <= 3 ? "orange" : "default";

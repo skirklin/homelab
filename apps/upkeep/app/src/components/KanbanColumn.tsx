@@ -1,17 +1,15 @@
 import styled from "styled-components";
 import { TaskCard } from "./TaskCard";
-import type { Task, UrgencyLevel } from "../types";
+import type { Task } from "../types";
 
-// Keyed by UrgencyLevel. The Kanban board is recurring-only and never renders
-// an "asap" column (only one-shot todos can be asap), but the map must be total
-// over the union so the styled-component index is type-safe; reuse the "today"
-// palette as the fallback for that unreachable case.
-const urgencyStyles: Record<UrgencyLevel, { bg: string; border: string; headerColor: string }> = {
-  asap: {
-    bg: "var(--color-today-bg)",
-    border: "var(--color-today)",
-    headerColor: "var(--color-today)",
-  },
+/**
+ * The Kanban board is recurring-only and renders exactly three columns. There
+ * is no "asap" column — only one-shot todos can be overdue/someday, which the
+ * `Task` union now keeps off this board entirely.
+ */
+type ColumnKind = "today" | "thisWeek" | "later";
+
+const urgencyStyles: Record<ColumnKind, { bg: string; border: string; headerColor: string }> = {
   today: {
     bg: "var(--color-today-bg)",
     border: "var(--color-today)",
@@ -29,7 +27,7 @@ const urgencyStyles: Record<UrgencyLevel, { bg: string; border: string; headerCo
   },
 };
 
-const Column = styled.div<{ $urgency: UrgencyLevel }>`
+const Column = styled.div<{ $urgency: ColumnKind }>`
   background: ${(props) => urgencyStyles[props.$urgency].bg};
   border: 2px solid ${(props) => urgencyStyles[props.$urgency].border};
   border-radius: var(--radius-lg);
@@ -48,7 +46,7 @@ const Column = styled.div<{ $urgency: UrgencyLevel }>`
   }
 `;
 
-const ColumnHeader = styled.div<{ $urgency: UrgencyLevel }>`
+const ColumnHeader = styled.div<{ $urgency: ColumnKind }>`
   padding: var(--space-sm) var(--space-md);
   border-bottom: 1px solid ${(props) => urgencyStyles[props.$urgency].border};
   display: flex;
@@ -56,14 +54,14 @@ const ColumnHeader = styled.div<{ $urgency: UrgencyLevel }>`
   justify-content: space-between;
 `;
 
-const ColumnTitle = styled.h2<{ $urgency: UrgencyLevel }>`
+const ColumnTitle = styled.h2<{ $urgency: ColumnKind }>`
   margin: 0;
   font-size: var(--font-size-base);
   font-weight: 600;
   color: ${(props) => urgencyStyles[props.$urgency].headerColor};
 `;
 
-const TaskCount = styled.span<{ $urgency: UrgencyLevel }>`
+const TaskCount = styled.span<{ $urgency: ColumnKind }>`
   background: ${(props) => urgencyStyles[props.$urgency].border};
   color: white;
   padding: 2px 8px;
@@ -99,7 +97,7 @@ const EmptyState = styled.div`
 
 interface KanbanColumnProps {
   title: string;
-  urgency: UrgencyLevel;
+  urgency: ColumnKind;
   tasks: Task[];
   onEditTask: (task: Task) => void;
   onCompleteTask: (task: Task) => void;
