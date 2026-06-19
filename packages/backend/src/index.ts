@@ -35,6 +35,22 @@ export {
   DEFAULT_NOTIFICATIONS,
 } from "./life-view-defaults";
 export {
+  normalizeSessionRuns,
+  toNormalizerEvent,
+  SESSION_SUBJECTS,
+  SESSION_VIEW,
+  SESSION_ID_MAP,
+  RATED_NEW_IDS,
+  FAT_NAME_TO_VOCAB,
+} from "./life-session-runs";
+export type {
+  SessionRun,
+  RunItem,
+  SessionSubject,
+  SessionView,
+  NormalizerEvent,
+} from "./life-session-runs";
+export {
   ManifestError,
   TRACKABLE_SHAPES,
   slugifyTrackableId,

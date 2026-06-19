@@ -199,6 +199,50 @@ describe("DayTimeline", () => {
     expect(screen.queryByTestId("entry-row")).not.toBeInTheDocument();
   });
 
+  it("renders a PER-ITEM run as ONE non-interactive session row (children NOT shown individually)", () => {
+    // Three per-item events correlated by labels.view/view_run — the new shape.
+    const labelled = (subjectId: string, entries: LifeEntry[], runIso: string): LifeEvent => {
+      const e = ev(subjectId, entries, TODAY, 7);
+      e.labels = { source: "manual", view: "morning", view_run: runIso };
+      e.timestamp = new Date(runIso);
+      return e;
+    };
+    const runIso = (() => {
+      const d = new Date(TODAY);
+      d.setHours(7, 0, 0, 0);
+      return d.toISOString();
+    })();
+    renderTimeline({
+      events: [
+        labelled("gratitude", [{ name: "note", type: "text", value: "coffee" }], runIso),
+        labelled("daily_intention", [{ name: "note", type: "text", value: "ship it" }], runIso),
+        labelled("energy", [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], runIso),
+      ],
+    });
+    const rows = screen.getAllByTestId("day-timeline-row");
+    // Exactly ONE row — the session — not three per-item rows.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("Morning session");
+    expect(rows[0]).toBeDisabled();
+  });
+
+  it("dedups: a fat run + its per-item run on the same timestamp render as ONE row", () => {
+    const runIso = (() => {
+      const d = new Date(TODAY);
+      d.setHours(7, 0, 0, 0);
+      return d.toISOString();
+    })();
+    const fat = ev("morning_session", [{ name: "gratitude", type: "text", value: "coffee" }], TODAY, 7);
+    fat.timestamp = new Date(runIso);
+    const child = ev("gratitude", [{ name: "note", type: "text", value: "coffee" }], TODAY, 7);
+    child.timestamp = new Date(runIso);
+    child.labels = { source: "manual", view: "morning", view_run: runIso };
+    renderTimeline({ events: [fat, child] });
+    const rows = screen.getAllByTestId("day-timeline-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent("Morning session");
+  });
+
   it("shows a quiet empty hint and no list when nothing was logged", () => {
     renderTimeline({ events: [] });
     expect(screen.queryByTestId("day-timeline-row")).not.toBeInTheDocument();

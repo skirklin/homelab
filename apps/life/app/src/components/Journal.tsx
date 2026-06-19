@@ -19,16 +19,19 @@ import {
   useUrlParam,
   useAuth,
 } from "@kirkl/shared";
-import { dayKey } from "@homelab/backend";
+import { dayKey, normalizeSessionRuns, DEFAULT_VIEW_TRACKABLES } from "@homelab/backend";
+import type { LifeManifestTrackable, SessionView } from "@homelab/backend";
 import { useLifeContext } from "../life-context";
 import { useSettingsMenu } from "../settings-menu";
 import { useLogEvent } from "../lib/useLogEvent";
 import { useTrackables } from "../lib/trackables";
+import { useViews } from "../lib/views";
 import { userTz } from "../lib/useUserTz";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import type { LogEvent } from "../types";
 import { findTextEntry, findNumberEntry } from "../lib/format";
 import { eventsForDay, labelFor } from "../lib/shapes";
+import { toJournalRun, type JournalRun } from "../lib/journalRuns";
 import { parseYmdParam } from "../lib/useSelectedDate";
 import { EntriesList } from "./EntriesList";
 import { EventsEditModal } from "./EventsEditModal";
@@ -224,8 +227,21 @@ function parseFilter(raw: string | null): FilterKey {
   return raw && (FILTER_VALUES as readonly string[]).includes(raw) ? (raw as FilterKey) : "all";
 }
 
-function sessionForEntry(entry: LogEvent): Session | undefined {
-  return SESSIONS.find((s) => sessionSubjectId(s.id) === entry.subjectId);
+// The filter chips key on the legacy session ids (`weekly_review`) for URL
+// stability, but normalized runs key on the view id (`weekly`). Map between.
+const SESSION_TO_VIEW: Record<Session["id"], SessionView> = {
+  morning: "morning",
+  evening: "evening",
+  weekly_review: "weekly",
+};
+const VIEW_TO_SESSION: Record<SessionView, Session["id"]> = {
+  morning: "morning",
+  evening: "evening",
+  weekly: "weekly_review",
+};
+
+function sessionForId(id: Session["id"]): Session | undefined {
+  return SESSIONS.find((s) => s.id === id);
 }
 
 // "journal" subject_id is reserved for freeform / Journey-backfilled entries
@@ -268,12 +284,18 @@ function formatTime(d: Date): string {
 
 const SESSION_SUBJECT_IDS = new Set(SESSIONS.map((s) => sessionSubjectId(s.id)));
 
+/** A per-item run child carries labels.view + labels.view_run. */
+function isRunChild(entry: LogEvent): boolean {
+  return Boolean(entry.labels?.view && entry.labels?.view_run);
+}
+
 /**
- * Filterable subjects = sessions + journal. Other trackables stay off the
- * Journal view (they're already on the dashboard).
+ * Events that are part of a session run — a fat `*_session` event OR a per-item
+ * run child. These are rendered as run cards (via normalizeSessionRuns), not as
+ * individual journal/measurement rows.
  */
-function isJournalable(entry: LogEvent): boolean {
-  return SESSION_SUBJECT_IDS.has(entry.subjectId) || JOURNAL_SUBJECTS.has(entry.subjectId);
+function isRunEvent(entry: LogEvent): boolean {
+  return SESSION_SUBJECT_IDS.has(entry.subjectId) || isRunChild(entry);
 }
 
 export function Journal() {
@@ -337,50 +359,87 @@ export function Journal() {
     [setUrlSearch],
   );
 
-  // All journal-shaped entries (sessions + freeform journal), newest first.
-  const journalEntries = useMemo(() => {
-    return Array.from(state.entries.values())
-      .filter(isJournalable)
-      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  }, [state.entries]);
+  // Views + the unified vocab map (user trackables ∪ DEFAULT_VIEW_TRACKABLES,
+  // defaults applied LAST so they win on an id collision — same precedence as
+  // ViewRunner) drive run rendering (item order + prompt text).
+  const views = useViews();
+  const vocab = useMemo<Map<string, LifeManifestTrackable>>(() => {
+    const m = new Map<string, LifeManifestTrackable>();
+    for (const t of trackables) m.set(t.id, t);
+    for (const t of DEFAULT_VIEW_TRACKABLES) m.set(t.id, t);
+    return m;
+  }, [trackables]);
+
+  // The journal stream is a union of session RUNS (dual-shape: fat events OR
+  // per-item children, collapsed by normalizeSessionRuns) and freeform journal
+  // events. Each carries a timestamp + searchable text so filter/search/group
+  // operate uniformly. Newest first.
+  type JournalItem =
+    | { kind: "run"; id: string; timestamp: Date; view: SessionView; run: JournalRun; text: string }
+    | { kind: "journal"; id: string; timestamp: Date; event: LogEvent; text: string };
+
+  const items = useMemo<JournalItem[]>(() => {
+    const all = Array.from(state.entries.values());
+    const out: JournalItem[] = [];
+
+    // Runs (both shapes) → JournalRun items.
+    for (const run of normalizeSessionRuns(all)) {
+      const jr = toJournalRun(run, views, vocab);
+      const text = jr.blocks
+        .filter((b) => b.kind === "text" && b.text)
+        .map((b) => b.text as string)
+        .join(" ")
+        .toLowerCase();
+      out.push({ kind: "run", id: jr.id, timestamp: jr.timestamp, view: jr.view, run: jr, text });
+    }
+
+    // Freeform journal events (NOT run children, NOT fat sessions).
+    for (const e of all) {
+      if (!JOURNAL_SUBJECTS.has(e.subjectId)) continue;
+      const text = e.entries
+        .filter((en) => en.type === "text")
+        .map((en) => (en as { value: string }).value)
+        .join(" ")
+        .toLowerCase();
+      out.push({ kind: "journal", id: e.id, timestamp: e.timestamp, event: e, text });
+    }
+
+    return out.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }, [state.entries, views, vocab]);
 
   // Filter + search applied for the main list.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return journalEntries.filter((e) => {
+    return items.filter((it) => {
       if (filter !== "all") {
         if (filter === "journal") {
-          if (!JOURNAL_SUBJECTS.has(e.subjectId)) return false;
+          if (it.kind !== "journal") return false;
         } else {
-          const session = sessionForEntry(e);
-          if (session?.id !== filter) return false;
+          // filter is a session id; map to the run's view id.
+          if (it.kind !== "run" || it.view !== SESSION_TO_VIEW[filter]) return false;
         }
       }
       if (!q) return true;
-      // Substring across all text entries.
-      for (const entry of e.entries) {
-        if (entry.type === "text" && entry.value.toLowerCase().includes(q)) return true;
-      }
-      return false;
+      return it.text.includes(q);
     });
-  }, [journalEntries, filter, search]);
+  }, [items, filter, search]);
 
-  // Group filtered entries by user-tz date.
+  // Group filtered items by user-tz date.
   const grouped = useMemo(() => {
-    const groups: { key: string; date: Date; entries: LogEvent[] }[] = [];
-    let current: { key: string; date: Date; entries: LogEvent[] } | null = null;
-    for (const e of filtered) {
-      const k = dayKey(e.timestamp, tz);
+    const groups: { key: string; date: Date; items: JournalItem[] }[] = [];
+    let current: { key: string; date: Date; items: JournalItem[] } | null = null;
+    for (const it of filtered) {
+      const k = dayKey(it.timestamp, tz);
       if (!current || current.key !== k) {
-        current = { key: k, date: e.timestamp, entries: [] };
+        current = { key: k, date: it.timestamp, items: [] };
         groups.push(current);
       }
-      current.entries.push(e);
+      current.items.push(it);
     }
     return groups;
   }, [filtered, tz]);
 
-  // On-this-day: entries from exactly 1 week / 1 month / 6 months / 1 year ago.
+  // On-this-day: items from exactly 1 week / 1 month / 6 months / 1 year ago.
   const onThisDay = useMemo(() => {
     const today = new Date();
 
@@ -391,19 +450,19 @@ export function Journal() {
       { label: "1 year ago", date: dayjs(today).subtract(1, "year").toDate() },
     ];
 
-    const result: { label: string; entry: LogEvent }[] = [];
+    const result: { label: string; item: JournalItem }[] = [];
     for (const o of offsets) {
       const k = dayKey(o.date, tz);
-      // First (chronologically earliest) entry for that day, so morning comes first.
-      const match = journalEntries
-        .filter((e) => dayKey(e.timestamp, tz) === k)
+      // First (chronologically earliest) item for that day, so morning comes first.
+      const match = items
+        .filter((it) => dayKey(it.timestamp, tz) === k)
         .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())[0];
       if (match) {
-        result.push({ label: o.label, entry: match });
+        result.push({ label: o.label, item: match });
       }
     }
     return result;
-  }, [journalEntries, tz]);
+  }, [items, tz]);
 
   // Preserve `?date=YYYY-MM-DD` when crossing between dashboard / journal /
   // insights so the per-day context survives a tab switch. Only `date` is
@@ -431,7 +490,9 @@ export function Journal() {
     // eventsForDay buckets by the user's tz (lo/hi = tz-aware start/end of day),
     // so a near-midnight measurement lands on the same local day the picker shows.
     const dayEvents = eventsForDay(Array.from(state.entries.values()), measureDay, tz).filter(
-      (e) => !SESSION_SUBJECT_IDS.has(e.subjectId) && !JOURNAL_SUBJECTS.has(e.subjectId),
+      // Exclude session runs (fat events AND per-item children) + freeform
+      // journal — those render as run/journal cards, not measurement rows.
+      (e) => !isRunEvent(e) && !JOURNAL_SUBJECTS.has(e.subjectId),
     );
     const bySubject = new Map<string, LogEvent[]>();
     for (const e of dayEvents) {
@@ -492,18 +553,21 @@ export function Journal() {
           <Section>
             <SectionTitle>On this day</SectionTitle>
             <OnThisDayRow>
-              {onThisDay.map(({ label, entry }) => {
-                const session = sessionForEntry(entry);
-                const firstText = firstTextOf(entry);
-                const isJournal = JOURNAL_SUBJECTS.has(entry.subjectId);
+              {onThisDay.map(({ label, item }) => {
+                const isRun = item.kind === "run";
+                const sessionId = isRun ? VIEW_TO_SESSION[item.view] : undefined;
+                const title = sessionId ? sessionForId(sessionId)?.title : undefined;
+                const firstText = isRun
+                  ? item.run.blocks.find((b) => b.kind === "text" && b.text)?.text
+                  : firstTextOf(item.event);
                 return (
-                  <OnThisDayCard key={`${label}-${entry.id}`}>
-                    {session ? iconForSessionId(session.id) : <BookOutlined />}
+                  <OnThisDayCard key={`${label}-${item.id}`}>
+                    {sessionId ? iconForSessionId(sessionId) : <BookOutlined />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <OnThisDayLabel>
-                        {label} · {dayjs(entry.timestamp).format("MMM D, YYYY")}
-                        {session && ` · ${session.title}`}
-                        {isJournal && ` · Journal`}
+                        {label} · {dayjs(item.timestamp).format("MMM D, YYYY")}
+                        {title && ` · ${title}`}
+                        {!isRun && ` · Journal`}
                       </OnThisDayLabel>
                       {firstText && (
                         <OnThisDayPreview>{firstText}</OnThisDayPreview>
@@ -571,103 +635,83 @@ export function Journal() {
             grouped.map((g) => (
               <DateGroup key={g.key}>
                 <DateHeader>{formatDateHeader(g.date, tz)}</DateHeader>
-                {g.entries.map((entry) => {
-                  const session = sessionForEntry(entry);
-                  if (session) {
-                    // Session entries render each prompt as a labeled block.
+                {g.items.map((it) => {
+                  if (it.kind === "run") {
+                    // A session run (fat OR per-item) renders each captured item
+                    // as a labeled prompt block. Identical output for both shapes
+                    // because both normalize through toJournalRun. Non-interactive
+                    // (composite, not a single editable event).
+                    const sessionId = VIEW_TO_SESSION[it.view];
+                    const title = sessionForId(sessionId)?.title ?? it.view;
                     return (
-                      <EntryCard key={entry.id}>
+                      <EntryCard key={it.id}>
                         <EntryHeader>
-                          {iconForSessionId(session.id)}
-                          <EntryKind>{session.title}</EntryKind>
+                          {iconForSessionId(sessionId)}
+                          <EntryKind>{title}</EntryKind>
                           <span>·</span>
-                          <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
+                          <EntryTime>{formatTime(it.timestamp)}</EntryTime>
                         </EntryHeader>
-                        {session.prompts.map((p) => {
-                          if (p.type === "text") {
-                            const val = findTextEntry(entry, p.id);
-                            if (!val) return null;
-                            return (
-                              <PromptBlock key={p.id}>
-                                <PromptLabel>{p.label}</PromptLabel>
-                                <PromptValue>{val}</PromptValue>
-                              </PromptBlock>
-                            );
-                          }
-                          if (p.type === "rating") {
-                            const num = findNumberEntry(entry, p.id);
-                            if (!num) return null;
-                            return (
-                              <PromptBlock key={p.id}>
-                                <PromptLabel>{p.label}</PromptLabel>
-                                <PromptValue>
-                                  <RatingPill>
-                                    {num.value} / {num.scale ?? p.max ?? 5}
-                                  </RatingPill>
-                                </PromptValue>
-                              </PromptBlock>
-                            );
-                          }
-                          // number / checkbox fall through to numeric display.
-                          const num = findNumberEntry(entry, p.id);
-                          if (!num) return null;
-                          return (
-                            <PromptBlock key={p.id}>
-                              <PromptLabel>{p.label}</PromptLabel>
-                              <PromptValue>{num.value}</PromptValue>
-                            </PromptBlock>
-                          );
-                        })}
+                        {it.run.blocks.map((b) => (
+                          <PromptBlock key={b.vocabId}>
+                            <PromptLabel>{b.prompt}</PromptLabel>
+                            <PromptValue>
+                              {b.kind === "rating" ? (
+                                <RatingPill>
+                                  {b.value} / {b.scale ?? 5}
+                                </RatingPill>
+                              ) : (
+                                b.text
+                              )}
+                            </PromptValue>
+                          </PromptBlock>
+                        ))}
                       </EntryCard>
                     );
                   }
-                  if (JOURNAL_SUBJECTS.has(entry.subjectId)) {
-                    // Freeform journal: render the `body` text + optional
-                    // mood pill + a footer line showing location/weather if
-                    // present.
-                    const body = findTextEntry(entry, "body");
-                    const mood = findNumberEntry(entry, "mood");
-                    const labels = entry.labels ?? {};
-                    const footerBits: string[] = [];
-                    if (labels.location_address) footerBits.push(labels.location_address);
-                    if (labels.weather) footerBits.push(labels.weather);
-                    return (
-                      <EntryCard
-                        key={entry.id}
-                        $interactive
-                        data-testid="journal-entry-card"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setEditing(entry)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setEditing(entry);
-                          }
-                        }}
-                      >
-                        <EntryHeader>
-                          <BookOutlined />
-                          <EntryKind>Journal</EntryKind>
-                          <span>·</span>
-                          <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
-                          {mood && (
-                            <>
-                              <span>·</span>
-                              <RatingPill>{mood.value} / {mood.scale ?? 5}</RatingPill>
-                            </>
-                          )}
-                        </EntryHeader>
-                        {body && <PromptValue>{body}</PromptValue>}
-                        {footerBits.length > 0 && (
-                          <PromptLabel style={{ marginTop: "var(--space-sm)" }}>
-                            {footerBits.join(" · ")}
-                          </PromptLabel>
+                  // Freeform journal: render the `body` text + optional mood pill
+                  // + a footer line showing location/weather if present.
+                  const entry = it.event;
+                  const body = findTextEntry(entry, "body");
+                  const mood = findNumberEntry(entry, "mood");
+                  const labels = entry.labels ?? {};
+                  const footerBits: string[] = [];
+                  if (labels.location_address) footerBits.push(labels.location_address);
+                  if (labels.weather) footerBits.push(labels.weather);
+                  return (
+                    <EntryCard
+                      key={entry.id}
+                      $interactive
+                      data-testid="journal-entry-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setEditing(entry)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setEditing(entry);
+                        }
+                      }}
+                    >
+                      <EntryHeader>
+                        <BookOutlined />
+                        <EntryKind>Journal</EntryKind>
+                        <span>·</span>
+                        <EntryTime>{formatTime(entry.timestamp)}</EntryTime>
+                        {mood && (
+                          <>
+                            <span>·</span>
+                            <RatingPill>{mood.value} / {mood.scale ?? 5}</RatingPill>
+                          </>
                         )}
-                      </EntryCard>
-                    );
-                  }
-                  return null;
+                      </EntryHeader>
+                      {body && <PromptValue>{body}</PromptValue>}
+                      {footerBits.length > 0 && (
+                        <PromptLabel style={{ marginTop: "var(--space-sm)" }}>
+                          {footerBits.join(" · ")}
+                        </PromptLabel>
+                      )}
+                    </EntryCard>
+                  );
                 })}
               </DateGroup>
             ))

@@ -23,9 +23,8 @@ import { useMemo } from "react";
 import styled from "styled-components";
 import { Tooltip } from "antd";
 import dayjs from "dayjs";
-import type { LifeEvent } from "@homelab/backend";
-import { dayKey } from "@homelab/backend";
-import { sessionSubjectId } from "../manifest";
+import type { LifeEvent, SessionView } from "@homelab/backend";
+import { dayKey, normalizeSessionRuns } from "@homelab/backend";
 import { buildCalendarGrid } from "../lib/calendarGrid";
 
 const WEEKS = 8;
@@ -100,26 +99,26 @@ interface SessionStreakGridProps {
 }
 
 export function SessionStreakGrid({ entries, tz }: SessionStreakGridProps) {
-  const morningSubject = sessionSubjectId("morning");
-  const eveningSubject = sessionSubjectId("evening");
-  const weeklySubject = sessionSubjectId("weekly_review");
-
   // The calendar grid (oldest week first, current week last) IS the layout: a
   // flat Su..Sa cell list whose day identity is tz-aware. We render it
   // column-major (grid-auto-flow: column) so each calendar week becomes a
   // visual column. `future` cells render hidden so the grid stays rectangular
   // and today lands at its real weekday row.
   const cells = useMemo(() => {
-    const logged = (subject: string) => {
-      const keys = new Set<string>();
-      for (const e of entries) {
-        if (e.subjectId === subject) keys.add(dayKey(e.timestamp, tz));
-      }
-      return keys;
+    // Dual-shape: a day "has" view V iff ANY run of V falls on it — whether the
+    // run is a single fat `*_session` event or N per-item events. Normalize once
+    // and bucket each run's local day by its view.
+    const byView: Record<SessionView, Set<string>> = {
+      morning: new Set(),
+      evening: new Set(),
+      weekly: new Set(),
     };
-    const morningByDay = logged(morningSubject);
-    const eveningByDay = logged(eveningSubject);
-    const weeklyByDay = logged(weeklySubject);
+    for (const run of normalizeSessionRuns(entries)) {
+      byView[run.view].add(dayKey(run.timestamp, tz));
+    }
+    const morningByDay = byView.morning;
+    const eveningByDay = byView.evening;
+    const weeklyByDay = byView.weekly;
 
     // buildCalendarGrid returns rows of weeks; flatten in week-then-day order so
     // the column-major grid lays weeks out as columns.
@@ -134,7 +133,7 @@ export function SessionStreakGrid({ entries, tz }: SessionStreakGridProps) {
       weekly: weeklyByDay.has(cell.key),
       labelDate: dayjs(cell.date).format("ddd, MMM D, YYYY"),
     }));
-  }, [entries, tz, morningSubject, eveningSubject, weeklySubject]);
+  }, [entries, tz]);
 
   return (
     <Wrap>

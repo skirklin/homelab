@@ -15,7 +15,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import dayjs from "dayjs";
-import type { LifeEvent, LifeManifestTrackable } from "@homelab/backend";
+import type { LifeEvent, LifeManifestTrackable, SessionView } from "@homelab/backend";
+import { normalizeSessionRuns } from "@homelab/backend";
 import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import {
   aggregateEvents,
@@ -133,6 +134,13 @@ const SESSION_BY_SUBJECT = new Map<string, Session>(
   SESSIONS.map((s) => [sessionSubjectId(s.id), s]),
 );
 
+/** Human title for a normalized run's view id (per-item runs key on `view`). */
+const VIEW_TITLE: Record<SessionView, string> = {
+  morning: "Morning",
+  evening: "Evening",
+  weekly: "Weekly review",
+};
+
 function formatTime(d: Date): string {
   return dayjs(d).format("h:mm A");
 }
@@ -140,6 +148,8 @@ function formatTime(d: Date): string {
 interface TimelineRow {
   id: string;
   time: string;
+  /** Sort key (ms) — not rendered; keeps rows newest-first across mixed sources. */
+  ts: number;
   thing: string;
   value: string;
   /**
@@ -203,29 +213,51 @@ export function DayTimeline({
   // which the cards already do, so the row just shows the label.
   const tz = userTz();
   const rows = useMemo<TimelineRow[]>(() => {
-    return eventsForDay(events, day, tz).map((ev) => {
-      const session = SESSION_BY_SUBJECT.get(ev.subjectId);
-      if (session) {
-        return {
-          id: ev.id,
-          time: formatTime(ev.timestamp),
-          thing: `${session.title} session`,
-          value: "",
-          event: null,
-        };
-      }
-      // Every non-session event is editable — including deleted-vocab rows,
-      // which still carry entries worth editing/deleting and degrade to the raw
-      // id as label.
-      return {
+    const dayEvents = eventsForDay(events, day, tz);
+
+    // Dual-shape sessions: a run may be a single fat `*_session` event OR N
+    // per-item events correlated by labels.view/view_run. Normalize the day to
+    // uniform runs, then render each run as ONE non-interactive session row.
+    // Per-item children are collapsed into that row, so they must NOT also
+    // render as individual editable event rows below.
+    const runs = normalizeSessionRuns(dayEvents);
+    const perItemChildIds = new Set<string>();
+    for (const ev of dayEvents) {
+      if (ev.labels?.view && ev.labels?.view_run) perItemChildIds.add(ev.id);
+    }
+
+    const sessionRows: TimelineRow[] = runs.map((run) => ({
+      id: run.id,
+      time: formatTime(run.timestamp),
+      ts: run.timestamp.getTime(),
+      thing: `${VIEW_TITLE[run.view]} session`,
+      value: "",
+      event: null,
+    }));
+
+    const eventRows: TimelineRow[] = [];
+    for (const ev of dayEvents) {
+      // Fat session events are rendered as runs above (the normalizer turned
+      // them into runs); skip them here.
+      if (SESSION_BY_SUBJECT.has(ev.subjectId)) continue;
+      // Per-item run children are folded into their session row above; skip.
+      if (perItemChildIds.has(ev.id)) continue;
+      // Every other event is editable — including deleted-vocab rows, which
+      // still carry entries worth editing/deleting and degrade to the raw id.
+      eventRows.push({
         id: ev.id,
         time: formatTime(ev.timestamp),
+        ts: ev.timestamp.getTime(),
         thing: labelFor(trackables, ev.subjectId),
         // Single-event summary — reuses the same formatting as the cards.
         value: formatAggregate(aggregateEvents([ev])),
         event: ev,
-      };
-    });
+      });
+    }
+
+    // Newest first, matching eventsForDay's ordering (sessions interleave by
+    // their run timestamp).
+    return [...sessionRows, ...eventRows].sort((a, b) => b.ts - a.ts);
   }, [events, day, trackables, tz]);
 
   const visible = rows.slice(0, MAX_ROWS);

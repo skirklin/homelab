@@ -19,6 +19,8 @@
  */
 import type PocketBase from "pocketbase";
 import { formatInTimeZone } from "date-fns-tz";
+import { normalizeSessionRuns } from "@homelab/backend";
+import type { NormalizerEvent, SessionRun } from "@homelab/backend";
 import { safeTz } from "../notifications/tz";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -101,6 +103,37 @@ interface ActivityRecord {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const SESSION_SUBJECTS = ["morning_session", "evening_session", "weekly_review_session"];
+
+/**
+ * Adapt a snake_case `LifeEventRecord` into the camelCase `NormalizerEvent` the
+ * shared `normalizeSessionRuns` consumes. Entries are passed through as-is (the
+ * normalizer reads `type`/`value`/`scale` which the record's entries carry).
+ */
+function toNormalizer(r: LifeEventRecord): NormalizerEvent {
+  return {
+    id: r.id,
+    subjectId: r.subject_id,
+    timestamp: new Date(r.timestamp),
+    // The record's entries are structurally LifeEntry-compatible for the
+    // normalizer's purposes (it reads type/value/unit/scale).
+    entries: r.entries as NormalizerEvent["entries"],
+    labels: r.labels ?? null,
+  };
+}
+
+/** Is this event part of a session run? A fat `*_session` event OR a per-item
+ *  run child (carrying labels.view + labels.view_run). Such events are rendered
+ *  via runs, NOT as standalone trackers / activity-summary rows. */
+function isRunEvent(e: LifeEventRecord): boolean {
+  if (SESSION_SUBJECTS.includes(e.subject_id)) return true;
+  return Boolean(e.labels?.view && e.labels?.view_run);
+}
+
+/** vocab id → its display label, used by the per-day session renderers when a
+ *  prompt has no special-cased phrasing. */
+function vocabHumanLabel(vocabId: string): string {
+  return humanize(vocabId);
+}
 
 /**
  * Fallback timezone for bundle assembly. The observer is currently a
@@ -353,9 +386,7 @@ async function resolveRecipeNames(
 // ─── Per-day narrative ───────────────────────────────────────────────────────
 
 type DayEntry =
-  | { kind: "morning"; event: LifeEventRecord }
-  | { kind: "evening"; event: LifeEventRecord }
-  | { kind: "weekly_review"; event: LifeEventRecord }
+  | { kind: "session"; run: SessionRun }
   | { kind: "cooking"; event: RecipeEventRecord; recipeName: string }
   | { kind: "tracker_text"; event: LifeEventRecord }
   | { kind: "exercise"; event: LifeEventRecord };
@@ -365,9 +396,12 @@ type DayEntry =
  * worth interleaving with journal text. Plain count/duration events
  * (poop=1, floss=1, coffee=8oz) are operational noise — they live in the
  * activity summary instead.
+ *
+ * Run events (fat `*_session` AND per-item run children) are handled by the
+ * session-run path, so they are excluded here.
  */
-function trackerNarrativeKind(event: LifeEventRecord): DayEntry["kind"] | null {
-  if (SESSION_SUBJECTS.includes(event.subject_id)) return null;
+function trackerNarrativeKind(event: LifeEventRecord): "tracker_text" | "exercise" | null {
+  if (isRunEvent(event)) return null;
   if (event.subject_id === "exercise") return "exercise";
   if (event.subject_id === "quick_capture") return "tracker_text";
   // Any other tracker with a non-empty text entry counts as narrative.
@@ -375,44 +409,114 @@ function trackerNarrativeKind(event: LifeEventRecord): DayEntry["kind"] | null {
   return null;
 }
 
-function renderMorningSession(event: LifeEventRecord): string | null {
-  const text = extractTextEntries(event.entries);
-  if (text.length === 0) return null;
-  const gratitude = text.find((t) => t.name === "gratitude")?.value;
-  const intention = text.find((t) => t.name === "intention")?.value;
-  const others = text.filter((t) => t.name !== "gratitude" && t.name !== "intention");
+// ── Session-run rendering (dual-shape) ─────────────────────────────────────
+//
+// A session run is read by VOCAB ID (the normalizer maps both fat and per-item
+// shapes to the same `run.values: vocabId -> RunItem[]`). The narrative phrasing
+// is keyed off the new vocab ids, preserving the exact labels the legacy fat
+// renderers produced (e.g. `daily_intention` → "Plan for the day"). Only text
+// values are rendered (energy/mood ratings are non-narrative, as before).
+
+/** The single text value captured for a vocab id in a run (trimmed, non-empty),
+ *  or undefined. */
+function runText(run: SessionRun, vocabId: string): string | undefined {
+  const items = run.values[vocabId];
+  if (!items) return undefined;
+  for (const item of items) {
+    for (const e of item.entries) {
+      if (e.type === "text" && typeof e.value === "string" && e.value.trim()) {
+        return e.value.trim();
+      }
+    }
+  }
+  return undefined;
+}
+
+/** All text-bearing vocab ids in a run except the explicitly-handled ones.
+ *  Sorted by vocab id so the output is deterministic regardless of source:
+ *  `run.values` key order differs between a fat run (entry order) and its
+ *  per-item equivalent (stream order). No default session vocab reaches this
+ *  path today — every prompt id is special-cased above — so it's only live for
+ *  custom views; the sort future-proofs fat↔per-item parity for those. */
+function runOtherTexts(run: SessionRun, handled: string[]): Array<{ vocabId: string; value: string }> {
+  const out: Array<{ vocabId: string; value: string }> = [];
+  for (const vocabId of Object.keys(run.values)) {
+    if (handled.includes(vocabId)) continue;
+    const value = runText(run, vocabId);
+    if (value) out.push({ vocabId, value });
+  }
+  out.sort((a, b) => a.vocabId.localeCompare(b.vocabId));
+  return out;
+}
+
+function renderMorningRun(run: SessionRun): string | null {
+  const gratitude = runText(run, "gratitude");
+  const intention = runText(run, "daily_intention");
+  const others = runOtherTexts(run, ["gratitude", "daily_intention"]);
+  if (!gratitude && !intention && others.length === 0) return null;
 
   const lines: string[] = ["*Morning session.*"];
   if (gratitude) lines.push(`Grateful for: ${gratitude}`);
   if (intention) lines.push(`Plan for the day: ${intention}`);
-  for (const o of others) lines.push(`${humanize(o.name)}: ${o.value}`);
+  for (const o of others) lines.push(`${vocabHumanLabel(o.vocabId)}: ${o.value}`);
   return lines.join(" ");
 }
 
-function renderEveningSession(event: LifeEventRecord): string | null {
-  const text = extractTextEntries(event.entries);
-  if (text.length === 0) return null;
-  const win = text.find((t) => t.name === "win")?.value;
-  const lesson = text.find((t) => t.name === "lesson")?.value;
-  const followup = text.find((t) => t.name === "intention_followup")?.value;
-  const others = text.filter(
-    (t) => t.name !== "win" && t.name !== "lesson" && t.name !== "intention_followup",
-  );
+function renderEveningRun(run: SessionRun): string | null {
+  const win = runText(run, "daily_win");
+  const lesson = runText(run, "daily_lesson");
+  const followup = runText(run, "intention_followup");
+  const others = runOtherTexts(run, ["daily_win", "daily_lesson", "intention_followup"]);
+  if (!win && !lesson && !followup && others.length === 0) return null;
 
   const lines: string[] = ["*Evening session.*"];
   if (win) lines.push(`Win: ${win}`);
   if (lesson) lines.push(`Lesson: ${lesson}`);
   if (followup) lines.push(`On the morning plan: ${followup}`);
-  for (const o of others) lines.push(`${humanize(o.name)}: ${o.value}`);
+  for (const o of others) lines.push(`${vocabHumanLabel(o.vocabId)}: ${o.value}`);
   return lines.join(" ");
 }
 
-function renderWeeklyReview(event: LifeEventRecord): string | null {
-  const text = extractTextEntries(event.entries);
-  if (text.length === 0) return null;
+/** Weekly review: render every text vocab id (no special phrasing) by
+ *  humanizing its vocab id.
+ *
+ *  INTENTIONAL wording change (NOT byte-identical to the pre-cutover render):
+ *  the new disambiguated vocab ids humanize to more-specific labels for the
+ *  Coach context — `weekly_lesson` → "Weekly lesson:" and `weekly_intention` →
+ *  "Weekly intention:" (the legacy renderer humanized the bare entry names
+ *  `lesson`/`intention` → "Lesson:"/"Intention:"). These are kept because they
+ *  disambiguate the weekly reflection from the daily `lesson` / `daily_intention`.
+ *  `highlights` / `lows` are unchanged ("Highlights:" / "Lows:").
+ *
+ *  The safety-critical property that DOES hold: a fat `weekly_review_session`
+ *  and its migrated per-item run render IDENTICALLY to each other — both route
+ *  through `SESSION_ID_MAP` → `renderWeeklyRun`, so the per-day prose is the
+ *  same regardless of source. Dedup (transient `--apply` window) and
+ *  deploy/migration ordering are therefore unaffected by this label change. */
+function renderWeeklyRun(run: SessionRun): string | null {
+  // Stable order: highlights, lows, weekly_lesson, weekly_intention, then any
+  // others — mirrors the View's prompt order.
+  const order = ["highlights", "lows", "weekly_lesson", "weekly_intention"];
+  const seen = new Set<string>();
+  const out: Array<{ vocabId: string; value: string }> = [];
+  for (const vocabId of order) {
+    const value = runText(run, vocabId);
+    if (value) {
+      out.push({ vocabId, value });
+      seen.add(vocabId);
+    }
+  }
+  for (const o of runOtherTexts(run, [...seen])) out.push(o);
+  if (out.length === 0) return null;
   const lines: string[] = ["*Weekly review.*"];
-  for (const t of text) lines.push(`${humanize(t.name)}: ${t.value}`);
+  for (const o of out) lines.push(`${vocabHumanLabel(o.vocabId)}: ${o.value}`);
   return lines.join(" ");
+}
+
+function renderSessionRun(run: SessionRun): string | null {
+  if (run.view === "morning") return renderMorningRun(run);
+  if (run.view === "evening") return renderEveningRun(run);
+  return renderWeeklyRun(run);
 }
 
 function renderCooking(event: RecipeEventRecord, recipeName: string): string {
@@ -466,18 +570,21 @@ function buildPerDayNarrative(
     byDay.set(key, list);
   };
 
+  // Session runs (dual-shape): normalize the whole stream once, then bucket each
+  // run by the LOCAL day of its representative timestamp. This collapses both
+  // fat `*_session` events and per-item run children into uniform runs (and
+  // dedups the transient migration window).
+  for (const run of normalizeSessionRuns(lifeEvents.map(toNormalizer))) {
+    const key = localDayKey(run.timestamp.toISOString(), tz);
+    push(key, { kind: "session", run });
+  }
+
+  // Non-run life events: interleave narrative-shaped trackers/exercise.
   for (const event of lifeEvents) {
+    if (isRunEvent(event)) continue; // handled by the run path above.
     const key = localDayKey(event.timestamp, tz);
-    if (event.subject_id === "morning_session") {
-      push(key, { kind: "morning", event });
-    } else if (event.subject_id === "evening_session") {
-      push(key, { kind: "evening", event });
-    } else if (event.subject_id === "weekly_review_session") {
-      push(key, { kind: "weekly_review", event });
-    } else {
-      const kind = trackerNarrativeKind(event);
-      if (kind) push(key, { kind, event } as DayEntry);
-    }
+    const kind = trackerNarrativeKind(event);
+    if (kind) push(key, { kind, event });
   }
 
   for (const event of cookingLog) {
@@ -498,27 +605,25 @@ function buildPerDayNarrative(
 
   const lines: string[] = ["### Per-day narrative\n"];
 
-  // Custom render order within a day: morning → evening → weekly → cooking → exercise → tracker_text.
-  // (Morning before evening matters; the rest is so the prose flows.)
-  const orderRank: Record<DayEntry["kind"], number> = {
-    morning: 0,
-    evening: 1,
-    weekly_review: 2,
-    cooking: 3,
-    exercise: 4,
-    tracker_text: 5,
+  // Custom render order within a day: morning → evening → weekly → cooking →
+  // exercise → tracker_text. (Morning before evening matters; the rest is so the
+  // prose flows.) Sessions share the `session` kind, so rank them by view.
+  const sessionViewRank: Record<SessionRun["view"], number> = { morning: 0, evening: 1, weekly: 2 };
+  const rankOf = (e: DayEntry): number => {
+    if (e.kind === "session") return sessionViewRank[e.run.view];
+    if (e.kind === "cooking") return 3;
+    if (e.kind === "exercise") return 4;
+    return 5; // tracker_text
   };
 
   for (const key of sortedKeys) {
     const entries = byDay.get(key)!;
-    entries.sort((a, b) => orderRank[a.kind] - orderRank[b.kind]);
+    entries.sort((a, b) => rankOf(a) - rankOf(b));
 
     const dayLines: string[] = [];
     for (const entry of entries) {
       let rendered: string | null = null;
-      if (entry.kind === "morning") rendered = renderMorningSession(entry.event);
-      else if (entry.kind === "evening") rendered = renderEveningSession(entry.event);
-      else if (entry.kind === "weekly_review") rendered = renderWeeklyReview(entry.event);
+      if (entry.kind === "session") rendered = renderSessionRun(entry.run);
       else if (entry.kind === "cooking") rendered = renderCooking(entry.event, entry.recipeName);
       else if (entry.kind === "exercise") rendered = renderExercise(entry.event);
       else if (entry.kind === "tracker_text") rendered = renderTrackerText(entry.event);
@@ -549,7 +654,10 @@ function buildActivitySummary(
   // Tracker aggregation: V2 from DATA_COLLECTION.md.
   // Bucket per (subjectId, localDay) first so 8 same-day floss events
   // count as one day with sum 8, not 8 events. Then aggregate across days.
-  const trackerEvents = lifeEvents.filter((e) => !SESSION_SUBJECTS.includes(e.subject_id));
+  // Exclude session runs (fat events AND per-item run children) — they are
+  // narrative, not operational trackers. A per-item `energy`/`mood` rating event
+  // carries labels.view/view_run, so isRunEvent keeps it out of the rollup.
+  const trackerEvents = lifeEvents.filter((e) => !isRunEvent(e));
   if (trackerEvents.length > 0) {
     // subject -> day -> { count: number, sum: number, unit: string }
     const perDay = new Map<string, Map<string, { count: number; sum: number; unit: string }>>();

@@ -501,59 +501,30 @@ export function planCategorySplit(ev: EventRow): CategorySplitAction {
 // Script 3: fan fat *_session events out into per-item events
 // ---------------------------------------------------------------------------
 
-/** The three fat session subjects this migration consumes. */
-export const SESSION_SUBJECTS = [
-  "morning_session",
-  "evening_session",
-  "weekly_review_session",
-] as const;
-export type SessionSubject = (typeof SESSION_SUBJECTS)[number];
-
-/**
- * `labels.view` written on each fanned child. NOTE: weekly's view id is
- * `weekly` (matching B2's ViewRunner `labels.view`), NOT `weekly_review`.
- */
-export const SESSION_VIEW: Record<SessionSubject, string> = {
-  morning_session: "morning",
-  evening_session: "evening",
-  weekly_review_session: "weekly",
-};
-
-/**
- * The fully-decided id map (§3 + the B1 mood decision). For each session
- * subject, the legacy `entries[].name` → the new per-item `subject_id`.
- *
- * `mood` / `mood_rating` route into the LIVE `mood` series. All others are
- * the §3 reflective vocab ids (distinct, de-collided across sessions).
- *
- * The planner HARD-FAILS on any entry name not present here for its subject —
- * an unmapped name yields an `error` action, never a silent drop. This is the
- * guard against drift between the audit and the run.
- */
-export const SESSION_ID_MAP: Record<SessionSubject, Record<string, string>> = {
-  morning_session: {
-    gratitude: "gratitude",
-    intention: "daily_intention",
-    energy: "energy",
-  },
-  evening_session: {
-    win: "daily_win",
-    lesson: "daily_lesson",
-    intention_followup: "intention_followup",
-    mood: "mood",
-  },
-  weekly_review_session: {
-    highlights: "highlights",
-    lows: "lows",
-    lesson: "weekly_lesson",
-    intention: "weekly_intention",
-    mood_rating: "mood",
-  },
-};
-
-/** New per-item subject_ids whose entry is the canonical RATED shape. Every
- *  other mapped id is `noted` (a single `{name:"note", type:"text"}` entry). */
-const RATED_NEW_IDS = new Set(["energy", "mood"]);
+// The session subject list, view map, legacy-name->vocab-id map, and rated-id
+// set are the SINGLE shared source of truth in `@homelab/backend`
+// (life-session-runs.ts). The cutover READ path (frontend readers + the Coach
+// bundle) normalizes against the SAME map, so the write path, this migration,
+// and every reader can never diverge on how a prompt maps to a vocab id.
+//
+// The planner HARD-FAILS on any entry name not present in SESSION_ID_MAP for its
+// subject (an `error` action, never a silent drop) — the guard against drift
+// between the audit and the run. Re-exported so the driver + tests keep their
+// existing `./lib/life-rewrite` import sites unchanged.
+export {
+  SESSION_SUBJECTS,
+  SESSION_VIEW,
+  SESSION_ID_MAP,
+  RATED_NEW_IDS,
+} from "@homelab/backend";
+export type { SessionSubject } from "@homelab/backend";
+import {
+  SESSION_SUBJECTS,
+  SESSION_VIEW,
+  SESSION_ID_MAP,
+  RATED_NEW_IDS,
+  type SessionSubject,
+} from "@homelab/backend";
 
 /** A single fanned-out child event to create. */
 export interface FanoutChild {
