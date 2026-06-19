@@ -19,6 +19,7 @@ function makeLog(manifest: LifeManifest | null): LifeLog {
     sampleSchedule: null,
     manifest,
     randomSamplingEnabled: false,
+    coachEnabled: true,
     created: "2026-06-01T00:00:00Z",
     updated: "2026-06-01T00:00:00Z",
   };

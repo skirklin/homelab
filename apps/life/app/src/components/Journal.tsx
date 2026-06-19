@@ -496,13 +496,20 @@ export function Journal() {
     }));
   }, [measureDay, state.entries, trackables, tz]);
 
+  // Hide the Insights link when Coach is disabled — its route redirects to "/"
+  // anyway, but offering a dead link is bad UX.
+  const coachEnabled = state.log?.coachEnabled ?? true;
   const menuItems = [
-    {
-      key: "insights",
-      icon: <LineChartOutlined />,
-      label: "Insights",
-      onClick: () => navigate(`/insights${dateQuerySuffix}`),
-    },
+    ...(coachEnabled
+      ? [
+          {
+            key: "insights",
+            icon: <LineChartOutlined />,
+            label: "Insights",
+            onClick: () => navigate(`/insights${dateQuerySuffix}`),
+          },
+        ]
+      : []),
     ...settingsMenuItems,
   ];
 

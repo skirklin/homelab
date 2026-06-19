@@ -121,6 +121,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
   const [fcmTokenCount, setFcmTokenCount] = useState<number | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(false);
   const [savingSampling, setSavingSampling] = useState(false);
+  const [savingCoach, setSavingCoach] = useState(false);
 
   const schedule = log?.sampleSchedule;
   const config = RANDOM_SAMPLES;
@@ -156,6 +157,23 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
       message.error("Failed to update random check-in setting");
     } finally {
       setSavingSampling(false);
+    }
+  };
+
+  const toggleCoach = async (next: boolean) => {
+    if (!log?.id) return;
+    setSavingCoach(true);
+    try {
+      await life.setCoachEnabled(log.id, next);
+      dispatch({
+        type: "SET_LOG",
+        log: { ...log, coachEnabled: next },
+      });
+    } catch (err) {
+      console.error("Failed to update Coach opt-in:", err);
+      message.error("Failed to update Coach setting");
+    } finally {
+      setSavingCoach(false);
     }
   };
 
@@ -201,6 +219,28 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
       onCancel={onClose}
       footer={null}
     >
+      <Section>
+        <SectionTitle>
+          <span>Coach</span>
+        </SectionTitle>
+        <SettingRow>
+          <div>
+            <SettingLabel>Enable Coach</SettingLabel>
+            <SettingDescription>
+              AI observations, insights, and the analysis hub. When off, the
+              Coach tab and its screens are hidden and no observations are
+              generated.
+            </SettingDescription>
+          </div>
+          <Switch
+            checked={log?.coachEnabled ?? true}
+            onChange={toggleCoach}
+            loading={savingCoach}
+            disabled={!log?.id}
+          />
+        </SettingRow>
+      </Section>
+
       <Section>
         <SectionTitle>
           <span>Random check-ins</span>

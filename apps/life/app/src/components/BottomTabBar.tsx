@@ -17,6 +17,7 @@ import {
   RobotOutlined,
 } from "@ant-design/icons";
 import type { ReactNode } from "react";
+import { useLifeContext } from "../life-context";
 
 export type LifeTab = "log" | "today" | "journal" | "coach";
 
@@ -117,10 +118,14 @@ export function BottomTabBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const active = activeTabForPath(location.pathname);
+  // Coach is a per-log master switch (default on). When off, drop its tab.
+  const { state } = useLifeContext();
+  const coachEnabled = state.log?.coachEnabled ?? true;
+  const tabs = coachEnabled ? TABS : TABS.filter((t) => t.tab !== "coach");
 
   return (
     <Bar aria-label="Primary" data-testid="bottom-tab-bar">
-      {TABS.map((t) => (
+      {tabs.map((t) => (
         <TabButton
           key={t.tab}
           type="button"

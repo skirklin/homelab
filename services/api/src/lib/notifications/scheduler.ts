@@ -66,18 +66,42 @@ async function runUpkeepPass(): Promise<void> {
  * Generate a weekly observation for every life-log owner, covering the past 7
  * days. Admin pb is scoped per-owner via `ownerId` so users' data never blends.
  */
-async function runObserverWeekly(): Promise<void> {
+export async function runObserverWeekly(): Promise<void> {
   const pb = await getAdminPb();
   const windowEnd = new Date();
   const windowStart = new Date(windowEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   const logs = await pb.collection("life_logs").getFullList({ $autoCancel: false });
+  // Owners who have explicitly disabled Coach (coach_enabled === false) opt out
+  // of observation generation entirely — no Anthropic tokens spent. Default-true
+  // semantics: only an explicit false skips, so legacy rows (undefined) and
+  // enabled rows still generate. A user with multiple logs is opted out only if
+  // every one of their logs has Coach off.
+  const coachDisabled = new Set(
+    logs
+      .filter((l) => l.coach_enabled === false)
+      .map((l) => (l.owner as string) || "")
+      .filter(Boolean),
+  );
+  const coachEnabledOwners = new Set(
+    logs
+      .filter((l) => l.coach_enabled !== false)
+      .map((l) => (l.owner as string) || "")
+      .filter(Boolean),
+  );
   const ownerIds = [...new Set(logs.map((l) => (l.owner as string) || "").filter(Boolean))];
 
   let generated = 0;
   let skipped = 0;
+  let coachOff = 0;
   for (const ownerId of ownerIds) {
     try {
+      // Skip owners who turned Coach off. (If they have multiple logs, keep
+      // generating as long as ANY of their logs still has Coach enabled.)
+      if (coachDisabled.has(ownerId) && !coachEnabledOwners.has(ownerId)) {
+        coachOff++;
+        continue;
+      }
       // Skip owners with no life activity in the window: generating for an
       // inactive log just burns an Anthropic call and produces an empty
       // observation. Gate on the same life_events query assembleBundle uses
@@ -102,7 +126,7 @@ async function runObserverWeekly(): Promise<void> {
     }
   }
   console.log(
-    `[scheduler/observer-weekly] done: ${generated} generated, ${skipped} skipped (no activity), of ${ownerIds.length} owners`,
+    `[scheduler/observer-weekly] done: ${generated} generated, ${skipped} skipped (no activity), ${coachOff} skipped (coach off), of ${ownerIds.length} owners`,
   );
 }
 

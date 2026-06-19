@@ -122,6 +122,7 @@ describe("Journal", () => {
         ],
       },
       randomSamplingEnabled: false,
+      coachEnabled: true,
       created: "2026-06-01T00:00:00Z",
       updated: "2026-06-01T00:00:00Z",
     };

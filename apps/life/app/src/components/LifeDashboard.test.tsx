@@ -198,6 +198,7 @@ function SeedLog({ views }: { views: { id: string; title: string; items: [] }[] 
         sampleSchedule: null,
         manifest: { trackables: [], views },
         randomSamplingEnabled: false,
+        coachEnabled: true,
         created: "",
         updated: "",
       } as never,

@@ -18,6 +18,7 @@ import styled from "styled-components";
 import { BookOutlined, LineChartOutlined, RobotOutlined } from "@ant-design/icons";
 import { AppHeader, PageContainer } from "@kirkl/shared";
 import { ChatThreadPanel } from "./ChatThreadPanel";
+import { useLifeContext } from "../life-context";
 
 // Wrap header + container in a flex column pinned to the dynamic viewport
 // height so the composer reliably hugs the bottom on iOS PWAs (where the
@@ -48,11 +49,19 @@ const ChatPageContainer = styled(PageContainer)`
 
 export function Chat() {
   const navigate = useNavigate();
+  // /chat is unlinked from nav and not Coach-gated itself, but its menu links
+  // into Coach surfaces — omit those when Coach is disabled.
+  const { state } = useLifeContext();
+  const coachEnabled = state.log?.coachEnabled ?? true;
 
   const menuItems = [
     { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("/journal") },
-    { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("/insights") },
-    { key: "observations", icon: <RobotOutlined />, label: "Observations", onClick: () => navigate("/observations") },
+    ...(coachEnabled
+      ? [
+          { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("/insights") },
+          { key: "observations", icon: <RobotOutlined />, label: "Observations", onClick: () => navigate("/observations") },
+        ]
+      : []),
   ];
 
   return (
