@@ -145,23 +145,22 @@ describe("Journal", () => {
     expect(screen.queryByTestId("journal-measurements")).not.toBeInTheDocument();
   });
 
-  it("session entries are NOT tappable (no journal-entry-card)", async () => {
-    renderJournal([
-      ev("morning_session", [{ name: "intention", type: "text", value: "ship it" }], TODAY),
-    ]);
-    // The session renders its prompt value, but as a non-interactive card.
-    await screen.findByText("ship it");
-    expect(screen.queryByTestId("journal-entry-card")).not.toBeInTheDocument();
-  });
-
-  // ── Dual-shape parity: a fat session and the equivalent per-item run render
-  // the SAME prompt labels + values (both normalize through toJournalRun). ──
+  // A per-item run child — carries labels.view + labels.view_run.
   const runIso = TODAY.toISOString();
   const labelled = (subjectId: string, entries: LifeEntry[]): LifeEvent => {
     const e = ev(subjectId, entries, TODAY);
     e.labels = { source: "manual", view: "morning", view_run: runIso };
     return e;
   };
+
+  it("session run cards are NOT tappable (no journal-entry-card)", async () => {
+    renderJournal([
+      labelled("daily_intention", [{ name: "note", type: "text", value: "ship it" }]),
+    ]);
+    // The run renders its prompt value, but as a non-interactive card.
+    await screen.findByText("ship it");
+    expect(screen.queryByTestId("journal-entry-card")).not.toBeInTheDocument();
+  });
 
   it("renders a PER-ITEM morning run with its prompts + values", async () => {
     renderJournal([
@@ -178,40 +177,5 @@ describe("Journal", () => {
     expect(screen.getByText("4 / 5")).toBeInTheDocument();
     // It's a session run card — non-interactive (not a freeform journal card).
     expect(screen.queryByTestId("journal-entry-card")).not.toBeInTheDocument();
-  });
-
-  it("a fat morning_session and its per-item equivalent render IDENTICAL values", async () => {
-    // Fat render
-    const { unmount } = renderJournal([
-      ev("morning_session", [
-        { name: "gratitude", type: "text", value: "the coffee" },
-        { name: "intention", type: "text", value: "ship the cutover" },
-      ], TODAY),
-    ]);
-    expect(await screen.findByText("What are you grateful for?")).toBeInTheDocument();
-    expect(screen.getByText("the coffee")).toBeInTheDocument();
-    expect(screen.getByText("ship the cutover")).toBeInTheDocument();
-    unmount();
-
-    // Per-item render — same labels + values.
-    renderJournal([
-      labelled("gratitude", [{ name: "note", type: "text", value: "the coffee" }]),
-      labelled("daily_intention", [{ name: "note", type: "text", value: "ship the cutover" }]),
-    ]);
-    expect(await screen.findByText("What are you grateful for?")).toBeInTheDocument();
-    expect(screen.getByText("the coffee")).toBeInTheDocument();
-    expect(screen.getByText("ship the cutover")).toBeInTheDocument();
-  });
-
-  it("dedups a fat run + its per-item children into ONE run card", async () => {
-    renderJournal([
-      ev("morning_session", [{ name: "gratitude", type: "text", value: "the coffee" }], TODAY),
-      labelled("gratitude", [{ name: "note", type: "text", value: "the coffee" }]),
-    ]);
-    await screen.findByText("What are you grateful for?");
-    // Only ONE run card — the gratitude prompt + value appear exactly once,
-    // not duplicated across a fat card and a per-item card.
-    expect(screen.getAllByText("What are you grateful for?")).toHaveLength(1);
-    expect(screen.getAllByText("the coffee")).toHaveLength(1);
   });
 });

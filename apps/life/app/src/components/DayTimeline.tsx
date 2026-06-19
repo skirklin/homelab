@@ -17,7 +17,6 @@ import styled from "styled-components";
 import dayjs from "dayjs";
 import type { LifeEvent, LifeManifestTrackable, SessionView } from "@homelab/backend";
 import { normalizeSessionRuns } from "@homelab/backend";
-import { SESSIONS, sessionSubjectId, type Session } from "../manifest";
 import {
   aggregateEvents,
   eventsForDay,
@@ -130,10 +129,6 @@ const EmptyHint = styled.div`
 /** Max event rows before collapsing the remainder into a "+N more" footer. */
 const MAX_ROWS = 7;
 
-const SESSION_BY_SUBJECT = new Map<string, Session>(
-  SESSIONS.map((s) => [sessionSubjectId(s.id), s]),
-);
-
 /** Human title for a normalized run's view id (per-item runs key on `view`). */
 const VIEW_TITLE: Record<SessionView, string> = {
   morning: "Morning",
@@ -215,11 +210,10 @@ export function DayTimeline({
   const rows = useMemo<TimelineRow[]>(() => {
     const dayEvents = eventsForDay(events, day, tz);
 
-    // Dual-shape sessions: a run may be a single fat `*_session` event OR N
-    // per-item events correlated by labels.view/view_run. Normalize the day to
-    // uniform runs, then render each run as ONE non-interactive session row.
-    // Per-item children are collapsed into that row, so they must NOT also
-    // render as individual editable event rows below.
+    // A session run is N per-item events correlated by labels.view/view_run.
+    // Normalize the day to uniform runs, then render each run as ONE
+    // non-interactive session row. Per-item children are collapsed into that
+    // row, so they must NOT also render as individual editable event rows below.
     const runs = normalizeSessionRuns(dayEvents);
     const perItemChildIds = new Set<string>();
     for (const ev of dayEvents) {
@@ -237,9 +231,6 @@ export function DayTimeline({
 
     const eventRows: TimelineRow[] = [];
     for (const ev of dayEvents) {
-      // Fat session events are rendered as runs above (the normalizer turned
-      // them into runs); skip them here.
-      if (SESSION_BY_SUBJECT.has(ev.subjectId)) continue;
       // Per-item run children are folded into their session row above; skip.
       if (perItemChildIds.has(ev.id)) continue;
       // Every other event is editable — including deleted-vocab rows, which

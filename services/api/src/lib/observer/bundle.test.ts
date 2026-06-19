@@ -47,37 +47,34 @@ function createMockPb(collections: Record<string, MockCollection>) {
 const WINDOW_START = new Date("2026-05-20T07:00:00Z");
 const WINDOW_END = new Date("2026-05-27T07:00:00Z");
 
+// A morning session run, as N per-item events under their vocab ids, correlated
+// by labels.view + labels.view_run (the on-disk shape post-fanout). Returns an
+// array so call sites SPREAD it into the life_events list.
 function morningSession(day: number, gratitude: string, intention: string) {
-  return {
-    id: `morning_${day}`,
-    subject_id: "morning_session",
-    timestamp: `2026-05-${String(20 + day).padStart(2, "0")}T14:00:00Z`,
-    entries: [
-      { name: "gratitude", type: "text", value: gratitude },
-      { name: "intention", type: "text", value: intention },
-      { name: "energy", type: "number", value: 4, unit: "rating" },
-    ],
-    labels: null,
-  };
+  const ts = `2026-05-${String(20 + day).padStart(2, "0")}T14:00:00Z`;
+  const run = { source: "manual", view: "morning", view_run: ts };
+  return [
+    { id: `pi_g_${day}`, subject_id: "gratitude", timestamp: ts, entries: [{ name: "note", type: "text", value: gratitude }], labels: run },
+    { id: `pi_i_${day}`, subject_id: "daily_intention", timestamp: ts, entries: [{ name: "note", type: "text", value: intention }], labels: run },
+    { id: `pi_e_${day}`, subject_id: "energy", timestamp: ts, entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], labels: run },
+  ];
 }
 
+// An evening session run as per-item events. win/lesson route to their vocab
+// ids; mood is the LIVE rated series; intention_followup is conditional.
+// 22:00Z lands at 15:00 in LA on the same calendar date in the test window.
 function eveningSession(day: number, win: string, lesson: string, intentionFollowup?: string) {
-  const entries = [
-    { name: "win", type: "text", value: win },
-    { name: "lesson", type: "text", value: lesson },
-    { name: "mood", type: "number", value: 4, unit: "rating" },
+  const ts = `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`;
+  const run = { source: "manual", view: "evening", view_run: ts };
+  const events: unknown[] = [
+    { id: `pi_w_${day}`, subject_id: "daily_win", timestamp: ts, entries: [{ name: "note", type: "text", value: win }], labels: run },
+    { id: `pi_l_${day}`, subject_id: "daily_lesson", timestamp: ts, entries: [{ name: "note", type: "text", value: lesson }], labels: run },
+    { id: `pi_m_${day}`, subject_id: "mood", timestamp: ts, entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], labels: run },
   ];
   if (intentionFollowup) {
-    entries.unshift({ name: "intention_followup", type: "text", value: intentionFollowup });
+    events.unshift({ id: `pi_if_${day}`, subject_id: "intention_followup", timestamp: ts, entries: [{ name: "note", type: "text", value: intentionFollowup }], labels: run });
   }
-  // 22:00Z lands at 15:00 in LA on the same calendar date in the test window.
-  return {
-    id: `evening_${day}`,
-    subject_id: "evening_session",
-    timestamp: `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`,
-    entries,
-    labels: null,
-  };
+  return events;
 }
 
 function countTracker(id: string, subject: string, day: number, value: number, unit: string) {
@@ -212,17 +209,17 @@ describe("assembleBundle", () => {
   describe("text-heavy period", () => {
     it("interleaves morning + evening + cooking on the same day, in chronological order", async () => {
       const lifeEvents = [
-        morningSession(0, "Grateful for a good night of sleep", "Focus on the API refactor today"),
-        eveningSession(
+        ...morningSession(0, "Grateful for a good night of sleep", "Focus on the API refactor today"),
+        ...eveningSession(
           0,
           "Shipped the observer module",
           "Need to take more breaks",
           "Yes, got the API refactor PR up",
         ),
-        morningSession(1, "The sunrise was beautiful", "Be present during conversations"),
-        eveningSession(1, "Good dinner with friends", "Less screen time after 9pm"),
-        morningSession(2, "Fresh coffee in the morning", "Write the bundle tests"),
-        eveningSession(2, "Tests all passing", "Start earlier tomorrow"),
+        ...morningSession(1, "The sunrise was beautiful", "Be present during conversations"),
+        ...eveningSession(1, "Good dinner with friends", "Less screen time after 9pm"),
+        ...morningSession(2, "Fresh coffee in the morning", "Write the bundle tests"),
+        ...eveningSession(2, "Tests all passing", "Start earlier tomorrow"),
       ];
 
       const cookingEvents = [
@@ -286,8 +283,8 @@ describe("assembleBundle", () => {
       expect(idxDay20).toBeLessThan(idxDay21);
       expect(idxDay21).toBeLessThan(idxDay22);
 
-      // relatedEventIds covers the 6 life events
-      expect(result.relatedEventIds).toHaveLength(6);
+      // relatedEventIds covers every per-item life event.
+      expect(result.relatedEventIds).toHaveLength(lifeEvents.length);
     });
   });
 
@@ -366,19 +363,7 @@ describe("assembleBundle", () => {
     });
   });
 
-  describe("dual-shape session parity (B3.2 cutover)", () => {
-    // Build a per-item run equivalent to a fat morning_session: N events under
-    // their vocab ids, correlated by labels.view + labels.view_run.
-    function perItemMorning(day: number, gratitude: string, intention: string) {
-      const ts = `2026-05-${String(20 + day).padStart(2, "0")}T14:00:00Z`;
-      const run = { source: "manual", view: "morning", view_run: ts };
-      return [
-        { id: `pi_g_${day}`, subject_id: "gratitude", timestamp: ts, entries: [{ name: "note", type: "text", value: gratitude }], labels: run },
-        { id: `pi_i_${day}`, subject_id: "daily_intention", timestamp: ts, entries: [{ name: "note", type: "text", value: intention }], labels: run },
-        { id: `pi_e_${day}`, subject_id: "energy", timestamp: ts, entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], labels: run },
-      ];
-    }
-
+  describe("per-item session-run narrative", () => {
     async function bundleFor(lifeEvents: unknown[]) {
       const pb = createMockPb({
         life_events: { getFullList: vi.fn().mockResolvedValue(lifeEvents), getOne: vi.fn() },
@@ -397,43 +382,9 @@ describe("assembleBundle", () => {
       ).markdown;
     }
 
-    // Per-item evening run equivalent to a fat evening_session: win/lesson route
-    // to their vocab ids; mood is the LIVE rated series.
-    function perItemEvening(day: number, win: string, lesson: string, intentionFollowup?: string) {
-      const ts = `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`;
-      const run = { source: "manual", view: "evening", view_run: ts };
-      const events: unknown[] = [
-        { id: `pi_w_${day}`, subject_id: "daily_win", timestamp: ts, entries: [{ name: "note", type: "text", value: win }], labels: run },
-        { id: `pi_l_${day}`, subject_id: "daily_lesson", timestamp: ts, entries: [{ name: "note", type: "text", value: lesson }], labels: run },
-        { id: `pi_m_${day}`, subject_id: "mood", timestamp: ts, entries: [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], labels: run },
-      ];
-      if (intentionFollowup) {
-        events.unshift({ id: `pi_if_${day}`, subject_id: "intention_followup", timestamp: ts, entries: [{ name: "note", type: "text", value: intentionFollowup }], labels: run });
-      }
-      return events;
-    }
-
-    // A fat weekly_review_session. Entry names map (SESSION_ID_MAP) to:
-    // highlights→highlights, lows→lows, lesson→weekly_lesson,
-    // intention→weekly_intention, mood_rating→mood (LIVE rated series).
+    // A per-item weekly run: each text item under its mapped vocab id, mood as
+    // the LIVE rated series.
     function weeklySession(day: number, highlights: string, lows: string, lesson: string, intention: string) {
-      return {
-        id: `weekly_${day}`,
-        subject_id: "weekly_review_session",
-        timestamp: `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`,
-        entries: [
-          { name: "highlights", type: "text", value: highlights },
-          { name: "lows", type: "text", value: lows },
-          { name: "lesson", type: "text", value: lesson },
-          { name: "intention", type: "text", value: intention },
-          { name: "mood_rating", type: "number", value: 4, unit: "rating" },
-        ],
-        labels: null,
-      };
-    }
-
-    // Per-item weekly run equivalent: each text item under its mapped vocab id.
-    function perItemWeekly(day: number, highlights: string, lows: string, lesson: string, intention: string) {
       const ts = `2026-05-${String(20 + day).padStart(2, "0")}T22:00:00Z`;
       const run = { source: "manual", view: "weekly", view_run: ts };
       return [
@@ -447,51 +398,36 @@ describe("assembleBundle", () => {
 
     const perDayOf = (md: string) => md.split("### Activity summary")[0];
 
-    it("a fat morning_session and its per-item equivalent produce the SAME per-day narrative", async () => {
-      const fatMd = await bundleFor([morningSession(0, "good sleep", "ship the cutover")]);
-      const perItemMd = await bundleFor(perItemMorning(0, "good sleep", "ship the cutover"));
-
-      // Compare only the per-day narrative section (the related-event-id list and
-      // tracker rollups differ in event count, but the prose must be identical).
-      expect(perDayOf(perItemMd)).toBe(perDayOf(fatMd));
-      // Sanity: the shared prose carries the session labels + verbatim text.
-      expect(perDayOf(fatMd)).toContain("*Morning session.*");
-      expect(perDayOf(fatMd)).toContain("Grateful for: good sleep");
-      expect(perDayOf(fatMd)).toContain("Plan for the day: ship the cutover");
+    it("renders a morning run as prose keyed off the per-item vocab ids", async () => {
+      const md = await bundleFor(morningSession(0, "good sleep", "ship the cutover"));
+      expect(perDayOf(md)).toContain("*Morning session.*");
+      expect(perDayOf(md)).toContain("Grateful for: good sleep");
+      expect(perDayOf(md)).toContain("Plan for the day: ship the cutover");
     });
 
-    it("a fat evening_session and its per-item equivalent produce the SAME per-day narrative", async () => {
-      const fatMd = await bundleFor([eveningSession(0, "shipped it", "rest matters", "stayed focused")]);
-      const perItemMd = await bundleFor(perItemEvening(0, "shipped it", "rest matters", "stayed focused"));
-
-      expect(perDayOf(perItemMd)).toBe(perDayOf(fatMd));
-      expect(perDayOf(fatMd)).toContain("*Evening session.*");
-      expect(perDayOf(fatMd)).toContain("Win: shipped it");
-      expect(perDayOf(fatMd)).toContain("Lesson: rest matters");
-      expect(perDayOf(fatMd)).toContain("On the morning plan: stayed focused");
+    it("renders an evening run with win / lesson / morning-plan follow-up", async () => {
+      const md = await bundleFor(eveningSession(0, "shipped it", "rest matters", "stayed focused"));
+      expect(perDayOf(md)).toContain("*Evening session.*");
+      expect(perDayOf(md)).toContain("Win: shipped it");
+      expect(perDayOf(md)).toContain("Lesson: rest matters");
+      expect(perDayOf(md)).toContain("On the morning plan: stayed focused");
     });
 
-    it("a fat weekly_review_session and its per-item equivalent produce the SAME per-day narrative", async () => {
-      const fatMd = await bundleFor([
+    it("renders a weekly run with disambiguated weekly_lesson / weekly_intention labels", async () => {
+      const md = await bundleFor(
         weeklySession(0, "great hikes", "slow Monday", "pace yourself", "more sleep"),
-      ]);
-      const perItemMd = await bundleFor(
-        perItemWeekly(0, "great hikes", "slow Monday", "pace yourself", "more sleep"),
       );
-
-      expect(perDayOf(perItemMd)).toBe(perDayOf(fatMd));
-      expect(perDayOf(fatMd)).toContain("*Weekly review.*");
-      expect(perDayOf(fatMd)).toContain("Highlights: great hikes");
-      expect(perDayOf(fatMd)).toContain("Lows: slow Monday");
-      // Intentional disambiguated labels (B3.2): weekly_lesson / weekly_intention
-      // humanize to "Weekly lesson:" / "Weekly intention:", NOT the legacy
-      // bare "Lesson:" / "Intention:".
-      expect(perDayOf(fatMd)).toContain("Weekly lesson: pace yourself");
-      expect(perDayOf(fatMd)).toContain("Weekly intention: more sleep");
+      expect(perDayOf(md)).toContain("*Weekly review.*");
+      expect(perDayOf(md)).toContain("Highlights: great hikes");
+      expect(perDayOf(md)).toContain("Lows: slow Monday");
+      // Disambiguated labels: weekly_lesson / weekly_intention humanize to
+      // "Weekly lesson:" / "Weekly intention:", NOT bare "Lesson:" / "Intention:".
+      expect(perDayOf(md)).toContain("Weekly lesson: pace yourself");
+      expect(perDayOf(md)).toContain("Weekly intention: more sleep");
     });
 
     it("per-item run children are NOT double-counted as trackers in the activity summary", async () => {
-      const md = await bundleFor(perItemMorning(0, "x", "y"));
+      const md = await bundleFor(morningSession(0, "x", "y"));
       const activity = md.split("### Activity summary")[1].split("### Active context")[0];
       // gratitude / daily_intention / energy are run children — none should
       // appear as a tracker rollup line.
@@ -500,25 +436,14 @@ describe("assembleBundle", () => {
       expect(activity).not.toMatch(/Energy:/);
       expect(activity).toContain("No tracker events or completed projects this period.");
     });
-
-    it("dedups a fat run + its per-item children (transient migration window) — no duplicate prose", async () => {
-      const md = await bundleFor([
-        morningSession(0, "good sleep", "ship the cutover"),
-        ...perItemMorning(0, "good sleep", "ship the cutover"),
-      ]);
-      const perDay = md.split("### Activity summary")[0];
-      // Exactly one "Morning session." block — the fat run was dropped in favor
-      // of the migrated per-item run.
-      expect(perDay.match(/\*Morning session\.\*/g)).toHaveLength(1);
-    });
   });
 
   describe("mixed-types period", () => {
     it("routes narrative content per-day and operational content into the summary", async () => {
       const lifeEvents = [
         // Day 0: journal + cooking + exercise w/ notes + plain count trackers
-        morningSession(0, "Grateful for the weekend", "Cook something new"),
-        eveningSession(0, "Made bread", "Patience with rising"),
+        ...morningSession(0, "Grateful for the weekend", "Cook something new"),
+        ...eveningSession(0, "Made bread", "Patience with rising"),
         exerciseEvent("ex1", 0, "lift", 75, 5, "shoulders day, felt strong"),
         countTracker("coffee_d0_1", "coffee", 0, 8, "oz"),
         countTracker("coffee_d0_2", "coffee", 0, 6, "oz"), // same day → aggregated
@@ -531,7 +456,7 @@ describe("assembleBundle", () => {
         exerciseEvent("ex2", 2, "walk", 120, 2),
         countTracker("coffee_d2", "coffee", 2, 10, "oz"),
         // Day 3: only morning, no other narrative
-        morningSession(3, "Quiet morning", "Read a chapter"),
+        ...morningSession(3, "Quiet morning", "Read a chapter"),
       ];
 
       const cookingEvents = [
@@ -621,12 +546,12 @@ describe("assembleBundle", () => {
     it("omits days with zero narrative-shaped activity", async () => {
       const lifeEvents = [
         // Day 0 narrative
-        morningSession(0, "Good", "Ship the test"),
+        ...morningSession(0, "Good", "Ship the test"),
         // Day 1 only has count trackers — should NOT get a heading
         countTracker("coffee_d1", "coffee", 1, 8, "oz"),
         countTracker("floss_d1", "floss", 1, 1, ""),
         // Day 2 narrative again
-        morningSession(2, "Back at it", "Review"),
+        ...morningSession(2, "Back at it", "Review"),
       ];
 
       const pb = createMockPb({

@@ -7,8 +7,8 @@
  * a single shared `labels.view` + `labels.view_run`. This replaces B2's
  * byte-identical fat `*_session` write. Behavior preserved: the conditional drop
  * of `intention_followup` when there is no morning intention, the sparse-skip of
- * empty answers, and the templating reads (which still bridge fat history via
- * `synthesizeViewEvents` until the §4 migration removes it).
+ * empty answers, and the templating reads — which resolve against the real
+ * per-item events (`daily_intention` / `weekly_intention`) in `state.entries`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -39,7 +39,7 @@ vi.mock("./TasksDueBlock", () => ({
   TasksDueBlock: () => <div data-testid="tasks-due-block" />,
 }));
 
-import { ViewRunner, synthesizeViewEvents } from "./ViewRunner";
+import { ViewRunner } from "./ViewRunner";
 import { LifeProvider, useLifeContext } from "../life-context";
 import type { LifeLog, LogEvent } from "../types";
 
@@ -152,53 +152,6 @@ async function answerRating(user: ReturnType<typeof userEvent.setup>, label: str
   await user.click(screen.getByRole("button", { name: String(n) }));
   await user.click(screen.getByRole("button", { name: last ? /Done/ : /Next/ }));
 }
-
-describe("synthesizeViewEvents — fat-session → new-vocab projection (B2 reality)", () => {
-  it("projects a fat morning_session into synthetic daily_intention/gratitude/energy events", () => {
-    const fat = makeEvent("morning_session", [
-      { name: "gratitude", type: "text", value: "coffee" },
-      { name: "intention", type: "text", value: "ship it" },
-      { name: "energy", type: "number", value: 4, unit: "rating", scale: 5 },
-    ]);
-    const out = synthesizeViewEvents([fat]);
-    const bySubject = (id: string) => out.filter((e) => e.subjectId === id);
-    expect(bySubject("daily_intention")[0]?.entries).toEqual([{ name: "intention", type: "text", value: "ship it" }]);
-    expect(bySubject("gratitude")[0]?.entries).toEqual([{ name: "gratitude", type: "text", value: "coffee" }]);
-    expect(bySubject("energy")).toHaveLength(1);
-    // Originals are preserved.
-    expect(bySubject("morning_session")).toHaveLength(1);
-  });
-
-  it("projects weekly_review_session.intention → weekly_intention (NOT daily)", () => {
-    const fat = makeEvent("weekly_review_session", [{ name: "intention", type: "text", value: "rest more" }]);
-    const out = synthesizeViewEvents([fat]);
-    expect(out.filter((e) => e.subjectId === "weekly_intention")[0]?.entries).toEqual([
-      { name: "intention", type: "text", value: "rest more" },
-    ]);
-    expect(out.filter((e) => e.subjectId === "daily_intention")).toHaveLength(0);
-  });
-
-  it("is inert when there are no fat session events", () => {
-    const plain = makeEvent("gratitude", [{ name: "note", type: "text", value: "x" }]);
-    expect(synthesizeViewEvents([plain])).toEqual([plain]);
-  });
-});
-
-describe("ViewRunner — templating resolves against REAL fat-session history (B2)", () => {
-  it("evening shows intention_followup when today's morning_session has an intention", async () => {
-    const events = [makeEvent("morning_session", [{ name: "intention", type: "text", value: "ship it" }])];
-    renderView("evening", "/evening", events);
-    await screen.findByText("How did the plan hold up?");
-    expect(screen.getByText(/This morning's plan: “ship it”/)).toBeInTheDocument();
-  });
-
-  it("morning shows the week banner when a recent weekly_review_session has an intention", async () => {
-    const events = [makeEvent("weekly_review_session", [{ name: "intention", type: "text", value: "rest more" }])];
-    renderView("morning", "/morning", events);
-    await screen.findByText("What are you grateful for?");
-    expect(screen.getByText(/This week: rest more/)).toBeInTheDocument();
-  });
-});
 
 describe("ViewRunner — step rendering", () => {
   it("renders the morning greeting, the tasks_due block, and the first prompt", async () => {

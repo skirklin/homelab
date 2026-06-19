@@ -32,7 +32,9 @@ import { ShapeSheet } from "./ShapeSheet";
 import { SampleResponseModal } from "./SampleResponseModal";
 import { DateNav } from "./DateNav";
 import { Hint } from "./Hint";
-import { RANDOM_SAMPLES, SESSIONS, sessionSubjectId, sessionPath, type Session } from "../manifest";
+import { RANDOM_SAMPLES } from "../manifest";
+import { normalizeSessionRuns, type SessionView } from "@homelab/backend";
+import { useViews } from "../lib/views";
 import { useTrackables } from "../lib/trackables";
 import { useSelectedDate, getDateString } from "../lib/useSelectedDate";
 import { SHAPE_ORDER } from "../lib/shapes";
@@ -166,6 +168,12 @@ export function LifeDashboard() {
   // cards), not by group — `group` is a semantic rollup for trends.
   const trackables = useTrackables();
 
+  // The session cards mirror the capture Views (morning / evening / weekly).
+  // Each card navigates to the View's id (== its route slug) and reads its
+  // greeting icon. Only the three default reflective views carry a card icon;
+  // any custom view falls back to the calendar glyph.
+  const views = useViews();
+
   // Context-aware session prominence: drive sizing and ordering off the
   // current hour + day in the user's local tz. Also surface a "logged at
   // HH:MM" chip on whichever session was already done today.
@@ -175,30 +183,28 @@ export function LifeDashboard() {
     const isSunday = now.getDay() === 0;
     const todayKey = getDateString(now);
 
-    // Find today's most recent entry per session.
-    const lastByKind: Record<Session["id"], Date | null> = { morning: null, evening: null, weekly_review: null };
-    for (const e of allEntries) {
-      if (getDateString(e.timestamp) !== todayKey) continue;
-      for (const s of SESSIONS) {
-        if (e.subjectId === sessionSubjectId(s.id)) {
-          const prev = lastByKind[s.id];
-          if (!prev || e.timestamp > prev) lastByKind[s.id] = e.timestamp;
-        }
-      }
+    // Find today's most recent run per view. A run is N per-item events
+    // correlated by labels.view/view_run; normalize the stream and take each
+    // view's latest run that falls on today.
+    const lastByView: Record<SessionView, Date | null> = { morning: null, evening: null, weekly: null };
+    for (const run of normalizeSessionRuns(allEntries)) {
+      if (getDateString(run.timestamp) !== todayKey) continue;
+      const prev = lastByView[run.view];
+      if (!prev || run.timestamp > prev) lastByView[run.view] = run.timestamp;
     }
 
     // Layout decisions — at most one card is "primary":
     //   morning hours (0–11): morning primary
-    //   Sunday afternoon/evening (12–21): weekly_review primary
+    //   Sunday afternoon/evening (12–21): weekly primary
     //   other afternoon/evening (12–21): evening primary
     //   late evening (22–23): all secondary
     type Prom = "primary" | "secondary";
-    let primary: Session["id"] | null;
+    let primary: SessionView | null;
     if (hour < 12) {
       primary = "morning";
     } else if (hour < 22) {
-      if (isSunday && !lastByKind.weekly_review) {
-        primary = "weekly_review";
+      if (isSunday && !lastByView.weekly) {
+        primary = "weekly";
       } else {
         primary = "evening";
       }
@@ -206,8 +212,8 @@ export function LifeDashboard() {
       primary = null;
     }
 
-    const sizeOf = (id: Session["id"]): Prom => (id === primary ? "primary" : "secondary");
-    const orderOf = (id: Session["id"]): number => {
+    const sizeOf = (id: SessionView): Prom => (id === primary ? "primary" : "secondary");
+    const orderOf = (id: SessionView): number => {
       if (id === primary) return 0;
       return id === "morning" ? 1 : id === "evening" ? 2 : 3;
     };
@@ -215,7 +221,7 @@ export function LifeDashboard() {
     return {
       hour,
       isSunday,
-      lastByKind,
+      lastByView,
       primary,
       sizeOf,
       orderOf,
@@ -372,43 +378,47 @@ export function LifeDashboard() {
         <Section>
           <SectionTitle>Sessions</SectionTitle>
           <SessionRow $hasPrimary={sessionContext.primary !== null}>
-            {[...SESSIONS]
+            {views
+              // Only the three reflective views (morning/evening/weekly) are
+              // session cards; ignore any other custom view here.
+              .filter((v): v is typeof v & { id: SessionView } =>
+                v.id === "morning" || v.id === "evening" || v.id === "weekly")
               // On Sundays the weekly review subsumes evening reflection — hide
               // the evening card entirely so the row reads "morning + weekly".
               // /evening is still reachable directly if needed.
-              .filter((s) => !(sessionContext.isSunday && s.id === "evening"))
+              .filter((v) => !(sessionContext.isSunday && v.id === "evening"))
               .sort((a, b) => sessionContext.orderOf(a.id) - sessionContext.orderOf(b.id))
-              .map((session) => {
-                const size = sessionContext.sizeOf(session.id);
+              .map((view) => {
+                const size = sessionContext.sizeOf(view.id);
                 const isPrimary = size === "primary";
-                const logged = sessionContext.lastByKind[session.id] ?? null;
+                const logged = sessionContext.lastByView[view.id] ?? null;
                 const isAfternoon = sessionContext.hour >= 12 && sessionContext.hour < 22;
                 const muted =
                   sessionContext.lateNight ||
-                  (session.id === "morning" && isAfternoon && !logged) ||
-                  (session.id === "weekly_review" && !sessionContext.isSunday && !logged);
+                  (view.id === "morning" && isAfternoon && !logged) ||
+                  (view.id === "weekly" && !sessionContext.isSunday && !logged);
                 const cardStyle = isPrimary ? { gridColumn: "1 / -1" } : undefined;
                 const icon =
-                  session.id === "morning" ? <SunOutlined />
-                    : session.id === "evening" ? <MoonOutlined />
+                  view.id === "morning" ? <SunOutlined />
+                    : view.id === "evening" ? <MoonOutlined />
                       : <CalendarOutlined />;
                 return (
                   <SessionCard
-                    key={session.id}
+                    key={view.id}
                     $size={size}
                     $muted={muted}
                     style={cardStyle}
-                    onClick={() => navigate(sessionPath(session.id))}
+                    onClick={() => navigate(view.id)}
                   >
                     {icon}
-                    <SessionCardTitle>{session.title}</SessionCardTitle>
+                    <SessionCardTitle>{view.title}</SessionCardTitle>
                     {logged ? (
                       <SessionCardCheck>
                         <CheckCircleFilled /> logged at {formatHHmm(logged)}
                       </SessionCardCheck>
-                    ) : session.id === "morning" && isAfternoon ? (
+                    ) : view.id === "morning" && isAfternoon ? (
                       <Hint>missed earlier?</Hint>
-                    ) : session.id === "weekly_review" && sessionContext.isSunday ? (
+                    ) : view.id === "weekly" && sessionContext.isSunday ? (
                       <Hint>Sunday review</Hint>
                     ) : null}
                   </SessionCard>
