@@ -55,28 +55,27 @@ function makeLogBackend(opts: { owned?: Record<string, unknown> | null } = {}): 
 }
 
 describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () => {
-  it("seeds the default shape-demo manifest on create, covering every shape", async () => {
+  it("seeds an EMPTY manifest on create (no default trackables/views/notifications)", async () => {
     const { backend, createSpy } = makeLogBackend({ owned: null });
     const log = await backend.getOrCreateLog("user-new");
 
-    // The create payload carries the default starter manifest.
+    // The create payload carries the empty default manifest.
     expect(createSpy).toHaveBeenCalledTimes(1);
     const [payload] = createSpy.mock.calls[0];
     expect((payload as { manifest: typeof DEFAULT_LIFE_MANIFEST }).manifest).toEqual(
       DEFAULT_LIFE_MANIFEST,
     );
+    // Explicit empty arrays — NOT undefined (the in-app editors edit these
+    // arrays in place; undefined would make them render the DEFAULT_* fallback
+    // and throw `*_not_found` on the first edit).
+    expect((payload as { manifest: { trackables: unknown[]; views: unknown[]; notifications: unknown[] } }).manifest).toEqual({
+      trackables: [],
+      views: [],
+      notifications: [],
+    });
 
-    // And the mapped LifeLog surfaces it.
-    expect(log.manifest).not.toBeNull();
-    const byId = Object.fromEntries(log.manifest!.trackables.map((t) => [t.id, t]));
-    // One trackable per shape.
-    expect(byId.water).toMatchObject({ shape: "took", defaultUnit: "oz", defaultAmount: 8 });
-    expect(byId.exercise).toMatchObject({ shape: "did", defaultDuration: 30, ratingLabel: "intensity" });
-    expect(byId.floss).toMatchObject({ shape: "happened" });
-    expect(byId.mood).toMatchObject({ shape: "rated" });
-
-    const shapes = new Set(log.manifest!.trackables.map((t) => t.shape));
-    expect(shapes).toEqual(new Set(["took", "did", "happened", "rated"]));
+    // And the mapped LifeLog surfaces an empty manifest.
+    expect(log.manifest).toEqual({ trackables: [], views: [], notifications: [] });
   });
 
   it("preserves an existing log's manifest (does NOT re-seed or overwrite)", async () => {

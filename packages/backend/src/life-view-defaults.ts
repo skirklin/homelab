@@ -186,29 +186,23 @@ export const DEFAULT_VIEWS: LifeView[] = [
 ];
 
 /**
- * The default scheduled nudges — the three FIXED session reminders only.
+ * The default scheduled nudges — the three FIXED session reminders only, with
+ * placeholder times (07:30 / 21:00 / 19:00). The weekly notification fires on
+ * Sunday (`weekday: 0`) and `subsumes` the evening reminder on its day.
  *
- * Placeholder default times are used here (07:30 / 21:00 / 19:00). Per-user
- * reminder-time reconciliation (copying each log's existing
- * `morningReminderTime` / `eveningReminderTime` / `weeklyReminderTime` columns
- * into these) AND the random-sampling (`{kind:"random"}`) notification are
- * Phase B4 — deliberately NOT modeled here.
+ * This is now an INERT fallback only: `useNotifications` resolves an
+ * `undefined` `manifest.notifications` to this default so an editor never
+ * renders blank. New logs seed `manifest.notifications: []` (see
+ * life-manifest-default.ts) and every existing log was materialized with a real
+ * array by the Phase D column→manifest migration, so the cron never relies on
+ * this — `resolveNotifications` reads `manifest.notifications` and falls back to
+ * `[]`, not to these defaults.
  *
- * The weekly notification fires on Sunday (`weekday: 0`) and `subsumes` the
- * evening reminder on its day, reproducing today's "evening is suppressed when
- * the weekly review fires" Sunday behavior.
- *
- * ⚠️ PHASE D ID-SCHEME LANDMINE — these BARE ids (`morning`/`evening`/`weekly`)
- * + placeholder times DIFFER from the B4 cron's column-derived ids
- * (`morning-reminder` / `evening-reminder` / `weekly-reminder` + real column
- * times) emitted by `buildNotificationsFromColumns` in
- * `services/api/src/lib/notifications/life-notifications.ts`. The `*-reminder`
- * ids are what `reminder_state` + the `LEGACY_SENT_COLUMN` double-fire guard
- * key on. When Phase D migrates the columns into `manifest.notifications`, it
- * MUST use the `*-reminder` ids + each log's real times — NOT this default — or
- * the guard stops matching and reminders could double-fire on the seed day.
- * (Cross-ref: `LifeManifest.notifications` doc in
- * `packages/backend/src/types/life.ts`.)
+ * Historical note: these BARE ids (`morning`/`evening`/`weekly`) deliberately
+ * differ from the `*-reminder` ids the Phase D migration materialized (which
+ * key `reminder_state`); the migration used the migration-time
+ * column-reconstruction, never this default. (Cross-ref: `LifeManifest.notifications`
+ * doc in `packages/backend/src/types/life.ts`.)
  */
 export const DEFAULT_NOTIFICATIONS: LifeNotification[] = [
   {

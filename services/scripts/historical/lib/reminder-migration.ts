@@ -31,11 +31,106 @@
  *   preserving (it's exactly what the fallback already returns). The landmine is
  *   notifications-only; views carry no double-fire guard.
  */
-import { DEFAULT_VIEWS, type LifeNotification, type LifeView } from "@homelab/backend";
-import {
-  buildNotificationsFromColumns,
-  type ResolvableLog,
-} from "../../../api/src/lib/notifications/life-notifications";
+import { DEFAULT_VIEWS, RANDOM_SAMPLES, type LifeNotification, type LifeView } from "@homelab/backend";
+
+// ---------------------------------------------------------------------------
+// Column → notifications reconstruction (relocated from the api service)
+//
+// This logic used to live in services/api/src/lib/notifications/life-notifications.ts
+// as the cron's `undefined`-manifest fallback. Phase D dropped the legacy
+// `*_reminder_time` columns and simplified the cron to manifest-only, so the
+// api service no longer needs it. It survives HERE — verbatim, behavior
+// unchanged — only because this historical migration still references it (it
+// is the exact thing the migration materialized into each log's manifest).
+// Forensic value only; not on any live path.
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimal shape of a raw `life_logs` PB record this reconstruction reads.
+ * The JS SDK parses the JSON `manifest` column to an object, so
+ * `manifest.notifications` is a real array or `undefined`.
+ */
+export interface ResolvableLog {
+  manifest?: { notifications?: LifeNotification[] | null } | null;
+  morning_reminder_time?: string | null;
+  evening_reminder_time?: string | null;
+  weekly_reminder_time?: string | null;
+  random_sampling_enabled?: boolean;
+}
+
+/** The column-derived notification ids (the `*-reminder` id scheme). */
+export const MORNING_REMINDER_ID = "morning-reminder";
+export const EVENING_REMINDER_ID = "evening-reminder";
+export const WEEKLY_REMINDER_ID = "weekly-reminder";
+export const SAMPLING_ID = "sampling";
+
+/**
+ * Reconstruct the pre-B4 notification behavior from the legacy columns. This
+ * is what the migration materialized into `manifest.notifications[]`, byte-
+ * faithful to the old cron:
+ *
+ *   - a non-empty `*_reminder_time` column ⇒ a `fixed` notification at that time
+ *     (morning/evening daily; weekly = Sunday-only `weekday:0`, `subsumes` the
+ *     evening reminder so the Sunday-evening double-nudge is suppressed);
+ *   - an empty column ⇒ NO notification ⇒ no reminder;
+ *   - `random_sampling_enabled` ⇒ a `random` notification from `RANDOM_SAMPLES`.
+ *
+ * The weekly notification ALWAYS lists `subsumes:["evening-reminder"]` but only
+ * suppresses evening on the day it is itself scheduled (Sunday). When the
+ * weekly time is empty it is still day-scheduled Sunday (so it subsumes
+ * evening) but `time: ""` never delivers a push — reproducing "evening never
+ * fires Sunday" without inventing a phantom weekly push.
+ */
+export function buildNotificationsFromColumns(log: ResolvableLog): LifeNotification[] {
+  const out: LifeNotification[] = [];
+
+  const morning = (log.morning_reminder_time || "").trim();
+  if (morning) {
+    out.push({
+      id: MORNING_REMINDER_ID,
+      target: "morning",
+      strategy: { kind: "fixed", cadence: "daily", time: morning },
+    });
+  }
+
+  const evening = (log.evening_reminder_time || "").trim();
+  if (evening) {
+    out.push({
+      id: EVENING_REMINDER_ID,
+      target: "evening",
+      strategy: { kind: "fixed", cadence: "daily", time: evening },
+    });
+  }
+
+  const weekly = (log.weekly_reminder_time || "").trim();
+  if (weekly || evening) {
+    out.push({
+      id: WEEKLY_REMINDER_ID,
+      target: "weekly",
+      strategy: {
+        kind: "fixed",
+        cadence: "weekly",
+        time: weekly,
+        weekday: 0,
+        subsumes: [EVENING_REMINDER_ID],
+      },
+    });
+  }
+
+  if (log.random_sampling_enabled) {
+    out.push({
+      id: SAMPLING_ID,
+      target: "sampling",
+      strategy: {
+        kind: "random",
+        timesPerDay: RANDOM_SAMPLES.timesPerDay,
+        activeHours: RANDOM_SAMPLES.activeHours as [number, number],
+      },
+    });
+  }
+
+  return out;
+}
 
 /**
  * The raw `life_logs` PB record this planner reads (snake_case columns, JSON
