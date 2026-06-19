@@ -263,7 +263,14 @@ export class PocketBaseLifeBackend implements LifeBackend {
     };
     if (options?.endTime) payload.end_time = options.endTime.toISOString();
     if (options?.labels && Object.keys(options.labels).length > 0) payload.labels = options.labels;
-    await this.wpb.collection("life_events").create(payload);
+    // Per-record requestKey so a burst of life_events creates (e.g. a session
+    // wizard writing N per-item events with Promise.all) doesn't auto-cancel.
+    // PocketBase's JS SDK keys in-flight requests by method+path by DEFAULT, so
+    // N concurrent creates to the SAME collection share one key and all-but-one
+    // get auto-cancelled ("The request was autocancelled"). A unique key per
+    // event id makes the writes independent. The id is locally generated and
+    // unique per event, so collisions are impossible.
+    await this.wpb.collection("life_events").create(payload, { requestKey: `life-event-${id}` });
     return id;
   }
 

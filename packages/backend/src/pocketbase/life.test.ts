@@ -144,6 +144,43 @@ describe("PocketBaseLifeBackend.addEvent — empty-payload invariant (F1)", () =
     });
     expect((payload as { entries: unknown[] }).entries).toHaveLength(1);
   });
+
+  it("passes a per-event requestKey so concurrent creates never auto-cancel", async () => {
+    // Regression for "WrappedPbError: The request was autocancelled" on a
+    // session-wizard submit: N per-item events written with Promise.all are N
+    // concurrent creates to the SAME life_events collection. PocketBase's SDK
+    // keys in-flight requests by method+path by default, so without a distinct
+    // requestKey all-but-one get auto-cancelled. addEvent must hand each create
+    // a unique requestKey derived from the (locally generated) event id.
+    const { backend, createSpy } = makeBackend();
+    createSpy.mockResolvedValue({ id: "ev" });
+
+    // Simulate the evening session: 3 per-item events written concurrently.
+    const subjects = ["energy", "gratitude", "highlights"];
+    const ids = await Promise.all(
+      subjects.map((s) =>
+        backend.addEvent("log123", s, [{ name: "rating", type: "number", value: 4, unit: "rating", scale: 5 }], "user1", {
+          labels: { view: "evening", view_run: "2026-06-17T00:00:00.000Z" },
+        }),
+      ),
+    );
+
+    // All N writes completed (none swallowed/cancelled) and reached the backend.
+    expect(ids).toHaveLength(3);
+    expect(createSpy).toHaveBeenCalledTimes(3);
+
+    // Every create carries an opts object with a requestKey...
+    const requestKeys = createSpy.mock.calls.map(([payload, opts]) => {
+      expect(opts).toMatchObject({ requestKey: expect.any(String) });
+      // ...keyed to the event's own id, so siblings can't collide.
+      expect((opts as { requestKey: string }).requestKey).toBe(
+        `life-event-${(payload as { id: string }).id}`,
+      );
+      return (opts as { requestKey: string }).requestKey;
+    });
+    // ...and the keys are all DISTINCT — the property that defeats autocancel.
+    expect(new Set(requestKeys).size).toBe(3);
+  });
 });
 
 describe("PocketBaseLifeBackend.updateEvent — empty-payload invariant (F1)", () => {
