@@ -292,3 +292,69 @@ spec:
               envFrom:
                 - secretRef:
                     name: api-secrets
+---
+# notification_log pruner — daily TTL on the notification sent-ledger.
+#
+# The notification crons write one notification_log row per (user, kind, bucket)
+# when a push lands (the single idempotency store — migration 20260619_200000).
+# The ledger only needs the CURRENT window to suppress same-day duplicates;
+# 30 days of history is generous forensic headroom. Without retention it would
+# grow ~one row per user per cron per day forever.
+#
+# Policy: delete rows whose `sent_at` is older than 30 days. Mirrors
+# pod-events-prune exactly (alpine/curl + jq + coreutils date, superuser auth,
+# page-and-delete loop). `sent_at` is a PB date column in the same
+# "YYYY-MM-DD HH:MM:SS.sssZ" shape as `created`, so the cutoff compare matches.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: notification-log-prune
+  namespace: homelab
+spec:
+  schedule: "35 9 * * *"  # 2:35 AM Pacific (PDT); after pod-events-prune
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: prune
+              image: alpine/curl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  apk add --no-cache jq coreutils >/dev/null
+                  PB=http://pocketbase.homelab.svc.cluster.local:8090
+                  TOKEN=$(curl -sf -X POST "$PB/api/collections/_superusers/auth-with-password" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"identity\":\"$PB_ADMIN_EMAIL\",\"password\":\"$PB_ADMIN_PASSWORD\"}" \
+                    | jq -er .token)
+                  CUTOFF=$(date -u -d '30 days ago' +'%Y-%m-%d %H:%M:%S.000Z')
+                  FILTER="sent_at < \"$CUTOFF\""
+                  ENCODED=$(printf '%s' "$FILTER" | jq -sRr @uri)
+                  echo "[notification-log-prune] cutoff=$CUTOFF"
+                  TOTAL=0
+                  while :; do
+                    PAGE=$(curl -sf "$PB/api/collections/notification_log/records?perPage=500&fields=id&filter=$ENCODED" \
+                      -H "Authorization: $TOKEN")
+                    IDS=$(printf '%s' "$PAGE" | jq -r '.items[].id')
+                    if [ -z "$IDS" ]; then
+                      break
+                    fi
+                    COUNT=0
+                    for ID in $IDS; do
+                      curl -sf -X DELETE "$PB/api/collections/notification_log/records/$ID" \
+                        -H "Authorization: $TOKEN"
+                      COUNT=$((COUNT + 1))
+                    done
+                    TOTAL=$((TOTAL + COUNT))
+                    echo "[notification-log-prune] deleted batch=$COUNT total=$TOTAL"
+                  done
+                  echo "[notification-log-prune] done total=$TOTAL"
+              envFrom:
+                - secretRef:
+                    name: api-secrets

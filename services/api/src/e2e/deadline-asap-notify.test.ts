@@ -10,12 +10,12 @@
  *
  * This runs the REAL runDeadlineNotifications against the per-worktree test PB
  * (no real push — see the VAPID note below) and observes the side effects the
- * cron produces: the per-user `last_deadline_notification` stamp + the
+ * cron produces: a `notification_log` ledger row (kind="deadline") + the
  * notified/skipped return counts. Pins:
  *   - an undeadlined, incomplete, un-cleared one-shot → its creator is notified
  *   - a snoozed undeadlined one-shot → NOT notified
  *   - a completed / cleared one-shot → NOT notified
- *   - idempotency: a second run the same day is a no-op (stamp guard)
+ *   - idempotency: a second run the same day is a no-op (ledger guard)
  *
  * Requires the per-worktree test env (infra/test-env.sh up).
  */
@@ -24,12 +24,13 @@ import PocketBase from "pocketbase";
 import { randomBytes } from "crypto";
 import { getPbTestUrl } from "./pb-test-url";
 
-// The cron now stamps `last_deadline_notification` ONLY when a push actually
-// landed (result.sent > 0) — a user with momentarily-dead subscriptions must
-// not be marked "notified" and suppressed (reconciled with the life cron). So
-// the stamp can't double as the "who was selected" signal unless a delivery
-// succeeds. These tests verify SELECTION (aggregation/snooze/cleared/opt-out),
-// not push transport, so mock the push layer to report one successful send.
+// The cron now writes a `notification_log` ledger row (via notifyOnce) ONLY
+// when a push actually landed (result.sent > 0) — a user with momentarily-dead
+// subscriptions must not be marked "notified" and suppressed (reconciled with
+// the life cron). So the ledger row can't double as the "who was selected"
+// signal unless a delivery succeeds. These tests verify SELECTION
+// (aggregation/snooze/cleared/opt-out), not push transport, so mock the push
+// layer to report one successful send.
 const sendPushToUser = vi.fn().mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
 vi.mock("../lib/push", () => ({
   sendPushToUser: (...a: unknown[]) => sendPushToUser(...a),
@@ -91,10 +92,24 @@ async function makeOneShot(fields: {
   return { id: rec.id };
 }
 
-/** Read the per-user idempotency stamp fresh from PB. */
-async function lastNotif(userId: string): Promise<string> {
-  const u = await adminPb.collection("users").getOne(userId);
-  return (u.last_deadline_notification as string) || "";
+const todayPacific = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+
+/**
+ * True iff the deadline cron stamped a ledger row for this user today. The
+ * deadline cron writes notification_log{ user, kind:"deadline", bucket:<PT day> }
+ * on a successful send — the go-forward idempotency signal (replaces the old
+ * users.last_deadline_notification stamp).
+ */
+async function wasNotifiedToday(userId: string): Promise<boolean> {
+  const rows = await adminPb.collection("notification_log").getFullList({
+    filter: adminPb.filter("user = {:u} && kind = {:k} && bucket = {:b}", {
+      u: userId,
+      k: "deadline",
+      b: todayPacific(),
+    }),
+  });
+  return rows.length > 0;
 }
 
 beforeAll(async () => {
@@ -117,15 +132,13 @@ describe("runDeadlineNotifications — undeadlined (asap) todos", () => {
       deadline: null, // undeadlined → asap
     });
 
-    expect(await lastNotif(user.id)).toBe(""); // not yet stamped
+    expect(await wasNotifiedToday(user.id)).toBe(false); // not yet stamped
 
     const result = await runDeadlineNotifications();
     expect(result.notified).toBeGreaterThanOrEqual(1);
 
-    // The observable side effect: the user got stamped today.
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-    const stamped = new Date(await lastNotif(user.id)).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-    expect(stamped).toBe(today);
+    // The observable side effect: a ledger row for today.
+    expect(await wasNotifiedToday(user.id)).toBe(true);
   });
 
   it("is idempotent: a second run the same day does not re-notify a stamped user", async () => {
@@ -135,13 +148,18 @@ describe("runDeadlineNotifications — undeadlined (asap) todos", () => {
 
     const first = await runDeadlineNotifications();
     expect(first.notified).toBeGreaterThanOrEqual(1);
-    const firstStamp = await lastNotif(user.id);
+    expect(await wasNotifiedToday(user.id)).toBe(true);
 
     const second = await runDeadlineNotifications();
-    // Second run finds the user already stamped today → skips them.
+    // Second run finds the user already in the ledger today → skips them.
     expect(second.skipped).toBeGreaterThanOrEqual(1);
-    // Stamp unchanged (no re-write for this user).
-    expect(await lastNotif(user.id)).toBe(firstStamp);
+    // Exactly one ledger row for this user today (no duplicate write).
+    const rows = await adminPb.collection("notification_log").getFullList({
+      filter: adminPb.filter("user = {:u} && kind = {:k} && bucket = {:b}", {
+        u: user.id, k: "deadline", b: todayPacific(),
+      }),
+    });
+    expect(rows).toHaveLength(1);
   });
 
   it("does NOT notify the creator when the only undeadlined one-shot is snoozed", async () => {
@@ -157,7 +175,7 @@ describe("runDeadlineNotifications — undeadlined (asap) todos", () => {
     });
 
     await runDeadlineNotifications();
-    expect(await lastNotif(user.id)).toBe(""); // never stamped → never notified
+    expect(await wasNotifiedToday(user.id)).toBe(false); // never stamped → never notified
   });
 
   it("does NOT notify for a completed or cleared undeadlined one-shot", async () => {
@@ -182,7 +200,7 @@ describe("runDeadlineNotifications — undeadlined (asap) todos", () => {
     });
 
     await runDeadlineNotifications();
-    expect(await lastNotif(completedUser.id)).toBe("");
-    expect(await lastNotif(clearedUser.id)).toBe("");
+    expect(await wasNotifiedToday(completedUser.id)).toBe(false);
+    expect(await wasNotifiedToday(clearedUser.id)).toBe(false);
   });
 });

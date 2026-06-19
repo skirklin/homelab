@@ -1,5 +1,5 @@
 /**
- * Shared per-user fan-out + once-a-day idempotency tail for the task crons.
+ * Shared per-user fan-out tail for the task crons, now backed by the ledger.
  *
  * Both task-notification crons (one-shot deadline/asap reminders in deadlines.ts
  * and recurring chore reminders in upkeep.ts) share the SAME delivery tail once
@@ -8,16 +8,14 @@
  *   1. fetch the recipient users (honoring the `1 = 0` empty-filter guard);
  *   2. skip a user whose `upkeep_notification_mode === "off"` (the binary
  *      opt-out — legacy `all`/`subscribed` both mean "on");
- *   3. skip a user already stamped for today on their per-cron `stampColumn`;
- *   4. `sendPushToUser` with the cron's own copy/data;
- *   5. stamp `stampColumn` with now — BUT only when the push actually landed
- *      (`result.sent > 0`).
+ *   3. delegate "send once per day, stamp only on success" to `notifyOnce`,
+ *      which owns the day-math + the `notification_log` idempotency row.
  *
- * That last point reconciles a drift: deadlines.ts and upkeep.ts used to stamp
- * UNCONDITIONALLY, so a user whose push subscriptions were momentarily dead got
- * marked "notified" and suppressed for the rest of the day — the daily asap nag
- * silently ate a day. The life cron (life.ts) already stamps only on
- * `result.sent > 0`; this helper makes that the single, shared policy.
+ * Previously this re-implemented the once-a-day stamp against per-user date
+ * columns (`last_task_notification` / `last_deadline_notification`). Those are
+ * retired in favor of the single `notification_log` ledger (see ledger.ts +
+ * migration 20260619_200000); this helper is now just the cron-specific
+ * fan-out (user lookup + off opt-out + per-user copy) wrapped around it.
  *
  * The per-cron aggregation (which tasks are due, who the resolved recipients
  * are, the title/body copy, the `data.type`) stays in each cron — only this
@@ -25,15 +23,15 @@
  * payload (copy + `data` + `buildUrl`) keyed off its own per-user task shape.
  */
 import type PocketBase from "pocketbase";
-import { sendPushToUser, type PushPayload } from "../push";
-import { todayPacific } from "./tz";
+import type { PushPayload } from "../push";
+import { notifyOnce } from "./ledger";
 
 export async function notifyUsersOnce<T>(opts: {
   pb: PocketBase;
   /** Resolved recipients → their per-user due-task aggregate (caller-shaped). */
   tasksByUser: Map<string, T[]>;
-  /** Per-cron idempotency stamp column on `users` (date-of-last-notify). */
-  stampColumn: "last_deadline_notification" | "last_task_notification";
+  /** Ledger channel for this cron, e.g. "upkeep" / "deadline" (the once-a-day key). */
+  kind: string;
   /** Build the push payload from this user's aggregated tasks. */
   buildPush: (userTasks: T[]) => PushPayload;
   /** `preferredOrigins` for `sendPushToUser` (dedupe across multi-origin subs). */
@@ -41,10 +39,9 @@ export async function notifyUsersOnce<T>(opts: {
   /** Log tag, e.g. "deadlines" / "upkeep". */
   logPrefix: string;
 }): Promise<{ notified: number; skipped: number }> {
-  const { pb, tasksByUser, stampColumn, buildPush, preferredOrigins, logPrefix } = opts;
-  const today = todayPacific();
+  const { pb, tasksByUser, kind, buildPush, preferredOrigins, logPrefix } = opts;
 
-  // Fetch user preferences (honor the global upkeep off opt-out + idempotency stamp).
+  // Fetch user preferences (honor the global upkeep off opt-out).
   const userIds = [...tasksByUser.keys()];
   const users = await pb.collection("users").getFullList({
     filter: userIds.length > 0
@@ -71,27 +68,18 @@ export async function notifyUsersOnce<T>(opts: {
       continue;
     }
 
-    // Already notified today on this cron's stamp?
-    if (user[stampColumn]) {
-      const lastNotif = new Date(user[stampColumn]).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
-      if (lastNotif === today) {
-        skipped++;
-        continue;
-      }
-    }
+    // Send once per day (ledger-backed): stamp only on a landed push; a
+    // duplicate / undelivered result counts as skipped.
+    const result = await notifyOnce(pb, {
+      user: userId,
+      kind,
+      payload: buildPush(userTasks),
+      preferredOrigins,
+    });
 
-    const result = await sendPushToUser(pb, userId, buildPush(userTasks), { preferredOrigins });
+    console.log(`[${logPrefix}] User ${userId}: ${result}`);
 
-    console.log(`[${logPrefix}] User ${userId}: ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
-
-    // Stamp ONLY when a push actually landed (result.sent > 0). A user whose
-    // subscriptions are momentarily dead must NOT be marked "notified" and
-    // suppressed for the day — they'd silently lose the nag. Matches the life
-    // cron's mark-after-success policy.
-    if (result.sent > 0) {
-      await pb.collection("users").update(userId, {
-        [stampColumn]: new Date().toISOString(),
-      }, { $autoCancel: false });
+    if (result === "sent") {
       notified++;
     } else {
       skipped++;

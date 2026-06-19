@@ -114,7 +114,7 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
   const { notified, skipped } = await notifyUsersOnce({
     pb,
     tasksByUser,
-    stampColumn: "last_task_notification",
+    kind: "upkeep",
     preferredOrigins: UPKEEP_ORIGINS,
     logPrefix: "upkeep",
     buildPush: (userTasks) => {

@@ -24,6 +24,7 @@ import { getAdminPb } from "../pb";
 import { sendPushToUser } from "../push";
 import { DOMAIN } from "../../config";
 import { makeUserTzResolver, safeTz } from "./tz";
+import { notifyOnce } from "./ledger";
 import { resolveNotifications, isEnabled } from "./life-notifications";
 
 // Life is now standalone at life.kirkl.in (the old kirkl.in/life module was
@@ -440,8 +441,6 @@ export async function runLifeReminderCheck(
       for (const victim of n.strategy.subsumes ?? []) subsumedIds.add(victim);
     }
 
-    const reminderState = (logDoc.reminder_state as Record<string, string> | null | undefined) || {};
-
     // Resolve the log's Views once for push title/body (manifest.views ??
     // DEFAULT_VIEWS), mirroring resolveNotifications' fallback shape.
     const manifestViews = (logDoc.manifest as { views?: LifeView[] | null } | null | undefined)?.views;
@@ -470,42 +469,39 @@ export async function runLifeReminderCheck(
         continue;
       }
 
-      // Idempotency: reminder_state[id] === today means already sent today.
-      // (Pre-Phase-D this also OR'd the legacy last_*_reminder_sent columns for
-      // a deploy-day double-fire guard; those columns are dropped and every
-      // reminder's reminder_state has keyed on the `*-reminder` ids since the
-      // B4 cron shipped 2026-06-18, so reminder_state alone is authoritative.)
-      if (reminderState[n.id] === todayYmd) {
-        skipped++;
-        continue;
-      }
-
-      // Mark as sent only AFTER a delivery actually landed (result.sent > 0).
-      // croner protect:true removes the double-fire concern; marking after
-      // success lets a no-delivery tick retry within the ±1min window, while
-      // the reminder_state[id]/legacy guard above prevents a second send once
-      // one succeeds.
+      // Once-per-owner-local-day idempotency via the shared ledger. `notifyOnce`
+      // owns the check + send + mark-after-success: it stamps a notification_log
+      // row keyed (user, "life_reminder:<id>", todayYmd) ONLY when a push lands,
+      // so a no-delivery tick retries within the ±1min window. The bucket is the
+      // OWNER-LOCAL day (todayYmd, not todayPacific) so a non-Pacific owner's
+      // reminder is one-per-their-day. (Replaces the per-log reminder_state map.)
       const content = pushContentForTarget(n, views);
       try {
-        const result = await sendPushToUser(pb, ownerId, {
-          title: content.title,
-          body: content.body,
-          buildUrl: () => viewUrl(n.target),
-          data: { type: `life_${n.target}_reminder`, logId: logDoc.id },
-        }, { preferredOrigins: LIFE_ORIGINS });
-        console.log(`[life-reminder/${n.id}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result.sent} sent, ${result.expired} expired, ${result.failed} failed`);
-        if (result.sent > 0) {
-          // Merge into the existing reminder_state map (don't clobber siblings).
-          const nextState = { ...reminderState, [n.id]: todayYmd };
-          reminderState[n.id] = todayYmd;
-          await pb.collection("life_logs").update(
-            logDoc.id,
-            { reminder_state: nextState },
-            { $autoCancel: false },
-          );
+        const result = await notifyOnce(pb, {
+          user: ownerId,
+          kind: `life_reminder:${n.id}`,
+          bucket: todayYmd,
+          payload: {
+            title: content.title,
+            body: content.body,
+            buildUrl: () => viewUrl(n.target),
+            // One stable `life_reminder` type for every target (morning/evening/
+            // weekly/any View); the SW deep-links via `data.url` (buildUrl), so it
+            // never needed the per-target string. `target` rides along for
+            // analytics/debugging. (Was the dynamic, un-registrable
+            // `life_${target}_reminder`, which the SW silently dropped to its
+            // generic url branch.)
+            data: { type: "life_reminder", target: n.target, logId: logDoc.id },
+          },
+          preferredOrigins: LIFE_ORIGINS,
+        });
+        console.log(`[life-reminder/${n.id}] log ${logDoc.id} → user ${ownerId} (${tz}): ${result}`);
+        if (result === "sent") {
           sent++;
-        } else {
+        } else if (result === "undelivered") {
           console.warn(`[life-reminder/${n.id}] 0 delivered — not marking, will retry within window`);
+        } else {
+          skipped++;
         }
       } catch (err) {
         console.error(`[life-reminder/${n.id}] log ${logDoc.id} → user ${ownerId}:`, err);

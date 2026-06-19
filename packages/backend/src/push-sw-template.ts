@@ -1,4 +1,31 @@
 /**
+ * Pure renderer for the Web-Push service worker, derived from
+ * `NOTIFICATION_TYPES`. No node/fs imports so it's safe to keep under `src/`
+ * (tree-shaken out of browser bundles — only the generator CLI and the lockstep
+ * test import it). The fs I/O lives in `scripts/gen-push-sw.ts`.
+ *
+ * See `notification-types.ts` for the WHY: the SW used to be three byte-
+ * identical hand-maintained copies that drifted from the senders. The SW is now
+ * a pure function of the registry; the lockstep test asserts the checked-in
+ * copies match this render.
+ */
+import { NOTIFICATION_TYPES } from "./notification-types";
+
+/** Apps that register a Web-Push SW (vite-plugin-pwa importScripts('/push-sw.js')). */
+export const PUSH_SW_APPS = ["home", "upkeep", "life"] as const;
+
+/** The repo-relative path of an app's checked-in push SW. */
+export function pushSwRelPath(app: string): string {
+  return `apps/${app}/app/public/push-sw.js`;
+}
+
+/**
+ * Render the SW source. The routing table is a JSON literal generated from the
+ * registry; the runtime logic below it is data-driven and hand-stable.
+ */
+export function renderPushSw(): string {
+  const routing = JSON.stringify(NOTIFICATION_TYPES, null, 2);
+  return `/**
  * Web Push service worker — GENERATED, DO NOT EDIT BY HAND.
  *
  * Source of truth: packages/backend/src/notification-types.ts
@@ -9,51 +36,15 @@
  * (packages/backend/src/notification-types.test.ts) fails if any checked-in
  * copy drifts from the registry.
  *
- * Routing is data-driven from ROUTING below: each `data.type` maps to its
+ * Routing is data-driven from ROUTING below: each \`data.type\` maps to its
  * notification options (tag / requireInteraction / quick-rating actions) and a
  * click destination. A type that isn't in ROUTING (or a payload with no type)
- * falls back to the generic `data.url` deep link — same as a registered
+ * falls back to the generic \`data.url\` deep link — same as a registered
  * { click: "url" } type — so an un-registered sender degrades gracefully
  * instead of crashing.
  */
 
-const ROUTING = {
-  "household_task_due": {
-    "tag": "upkeep-tasks",
-    "click": {
-      "kind": "fixed",
-      "path": "/upkeep"
-    }
-  },
-  "task_attention": {
-    "click": {
-      "kind": "url"
-    }
-  },
-  "life_tracker_sample": {
-    "requireInteraction": true,
-    "quickRatingActions": true,
-    "click": {
-      "kind": "sample",
-      "path": "/life?sample=true"
-    }
-  },
-  "life_reminder": {
-    "click": {
-      "kind": "url"
-    }
-  },
-  "travel_morning": {
-    "click": {
-      "kind": "url"
-    }
-  },
-  "travel_evening": {
-    "click": {
-      "kind": "url"
-    }
-  }
-};
+const ROUTING = ${routing};
 
 self.addEventListener("push", (event) => {
   const data = event.data?.json() || {};
@@ -129,7 +120,7 @@ self.addEventListener("notificationclick", (event) => {
     messageData = { type: "SAMPLE_REQUESTED" };
   }
   // Default (registered { click: "url" } types AND unregistered/typeless
-  // payloads): resolve the deep link the sender passed in `data.url` against
+  // payloads): resolve the deep link the sender passed in \`data.url\` against
   // THIS SW's origin so a (now relative) link always opens on the origin the
   // user is signed in on — PocketBase auth is per-origin, so an absolute
   // cross-origin URL would cold-load an empty session (presents as sign-out).
@@ -171,3 +162,5 @@ self.addEventListener("notificationclick", (event) => {
       })
   );
 });
+`;
+}

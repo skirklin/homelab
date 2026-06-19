@@ -201,21 +201,20 @@ describe("runLifeTrackerSampling — per-owner timezone (P0)", () => {
 
 // ─── runLifeReminderCheck: mark-after-successful-delivery ────────────────────
 //
-// The reminder loop must write `reminder_state[id]` only when a push actually
+// The reminder loop must record a sent-ledger row only when a push actually
 // landed (result.sent > 0). A tick that delivers nothing (no live subs / all
 // failed) or throws must NOT mark the day, so the next within-window tick
 // retries. (croner protect:true makes the old mark-before-send double-fire
-// guard moot.) Post-Phase-D the SOLE idempotency store is the `reminder_state`
-// JSON map keyed by notification id; notifications come from
-// `manifest.notifications` only (the legacy `*_reminder_time` columns are
-// dropped). The fixed session-reminder ids are `morning-reminder` /
-// `evening-reminder` / `weekly-reminder`.
+// guard moot.) The idempotency store is now the shared `notification_log`
+// ledger (via notifyOnce): one row per (user, "life_reminder:<id>", ownerYmd).
+// (Replaces the per-log `reminder_state` JSON map — migration 20260619_200000.)
+// Notifications come from `manifest.notifications` only; the fixed session-
+// reminder ids are `morning-reminder` / `evening-reminder` / `weekly-reminder`.
 
 interface ReminderLog {
   id: string;
   owner: string;
   manifest?: { trackables: unknown[]; notifications?: unknown[] };
-  reminder_state?: Record<string, string>;
 }
 
 /** A `manifest.notifications` carrying one fixed daily reminder at `time`. */
@@ -236,21 +235,30 @@ function weeklyReminderManifest(id: string, target: string, time: string) {
   };
 }
 
-/** Pull the latest `reminder_state` written for a log, keyed by notification id. */
-function reminderStateWrites(
-  updates: Array<{ id: string; data: Record<string, unknown> }>,
+/** Pull the ledger rows created for a given notification id (kind suffix). */
+function ledgerCreatesFor(
+  creates: Array<Record<string, unknown>>,
   notificationId: string,
 ) {
-  return updates.filter(
-    (u) =>
-      u.data.reminder_state &&
-      (u.data.reminder_state as Record<string, string>)[notificationId] !== undefined,
-  );
+  return creates.filter((c) => c.kind === `life_reminder:${notificationId}`);
 }
 
-function makeReminderPb(opts: { logs: ReminderLog[]; usersTz: Record<string, string | undefined> }) {
+/**
+ * @param sent ledger rows already present (idempotency seed). Each entry's
+ *   `(kind, bucket)` is matched against notifyOnce's getList filter.
+ */
+function makeReminderPb(opts: {
+  logs: ReminderLog[];
+  usersTz: Record<string, string | undefined>;
+  sent?: Array<{ kind: string; bucket: string }>;
+}) {
   const updates: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const ledgerCreates: Array<Record<string, unknown>> = [];
+  const seeded = opts.sent ?? [];
   const pb = {
+    // notifyOnce uses pb.filter to build the dedup filter; capture the params so
+    // the fake getList can honor the (kind, bucket) lookup.
+    filter: (_expr: string, params?: Record<string, unknown>) => JSON.stringify(params ?? {}),
     collection(name: string) {
       if (name === "life_logs") {
         return {
@@ -271,10 +279,27 @@ function makeReminderPb(opts: { logs: ReminderLog[]; usersTz: Record<string, str
           },
         };
       }
+      if (name === "notification_log") {
+        return {
+          getList: async (_p: number, _pp: number, q: { filter: string }) => {
+            const params = JSON.parse(q.filter) as { kind?: string; bucket?: string };
+            const hit = seeded.some(
+              (s) => s.kind === params.kind && s.bucket === params.bucket,
+            ) || ledgerCreates.some(
+              (c) => c.kind === params.kind && c.bucket === params.bucket,
+            );
+            return { totalItems: hit ? 1 : 0, items: [] };
+          },
+          create: async (data: Record<string, unknown>) => {
+            ledgerCreates.push(data);
+            return data;
+          },
+        };
+      }
       throw new Error(`unexpected collection ${name}`);
     },
   };
-  return { pb, updates };
+  return { pb, updates, ledgerCreates };
 }
 
 describe("runLifeReminderCheck — mark only after successful delivery", () => {
@@ -282,18 +307,18 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
   // suppression rules don't interfere. 2026-06-08 is a Monday; pick 08:00 UTC.
   const MONDAY_0800Z = new Date("2026-06-08T08:00:00Z");
 
-  it("does NOT mark reminder_state when delivery is 0", async () => {
+  it("does NOT write a ledger row when delivery is 0", async () => {
     sendPushToUser.mockResolvedValue({ sent: 0, expired: 0, failed: 1 });
     const logs: ReminderLog[] = [
       { id: "log1", owner: "userA", manifest: dailyReminderManifest("morning-reminder", "morning", "08:00") },
     ];
-    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    const { pb, ledgerCreates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(pb);
 
     const res = await runLifeReminderCheck(MONDAY_0800Z);
 
     expect(sendPushToUser).toHaveBeenCalledTimes(1);
-    expect(reminderStateWrites(updates, "morning-reminder")).toHaveLength(0);
+    expect(ledgerCreatesFor(ledgerCreates, "morning-reminder")).toHaveLength(0);
     expect(res.sent).toBe(0);
   });
 
@@ -302,44 +327,45 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     const logs: ReminderLog[] = [
       { id: "log1", owner: "userA", manifest: dailyReminderManifest("morning-reminder", "morning", "08:00") },
     ];
-    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    const { pb, ledgerCreates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(pb);
 
     const res = await runLifeReminderCheck(MONDAY_0800Z);
 
-    expect(reminderStateWrites(updates, "morning-reminder")).toHaveLength(0);
+    expect(ledgerCreatesFor(ledgerCreates, "morning-reminder")).toHaveLength(0);
     expect(res.sent).toBe(0);
   });
 
-  it("DOES mark reminder_state when delivery succeeds (manifest.notifications drives the send)", async () => {
+  it("DOES write a ledger row when delivery succeeds (manifest.notifications drives the send)", async () => {
     sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
     const logs: ReminderLog[] = [
       { id: "log1", owner: "userA", manifest: dailyReminderManifest("morning-reminder", "morning", "08:00") },
     ];
-    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    const { pb, ledgerCreates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(pb);
 
     const res = await runLifeReminderCheck(MONDAY_0800Z);
 
     expect(sendPushToUser).toHaveBeenCalledTimes(1);
-    const writes = reminderStateWrites(updates, "morning-reminder");
-    expect(writes).toHaveLength(1);
-    expect((writes[0].data.reminder_state as Record<string, string>)["morning-reminder"]).toBe("2026-06-08");
+    const creates = ledgerCreatesFor(ledgerCreates, "morning-reminder");
+    expect(creates).toHaveLength(1);
+    // bucket is the OWNER-LOCAL day (UTC owner here → same as the UTC instant).
+    expect(creates[0].bucket).toBe("2026-06-08");
+    expect(creates[0].user).toBe("userA");
     expect(res.sent).toBe(1);
   });
 
-  it("reminder_state[id] === today suppresses a second send (idempotent within the day)", async () => {
+  it("an existing ledger row for today suppresses a second send (idempotent within the day)", async () => {
     sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
     const logs: ReminderLog[] = [
-      {
-        id: "log1",
-        owner: "userA",
-        manifest: dailyReminderManifest("morning-reminder", "morning", "08:00"),
-        // Already delivered today → must not re-send.
-        reminder_state: { "morning-reminder": "2026-06-08" },
-      },
+      { id: "log1", owner: "userA", manifest: dailyReminderManifest("morning-reminder", "morning", "08:00") },
     ];
-    const { pb } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    const { pb } = makeReminderPb({
+      logs,
+      usersTz: { userA: "UTC" },
+      // Already delivered today → must not re-send.
+      sent: [{ kind: "life_reminder:morning-reminder", bucket: "2026-06-08" }],
+    });
     getAdminPb.mockResolvedValue(pb);
 
     const res = await runLifeReminderCheck(MONDAY_0800Z);
@@ -396,7 +422,7 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     let env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(env.pb);
     await runLifeReminderCheck(SUNDAY_0800Z);
-    expect(reminderStateWrites(env.updates, "weekly-reminder")).toHaveLength(0);
+    expect(ledgerCreatesFor(env.ledgerCreates, "weekly-reminder")).toHaveLength(0);
 
     // Success path: mark.
     sendPushToUser.mockResolvedValue({ sent: 2, expired: 0, failed: 0 });
@@ -406,9 +432,9 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     env = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(env.pb);
     await runLifeReminderCheck(SUNDAY_0800Z);
-    const writes = reminderStateWrites(env.updates, "weekly-reminder");
-    expect(writes).toHaveLength(1);
-    expect((writes[0].data.reminder_state as Record<string, string>)["weekly-reminder"]).toBe("2026-06-07");
+    const creates = ledgerCreatesFor(env.ledgerCreates, "weekly-reminder");
+    expect(creates).toHaveLength(1);
+    expect(creates[0].bucket).toBe("2026-06-07");
   });
 
   it("weekly reminder subsumes the same-time evening reminder on Sunday (only weekly fires)", async () => {
@@ -440,18 +466,20 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
         },
       },
     ];
-    const { pb, updates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
+    const { pb, ledgerCreates } = makeReminderPb({ logs, usersTz: { userA: "UTC" } });
     getAdminPb.mockResolvedValue(pb);
 
     const res = await runLifeReminderCheck(SUNDAY_0800Z);
 
     // Only the weekly fired; the evening was subsumed.
     expect(sendPushToUser).toHaveBeenCalledTimes(1);
-    const pushData = sendPushToUser.mock.calls[0][2] as { data: { type: string } };
-    expect(pushData.data.type).toBe("life_weekly_reminder");
+    const pushData = sendPushToUser.mock.calls[0][2] as { data: { type: string; target: string } };
+    // One stable `life_reminder` type now; the target rides in data.target.
+    expect(pushData.data.type).toBe("life_reminder");
+    expect(pushData.data.target).toBe("weekly");
     expect(res.sent).toBe(1);
-    expect(reminderStateWrites(updates, "weekly-reminder")).toHaveLength(1);
-    expect(reminderStateWrites(updates, "evening-reminder")).toHaveLength(0);
+    expect(ledgerCreatesFor(ledgerCreates, "weekly-reminder")).toHaveLength(1);
+    expect(ledgerCreatesFor(ledgerCreates, "evening-reminder")).toHaveLength(0);
   });
 });
 

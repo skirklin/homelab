@@ -128,7 +128,7 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
   const { notified, skipped } = await notifyUsersOnce({
     pb,
     tasksByUser,
-    stampColumn: "last_deadline_notification",
+    kind: "deadline",
     preferredOrigins: UPKEEP_ORIGINS,
     logPrefix: "deadlines",
     buildPush: (userTasks) => {
