@@ -155,9 +155,11 @@ export class PocketBaseLifeBackend implements LifeBackend {
       return logFromRecord(owned.items[0]);
     }
 
-    // Seed the minimal type-demo starter manifest on CREATE only. Existing
-    // logs (post-backfill) keep their own manifest — this path never runs for
-    // them because the owner-filter above returns first.
+    // Seed the empty default manifest on CREATE only (defaultLifeManifest is
+    // `{trackables:[],views:[],notifications:[]}` — new users build their own
+    // vocab + capture surface from scratch). Existing logs keep their own
+    // manifest — this path never runs for them because the owner-filter above
+    // returns first.
     const id = newId();
     const r = await this.wpb.collection("life_logs").create({
       id,
@@ -200,6 +202,13 @@ export class PocketBaseLifeBackend implements LifeBackend {
     // pure ops only ever touch the targeted trackable, so the rest of the
     // manifest is preserved byte-for-byte. A null/garbage column reads as an
     // empty manifest so `add` works on a fresh log.
+    //
+    // RACE: this is an unserialized server-side read-modify-write of ONE JSON
+    // column. Two near-simultaneous manifest edits (two tabs, or MCP + UI) each
+    // read the same baseline and the second write clobbers the first's change —
+    // last-writer-wins. The per-op "touches only the targeted X" narrows the
+    // blast radius but does NOT close the window: it's the same column either
+    // way. There is no queue serializing these; don't assume one.
     const rec = await this.pb().collection("life_logs").getOne(logId);
     const current = manifestFromRecord(rec.manifest) ?? emptyManifest();
     const next = mutate(current);

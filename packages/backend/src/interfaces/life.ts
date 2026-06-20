@@ -1,9 +1,12 @@
 /**
  * Life tracker backend interface.
  *
- * Covers: log management and events. The trackable / session manifest is
- * code-defined in the frontend (apps/life/.../manifest.ts); no DB-driven
- * config.
+ * Covers: log management, events, and the per-user manifest. The manifest is
+ * DB-driven config stored on the `life_logs.manifest` JSON column — trackables
+ * (vocab), goals, capture views, and notifications — edited in-app (and via
+ * MCP) through the `mutateManifest`-based ops below. There is no longer a
+ * code-defined frontend manifest; `apps/life/.../manifest.ts` only re-exports
+ * the shared random-sample config.
  */
 import type { Unsubscribe } from "../types/common";
 import type {

@@ -298,6 +298,10 @@ export class PocketBaseUpkeepBackend implements UpkeepBackend {
   async deleteTask(taskId: string): Promise<void> {
     // Need the descendant set; query PB once for the path-prefix match.
     // (Local-cache-based descendant filtering is a v2 query-engine concern.)
+    // PATH INVARIANT: `path` is the `/`-joined ancestor-id chain from root down
+    // to this task, so `path ~ '<p>/%'` selects exactly the STRICT descendants
+    // of `<p>` (the trailing `/` excludes the node itself). Load-bearing here
+    // and in moveTask below.
     const task = await this.pb().collection("tasks").getOne(taskId);
     const descendants = await this.pb().collection("tasks").getFullList({
       filter: this.pb().filter("path ~ {:prefix}", { prefix: `${task.path}/%` }),

@@ -1,35 +1,34 @@
 /**
  * Shared, system-wide life-tracker config.
  *
- * The life app's random-sample push notifications used to be configured
- * per-log in a `life_logs.manifest` JSON column. That column was abandoned
- * when the frontend manifest moved to code (apps/life/.../manifest.ts) and
- * is dropped by migration 0032. To keep the api scheduler, the life UI,
- * and the SampleResponseModal working off one definition, the random-sample
- * config now lives here.
+ * Random-sample push notifications are app-wide (shared by every log), so
+ * their schedule + question list live here in code rather than per-log on the
+ * `life_logs.manifest` column. (The per-user manifest column is alive and well
+ * for trackables/goals/views/notifications — it just isn't where the shared
+ * random-sample config belongs.) Keeping it here lets the api scheduler, the
+ * life UI, and the SampleResponseModal work off one definition.
  *
- * Post-collapse model: each question points at a Trackable in the life app
- * (apps/life/app/src/manifest.ts TRACKABLES). Responses are written as
- * value-shaped events under `subject_id = trackableId`, so they flow into
- * the same series as manually-logged ratings — no parallel "sample" table.
+ * Each question points at a trackable in the caller's manifest vocab by id.
+ * Responses are written as value-shaped events under `subject_id = trackableId`,
+ * so they flow into the same series as manually-logged ratings — no parallel
+ * "sample" table.
  *
  * Per-user opt-in lives on `life_logs.random_sampling_enabled`
- * (20260522_221130_life_random_sampling_enabled) — do NOT resurrect the
- * manifest JSON column.
+ * (20260522_221130_life_random_sampling_enabled).
  */
 
 export interface LifeSampleQuestion {
   /**
-   * Trackable id from the life app's TRACKABLES list. Becomes the
-   * `subject_id` of the resulting event so the response flows into the
+   * Trackable id — resolves against the caller's DB manifest vocab. Becomes
+   * the `subject_id` of the resulting event so the response flows into the
    * same series as manual entries.
    */
   trackableId: string;
   /**
    * Push-notification body / modal prompt. Required (not optional) so the
-   * api scheduler can label notifications without importing the life
-   * app's TRACKABLES list. The UI may still fall back to the trackable's
-   * own label if a future question omits this.
+   * api scheduler can label notifications without reading the caller's
+   * manifest. The UI may still fall back to the trackable's own label if a
+   * future question omits this.
    */
   label: string;
 }
@@ -49,8 +48,6 @@ export interface LifeRandomSamplesConfig {
  * The one config. Edited here, consumed by:
  *   - the api scheduler in services/api/src/lib/notifications/life.ts
  *   - the life UI (LifeDashboard, SettingsModal, Visualizations, SampleResponseModal)
- *
- * Solo-user app, code-driven manifest, no UI editor.
  *
  * Both questions point at rating trackables (mood, content) so the push
  * notification can offer 1-5 action buttons that the service worker turns
