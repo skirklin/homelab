@@ -141,6 +141,9 @@ export async function sendPushToUser(
         // an expired (404/410) sub. This is safe because a misconfigured
         // server key would fail ALL sends uniformly — a 403 on only a subset
         // means those specific subs are stale, not that the server is broken.
+        // 404 (endpoint not found) and 410 (Gone) are the push service's
+        // standard "this subscription no longer exists / has expired" codes, so
+        // they prune for the same reason.
         if (statusCode === 403 || statusCode === 404 || statusCode === 410) {
           await pb.collection("push_subscriptions").delete(sub.id, {
             $autoCancel: false,

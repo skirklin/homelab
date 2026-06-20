@@ -12,6 +12,13 @@
  *
  * IDEMPOTENCY MODEL
  *   - bucket is the window key — almost always `todayPacific()` (one nag/day).
+ *     The `todayPacific()` DEFAULT is correct ONLY for owner-AGNOSTIC crons
+ *     (upkeep/deadline), whose 8am-PT fire is itself Pacific, so "the Pacific
+ *     day" is the right window for every recipient. Multi-timezone callers
+ *     (life reminders, travel tick) MUST pass an owner-LOCAL-day bucket instead
+ *     — otherwise a user east/west of Pacific gets bucketed under the wrong
+ *     calendar day and can be double-nagged or silently skipped across the
+ *     Pacific-midnight boundary.
  *   - kind is the logical channel; embed any per-subject discriminator in it
  *     (e.g. "travel_morning:<tripId>", "life_reminder:<notificationId>") so two
  *     subjects on the same day don't collide on one ledger row.

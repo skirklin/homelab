@@ -12,6 +12,16 @@
  * is honored (fully mutes a user). The legacy `all` / `subscribed` distinction
  * is gone — any non-`off` value means "notify me about chores I'm a resolved
  * recipient of."
+ *
+ * DUE-DATE MATH IS FORKED, ON PURPOSE. This cron (and deadlines.ts) re-derive
+ * "is it due?" locally rather than importing @homelab/backend's
+ * upkeep-urgency.ts. That shared helper deltas against the BROWSER's local
+ * midnight — correct in-app — but these crons run in a UTC pod and must agree
+ * with the USER's day, so the day-boundary handling is deliberately
+ * Pacific-anchored here instead (see `isDueTodayOrEarlier` /
+ * `calculateDueDate`). The frequency ARITHMETIC (value × unit) must stay in sync
+ * with upkeep-urgency.ts; only the day-boundary anchoring is intentionally
+ * different.
  */
 import { getAdminPb } from "../pb";
 import { DOMAIN } from "../../config";
@@ -43,11 +53,21 @@ function calculateDueDate(lastCompleted: Date, frequency: TaskFrequency): Date {
   return due;
 }
 
+/**
+ * True when `date`'s Pacific calendar day is today-or-earlier (Pacific).
+ *
+ * Anchored to Pacific — NOT the pod's UTC-local clock — for the same reason
+ * deadlines.ts's `daysUntil` is (both crons run in a UTC pod but must agree with
+ * the user's day; see the due-date-math note at the head of this file). The
+ * regular 8am-PT fire would read the same day either way (8am PT ≈ 15:00–16:00
+ * UTC, before UTC midnight), but the scheduler's startup CATCH-UP path
+ * (dailyFireAlreadyPassedToday) can boot at any UTC hour. A boot in the
+ * ~5pm–midnight PT window (after UTC midnight) would make a naive UTC-local
+ * "today" read one day AHEAD of Pacific and fire a task a day early. Comparing
+ * Pacific-day strings closes that edge.
+ */
 function isDueTodayOrEarlier(date: Date): boolean {
-  const today = new Date();
-  const dueDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return dueDay <= todayDay;
+  return todayPacific(date) <= todayPacific();
 }
 
 export async function runUpkeepNotifications(): Promise<{ notified: number; skipped: number }> {

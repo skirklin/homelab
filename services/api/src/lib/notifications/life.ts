@@ -181,6 +181,14 @@ export async function runLifeTrackerSampling(): Promise<{ sent: number; skipped:
     const timezone = await tzForOwner(ownerId);
     const today = getDateStringInTimezone(nowDate, timezone);
 
+    // Why the sampler keeps its OWN `sample_schedule.sentTimes` store instead of
+    // the notification_log ledger (notifyOnce): its idempotency unit is a
+    // per-slot scheduled epoch-ms TIME, with N sends/day. The ledger's model is
+    // once-per-(user, kind, bucket) — one row per day per channel — which can't
+    // express "this specific 2:43pm slot fired, but the 5:10pm slot for the same
+    // user/kind/day hasn't" without synthesizing a fake bucket per slot. So slot
+    // tracking stays here. (Do NOT "unify into the ledger" — it would silently
+    // collapse multi-sample-per-day to one.)
     let schedule = logDoc.sample_schedule as SampleSchedule | null;
 
     // Generate new schedule for today if needed
