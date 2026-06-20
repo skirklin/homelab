@@ -48,7 +48,7 @@ process.env.PB_URL = getPbTestUrl();
 process.env.PB_ADMIN_EMAIL = "test-admin@test.local";
 process.env.PB_ADMIN_PASSWORD = "testpassword1234";
 
-const { runUpkeepNotifications } = await import("../lib/notifications/upkeep");
+const { runUpkeepNotifications, isDueTodayOrEarlier } = await import("../lib/notifications/upkeep");
 
 const PB_URL = getPbTestUrl();
 
@@ -186,12 +186,8 @@ describe("upkeep recurring cron — due/aggregate seam", () => {
     }
     return due;
   }
-  function isDueTodayOrEarlier(date: Date): boolean {
-    const today = new Date();
-    const dueDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    return dueDay <= todayDay;
-  }
+  // isDueTodayOrEarlier is the REAL Pacific-anchored helper imported from the
+  // cron module — not a re-implementation — so this seam can't drift from prod.
   function isDue(task: { last_completed?: string | null; frequency: { value: number; unit: "days" | "weeks" | "months" } }): boolean {
     if (!task.last_completed) return true;
     return isDueTodayOrEarlier(calculateDueDate(new Date(task.last_completed), task.frequency));
@@ -203,6 +199,38 @@ describe("upkeep recurring cron — due/aggregate seam", () => {
     expect(isDue({ last_completed: new Date().toISOString(), frequency: freq })).toBe(false);
     const old = new Date(); old.setDate(old.getDate() - 30);
     expect(isDue({ last_completed: old.toISOString(), frequency: freq })).toBe(true);
+  });
+
+  /**
+   * Catch-up-window regression for the Pacific-anchored due check.
+   *
+   * The scheduler's startup catch-up path (dailyFireAlreadyPassedToday) can boot
+   * at ANY UTC hour, not just 8am PT. A boot in the post-UTC-midnight /
+   * pre-Pacific-midnight window — e.g. 03:00 UTC = 20:00 PT the prior day — used
+   * to read "today" off the pod's UTC-local clock, landing one calendar day
+   * AHEAD of Pacific and firing a chore due TOMORROW (Pacific) a day early.
+   *
+   * Pin "now" to 2026-06-15T03:00:00Z (= 2026-06-14 20:00 PT). A chore due on
+   * 2026-06-15 (tomorrow Pacific) must NOT be due; one due 2026-06-14 (today
+   * Pacific) must be. The old UTC-local logic returns true for the tomorrow case
+   * on a UTC pod — this is the guard that catches the regression.
+   */
+  it("does NOT fire a chore due tomorrow-Pacific when booting in the catch-up window", () => {
+    vi.useFakeTimers();
+    try {
+      // 03:00 UTC on 2026-06-15 → 2026-06-14 20:00 PT (Pacific is UTC-7 in June).
+      vi.setSystemTime(new Date("2026-06-15T03:00:00Z"));
+
+      // Use Pacific-noon instants so the date's Pacific calendar day is
+      // unambiguous regardless of the host TZ the test happens to run under.
+      const dueTomorrowPacific = new Date("2026-06-15T19:00:00Z"); // 2026-06-15 12:00 PT
+      const dueTodayPacific = new Date("2026-06-14T19:00:00Z");    // 2026-06-14 12:00 PT
+
+      expect(isDueTodayOrEarlier(dueTomorrowPacific)).toBe(false);
+      expect(isDueTodayOrEarlier(dueTodayPacific)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("aggregates a shared-list chore to its creator only — the off user never appears", async () => {

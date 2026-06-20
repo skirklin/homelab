@@ -66,7 +66,7 @@ function calculateDueDate(lastCompleted: Date, frequency: TaskFrequency): Date {
  * "today" read one day AHEAD of Pacific and fire a task a day early. Comparing
  * Pacific-day strings closes that edge.
  */
-function isDueTodayOrEarlier(date: Date): boolean {
+export function isDueTodayOrEarlier(date: Date): boolean {
   return todayPacific(date) <= todayPacific();
 }
 
