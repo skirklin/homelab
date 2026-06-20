@@ -13,14 +13,19 @@
  * `defaultLifeManifest` at creation — so this editor always operates on a
  * concrete array, never a fallback-rendered default.
  *
- * ⚠️ ID-SCHEME LANDMINE — see the mutate sites below. A notification's `id`
- * keys its `reminder_state` row (the double-fire guard), so we must NEVER
- * rewrite an existing notification's id. Every edit ALWAYS passes the existing
- * `n.id` verbatim to `updateNotification(logId, n.id, …)`; time edits spread the
- * EXISTING strategy so `subsumes` / `weekday` survive a time-only change.
- * `addNotification` mints a fresh slug ONLY for a genuinely new notification.
- * (Cross-ref: the reminder-state guard in
- * services/api/src/lib/notifications/life-notifications.ts, `DEFAULT_NOTIFICATIONS`
+ * ⚠️ STABLE-ID INVARIANT — see the mutate sites below. A notification's `id` is
+ * the `notification_log` ledger `kind` discriminator (`life_reminder:<id>`) AND
+ * the manifest join key, so we must NEVER rewrite an existing notification's id —
+ * doing so would orphan its in-flight ledger rows. Every edit ALWAYS passes the
+ * existing `n.id` verbatim to `updateNotification(logId, n.id, …)`; time edits
+ * spread the EXISTING strategy so `subsumes` / `weekday` survive a time-only
+ * change. `addNotification` mints a fresh slug ONLY for a genuinely new
+ * notification. (The old "rewriting an id double-fires via `reminder_state`"
+ * warning is retired — that column was dropped and the ledger buckets per
+ * owner-local day, so there's no cross-day continuity to break; keep ids stable
+ * for the ledger key + join key, not for double-fire avoidance.) (Cross-ref:
+ * `notifyOnce`/`runLifeReminderCheck` in
+ * services/api/src/lib/notifications/{ledger,life}.ts, `DEFAULT_NOTIFICATIONS`
  * in packages/backend/src/life-view-defaults.ts, and the
  * `LifeManifest.notifications` doc in packages/backend/src/types/life.ts.)
  */

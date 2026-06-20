@@ -199,11 +199,15 @@ export const DEFAULT_VIEWS: LifeView[] = [
  * this — `resolveNotifications` reads `manifest.notifications` and falls back to
  * `[]`, not to these defaults.
  *
- * Historical note: these BARE ids (`morning`/`evening`/`weekly`) deliberately
- * differ from the `*-reminder` ids the Phase D migration materialized (which
- * key `reminder_state`); the migration used the migration-time
- * column-reconstruction, never this default. (Cross-ref: `LifeManifest.notifications`
- * doc in `packages/backend/src/types/life.ts`.)
+ * Historical note: these BARE ids (`morning`/`evening`/`weekly`) differ from the
+ * `*-reminder` ids the Phase D migration materialized from the old columns. That
+ * id-scheme split is now just historical trivia: idempotency lives in the
+ * `notification_log` ledger (keyed per owner-local day via `notifyOnce`), so a
+ * notification's id is simply its ledger `kind` discriminator (`life_reminder:<id>`)
+ * — there's no cross-day `reminder_state` continuity for a bare-vs-`*-reminder` id
+ * to break. Keep ids stable (the ledger key + manifest join key), but the old
+ * "use `*-reminder` ids or you'll double-fire" warning is retired. (Cross-ref:
+ * `LifeManifest.notifications` doc in `packages/backend/src/types/life.ts`.)
  */
 export const DEFAULT_NOTIFICATIONS: LifeNotification[] = [
   {

@@ -79,7 +79,8 @@ const SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 /**
  * A manifest id must be a slug: lower-kebab, starts alnum, <=64 chars. Shared
  * by trackables, goals, views, and notifications so every per-user id obeys the
- * same shape (used as event subject_id / labels.view / reminder_state keys).
+ * same shape (used as event subject_id / labels.view / the `notification_log`
+ * ledger `kind` discriminator `life_reminder:<id>`).
  */
 export function isSlug(s: unknown): s is string {
   return typeof s === "string" && s.length > 0 && s.length <= 64 && SLUG_RE.test(s);
