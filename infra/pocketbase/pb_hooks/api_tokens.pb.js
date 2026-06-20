@@ -34,8 +34,9 @@
  *
  *   Discriminator: the auth record's collection name. In PB 0.25's goja
  *   runtime we go through the method (`auth.collection().name`) rather
- *   than the `auth.collectionName` property used by sharing.pb.js —
- *   that property is undefined here, so a `=== "_superusers"` check
+ *   than the `auth.collectionName` property (undefined in PB 0.25 goja —
+ *   sharing.pb.js avoids it the same way). That property is undefined
+ *   here, so a `=== "_superusers"` check
  *   against it would be unconditionally false and we would strip even
  *   the legit operator-stamping path (closed-fail rather than open-fail,
  *   but still observably broken). The method form actually returns the
