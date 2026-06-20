@@ -135,6 +135,9 @@ export function startScheduler(): void {
   // per-log whether the current minute matches the owner's morning/evening
   // reminder time (±1 min) in their tz; idempotent via the notification_log
   // ledger (kind="life_reminder:<id>", bucket=owner-local day).
+  // No startup catch-up: the ±1min match window means a minute missed while the
+  // process was down is simply gone. Firing it late would deliver a reminder
+  // stamped with a time that has already passed — worse than skipping it.
   jobs.push(new Cron("* * * * *", { name: "life-reminders", protect: true }, () =>
     guard("life-reminders", async () => {
       const r = await runLifeReminderCheck();
@@ -194,6 +197,12 @@ export function startScheduler(): void {
  * future occurrence, so if it falls on a LATER `tz`-calendar day than today,
  * today's fire has already happened. Only valid for once-per-day patterns
  * (which is all we use it for).
+ *
+ * Why once-per-day only: the test is "nextRun() lands on a later day." For a
+ * multi-fire pattern (e.g. `0 * * * *`) the next occurrence is later TODAY, so
+ * nextYmd === todayYmd always and this returns false — it would report "not yet
+ * passed" even at 11pm and never trigger catch-up. The single-fire assumption is
+ * what makes a same-day nextRun mean "already fired today."
  */
 function dailyFireAlreadyPassedToday(pattern: string, tz: string): boolean {
   const probe = new Cron(pattern, { timezone: tz, paused: true });
