@@ -3015,7 +3015,14 @@ dataRoutes.post("/tasks", handler(async (c) => {
     parent_id: body.parent_id || "",
     position: body.position ?? 0,
     task_type: body.task_type || "one_shot",
-    frequency: body.frequency || 0,
+    // A recurring task MUST carry a real Frequency object — a bare `0` is a
+    // representable-illegal state that crashes readers (formatFrequency does
+    // `unit.slice(...)`). Default a recurring create with no/falsy frequency to
+    // a sensible value; one_shot ignores frequency, so `0` is harmless there.
+    // (The PB→TS mapper also coerces on read, so this is belt-and-suspenders.)
+    frequency:
+      body.frequency ||
+      ((body.task_type || "one_shot") === "recurring" ? { value: 1, unit: "days" } : 0),
     tags: body.tags || [],
     // assignees is the sole notification driver. Persist exactly what the
     // caller sent (empty when omitted) — do NOT stamp the creator here. Under

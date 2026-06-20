@@ -18,7 +18,7 @@
 import type PocketBase from "pocketbase";
 import type { RecordModel } from "pocketbase";
 import type { UpkeepBackend, NewTask } from "../interfaces/upkeep";
-import type { TaskList, Task, RecurringTask, TaskCompletion, TaskUpdate } from "../types/upkeep";
+import type { TaskList, Task, Frequency, TaskCompletion, TaskUpdate } from "../types/upkeep";
 import type { LifeEntry } from "../types/life";
 import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
@@ -118,12 +118,35 @@ export function taskFromRecord(r: RecordModel | RawRecord): Task {
   return {
     ...base,
     taskType: "recurring",
-    // Schema/type mismatch: backend Task declares `frequency: Frequency` but
-    // PB stores it as either an object or a number; preserve the original
-    // pass-through behavior (`r.frequency || 0`) here.
-    frequency: (x.frequency || 0) as RecurringTask["frequency"],
+    // `RecurringTask.frequency` is typed `Frequency` ({value,unit}), but PB can
+    // hand back a bare number (the create path defaults `frequency` to `0`) or a
+    // missing/malformed value. This mapper is the single choke point turning raw
+    // records into the typed union, so coerce any non-Frequency here to a valid
+    // default — otherwise the union is a lie and downstream consumers (e.g.
+    // formatFrequency → `unit.slice(...)`) crash on `0`. Making it always-valid
+    // here protects every read path regardless of how the bad data got in.
+    frequency: normalizeFrequency(x.frequency),
     lastCompleted: x.last_completed ? new Date(x.last_completed as string) : null,
   };
+}
+
+/** Default for a recurring task whose stored frequency is missing/falsy/malformed. */
+const DEFAULT_FREQUENCY: Frequency = { value: 1, unit: "days" };
+
+/** Coerce a raw stored frequency to a valid `Frequency`, defaulting if invalid. */
+function normalizeFrequency(raw: unknown): Frequency {
+  if (
+    raw &&
+    typeof raw === "object" &&
+    typeof (raw as Frequency).value === "number" &&
+    (raw as Frequency).value >= 1 &&
+    ((raw as Frequency).unit === "days" ||
+      (raw as Frequency).unit === "weeks" ||
+      (raw as Frequency).unit === "months")
+  ) {
+    return raw as Frequency;
+  }
+  return DEFAULT_FREQUENCY;
 }
 
 function completionFromRecord(r: RecordModel | RawRecord): TaskCompletion {
