@@ -57,9 +57,9 @@ import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
 /**
  * Coerce a PB `manifest` JSON column into a `LifeManifest` or null. The PB JS
  * SDK returns parsed JSON for this column; we still validate the shape so a
- * legacy/garbage row surfaces as null rather than crashing a consumer. P2 will
- * read this; until then the app keeps rendering from hardcoded TRACKABLES, so
- * a null here is harmless.
+ * legacy/garbage row surfaces as null rather than crashing a consumer.
+ * Consumers render from this manifest (falling back to the default manifest),
+ * so a null here degrades to the default rather than crashing.
  */
 function manifestFromRecord(raw: unknown): LifeManifest | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;

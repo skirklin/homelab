@@ -325,10 +325,10 @@ export interface LifeLog {
   id: string;
   sampleSchedule: SampleSchedule | null;
   /**
-   * Per-user, data-defined trackable manifest. Null on legacy logs that
-   * predate the P1 backfill; new logs are seeded with the default template on
-   * first `getOrCreateLog`. The app reads hardcoded `TRACKABLES` until P2
-   * swaps the render path to this field.
+   * Per-user, data-defined trackable manifest. Null only on legacy logs that
+   * predate the backfill; new logs are seeded with the default template on
+   * first `getOrCreateLog`. The app renders from this field, falling back to
+   * the default manifest when null.
    */
   manifest: LifeManifest | null;
   /**
