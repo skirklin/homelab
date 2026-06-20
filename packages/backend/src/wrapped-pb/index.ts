@@ -75,13 +75,17 @@ export class WrappedPbError extends Error {
 }
 
 export interface WrappedCollection {
-  // Reads — passthrough. Live state goes through PBMirror; these exist for
-  // one-shot lookups (e.g. read-modify-write of a JSON column).
+  // Network reads — passthrough straight to PB (no queue overlay). Live state
+  // goes through PBMirror; these exist for one-shot lookups (e.g.
+  // read-modify-write of a JSON column).
   getFullList<T = RecordModel>(opts?: RecordFullListOptions): Promise<T[]>;
   getFullList<T = RecordModel>(batch?: number, opts?: RecordListOptions): Promise<T[]>;
   getList<T = RecordModel>(page?: number, perPage?: number, opts?: RecordListOptions): Promise<ListResult<T>>;
   getFirstListItem<T = RecordModel>(filter: string, opts?: RecordListOptions): Promise<T>;
   getOne<T = RecordModel>(id: string, opts?: RecordOptions): Promise<T>;
+  // In-memory reads — NOT passthrough. These read the queue overlay
+  // synchronously (server snapshot + pending optimistic mutations), so they
+  // reflect un-acked local writes and never touch the network.
   /** Synchronous in-memory read (server snapshot + pending overlay). Returns null if not cached. */
   view<T = RecordModel>(id: string): T | null;
   /** Synchronous scan of all cached records (server + pending) matching predicate. */
@@ -288,6 +292,12 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     if (typeof indexedDB === "undefined") return;
     // Stamp the user NOW (queue time), not at flush — see dirtySnapshots above.
     const user = pb().authStore?.record?.id ?? null;
+    // Key is (collection, id) WITHOUT user (the user rides in the value). So if
+    // a different user writes the same (col, id) within the debounce window, the
+    // later write coalesces last-writer-wins onto the earlier one. That's safe:
+    // each surviving entry still carries its OWN captured user, so nothing lands
+    // in the wrong scope — at worst the dropped row is simply absent from the
+    // cache and self-heals on that user's next revalidate fetch.
     dirtySnapshots.set(`${collection}::${id}`, { collection, id, snapshot, user });
     if (snapshotFlushTimer === null) {
       snapshotFlushTimer = setTimeout(flushSnapshots, SNAPSHOT_FLUSH_MS);
@@ -477,9 +487,19 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
   }
 
   /**
-   * Build the network call for a given mutation. Centralized so both the
-   * initial dispatch and the retry / replay paths reconstruct the request
-   * the same way without duplicating the kind-switching logic.
+   * Build the network call for a given mutation. Centralized so the retry /
+   * replay paths reconstruct the request without duplicating the kind-switching
+   * logic.
+   *
+   * NOT identical to the initial dispatch: the inline create/update/delete
+   * closures (in the WrappedCollection methods below) forward the caller's
+   * `opts`, but the retry/replay path here deliberately omits them. `opts` is
+   * request-scoped — its main payload is the caller's `requestKey` (the
+   * PB-autocancel-on-concurrent-writes guard), which is meaningful only for the
+   * one in-flight request the caller issued. A retry or a cold replay is a new
+   * request with no live sibling to dedupe against, so reusing the original
+   * requestKey would be wrong (it could autocancel an unrelated in-flight
+   * write). Replaying body-only is the intended behavior, not an oversight.
    */
   function fireMutation(collection: string, recordId: string, mutation: Mutation): () => Promise<RawRecord | null> {
     return async () => {
@@ -534,6 +554,11 @@ export function wrapPocketBase(pb: () => PocketBase): WrappedPocketBase {
     const chainLink: Promise<unknown> = outcome.catch(() => {});
     dispatchChains.set(chainKey, chainLink);
     void chainLink.then(() => {
+      // Delete only if I'm STILL the tail. A newer mutation enqueued while this
+      // one ran will have overwritten the map entry to chain off us; clearing it
+      // unconditionally would orphan that successor (it'd start a fresh chain and
+      // race the in-flight write). Same "mutate only if still on top" discipline
+      // as mirror.ts's restore-only-if-on-top.
       if (dispatchChains.get(chainKey) === chainLink) dispatchChains.delete(chainKey);
     });
     return outcome;

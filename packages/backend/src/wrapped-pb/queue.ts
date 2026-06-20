@@ -164,8 +164,12 @@ export class MutationQueue {
    *  retained tombstone at seq S only needs to survive long enough to reject a
    *  fetch issued BEFORE it (seq < S). Once no in-flight fetch predates S, the
    *  tombstone can be GC'd: a fetch issued after S gets seq > S and re-observes
-   *  the record correctly. Keyed by an opaque token so concurrent fetches with
-   *  the same issue-seq (none today) and resolve-order don't collide. */
+   *  the record correctly. Keyed by an opaque token, NOT by seq: keying by seq
+   *  would let two fetches that happen to share an issue-seq alias the same map
+   *  entry, so the first to resolve would delete the other's still-in-flight
+   *  registration. That under-counts `minInFlightFetchSeq()`, which would then
+   *  GC a tombstone the surviving fetch still needs to be rejected by — exactly
+   *  the false-resurrection this retention scheme exists to prevent. */
   private inFlightFetchSeqs = new Map<number, number>(); // token -> seq
   private fetchToken = 0;
 
