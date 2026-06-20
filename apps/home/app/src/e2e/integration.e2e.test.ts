@@ -1,7 +1,7 @@
 /**
  * Integration tests for the Home app shell — PocketBase backend.
  *
- * The home app is a shell that embeds shopping, life, recipes, upkeep, and travel
+ * The home app is a shell that embeds shopping, recipes, upkeep, and travel
  * as modules. These tests verify that:
  *   1. The shared backend initializes correctly.
  *   2. User profile fields required by each module exist and work.

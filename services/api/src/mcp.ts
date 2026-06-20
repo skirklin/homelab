@@ -551,7 +551,7 @@ server.tool(
 // --- Life trackable (vocabulary) tools ---
 //
 // A "trackable" is a vocab row: a data-defined THING the user logs (coffee,
-// vyvanse, run, mood). Each row has a SHAPE (took|did|happened|rated) that
+// vyvanse, run, mood). Each row has a SHAPE (took|did|happened|rated|noted) that
 // decides which entries[] a new event carries; the thing's `id` is the event
 // subject_id. These tools manage the caller's own per-user manifest
 // (life_logs.manifest); they always operate on the authenticated caller's log

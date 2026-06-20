@@ -282,7 +282,6 @@ describe("Task Operations", () => {
       upkeep.addTask(listId, {
         name: "",
         description: "",
-        roomId: "general",
         frequency: { value: 1, unit: "days" },
         lastCompleted: null,
         snoozedUntil: null,
