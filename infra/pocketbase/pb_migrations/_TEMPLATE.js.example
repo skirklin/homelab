@@ -52,9 +52,15 @@
  *    scripts live at services/scripts/historical/recover-life-events.ts
  *    and services/scripts/historical/recover-recipe-event-notes.ts.
  *
+ *    PB's migration JSVM CANNOT `require()` filesystem modules. goja's
+ *    require has no filesystem resolver and no `__hooks` equivalent for
+ *    migrations, so `require("./lib/pb-json.js")` panics with "Invalid
+ *    module" (see 0026_authz_strings_source_of_truth.js's header). Paste
+ *    the `unwrapPbJson` helper INLINE instead — the canonical copy lives
+ *    at lib/pb-json.js; the sample below inlines it verbatim.
+ *
  *    The right way:
  *
- *      const { unwrapPbJson } = require("./lib/pb-json.js");
  *      const data = unwrapPbJson(r.get("data"));  // real object, always
  *      // ... transform data ...
  *      r.set("data", data);
@@ -67,7 +73,26 @@
  * --------------------------------------------------------------------------
  */
 
-const { unwrapPbJson } = require("./lib/pb-json.js");
+// PB migrations cannot require() lib modules (goja panics "Invalid module").
+// Inline the helper from lib/pb-json.js verbatim — that file is the canonical copy.
+function unwrapPbJson(raw) {
+  if (raw == null) return {};
+  // Already-parsed object (rare in goja, but defensive).
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+  // String form (some PB versions / SDK paths return JSON as string).
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw); } catch (_) { return {}; }
+  }
+  // Array form: array of UTF-8 byte values.
+  if (Array.isArray(raw)) {
+    var s = "";
+    for (var i = 0; i < raw.length; i++) {
+      s += String.fromCharCode(raw[i]);
+    }
+    try { return JSON.parse(s); } catch (_) { return {}; }
+  }
+  return {};
+}
 
 migrate(
   (app) => {

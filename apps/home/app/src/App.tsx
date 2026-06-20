@@ -37,7 +37,7 @@ function RedirectToLastApp() {
 
 // Invite links work against either the per-app subdomains (standalone) or
 // the home app (embedded). When they land at /invite/:code here, look up the
-// invite's target_type and forward into the module that owns the redemption
+// invite's target_module and forward into the module that owns the redemption
 // UI. Falls back to /recipes/invite/:code for unknown codes — recipes was
 // the only invite type when this redirect was first written, and that path's
 // own error UI handles "invalid invite" cleanly.

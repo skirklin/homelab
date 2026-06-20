@@ -119,8 +119,8 @@ app.get("/health/backups", async (c) => {
   try {
     const { getAdminPb } = await import("./lib/pb");
     const pb = await getAdminPb();
-    // PB exposes the backups index via authStore's pbCollections client.
-    // We need the raw HTTP route since the SDK doesn't wrap /api/backups.
+    // The SDK doesn't wrap /api/backups, so we call the raw HTTP route with
+    // the admin token.
     const pbUrl = process.env.PB_URL || "http://pocketbase.homelab.svc.cluster.local:8090";
     const res = await fetch(`${pbUrl}/api/backups`, {
       headers: { Authorization: pb.authStore.token },
