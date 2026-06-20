@@ -5,14 +5,13 @@
  * `useNotifications` resolvers return when a log's `manifest.views` /
  * `manifest.notifications` is `undefined` (legacy / un-customized logs).
  *
- * Phase B1 is FULLY ADDITIVE: nothing here is rendered or scheduled yet. The
- * ViewRunner consumes `DEFAULT_VIEWS` in Phase B2; the notification cron
- * consumes `DEFAULT_NOTIFICATIONS` in Phase B4. The Phase-C migration
- * materializes `DEFAULT_VIEW_TRACKABLES` into each log's `manifest.trackables`.
+ * The ViewRunner renders `DEFAULT_VIEWS` (for logs that haven't customized);
+ * the notification cron schedules `DEFAULT_NOTIFICATIONS`; and
+ * `DEFAULT_VIEW_TRACKABLES` is seeded into each log's `manifest.trackables`.
  *
- * Source of truth for the prompt text / order / placeholders below is today's
- * `apps/life/app/src/manifest.ts` `SESSIONS` array — kept byte-faithful so the
- * eventual data-driven renderer reproduces the wizards verbatim.
+ * Source of truth for the prompt text / order / placeholders below was the
+ * original code-defined session prompts — kept byte-faithful so the data-driven
+ * renderer reproduces the wizards verbatim.
  *
  * ── The split-collision id map (design §3) ──────────────────────────────────
  * Today's session prompts collide on `entries[].name` across sessions
@@ -43,7 +42,7 @@ import type {
  * `placeholder` (the textarea ghost text) — so the ViewRunner reproduces the
  * wizards exactly. The energy `rated` row keeps the 1–5 scale via `ratingLabel`.
  * These are NON-HIDDEN (so Views can render them); the `noted`-shape exclusion
- * (Phase A) is what keeps them off the input surfaces.
+ * is what keeps them off the input surfaces.
  */
 export const DEFAULT_VIEW_TRACKABLES: LifeManifestTrackable[] = [
   // ── Morning ──

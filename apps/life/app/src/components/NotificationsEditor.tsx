@@ -8,10 +8,10 @@
  * the `applyManifest`→`SET_LOG` pattern.
  *
  * `manifest.notifications` is guaranteed to be a real, persisted array: EXISTING
- * logs are materialized by the Phase D3 column→manifest migration (which mints
- * the load-bearing `*-reminder` ids via `buildNotificationsFromColumns`), and
- * NEW logs are seeded from `defaultLifeManifest` at creation — so this editor
- * always operates on a concrete array, never a fallback-rendered default.
+ * logs were materialized by the column→manifest migration (carrying the
+ * load-bearing `*-reminder` ids), and NEW logs are seeded from
+ * `defaultLifeManifest` at creation — so this editor always operates on a
+ * concrete array, never a fallback-rendered default.
  *
  * ⚠️ ID-SCHEME LANDMINE — see the mutate sites below. A notification's `id`
  * keys its `reminder_state` row (the double-fire guard), so we must NEVER
