@@ -244,7 +244,7 @@ export function LifeDashboard() {
 
   // Entries subscription is mounted once in LifeRoutesInner so every route
   // inherits today's events from a single feed.
-  const allEntries = Array.from(state.entries.values());
+  const allEntries = useMemo(() => Array.from(state.entries.values()), [state.entries]);
 
   // The vocabulary + goals come from the per-user manifest. The HabitBoard is
   // the day's review/check-off surface; favorites + "+ Log something else" are
@@ -319,7 +319,7 @@ export function LifeDashboard() {
       orderOf,
       lateNight: primary === null,
     };
-  }, [allEntries, state.entries]);
+  }, [allEntries]);
 
   const formatHHmm = (d: Date) => {
     let h = d.getHours();

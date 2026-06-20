@@ -37,7 +37,7 @@ import type {
   LifeNotifyStrategy,
   TemplateRef,
 } from "./types/life";
-import { ManifestError, isSlug, validateRefs, patchOptionalString, reorderById } from "./life-manifest-ops";
+import { ManifestError, isSlug, validateRefs, patchOptionalString, addOptionalString, reorderById } from "./life-manifest-ops";
 
 export const VIEW_ITEM_KINDS = ["capture", "tasks_due", "banner"] as const;
 export const VIEW_RENDERS = ["guided", "inline"] as const;
@@ -122,18 +122,8 @@ function validateViewShape(input: {
   }
   const items = validateViewItems(input.items);
   const view: LifeView = { id: input.id, title: input.title, items };
-  if (input.greeting !== undefined && input.greeting !== null && input.greeting !== "") {
-    if (typeof input.greeting !== "string") {
-      throw new ManifestError("invalid_view", "greeting must be a string");
-    }
-    view.greeting = input.greeting;
-  }
-  if (input.icon !== undefined && input.icon !== null && input.icon !== "") {
-    if (typeof input.icon !== "string") {
-      throw new ManifestError("invalid_view", "icon must be a string");
-    }
-    view.icon = input.icon;
-  }
+  addOptionalString(view, "greeting", input.greeting, "greeting", "invalid_view");
+  addOptionalString(view, "icon", input.icon, "icon", "invalid_view");
   if (input.render !== undefined && input.render !== null) {
     if (!(VIEW_RENDERS as readonly string[]).includes(input.render as string)) {
       throw new ManifestError(
@@ -365,18 +355,8 @@ function validateNotificationShape(input: {
   if (input.enabled !== undefined) notif.enabled = !!input.enabled;
   // Optional custom push copy — non-empty strings when present (mirrors
   // greeting/icon on views). Absent/""/null → leave unset (cron derives copy).
-  if (input.title !== undefined && input.title !== null && input.title !== "") {
-    if (typeof input.title !== "string") {
-      throw new ManifestError("invalid_notification", "title must be a string");
-    }
-    notif.title = input.title;
-  }
-  if (input.body !== undefined && input.body !== null && input.body !== "") {
-    if (typeof input.body !== "string") {
-      throw new ManifestError("invalid_notification", "body must be a string");
-    }
-    notif.body = input.body;
-  }
+  addOptionalString(notif, "title", input.title, "title", "invalid_notification");
+  addOptionalString(notif, "body", input.body, "body", "invalid_notification");
   return notif;
 }
 

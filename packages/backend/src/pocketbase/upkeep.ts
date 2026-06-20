@@ -78,11 +78,12 @@ function listFromRecord(r: RecordModel | RawRecord): TaskList {
  * THE choke point. The flat PB columns (`task_type`, `deadline`,
  * `deadline_lead_days`, `frequency`, `last_completed`, `completed`, `cleared`)
  * are mapped INTO the discriminated `Task` union here — and nowhere else. The
- * "someday" state is derived from `deadline === null && task_type ===
- * "one_shot"`; a present deadline becomes `{kind:"dated", deadline, leadDays}`.
+ * "someday" state is derived from a falsy `deadline` (null or empty string) on a
+ * `task_type === "one_shot"` row; a present deadline becomes
+ * `{kind:"dated", deadline, leadDays}`.
  * The wire format is untouched (no migration); only this read mapping changes.
  */
-function taskFromRecord(r: RecordModel | RawRecord): Task {
+export function taskFromRecord(r: RecordModel | RawRecord): Task {
   const x = r as Record<string, unknown>;
   const base = {
     id: r.id,

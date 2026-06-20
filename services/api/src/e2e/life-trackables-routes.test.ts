@@ -81,14 +81,12 @@ beforeAll(async () => {
 });
 
 describe("life trackables: add → list round-trip + uniqueness", () => {
-  it("a fresh caller gets a seeded manifest (get-or-create)", async () => {
+  it("a fresh caller gets an EMPTY seeded manifest (get-or-create)", async () => {
     const { status, data } = await req("/data/life/trackables", { token: alice.apiToken });
     expect(status).toBe(200);
-    // default starter set seeded on first resolve — one trackable per shape
-    expect(ids(data)).toContain("water");
-    expect(ids(data)).toContain("mood");
-    const shapes = (data.trackables as any[]).map((t) => t.shape);
-    expect(new Set(shapes)).toEqual(new Set(["took", "did", "happened", "rated"]));
+    // A brand-new log seeds EMPTY (no starter trackables) — the "start empty"
+    // directive from Phase D. The user builds their own vocab from scratch.
+    expect(data.trackables).toEqual([]);
   });
 
   it("adds a vocab row and lists it back", async () => {

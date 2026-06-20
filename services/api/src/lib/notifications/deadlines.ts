@@ -10,8 +10,10 @@
  *     urgency "later" and matched NO notification path, so a real todo could be
  *     forgotten forever. They're the "asap" bucket: nag daily until the user
  *     acts (do it, set a deadline, complete, clear, or snooze).
- * A single per-user push covers both kinds, idempotent via the per-user
- * `last_deadline_notification` date stamp (one morning nag, not two).
+ * A single per-user push covers both kinds, idempotent via the
+ * `notification_log` ledger (notifyUsersOnce → notifyOnce, kind:"deadline"):
+ * one ledger row per (user, kind, day) gates re-sends, so a user gets one
+ * morning nag, not two.
  *
  * Recipients are resolved by an `inherit`-strategy cascade over the task's
  * ancestor chain (resolveNotifyRecipients, shared with upkeep.ts — see
