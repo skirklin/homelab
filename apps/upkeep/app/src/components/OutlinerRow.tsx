@@ -356,7 +356,6 @@ export function OutlinerRow({
               </Tag>
             );
           }
-          if (u.kind === "snoozed") return null; // handled by the snooze tag below
           // Preserve prior coloring: overdue → red; due today or within 3 days
           // → orange; further out → default.
           const color =

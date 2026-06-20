@@ -82,8 +82,9 @@ const Empty = styled.div`
 
 /**
  * Reserved (non-View) notification destinations. `today` lands on the habit
- * board (the `<Today/>` route renders `<HabitBoard/>`), so a user with NO Views
- * (Angela) can still target a useful page. `viewUrl(target)` → `/today`. We
+ * board: `/today` redirects to `/` (the dashboard, which renders the habit
+ * board inline — the standalone `<Today/>` route was removed), so a user with
+ * NO Views (Angela) can still target a useful page. `viewUrl(target)` → `/today`. We
  * deliberately do NOT offer an empty-string "Dashboard" target — empty-string
  * sentinels are disallowed in this repo, and `viewUrl("")` would be "/".
  */

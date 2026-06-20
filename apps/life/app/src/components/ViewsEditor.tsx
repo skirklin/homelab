@@ -275,7 +275,12 @@ function ViewBody({ view, logId, trackableOptions, run, life, setItems }: ViewBo
 
       <FieldLabel>Items</FieldLabel>
       {view.items.map((item, idx) => (
-        <ItemRow key={idx}>
+        // Key by content, not index: a banner renders an uncontrolled
+        // `<Input defaultValue={item.text}>` (commit-on-blur), so reusing the
+        // node across a reorder/remove would leave the prior banner's text
+        // stranded. Folding the banner text into the key forces React to
+        // remount (re-seeding defaultValue) when the item at this slot changes.
+        <ItemRow key={`${idx}-${item.kind}-${item.kind === "banner" ? item.text : ""}`}>
           <ItemHeader>
             <span style={{ flex: 1, fontSize: "var(--font-size-xs)", fontWeight: 500 }}>{item.kind}</span>
             <Button size="small" type="text" disabled={idx === 0} onClick={() => moveItem(idx, -1)} aria-label="Move up">

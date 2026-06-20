@@ -176,6 +176,26 @@ export function patchOptionalString<K extends string>(
   }
 }
 
+/**
+ * Add-path counterpart to `patchOptionalString`: skip absent/empty values
+ * (undefined/null/""), reject non-strings, else set the key. Used by every
+ * create path for the nullable free-form strings (view greeting/icon,
+ * notification title/body) where "" means "omit", not "clear". (The
+ * trackable prefill hints use `validateOptionalString` instead — they reject
+ * whitespace-only strings, a stricter contract.)
+ */
+export function addOptionalString<K extends string>(
+  target: Partial<Record<K, string>>,
+  key: K,
+  value: unknown,
+  name: string,
+  code: ManifestErrorCode,
+): void {
+  if (value === undefined || value === null || value === "") return;
+  if (typeof value !== "string") throw new ManifestError(code, `${name} must be a string`);
+  target[key] = value;
+}
+
 function validateOptionalNumber(value: unknown, name: string): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {

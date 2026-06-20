@@ -13,7 +13,8 @@ import type { RecordModel, UnsubscribeFunc } from "pocketbase";
 import { wrapPocketBase } from "../wrapped-pb";
 import { createMirror } from "../wrapped-pb/mirror";
 import { clearAllMutations } from "../wrapped-pb/persistence";
-import { PocketBaseUpkeepBackend } from "./upkeep";
+import { PocketBaseUpkeepBackend, taskFromRecord } from "./upkeep";
+import type { RawRecord } from "../wrapped-pb/mirror";
 
 type RealtimeCb = (e: { action: string; record: RecordModel }) => void;
 
@@ -196,5 +197,83 @@ describe("PocketBaseUpkeepBackend.clearDoneTasks", () => {
     const tasks = stub.col("tasks");
     expect(tasks.records.get("open-1")?.cleared).toBe(false);
     expect(tasks.records.get("recur-1")?.cleared).toBe(false);
+  });
+});
+
+/**
+ * taskFromRecord — THE flat-columns → discriminated-union choke point.
+ * Construct raw records the way the mapper reads them (snake_case PB columns)
+ * and assert the resulting Task variant.
+ */
+describe("taskFromRecord", () => {
+  const baseCols = (overrides: Record<string, unknown>): RawRecord => ({
+    id: "t1",
+    list: "L1",
+    parent_id: "",
+    path: "t1",
+    position: 0,
+    name: "Task",
+    description: "",
+    snoozed_until: null,
+    assignees: [],
+    created_by: "u1",
+    tags: [],
+    collapsed: false,
+    created: "2026-01-01T00:00:00Z",
+    updated: "2026-01-01T00:00:00Z",
+    ...overrides,
+  });
+
+  it("one_shot with a present deadline → schedule {kind:'dated', deadline, leadDays}", () => {
+    const task = taskFromRecord(baseCols({
+      task_type: "one_shot",
+      deadline: "2026-03-15T00:00:00Z",
+      deadline_lead_days: 3,
+      completed: false,
+      cleared: false,
+    }));
+    expect(task.taskType).toBe("one_shot");
+    if (task.taskType !== "one_shot") throw new Error("expected one_shot");
+    expect(task.schedule.kind).toBe("dated");
+    if (task.schedule.kind !== "dated") throw new Error("expected dated");
+    expect(task.schedule.deadline).toEqual(new Date("2026-03-15T00:00:00Z"));
+    expect(task.schedule.leadDays).toBe(3);
+  });
+
+  it("one_shot with null deadline → schedule {kind:'someday'}", () => {
+    const task = taskFromRecord(baseCols({
+      task_type: "one_shot",
+      deadline: null,
+      deadline_lead_days: null,
+      completed: false,
+      cleared: false,
+    }));
+    if (task.taskType !== "one_shot") throw new Error("expected one_shot");
+    expect(task.schedule).toEqual({ kind: "someday" });
+  });
+
+  it("one_shot with empty-string deadline (falsy) → schedule {kind:'someday'}", () => {
+    const task = taskFromRecord(baseCols({
+      task_type: "one_shot",
+      deadline: "",
+      deadline_lead_days: 0,
+      completed: false,
+      cleared: false,
+    }));
+    if (task.taskType !== "one_shot") throw new Error("expected one_shot");
+    expect(task.schedule).toEqual({ kind: "someday" });
+  });
+
+  it("recurring → frequency + lastCompleted populated, no schedule field", () => {
+    const task = taskFromRecord(baseCols({
+      task_type: "recurring",
+      frequency: { value: 7, unit: "days" },
+      last_completed: "2026-02-01T00:00:00Z",
+    }));
+    expect(task.taskType).toBe("recurring");
+    if (task.taskType !== "recurring") throw new Error("expected recurring");
+    expect(task.frequency).toEqual({ value: 7, unit: "days" });
+    expect(task.lastCompleted).toEqual(new Date("2026-02-01T00:00:00Z"));
+    expect("schedule" in task).toBe(false);
   });
 });
