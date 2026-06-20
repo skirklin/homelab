@@ -1,3 +1,6 @@
+-- VESTIGIAL / INERT: seeded once to 1, never read or written. This is NOT the
+-- migration mechanism — migrations are introspection-driven in Database._migrate
+-- (db.py), with no version gate. Kept only to avoid a no-op schema change.
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );

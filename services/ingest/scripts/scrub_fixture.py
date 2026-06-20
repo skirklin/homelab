@@ -57,6 +57,12 @@ KNOWN_USERNAMES: tuple[str, ...] = (
 # Person names that may appear in profile responses, addresses, etc.
 KNOWN_FIRST_NAMES: tuple[str, ...] = ("Scott", "Angela")
 KNOWN_LAST_NAMES: tuple[str, ...] = ("Kirklin", "Chang", "Yenchi")
+# INERT: unlike KNOWN_FIRST_NAMES / KNOWN_LAST_NAMES (which _replace_names()
+# scrubs as free-text substrings anywhere), this tuple is never referenced.
+# Middle names are redacted ONLY when they appear under a NAME_KEYS_MIDDLE key
+# (see the key path below), not as free text. Adding a name here does NOT plug a
+# free-text leak. To make this a real lever it must be wired into
+# _replace_names() (a code change).
 KNOWN_MIDDLE_NAMES: tuple[str, ...] = ("J",)
 
 # Cookie names whose values carry session/auth state and must be redacted.

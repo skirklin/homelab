@@ -15,7 +15,10 @@ from money.models import (
     Transaction,
 )
 
-SCHEMA_VERSION = 1
+# NOTE: there is intentionally no schema-version constant here. Migrations are
+# introspection-driven (see Database._migrate), not version-gated. The
+# `schema_version` table in schema.sql is vestigial/inert — seeded once, never
+# read or written — kept only to avoid a no-op schema change.
 
 
 class Database:
@@ -36,7 +39,15 @@ class Database:
         self._migrate()
 
     def _migrate(self) -> None:
-        """Apply schema migrations for existing databases."""
+        """Bring an existing database up to the current schema.
+
+        Introspection-driven and idempotent — NOT version-gated. There is no
+        version counter; each block probes the live schema (``PRAGMA
+        table_info`` / ``sqlite_master``) and conditionally ALTERs/CREATEs only
+        what is missing. Safe to run on every ``initialize()``. To add a
+        migration, append another presence-guarded block; do not look for or
+        bump a version number (the ``schema_version`` table is inert).
+        """
         columns = {
             row["name"] for row in self.conn.execute("PRAGMA table_info(accounts)").fetchall()
         }
