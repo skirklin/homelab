@@ -871,9 +871,10 @@ server.tool(
 // A "notification" is a scheduled nudge that targets a View — decoupled from
 // View content (a View defines WHAT to capture; a notification defines WHEN to
 // open it). These tools manage the caller's OWN manifest (no log-id param).
-// IMMUTABILITY: `id` keys reminder_state (the double-fire guard) and
-// `strategy.kind` decides HOW the notification fires — BOTH can NEVER change;
-// to change them, remove + re-add. Notifications add no event data.
+// IMMUTABILITY: `id` keys the `notification_log` ledger row
+// (`life_reminder:<id>`) that is the double-fire guard, and `strategy.kind`
+// decides HOW the notification fires — BOTH can NEVER change; to change them,
+// remove + re-add. Notifications add no event data.
 
 const notifyStrategySchema = z.union([
   z.object({
@@ -902,7 +903,7 @@ server.tool(
 
 server.tool(
   "add_life_notification",
-  "Create a scheduled notification in the caller's manifest. `id` is an IMMUTABLE slug (it keys reminder_state — the double-fire guard). `target` is the page/View id to open (`today` lands on the habit board; otherwise a View id). strategy is either {kind:'fixed', cadence:daily|weekly, time:'HH:MM' (or '' for never-deliver), weekday?, subsumes?} or {kind:'random', timesPerDay, activeHours:[start,end]}. `strategy.kind` is IMMUTABLE after creation. Optional `title`/`body` set custom push copy; when omitted the push copy is derived from the target View.",
+  "Create a scheduled notification in the caller's manifest. `id` is an IMMUTABLE slug (it keys the `notification_log` ledger row `life_reminder:<id>` — the double-fire guard). `target` is the page/View id to open (`today` lands on the habit board; otherwise a View id). strategy is either {kind:'fixed', cadence:daily|weekly, time:'HH:MM' (or '' for never-deliver), weekday?, subsumes?} or {kind:'random', timesPerDay, activeHours:[start,end]}. `strategy.kind` is IMMUTABLE after creation. Optional `title`/`body` set custom push copy; when omitted the push copy is derived from the target View.",
   {
     id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-])"),
     target: z.string().describe("The page/View id to open when the nudge fires (e.g. `today` for the habit board)"),
@@ -919,7 +920,7 @@ server.tool(
 
 server.tool(
   "update_life_notification",
-  "Patch a notification's target/strategy/enabled/title/body (pass only what changes). `id` is IMMUTABLE (it keys reminder_state) and `strategy.kind` is IMMUTABLE (it decides how the notification fires); to change either, remove + re-add. Passing strategy replaces it wholesale (its kind must match the existing kind). `title`/`body` set custom push copy; pass null or \"\" to clear and fall back to the View-derived copy.",
+  "Patch a notification's target/strategy/enabled/title/body (pass only what changes). `id` is IMMUTABLE (it keys the `notification_log` ledger row `life_reminder:<id>` — the double-fire guard) and `strategy.kind` is IMMUTABLE (it decides how the notification fires); to change either, remove + re-add. Passing strategy replaces it wholesale (its kind must match the existing kind). `title`/`body` set custom push copy; pass null or \"\" to clear and fall back to the View-derived copy.",
   {
     id: z.string().describe("The notification id to update (immutable; identifies which notification)"),
     target: z.string().optional().describe("The page/View id to open (e.g. `today` for the habit board)"),

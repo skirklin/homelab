@@ -181,7 +181,7 @@ export type LifeViewItem =
  * dispatches per strategy (fixed + random + `subsumes`).
  */
 export interface LifeNotification {
-  /** IMMUTABLE — keys `reminder_state`. */
+  /** IMMUTABLE — keys the `notification_log` ledger row `life_reminder:<id>` (the double-fire guard). */
   id: string;
   /** The View id to open when the nudge fires. */
   target: string;

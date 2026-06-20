@@ -2785,8 +2785,9 @@ dataRoutes.post("/life/views/reorder", handler(async (c) => {
 // ---- Life notifications (Unified Capture; manifest-only) ----
 //
 // Same pattern. A notification defines WHEN to open a View. `id` is IMMUTABLE
-// (it keys reminder_state — the double-fire guard); `strategy.kind` is also
-// immutable (it decides how the notification fires). The pure ops validate
+// (it keys the `notification_log` ledger row `life_reminder:<id>` — the
+// double-fire guard); `strategy.kind` is also immutable (it decides how the
+// notification fires). The pure ops validate
 // strategy by kind (fixed cadence/time/weekday/subsumes vs random
 // timesPerDay/activeHours).
 
