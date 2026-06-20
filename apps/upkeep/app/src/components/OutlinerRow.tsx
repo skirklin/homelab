@@ -207,6 +207,17 @@ export function OutlinerRow({
     upkeep.deleteTask(task.id);
   }, [upkeep, task.id]);
 
+  // Keyboard surface for the row — the outliner's primary power-user affordance.
+  // Navigation bindings (fired only when NOT editing):
+  //   Enter                 → new sibling after this row
+  //   Tab / Shift-Tab       → indent / outdent
+  //   Space                 → toggle complete
+  //   F2                    → rename (enter edit mode)
+  //   Cmd/Ctrl+Delete       → delete row (Backspace also works with the modifier)
+  //   Alt+Up / Alt+Down     → reorder among siblings
+  // EDITING mode swallows every key except Enter (save) and Escape (revert) and
+  // returns early, so none of the navigation bindings can fire mid-rename — e.g.
+  // Space types a space instead of toggling complete, Tab is left to the input.
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (editing) {
       if (e.key === "Enter") {
@@ -262,6 +273,9 @@ export function OutlinerRow({
     setDragging(false);
   }, []);
 
+  // Split the row's height into vertical thirds: top → "before", bottom →
+  // "after", middle → "inside" (reparent as first child). The zone drives both
+  // the drop indicator and the fractional target position in handleDrop.
   const getDropZone = useCallback((e: React.DragEvent): DropZone => {
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
@@ -288,11 +302,18 @@ export function OutlinerRow({
     setDropZone(null);
     if (!draggedId || draggedId === task.id) return;
 
-    // Prevent dropping a parent into its own subtree
+    // Cycle guard: `task.path` is this row's ancestor-id chain, so if it
+    // contains the dragged id then this row lives somewhere inside the dragged
+    // node's subtree — moving the parent under its own descendant would orphan a
+    // loop. Refuse the drop.
     if (task.path.includes(draggedId)) return;
 
+    // Fractional-position convention: a move targets `sibling.position ± 0.5`
+    // (before/after) or `0` (inside, as first child). Bisecting the gap between
+    // two existing integer/fractional positions keeps ordering correct without a
+    // renormalize pass — the backend re-sorts by position and only periodically
+    // (or never) needs to collapse the fractions back to integers.
     if (zone === "inside") {
-      // Drop as first child of this task
       upkeep.moveTask(draggedId, task.id, 0);
       if (task.collapsed) upkeep.toggleCollapsed(task.id);
     } else if (zone === "before") {

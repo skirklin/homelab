@@ -269,6 +269,13 @@ export function LifeDashboard() {
   // Context-aware session prominence: drive sizing and ordering off the
   // current hour + day in the user's local tz. Also surface a "logged at
   // HH:MM" chip on whichever session was already done today.
+  //
+  // Recomputes only when events change, not on a clock tick — `hour`/`isSunday`
+  // read a fresh `new Date()` but the deps are `[allEntries]` only (parallels
+  // the `isMobileDevice` compute-once note above). So prominence is set on
+  // mount/log and won't re-roll mid-session as the hour advances. Intentional:
+  // a card silently resizing under the user at the top of the hour would be
+  // more jarring than a slightly stale layout.
   const sessionContext = useMemo(() => {
     const now = new Date();
     const hour = now.getHours();
