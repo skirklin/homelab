@@ -396,10 +396,9 @@ function fixedScheduledToday(
  * (kind `life_reminder:<id>`, bucketed by the owner-local day): one ledger row
  * per (user, kind, bucket) gates re-sends, so a notification fires at most once
  * per owner-local day. The row is stamped ONLY when a push actually lands, so a
- * no-delivery tick still retries within the ±1min window. (Replaces the per-log
- * `reminder_state` map this used pre-Phase-D — the ledger is now the sole
- * idempotency store; the `id`-keyed `reminder_state` column was kept but no
- * longer gates re-sends.)
+ * no-delivery tick still retries within the ±1min window. (The ledger is the
+ * SOLE idempotency store; the old per-log `reminder_state` json column this used
+ * pre-ledger was dropped in migration 20260620_154500.)
  */
 export async function runLifeReminderCheck(
   now: Date = new Date(),
@@ -482,7 +481,7 @@ export async function runLifeReminderCheck(
       // row keyed (user, "life_reminder:<id>", todayYmd) ONLY when a push lands,
       // so a no-delivery tick retries within the ±1min window. The bucket is the
       // OWNER-LOCAL day (todayYmd, not todayPacific) so a non-Pacific owner's
-      // reminder is one-per-their-day. (Replaces the per-log reminder_state map.)
+      // reminder is one-per-their-day.
       const content = pushContentForTarget(n, views);
       try {
         const result = await notifyOnce(pb, {

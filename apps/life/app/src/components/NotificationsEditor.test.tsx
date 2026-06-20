@@ -1,9 +1,10 @@
 /**
- * NotificationsEditor — guards the Phase D id-scheme landmine: editing a
- * notification's TIME (or any field) must go through `updateNotification(id, …)`
- * with the id preserved, and a time-only edit must NOT drop the strategy's
- * `subsumes` / `weekday`. A rewritten id breaks the `reminder_state` double-fire
- * guard, so these assertions are load-bearing.
+ * NotificationsEditor — guards the stable-id invariant: editing a notification's
+ * TIME (or any field) must go through `updateNotification(id, …)` with the id
+ * preserved, and a time-only edit must NOT drop the strategy's `subsumes` /
+ * `weekday`. A rewritten id orphans the notification's `notification_log` ledger
+ * rows (the id is the `life_reminder:<id>` ledger key + manifest join key), so
+ * these assertions are load-bearing.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -68,7 +69,7 @@ describe("NotificationsEditor — id-scheme landmine", () => {
     expect(mockLifeBackend.updateNotification).toHaveBeenCalled();
     const [logId, id, patch] = mockLifeBackend.updateNotification.mock.calls.at(-1)!;
     expect(logId).toBe("log1");
-    // id is NEVER rewritten — it keys reminder_state.
+    // id is NEVER rewritten — it's the `life_reminder:<id>` ledger key + join key.
     expect(id).toBe("weekly-reminder");
     expect(patch.strategy).toMatchObject({
       kind: "fixed",

@@ -441,7 +441,7 @@ describe("runLifeReminderCheck — mark only after successful delivery", () => {
     // 2026-06-07 is a Sunday; both reminders target 08:00 UTC. The weekly
     // reminder lists "evening-reminder" in `subsumes`, so on the day it's
     // scheduled (Sunday) the evening daily reminder must be suppressed — exactly
-    // one push fires (the weekly), and only the weekly stamps reminder_state.
+    // one push fires (the weekly), and only the weekly stamps the ledger row.
     const SUNDAY_0800Z = new Date("2026-06-07T08:00:00Z");
     sendPushToUser.mockResolvedValue({ sent: 1, expired: 0, failed: 0 });
 

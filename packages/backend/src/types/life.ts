@@ -181,7 +181,14 @@ export type LifeViewItem =
  * dispatches per strategy (fixed + random + `subsumes`).
  */
 export interface LifeNotification {
-  /** IMMUTABLE — keys the `notification_log` ledger row `life_reminder:<id>` (the double-fire guard). */
+  /**
+   * IMMUTABLE — this id is the ledger `kind` discriminator (`life_reminder:<id>`,
+   * the per-day idempotency key in `notification_log`) AND the manifest/event
+   * join key, so renaming it would orphan in-flight ledger rows. Keep it stable;
+   * the bare-vs-`*-reminder` distinction no longer matters for idempotency (the
+   * ledger buckets per owner-local day, so there's no cross-day continuity to
+   * break).
+   */
   id: string;
   /** The View id to open when the nudge fires. */
   target: string;

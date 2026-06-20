@@ -86,6 +86,16 @@ pushRoutes.post("/unsubscribe", handler(async (c) => {
  *
  * This is an internal endpoint — intended to be called by PocketBase hooks
  * or scheduled tasks, not directly by frontends.
+ *
+ * INTENTIONALLY does NOT pass `preferredOrigins` (so it reaches ALL of the
+ * user's subscriptions, every device) and does NOT route through the
+ * `notification_log` ledger (no per-day dedup). That's correct for its only
+ * caller — the event-watcher infra-alert path (a separate process; see
+ * services/event-watcher/src/index.ts). Those alerts are duration-gated upstream
+ * (so they don't spam), carry an absolute monitor URL, and should buzz every
+ * device the operator owns; per-day collapsing or single-origin delivery would
+ * defeat the point. It inherits `sendPushToUser`'s defaults — `urgency:"high"` +
+ * a 4h TTL — for prompt delivery.
  */
 pushRoutes.post("/send", handler(async (c) => {
   if (!c.get("isApiKey")) {
