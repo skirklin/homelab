@@ -570,7 +570,7 @@ const quickPayloadSchema = z.object({
 
 server.tool(
   "list_life_trackables",
-  "List the caller's life trackables (the per-user vocabulary). Each has id, label, shape (took|did|happened|rated), optional group (semantic rollup), prefill defaults (defaultUnit/defaultAmount/defaultDuration), optional ratingLabel, hidden, and pinned[] quick-actions.",
+  "List the caller's life trackables (the per-user vocabulary). Each has id, label, shape (took|did|happened|rated|noted), optional group (semantic rollup), prefill defaults (defaultUnit/defaultAmount/defaultDuration), optional ratingLabel, hidden, and pinned[] quick-actions.",
   {},
   async () => {
     const data = await api("/life/trackables");
@@ -814,7 +814,7 @@ server.tool(
 
 server.tool(
   "add_life_view",
-  "Create a capture view in the caller's manifest. `id` is an IMMUTABLE slug (it is written to life_events.labels.view — the history join key for a guided run's events). `items[]` is ordered: capture items name a vocab `trackableId` (the prompt/hint live on the vocab row, not here); `banner` items are read-only templated echoes; `tasks_due` echoes upkeep tasks. `render` is guided (stepped wizard) or inline (dashboard surface).",
+  "Create a capture view in the caller's manifest. `id` is an IMMUTABLE slug (it is written to life_events.labels.view — the history join key for a guided run's events). NOTE: only guided runs emit events, so `id` is only history-load-bearing for `render: guided` views; inline/dashboard (display-only) views write no events, so their `id` is purely a manifest key. `items[]` is ordered: capture items name a vocab `trackableId` (the prompt/hint live on the vocab row, not here); `banner` items are read-only templated echoes; `tasks_due` echoes upkeep tasks. `render` is guided (stepped wizard) or inline (dashboard surface).",
   {
     id: z.string().describe("IMMUTABLE unique slug ([a-z0-9_-])"),
     title: z.string().describe("Display title"),
