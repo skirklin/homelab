@@ -319,9 +319,10 @@ def parse_raw_chase(
         )
         account_count += 1
         log.info("Chase DDA (tile): %s ••%s (id=%s)", tile.nickname, tile.mask, account.id)
-        # Use the same source as dda/list-driven writes so the UNIQUE
-        # (account_id, as_of, source) constraint dedupes if the two paths
-        # ever land on the same date for the same account.
+        # The idx_balances_unique_per_date UNIQUE (account_id, as_of) index
+        # plus INSERT OR REPLACE means the last write for a given account+date
+        # wins regardless of source, so the dda/list and tile paths can't leave
+        # side-by-side rows if they ever land on the same date.
         db.insert_balance(
             Balance(
                 account_id=account.id,
