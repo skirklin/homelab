@@ -319,8 +319,11 @@ export class MutationQueue {
 
   /**
    * Like viewCollection but only returns records with pending mutations.
-   * Used by subscribe replay so server-only seeded records (which the
-   * caller already loaded via its own initial fetch) aren't double-emitted.
+   * Sole caller is materialize()'s sort+limit branch in mirror.ts: it splices
+   * optimistic creates that aren't yet in `slice.members` (the server hasn't
+   * seen them, so they're absent from the last top-N membership) into the
+   * local sort+limit window, so a just-created row shows up before its server
+   * ack lands instead of popping in on the next refetch.
    */
   viewPending(
     collection: string,
