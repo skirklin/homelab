@@ -392,14 +392,14 @@ function fixedScheduledToday(
  * `fixed` one whose owner-local wall-clock matches `strategy.time` (±1 min),
  * unless it's subsumed by another notification scheduled to fire today.
  *
- * Idempotency: a notification counts as already-sent-today iff
- * `reminder_state[id] === today`. (Pre-Phase-D this also OR'd the legacy
- * `last_*_reminder_sent` columns; those columns are dropped — reminder_state is
- * now the sole idempotency store.)
- *
- * Mark-after-success is preserved: `reminder_state[id]` is written only when a
- * push actually landed (result.sent > 0), so a no-delivery tick retries within
- * the ±1min window.
+ * Idempotency runs through the shared `notification_log` ledger via `notifyOnce`
+ * (kind `life_reminder:<id>`, bucketed by the owner-local day): one ledger row
+ * per (user, kind, bucket) gates re-sends, so a notification fires at most once
+ * per owner-local day. The row is stamped ONLY when a push actually lands, so a
+ * no-delivery tick still retries within the ±1min window. (Replaces the per-log
+ * `reminder_state` map this used pre-Phase-D — the ledger is now the sole
+ * idempotency store; the `id`-keyed `reminder_state` column was kept but no
+ * longer gates re-sends.)
  */
 export async function runLifeReminderCheck(
   now: Date = new Date(),

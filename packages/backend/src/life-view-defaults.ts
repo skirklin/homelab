@@ -1,7 +1,9 @@
 /**
  * The default Views, default View-tracked vocab, and default notifications that
- * reproduce TODAY'S three code-defined sessions (morning / evening / weekly)
- * EXACTLY as data. These are the `DEFAULT_*` fallbacks the `useViews` /
+ * reproduce the original three code-defined sessions (morning / evening /
+ * weekly) EXACTLY as data. Those sessions lived in a `SESSIONS` const that was
+ * removed in Phase B3.3; this file is now the only home for that prompt set.
+ * These are the `DEFAULT_*` fallbacks the `useViews` /
  * `useNotifications` resolvers return when a log's `manifest.views` /
  * `manifest.notifications` is `undefined` (legacy / un-customized logs).
  *
@@ -14,7 +16,7 @@
  * renderer reproduces the wizards verbatim.
  *
  * ── The split-collision id map (design §3) ──────────────────────────────────
- * Today's session prompts collide on `entries[].name` across sessions
+ * Those session prompts collide on `entries[].name` across sessions
  * (morning.intention vs weekly.intention; evening.lesson vs weekly.lesson). As
  * distinct VOCAB ids they must split, so each gets its own `subject_id` series:
  *

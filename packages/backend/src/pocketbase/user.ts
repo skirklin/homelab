@@ -33,7 +33,7 @@ export class PocketBaseUserBackend implements UserBackend {
    * same SSE round-trip, vs. the single-millisecond window between two
    * synchronous setSlug calls in one tab. The right long-term fix is a PB
    * JS hook that does the merge server-side; this is the near-term
-   * mitigation. See $LINEAR_TODO for the hook plan.
+   * mitigation. (No tracking issue for the hook.)
    */
   private writeChains = new Map<string, Promise<unknown>>();
 
