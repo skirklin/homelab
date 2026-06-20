@@ -55,8 +55,8 @@ export interface QuickPayload {
  * `fromTrackable` within `within` (the owner-local day or week), reads the
  * `entry` (defaulting per shape), and substitutes it for `{token}`.
  *
- * Carried on the vocab row but UNUSED by capture in Phase A — the View renderer
- * (Phase B) consumes it. Round-trips through the PB mapper + manifest ops here.
+ * Carried on the vocab row and consumed by the View renderer — NOT by the
+ * legacy capture path. Round-trips through the PB mapper + manifest ops here.
  */
 export interface TemplateRef {
   /** `{token}` placeholder in the prompt/hint/banner text. */
@@ -110,17 +110,17 @@ export interface TrackablePayload {
   /** Manual quick-action favorites, shown first in the quick row / sheet. */
   pinned?: QuickPayload[];
   /**
-   * View-render metadata (UNUSED by capture in Phase A; consumed by the View
-   * renderer in Phase B). The question text shown when this row is captured
+   * View-render metadata (consumed by the View renderer, not by the legacy
+   * capture path). The question text shown when this row is captured
    * inside a View. May contain `{token}`s resolved against `refs`.
    */
   prompt?: string;
-  /** View-render sub-label; may contain `{token}`s. Phase-B only. */
+  /** View-render sub-label; may contain `{token}`s. View renderer only. */
   hint?: string;
   /** View-render input placeholder (the textarea's empty-state ghost text,
-   *  byte-faithful to today's session prompt `placeholder`). Phase-B only. */
+   *  byte-faithful to today's session prompt `placeholder`). View renderer only. */
   placeholder?: string;
-  /** Template references for `{token}`s in `prompt`/`hint`. Phase-B only. */
+  /** Template references for `{token}`s in `prompt`/`hint`. View renderer only. */
   refs?: TemplateRef[];
 }
 export type LifeManifestTrackable = TrackableIdentity & TrackablePayload;
@@ -131,9 +131,8 @@ export type LifeManifestTrackable = TrackableIdentity & TrackablePayload;
  * evening / weekly *sessions* are Views rendered `guided`; the dashboard's
  * inline shape-grid is conceptually a View rendered `inline`. One renderer.
  *
- * Stored on `life_logs.manifest.views`. UNUSED by any live surface in Phase B1
- * (sessions still run the old `SessionRunner`/`SESSIONS` path) — the data model
- * lands first, the ViewRunner consumes it in Phase B2.
+ * Stored on `life_logs.manifest.views` and rendered by the ViewRunner today
+ * (the morning / evening / weekly sessions run as guided Views).
  *
  * IDENTITY (`id` — the frozen runner slug) & PAYLOAD (everything else) split,
  * so `updateView` only ever sees `Partial<ViewPayload>` and cannot name `id`.
@@ -167,8 +166,8 @@ export type LifeView = ViewIdentity & ViewPayload;
  *   - `banner`   — a read-only templated echo ("This week: {wk}"). Writes no
  *                  event; drops silently if a required `refs` token is absent.
  *
- * Renderer contract (Phase B2): non-capture blocks render BEFORE the first
- * capture step, matching today's wizard layout.
+ * Renderer contract: non-capture blocks render BEFORE the first capture step,
+ * matching the wizard layout.
  */
 export type LifeViewItem =
   | { kind: "capture"; trackableId: string; optional?: boolean }
@@ -178,9 +177,8 @@ export type LifeViewItem =
 /**
  * A scheduled nudge that targets a View. Decoupled from View *content* — a View
  * defines WHAT to capture; a notification defines WHEN to open it. Stored on
- * `life_logs.manifest.notifications`. UNUSED by the cron in Phase B1 — the
- * strategy dispatch (fixed + random + `subsumes` + per-user reminder-time
- * reconciliation) is Phase B4.
+ * `life_logs.manifest.notifications` and consumed by the reminder cron, which
+ * dispatches per strategy (fixed + random + `subsumes`).
  */
 export interface LifeNotification {
   /** IMMUTABLE — keys `reminder_state`. */

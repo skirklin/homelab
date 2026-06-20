@@ -303,8 +303,8 @@ export function validatePins(raw: unknown): QuickPayload[] {
 
 /**
  * Validate the optional `refs[]` view-render metadata on a vocab row. These are
- * UNUSED by capture in Phase A (the Phase-B View renderer consumes them) but
- * must round-trip through the manifest ops without being dropped or corrupted.
+ * consumed by the View renderer (not by the legacy capture path) and must
+ * round-trip through the manifest ops without being dropped or corrupted.
  * Returns the typed list, or undefined when absent. An empty array clears.
  */
 export function validateRefs(raw: unknown, code: ManifestErrorCode = "invalid_default"): TemplateRef[] | undefined {

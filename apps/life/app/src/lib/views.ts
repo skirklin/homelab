@@ -2,10 +2,9 @@
  * Resolver hooks for the Unified Capture data model (Views + Notifications).
  *
  * Mirror of `useTrackables` / `useGoals` in [trackables.ts](./trackables.ts):
- * read the per-user manifest, fall back to the `DEFAULT_*` constants. These are
- * NEW hooks introduced in Phase B1 and consumed in Phase B2 (ViewRunner) /
- * Phase B4 (notification cron) — they are NOT called from any component yet,
- * and adding them changes no behavior.
+ * read the per-user manifest, fall back to the `DEFAULT_*` constants. Called by
+ * LifeDashboard, SettingsModal, Journal, and the ViewRunner; the notification
+ * cron applies the same resolve server-side.
  *
  * RESOLVE SEMANTICS (load-bearing): `manifest.views === undefined` falls back
  * to `DEFAULT_VIEWS`, but an explicit `[]` resolves to `[]` (Angela has Views
