@@ -20,6 +20,7 @@ import { notifyUsersOnce } from "./notify-once";
 import {
   resolveNotifyRecipients,
   fetchAncestorsByPath,
+  fetchParentIds,
   type NotifyNode,
 } from "./recipients";
 
@@ -84,12 +85,19 @@ export async function runUpkeepNotifications(): Promise<{ notified: number; skip
     return isDue;
   });
 
+  // Notifications target only LEAF chores, never group/container nodes. A
+  // recurring container that is "due" would otherwise nag for the group itself.
+  // Subtract every task that is some other task's parent (any task_type /
+  // completion state — structural leaf-ness).
+  const parentIds = await fetchParentIds(pb);
+  const dueLeaves = dueRaw.filter((t) => !parentIds.has(t.id));
+
   // Recipients cascade up the ancestor chain (`inherit` strategy), same as the
   // deadline cron. Batch-fetch every proper-ancestor referenced by a due task.
-  const ancestorsById = await fetchAncestorsByPath(pb, dueRaw as NotifyNode[]);
+  const ancestorsById = await fetchAncestorsByPath(pb, dueLeaves as NotifyNode[]);
 
   const dueTasks: { taskName: string; recipientIds: string[] }[] = [];
-  for (const task of dueRaw) {
+  for (const task of dueLeaves) {
     const listOwnerIds: string[] = task.expand?.list?.owners || [];
     const recipientIds = resolveNotifyRecipients(task as NotifyNode, ancestorsById, listOwnerIds);
     dueTasks.push({ taskName: task.name, recipientIds });

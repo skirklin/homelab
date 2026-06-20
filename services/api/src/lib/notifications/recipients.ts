@@ -108,3 +108,23 @@ export async function fetchAncestorsByPath(
   for (const a of ancestors) ancestorsById.set(a.id, a as NotifyNode);
   return ancestorsById;
 }
+
+/**
+ * Fetch the set of task ids that are a PARENT of at least one other task —
+ * the "group"/container nodes. Notifications target only LEAF tasks
+ * (actionable todos), never the containers that organize them, so both crons
+ * subtract this set from their due list. `parent_id` is a plain text field
+ * (not a relation) defaulting to "" for roots, so the cheapest way to know
+ * leaf-ness is one getFullList of just the parent_id column, deduped into a
+ * Set. A task with ANY child (of any task_type, completed or not) is a group.
+ */
+export async function fetchParentIds(pb: PocketBase): Promise<Set<string>> {
+  const rows = await pb.collection("tasks").getFullList({
+    filter: 'parent_id != ""',
+    fields: "parent_id",
+    $autoCancel: false,
+  });
+  const ids = new Set<string>();
+  for (const r of rows) if (r.parent_id) ids.add(r.parent_id as string);
+  return ids;
+}

@@ -26,6 +26,7 @@ import { notifyUsersOnce } from "./notify-once";
 import {
   resolveNotifyRecipients,
   fetchAncestorsByPath,
+  fetchParentIds,
   type NotifyNode,
 } from "./recipients";
 
@@ -98,13 +99,20 @@ export async function runDeadlineNotifications(): Promise<{ notified: number; sk
     return daysUntil(deadline) <= leadDays;
   });
 
+  // Notifications target only LEAF todos, never group/container nodes that
+  // organize them. A one-shot container with no deadline would otherwise
+  // qualify as "asap" and nag. Subtract every task that is some other task's
+  // parent (any task_type / completion state — structural leaf-ness).
+  const parentIds = await fetchParentIds(pb);
+  const dueLeaves = dueRaw.filter((t) => !parentIds.has(t.id));
+
   // Recipients cascade up the ancestor chain (`inherit` strategy). Ancestors
   // (containers) are usually NOT in the due set above, so batch-fetch every
   // proper-ancestor id referenced by any due task's `path` (shared helper).
-  const ancestorsById = await fetchAncestorsByPath(pb, dueRaw as NotifyNode[]);
+  const ancestorsById = await fetchAncestorsByPath(pb, dueLeaves as NotifyNode[]);
 
   const dueTasks: { taskName: string; dated: boolean; recipientIds: string[] }[] = [];
-  for (const task of dueRaw) {
+  for (const task of dueLeaves) {
     const listOwnerIds: string[] = task.expand?.list?.owners || [];
     const recipientIds = resolveNotifyRecipients(task as NotifyNode, ancestorsById, listOwnerIds);
     dueTasks.push({ taskName: task.name, dated: !!task.deadline, recipientIds });
