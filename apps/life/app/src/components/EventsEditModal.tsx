@@ -1,7 +1,7 @@
 /**
  * The single event-edit surface: a modal that wraps the `EntriesList` row
  * editor around N events (1..n), each with timestamp + value editing + delete.
- * Both "edit one tapped event" (Journal / DayTimeline / a single-event calendar
+ * Both "edit one tapped event" (Journal / a single-event calendar
  * day) and "edit a multi-event day" (HabitBoard) route through here — there is
  * no separate single-event modal.
  *

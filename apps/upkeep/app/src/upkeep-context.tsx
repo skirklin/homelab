@@ -156,7 +156,10 @@ export function UpkeepProvider({ children }: { children: ReactNode }) {
 
     const unsub = subscribeToListViaBackend(upkeep, listId, dispatch);
 
-    // Check if we navigated away before subscription resolved
+    // Check if we navigated away before subscription resolved. Without this
+    // re-check the stale list's realtime feed leaks: subscribeToListViaBackend
+    // already wired it up, so it would keep dispatching SET_TASKS for the list
+    // the user left, clobbering the new list's tasks. Tear it down immediately.
     if (currentListIdRef.current !== listId) {
       unsub();
       return;

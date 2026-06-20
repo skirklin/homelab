@@ -1,6 +1,6 @@
 /**
- * Habit board — the goal review lens on the dashboard. Swaps in for DayTimeline
- * in the same slot (the Timeline · Habits toggle). It is a CALENDAR view over
+ * Habit board — the goal/trackable review surface on the Daily screen. It is a
+ * CALENDAR view over
  * the unified task/trackable model: every goal and every plain trackable gets a
  * Su–Sa multi-week `TrackerCalendar` so last week's context, day labels, a today
  * marker, and history are all legible at a glance (replacing the old single-week
