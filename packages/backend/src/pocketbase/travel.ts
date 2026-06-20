@@ -31,6 +31,10 @@ function logFromRecord(r: RecordModel | RawRecord): TravelLog {
 
 function tripFromRecord(r: RecordModel | RawRecord): Trip {
   const x = r as Record<string, unknown>;
+  // Mostly mechanical snake_case→camelCase, but two fields are true RENAMES
+  // (different words, not just recasing): the `flagged_for_review` column maps
+  // to `flagged`, and `review_comment` maps to `flagComment`. A server-side
+  // grep for `flagged` / `flagComment` will NOT find the PB column names.
   return {
     id: r.id, log: x.log as string, name: (x.name as string) || "", destination: (x.destination as string) || "",
     startDate: (x.start_date as string) || "", endDate: (x.end_date as string) || "",
