@@ -276,4 +276,27 @@ describe("taskFromRecord", () => {
     expect(task.lastCompleted).toEqual(new Date("2026-02-01T00:00:00Z"));
     expect("schedule" in task).toBe(false);
   });
+
+  // A recurring record can carry a bare `0` (create path defaults frequency to
+  // 0) or a missing/malformed value. The mapper must coerce it to a valid
+  // Frequency object so no reader (e.g. formatFrequency) crashes on `0.unit`.
+  it("recurring with frequency: 0 → coerced to a valid default Frequency", () => {
+    const task = taskFromRecord(baseCols({ task_type: "recurring", frequency: 0 }));
+    if (task.taskType !== "recurring") throw new Error("expected recurring");
+    expect(task.frequency).toEqual({ value: 1, unit: "days" });
+  });
+
+  it("recurring with missing frequency → coerced to a valid default Frequency", () => {
+    const task = taskFromRecord(baseCols({ task_type: "recurring" }));
+    if (task.taskType !== "recurring") throw new Error("expected recurring");
+    expect(task.frequency).toEqual({ value: 1, unit: "days" });
+  });
+
+  it("recurring with malformed frequency (bad unit) → coerced to default", () => {
+    const task = taskFromRecord(
+      baseCols({ task_type: "recurring", frequency: { value: 3, unit: "years" } }),
+    );
+    if (task.taskType !== "recurring") throw new Error("expected recurring");
+    expect(task.frequency).toEqual({ value: 1, unit: "days" });
+  });
 });

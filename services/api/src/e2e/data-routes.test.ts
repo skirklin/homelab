@@ -812,6 +812,18 @@ describe("Upkeep", () => {
     cleanupIds.push({ collection: "tasks", id: data.id });
   });
 
+  it("POST /data/tasks — recurring with no frequency defaults to a valid Frequency, not 0", async () => {
+    const { status, data } = await apiReq("/data/tasks", {
+      method: "POST",
+      token: userToken,
+      body: { list: taskListId, name: "Water plants", task_type: "recurring" },
+    });
+    expect(status).toBe(201);
+    cleanupIds.push({ collection: "tasks", id: data.id });
+    // Must be a real Frequency object so readers (formatFrequency) can't crash.
+    expect(data.frequency).toEqual({ value: 1, unit: "days" });
+  });
+
   it("POST /data/tasks/:id/complete — completes a task", async () => {
     const { status, data } = await apiReq(
       `/data/tasks/${task1Id}/complete`,
