@@ -617,9 +617,10 @@ export function ShapeSheet({ shape, onClose, trackables, events, userId, logId, 
                 )}
 
                 {/* Reflective free-text capture. `noted` vocab is View-only, so
-                    this branch isn't reachable from the dashboard shape pickers
-                    — but it's the reusable widget the ViewRunner renders, so it
-                    lives here as a self-contained field. */}
+                    this branch isn't reachable from the dashboard shape pickers.
+                    Views don't reuse this widget — the ViewRunner renders its own
+                    antd Input.TextArea + buildEntries — so this branch only keeps
+                    ShapeSheet total over every shape (no unhandled `noted` case). */}
                 {selected.shape === "noted" && (
                   <TextFieldEditor
                     label={selected.prompt ?? "Note"}
