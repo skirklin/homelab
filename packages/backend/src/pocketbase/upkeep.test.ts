@@ -299,4 +299,12 @@ describe("taskFromRecord", () => {
     if (task.taskType !== "recurring") throw new Error("expected recurring");
     expect(task.frequency).toEqual({ value: 1, unit: "days" });
   });
+
+  it("recurring with value < 1 (e.g. 0 days) → coerced to default", () => {
+    const task = taskFromRecord(
+      baseCols({ task_type: "recurring", frequency: { value: 0, unit: "days" } }),
+    );
+    if (task.taskType !== "recurring") throw new Error("expected recurring");
+    expect(task.frequency).toEqual({ value: 1, unit: "days" });
+  });
 });

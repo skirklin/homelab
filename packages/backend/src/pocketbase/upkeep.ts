@@ -139,6 +139,7 @@ function normalizeFrequency(raw: unknown): Frequency {
     raw &&
     typeof raw === "object" &&
     typeof (raw as Frequency).value === "number" &&
+    (raw as Frequency).value >= 1 &&
     ((raw as Frequency).unit === "days" ||
       (raw as Frequency).unit === "weeks" ||
       (raw as Frequency).unit === "months")
