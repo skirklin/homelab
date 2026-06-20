@@ -164,8 +164,8 @@ JSON_FIELD_NAMES=(
     "household_slugs"
     "recipe_boxes"
     "owners"
-    "notification_state"
-    "reminder_times"
+    "manifest"
+    "sample_schedule"
 )
 
 check_unwrapped_json_field_access() {

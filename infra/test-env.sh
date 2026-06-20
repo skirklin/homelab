@@ -179,6 +179,10 @@ container_to_basename() {
 # alive. A legacy `agent-<hash>` whose dir is gone is an orphan. Anything that
 # doesn't resolve to an agent-* basename and isn't "homelab" is treated
 # conservatively as alive (we don't reap names we don't understand).
+# CONSEQUENCE: a container from a renamed/future naming scheme (neither
+# "homelab" nor "agent-*") is never auto-reaped — it must be cleaned up by
+# hand with `docker rm`. Given the 93-stale-worktrees → 3.2 GB history, an
+# unreapable squatter is the kind of blind spot that quietly accumulates.
 basename_is_live_worktree() {
     local base="$1"
     [ "$base" = "homelab" ] && return 0

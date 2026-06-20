@@ -27,6 +27,9 @@
  *     separate workstream. Leaving the column in place is harmless (the cron
  *     simply stops touching it) and avoids stepping on that surface. A later
  *     phase can drop it once that workstream confirms nothing depends on it.
+ *     (Not to be confused with the legacy `reminder_times` from 0027 — a
+ *     different, since-removed column; the lint-pb JSON_FIELD_NAMES list once
+ *     carried that stale sibling name.)
  *   - life_logs.sample_schedule — the random sampler's `sentTimes` was NOT
  *     migrated onto the ledger (it carries computed per-day schedule state, not
  *     a plain idempotency stamp); it stays its own store.
