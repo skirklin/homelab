@@ -87,10 +87,10 @@ const SessionRow = styled.div<{ $hasPrimary: boolean }>`
 `;
 
 /**
- * "+ Log something else" — the entry point for anything not on Favorites. A
- * toggle reveals the four shape options; each opens the existing per-shape
- * ShapeSheet (typeahead-to-pick-or-create + per-thing inputs + star-to-favorite).
- * Replaces the always-visible 2×2 ShapeCard grid.
+ * "Log something else" — the entry point for anything not on Favorites. An
+ * always-visible 2-column grid of the four shape options; tapping one opens
+ * that shape's per-shape ShapeSheet (typeahead-to-pick-or-create + per-thing
+ * inputs + star-to-favorite).
  */
 const ShapeGrid = styled.div`
   display: grid;

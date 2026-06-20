@@ -51,7 +51,6 @@ def parse_raw_morgan_stanley(
     Reads:
       {inst_dir}/{timestamp}_portfolio_summary.json
       {inst_dir}/{timestamp}_grants.json
-      {inst_dir}/{timestamp}_portfolio.json   (optional legacy)
 
     Returns a summary dict with counts written.
     """
