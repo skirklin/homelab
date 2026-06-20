@@ -5,7 +5,7 @@
 import { getBackend } from "@kirkl/shared";
 
 // API base URL — in dev, route through the vite dev server so proxying works.
-// In production, PB and API share a host (api.beta.kirkl.in/fn/).
+// In production, PB and API share a host (api.kirkl.in/fn/).
 function getApiBase(): string {
   const pbUrl = getBackend().baseURL.replace(/\/$/, "");
   const isLocal = pbUrl.includes("localhost") || pbUrl.includes("127.0.0.1");

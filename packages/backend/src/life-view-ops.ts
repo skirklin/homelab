@@ -15,8 +15,9 @@
  *   - `view.id` is the runner slug written to `life_events.labels.view` (the
  *     history join key for a guided run's N correlated events). Renaming it
  *     would orphan that history, so it is immutable on update.
- *   - `notification.id` keys the `reminder_state` JSON column (the double-fire
- *     guard). Renaming it breaks idempotency, so it is immutable on update.
+ *   - `notification.id` keys the `notification_log` ledger row
+ *     (`life_reminder:<id>`) that is the double-fire guard. Renaming it breaks
+ *     idempotency, so it is immutable on update.
  *   - `notification.strategy.kind` decides HOW a notification fires (fixed
  *     wall-clock vs random sampling). Patching it would change what the
  *     notification measures (mirrors trackable.shape), so it requires
@@ -390,7 +391,8 @@ export function addNotification(
 
 /**
  * UPDATE an existing notification. Patches only the provided keys. ENFORCES
- * immutability of `id` (it keys `reminder_state`) and `strategy.kind` (it
+ * immutability of `id` (it keys the `notification_log` ledger row
+ * `life_reminder:<id>`, the double-fire guard) and `strategy.kind` (it
  * decides how the notification fires — like trackable.shape, changing it
  * requires remove+re-add). target/enabled/title/body + the within-kind strategy
  * fields are editable; null/"" clears the optional custom-copy strings
@@ -418,7 +420,7 @@ export function updateNotification(
   if (patch.id !== undefined && patch.id !== notificationId) {
     throw new ManifestError(
       "immutable_notification_id",
-      `notification id is immutable (it keys reminder_state); cannot rename "${notificationId}" → "${String(patch.id)}"`,
+      `notification id is immutable (it keys the notification_log ledger row life_reminder:<id>); cannot rename "${notificationId}" → "${String(patch.id)}"`,
     );
   }
 

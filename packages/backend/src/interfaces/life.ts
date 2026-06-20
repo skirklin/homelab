@@ -242,13 +242,15 @@ export interface LifeBackend {
   /**
    * Add a notification to the log's `manifest.notifications[]`. Validates the
    * full shape + id uniqueness (see life-view-ops). `id` is IMMUTABLE (it keys
-   * `reminder_state`). Manifest-only — never touches events.
+   * the `notification_log` ledger row `life_reminder:<id>`, the double-fire
+   * guard). Manifest-only — never touches events.
    */
   addNotification(logId: string, input: AddNotificationInput): Promise<LifeManifest>;
 
   /**
    * Patch a notification's target/strategy/enabled. `id` and `strategy.kind`
-   * are IMMUTABLE (id keys reminder_state; kind decides how it fires).
+   * are IMMUTABLE (id keys the `notification_log` ledger row `life_reminder:<id>`,
+   * the double-fire guard; kind decides how it fires).
    */
   updateNotification(
     logId: string,
