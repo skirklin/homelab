@@ -397,4 +397,41 @@ describe("upkeep recurring cron — runUpkeepNotifications drives PB state", () 
     expect(await stampOf(a.id)).toBe(null);      // creator NOT notified
     expect(notified).toBe(1);
   });
+
+  it("a due recurring GROUP (has a child) does NOT notify; a due recurring LEAF does", async () => {
+    // The container is itself recurring + due (last_completed null), so under
+    // the old filter it would nag for the group. With leaf-filtering only the
+    // actionable child chore notifies.
+    const group = await makeActor("cron-group");
+    const leaf = await makeActor("cron-leaf");
+
+    const groupList = await adminPb.collection("task_lists").create({
+      name: "Cron group list",
+      owners: [group.id],
+    });
+    // A recurring container chore, due, owned/created by `group`.
+    const container = await makeRecurringTask({
+      list: groupList.id,
+      name: "Cron deep clean",
+      created_by: group.id,
+      last_completed: null, // due
+    });
+    // Its child leaf chore, created by a DIFFERENT user so we can tell them apart.
+    await makeRecurringTask({
+      list: groupList.id,
+      name: "Cron scrub floors",
+      parent_id: container.id,
+      created_by: leaf.id,
+      last_completed: null, // due
+    });
+
+    await isolateUsers([group.id, leaf.id]);
+    const { notified } = await runUpkeepNotifications();
+
+    // The container's recipient (group) is NOT stamped — it's a group node.
+    expect(await stampOf(group.id)).toBe(null);
+    // The leaf child's recipient (leaf) IS stamped.
+    expect(await stampOf(leaf.id)).toBe(todayLA());
+    expect(notified).toBe(1);
+  });
 });

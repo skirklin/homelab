@@ -71,6 +71,7 @@ async function makeOneShot(fields: {
   list: string;
   name: string;
   created_by: string;
+  parent_id?: string;
   deadline?: string | null;
   completed?: boolean;
   cleared?: boolean;
@@ -79,7 +80,7 @@ async function makeOneShot(fields: {
   const rec = await adminPb.collection("tasks").create({
     list: fields.list,
     name: fields.name,
-    parent_id: "",
+    parent_id: fields.parent_id || "",
     assignees: [],
     created_by: fields.created_by,
     task_type: "one_shot",
@@ -88,7 +89,12 @@ async function makeOneShot(fields: {
     cleared: fields.cleared ?? false,
     snoozed_until: fields.snoozed_until ?? null,
   });
-  await adminPb.collection("tasks").update(rec.id, { path: rec.id });
+  let path = rec.id;
+  if (fields.parent_id) {
+    const parent = await adminPb.collection("tasks").getOne(fields.parent_id);
+    path = `${parent.path}/${rec.id}`;
+  }
+  await adminPb.collection("tasks").update(rec.id, { path });
   return { id: rec.id };
 }
 
@@ -202,5 +208,58 @@ describe("runDeadlineNotifications — undeadlined (asap) todos", () => {
     await runDeadlineNotifications();
     expect(await wasNotifiedToday(completedUser.id)).toBe(false);
     expect(await wasNotifiedToday(clearedUser.id)).toBe(false);
+  });
+
+  it("does NOT notify for a GROUP one-shot (has a child); its LEAF child DOES notify", async () => {
+    // A undeadlined one-shot PARENT would qualify as "asap" under the old
+    // filter, but it's a container — only the actionable LEAF child should nag.
+    const parentUser = await makeUser("asap-group-parent");
+    const parentList = await makeList(parentUser.id);
+    const parent = await makeOneShot({
+      list: parentList,
+      name: "Plan the trip",
+      created_by: parentUser.id,
+      deadline: null, // would be asap if it were a leaf
+    });
+
+    const childUser = await makeUser("asap-group-child");
+    const child = await makeOneShot({
+      list: parentList,
+      name: "Book flights",
+      created_by: childUser.id,
+      parent_id: parent.id,
+      deadline: null, // qualifying leaf
+    });
+    void child;
+
+    await runDeadlineNotifications();
+
+    // The container's creator is never nagged; the leaf child's creator is.
+    expect(await wasNotifiedToday(parentUser.id)).toBe(false);
+    expect(await wasNotifiedToday(childUser.id)).toBe(true);
+  });
+
+  it("does NOT notify a one-shot parent whose only child is COMPLETED (structural leaf-ness)", async () => {
+    // Leaf-ness is structural: having ANY child — even a completed one —
+    // makes the parent a group. The completed child itself never nags.
+    const user = await makeUser("asap-group-completed-child");
+    const list = await makeList(user.id);
+    const parent = await makeOneShot({
+      list,
+      name: "Organize garage",
+      created_by: user.id,
+      deadline: null,
+    });
+    await makeOneShot({
+      list,
+      name: "Buy shelving",
+      created_by: user.id,
+      parent_id: parent.id,
+      deadline: null,
+      completed: true, // child is done, but parent still has a child → group
+    });
+
+    await runDeadlineNotifications();
+    expect(await wasNotifiedToday(user.id)).toBe(false);
   });
 });
