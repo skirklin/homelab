@@ -119,6 +119,42 @@ describe("sendPushToUser — dead-subscription pruning", () => {
   });
 });
 
+/** Return the 3rd (options) arg web-push received for a given endpoint. */
+function pushedOptionsFor(endpoint: string): { urgency?: string; TTL?: number } | undefined {
+  const call = sendNotification.mock.calls.find(
+    ([sub]) => (sub as { endpoint: string }).endpoint === endpoint,
+  );
+  return call?.[2] as { urgency?: string; TTL?: number } | undefined;
+}
+
+// Promptness fix: Android (Doze) defers a "normal"-urgency push until the app
+// reopens, and web-push's default 4-week TTL lets a missed push linger absurdly
+// late. Every send must carry urgency:"high" + a finite (few-hours) TTL by
+// default, with both overridable per call.
+describe("sendPushToUser — urgency + TTL options", () => {
+  it("defaults to urgency:'high' and a finite TTL", async () => {
+    const pb = makeFakePb([sub("o1", "https://kirkl.in")]);
+    await sendPushToUser(pb, "user1", { title: "x", url: "/x" });
+    const opts = pushedOptionsFor("https://push.example/o1");
+    expect(opts?.urgency).toBe("high");
+    expect(Number.isFinite(opts?.TTL)).toBe(true);
+    expect(opts?.TTL).toBe(14400);
+  });
+
+  it("honors an explicit urgency / ttlSeconds override", async () => {
+    const pb = makeFakePb([sub("o2", "https://kirkl.in")]);
+    await sendPushToUser(
+      pb,
+      "user1",
+      { title: "x", url: "/x" },
+      { urgency: "low", ttlSeconds: 60 },
+    );
+    const opts = pushedOptionsFor("https://push.example/o2");
+    expect(opts?.urgency).toBe("low");
+    expect(opts?.TTL).toBe(60);
+  });
+});
+
 describe("sendPushToUser — origin-aware deep link (buildUrl)", () => {
   it("delivers a SAME-ORIGIN relative path to the embedded kirkl.in subscription", async () => {
     // User only has an embedded subscription. The push must NOT carry an

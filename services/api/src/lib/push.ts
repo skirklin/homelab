@@ -66,6 +66,23 @@ export interface SendOptions {
    * fall back to legacy subs with no recorded origin.
    */
   preferredOrigins?: string[];
+  /**
+   * Web Push urgency header. DEFAULT "high". Android (FCM) honors this to
+   * wake the device and fire the service worker promptly even under Doze /
+   * battery optimization — at "normal" (web-push's default) Android may defer
+   * the push until the app is next opened, surfacing a daily reminder an hour
+   * late. Every notification we send is time-relevant, so "high" is correct.
+   */
+  urgency?: "very-low" | "low" | "normal" | "high";
+  /**
+   * Time-to-live in SECONDS — how long the push service holds an undelivered
+   * push before discarding it. DEFAULT 14400 (4h). web-push's own default is
+   * 4 weeks, far too long: all our notification types (reminders, samples,
+   * task-due, travel, chat) are same-day / time-relevant, so a multi-hour-late
+   * push is already stale and a multi-week-late one is absurd. Callers may
+   * override per notification type.
+   */
+  ttlSeconds?: number;
 }
 
 /**
@@ -81,6 +98,11 @@ export async function sendPushToUser(
   options: SendOptions = {},
 ): Promise<PushResult> {
   ensureVapid();
+
+  // Resolve send-option defaults once. "high" urgency + a 4h TTL keep pushes
+  // prompt (wakes Android out of Doze) and stale-bounded (no multi-week linger).
+  const urgency = options.urgency ?? "high";
+  const ttlSeconds = options.ttlSeconds ?? 14400;
 
   const allSubs = await pb.collection("push_subscriptions").getFullList({
     filter: pb.filter("user = {:userId}", { userId }),
@@ -131,7 +153,7 @@ export async function sendPushToUser(
         keys: sub.keys as { p256dh: string; auth: string },
       };
       try {
-        await webpush.sendNotification(subscription, body);
+        await webpush.sendNotification(subscription, body, { urgency, TTL: ttlSeconds });
         return "sent" as const;
       } catch (err: unknown) {
         const statusCode = (err as { statusCode?: number }).statusCode;
