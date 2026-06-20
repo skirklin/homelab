@@ -18,12 +18,14 @@
  *
  * Layout note: lives under pb_migrations/lib/ so the PB migration loader
  * (which globs `NNNN_*.js` at the top level) does not try to run it as a
- * migration. Migrations require() it relatively:
+ * migration.
  *
- *   const { unwrapPbJson } = require("./lib/pb-json.js");
- *
- * CommonJS (`module.exports`) so goja can require() it; mirrors the
- * convention established by lib/authz-rules.js.
+ * This file is the CANONICAL copy, consumed by the TS side (and tests).
+ * PB migrations CANNOT require() it — goja's migration JSVM has no
+ * filesystem resolver and panics with "Invalid module" (see
+ * 0026_authz_strings_source_of_truth.js's header). Migrations inline a
+ * verbatim copy of `unwrapPbJson` instead; _TEMPLATE.js.example carries
+ * that inline copy. CommonJS (`module.exports`) so the TS side can import it.
  */
 
 function unwrapPbJson(raw) {

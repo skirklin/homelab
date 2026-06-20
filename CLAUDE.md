@@ -235,7 +235,7 @@ Two ways to authenticate:
 - `services/scripts` — migration and utility scripts (export-firebase, import-to-pb, wipe-pb). One-shot recovery scripts live under `services/scripts/historical/` (e.g. `recover-life-events.ts`, `recover-recipe-events.ts`, `recover-cooking-log.py`) — kept around for forensic value but not part of the steady-state deploy path.
 - `extension/` — Chrome extension for financial data capture
 - `infra/` — Dockerfiles, k8s manifests, build/deploy scripts
-- `infra/pocketbase/pb_migrations/` — PocketBase schema migrations. Use [`_TEMPLATE.js.example`](infra/pocketbase/pb_migrations/_TEMPLATE.js.example) as the starting point for new migrations; it imports `unwrapPbJson` from [`lib/pb-json.js`](infra/pocketbase/pb_migrations/lib/pb-json.js), which handles all three goja shapes (string, parsed object, byte-array) for PB JSON columns.
+- `infra/pocketbase/pb_migrations/` — PocketBase schema migrations. Use [`_TEMPLATE.js.example`](infra/pocketbase/pb_migrations/_TEMPLATE.js.example) as the starting point for new migrations; it INLINES `unwrapPbJson` (PB migrations can't `require()` lib modules — goja panics "Invalid module") to handle all three goja shapes (string, parsed object, byte-array) for PB JSON columns. [`lib/pb-json.js`](infra/pocketbase/pb_migrations/lib/pb-json.js) is the canonical copy + the TS-side import source.
 - `infra/pocketbase/pb_hooks/` — PocketBase JS hooks: `sharing.pb.js` (invite redemption), `shopping-list-cleanup.pb.js`, `task-list-cleanup.pb.js`, `recipe-box-cleanup.pb.js`, `api_tokens.pb.js`. Module-scope helpers are unreachable inside `routerAdd` callbacks under goja, so JSON-column unwrap is inlined in each hook that needs it (mirrors `lib/pb-json.js`).
 
 ## Backend abstraction (`@homelab/backend`)

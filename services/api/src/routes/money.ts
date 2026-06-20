@@ -14,6 +14,15 @@
  * The interim story: see `services/ingest/MIGRATION.md` for the eventual
  * "move data to PocketBase" plan. This proxy is a small thing that lets
  * MCP work today without blocking on that migration.
+ *
+ * SECURITY — single-tenant by design (no per-user scoping). Neither
+ * `forward()` nor the close endpoint reads `c.get("userId")`: every route
+ * hits the same ingest sqlite for EVERY authenticated caller, including any
+ * `mcpat_` OAuth user. `authMiddleware` only proves a caller is
+ * authenticated, NOT authorized to this data. This is safe only because the
+ * intended callers are the tailnet-only money app and the operator's own
+ * tokens. Do NOT expose money to shared/invited users without first adding
+ * real per-caller scoping (e.g. gate on userId, or partition ingest data).
  */
 import { Hono } from "hono";
 import type { Context } from "hono";
