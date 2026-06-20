@@ -299,24 +299,26 @@ export interface LifeManifest {
    * and new logs that haven't customized); `[]` → explicitly NO views (Angela);
    * a non-empty array → exactly those. Distinguishing `undefined` from `[]` is
    * load-bearing, so the PB mapper carries an explicit `[]` through verbatim.
-   * UNUSED by any live surface in Phase B1.
    */
   views?: LifeView[];
   /**
-   * The user's scheduled nudges. Same RESOLVE SEMANTICS as `views`
-   * (`undefined` → `DEFAULT_NOTIFICATIONS`; `[]` → explicitly none). UNUSED by
-   * the cron in Phase B1 (Phase B4 wires strategy dispatch).
+   * The user's scheduled nudges — the SOLE source of truth for the reminder
+   * cron after Phase D (the legacy `*_reminder_time` columns were dropped).
    *
-   * ⚠️ The `undefined → DEFAULT_NOTIFICATIONS` resolve above is the
-   * new-user/editor default ONLY. The B4 CRON's actual `undefined` fallback is
-   * column-reconstruction (`resolveNotifications` →
-   * `buildNotificationsFromColumns` in
-   * `services/api/src/lib/notifications/life-notifications.ts`), which emits
-   * `*-reminder` ids + real column times — NOT `DEFAULT_NOTIFICATIONS`'s bare
-   * ids + placeholder times. Phase D's column→manifest seeding must reconcile to
-   * the `*-reminder` id scheme so the `reminder_state` double-fire guard keeps
-   * matching (see that file + `DEFAULT_NOTIFICATIONS` in
-   * `packages/backend/src/life-view-defaults.ts`).
+   * RESOLVE SEMANTICS differ between surfaces:
+   * - The cron (`resolveNotifications` in
+   *   `services/api/src/lib/notifications/life-notifications.ts`) is
+   *   manifest-only: `undefined`/garbage → `[]` (no fallback). Phase D
+   *   materialized every existing log's `manifest.notifications` from the old
+   *   columns, so `undefined` now only means a brand-new `[]`-seeded log or a
+   *   corrupt row — both correctly resolving to "no notifications".
+   * - The new-user/editor default is `DEFAULT_NOTIFICATIONS`
+   *   (`packages/backend/src/life-view-defaults.ts`), seeded into the manifest
+   *   at log creation — NOT a runtime cron fallback.
+   *
+   * The old column-reconstruction (`buildNotificationsFromColumns`) was retired
+   * in Phase D and survives only in the historical migration
+   * (`services/scripts/historical/lib/reminder-migration.ts`).
    */
   notifications?: LifeNotification[];
 }
