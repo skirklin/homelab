@@ -412,6 +412,9 @@ BUILD_TMP=""
 
 record_deployment() {
     local exit_code="$1"
+    # No token → skip recording silently. The deploy still succeeds, but the
+    # `deployments` collection gets no row, so the monitor shows a gap in
+    # deploy history with no warning anywhere. (Same for a missing `jq` below.)
     [ -z "${HOMELAB_API_TOKEN:-}" ] && return "$exit_code"
     command -v jq >/dev/null 2>&1 || return "$exit_code"
 
