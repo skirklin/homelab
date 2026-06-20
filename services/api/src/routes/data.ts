@@ -54,12 +54,24 @@ import { safeTz } from "../lib/notifications/tz";
 
 export const dataRoutes = new Hono<AppEnv>();
 
+/*
+ * Scalar ↔ entries[] indirection (notesFromEntries / ratingFromEntries /
+ * patch*Entries below).
+ *
+ * WHY this exists: `entries[]` is the CANONICAL cross-collection storage
+ * shape — task_events, recipe_events, and life_events all persist their
+ * payload as a tagged array of `{name,type,value,unit?}` entries. The flat
+ * scalar (a bare `notes` string / `rating` int) is PURELY an API-boundary
+ * convenience for ergonomic Claude / curl access; it is read out of the
+ * array on the way out and folded back into it on the way in, and is NEVER
+ * persisted as a scalar column. Do not "simplify" the array into a column —
+ * that would fork the storage shape away from the other event collections.
+ */
+
 /**
  * Read the "notes" text entry from a unified event row's entries[] field.
- * task_events / recipe_events / life_events all share this shape — the
- * notes field is exposed as a flat string at the API boundary for
- * ergonomic Claude / curl access, even though it's stored as one entry
- * in the array.
+ * (See the scalar↔entries note above for why notes is array-stored but
+ * surfaced flat.)
  */
 function notesFromEntries(entries: unknown): string | undefined {
   if (!Array.isArray(entries)) return undefined;
@@ -2363,6 +2375,13 @@ dataRoutes.delete("/life/entries/:id", handler(async (c) => {
 // (resolve the CALLER'S OWN log from userId — never a caller-supplied log id,
 // so cross-user writes are structurally impossible) and a read-modify-write of
 // the manifest column. Removal is manifest-only and never touches life_events.
+//
+// ORGANIZING PRINCIPLE for every handler below: route handlers do NOT validate
+// life-manifest payloads. The pure ops in @homelab/backend are the SOLE
+// validation authority — they throw ManifestError (mapped to HTTP status by
+// manifestErrorStatus). Routes only adapt the HTTP request/response shape
+// (parse body, scope identity, persist, translate the error). That is WHY
+// these handlers look so thin: any apparent missing check lives in the op.
 
 /** Coerce a PB `manifest` JSON value into a LifeManifest, or null. */
 function manifestFromValue(raw: unknown): LifeManifest | null {
@@ -2498,8 +2517,10 @@ dataRoutes.post("/life/trackables", handler(async (c) => {
   return c.json({ trackables: out.manifest.trackables }, 201);
 }));
 
-// Patch a trackable. id + shape are immutable — STRUCTURALLY (the pure op's
-// patch type is the payload keyspace, so they can't be passed at all).
+// Patch a trackable. id + shape are STRUCTURALLY immutable: the pure op's
+// patch type is the payload keyspace, so they're unnameable here — no `id`/
+// `shape` to forward, no runtime throw needed. (See the immutability-split
+// note on the notification PATCH below for why notifications differ.)
 dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -2519,10 +2540,6 @@ dataRoutes.patch("/life/trackables/:id", handler(async (c) => {
     refs?: unknown;
   }>();
   const out = await applyManifestMutation(pb, userId, (cur) =>
-    // The pure op's patch type is the trackable's PAYLOAD keyspace, so `id` /
-    // `shape` are structurally unnameable here — immutability is enforced by the
-    // type system, not a runtime throw. A caller's `id`/`shape` in the body is
-    // simply not forwarded (it can't be).
     updateTrackableOp(cur, trackableId, {
       label: body.label,
       group: body.group,
@@ -2626,8 +2643,10 @@ dataRoutes.post("/life/goals", handler(async (c) => {
   return c.json({ goals: manifestGoals(out.manifest) }, 201);
 }));
 
-// Patch a goal. id/scope/kind/metric are immutable — STRUCTURALLY (the pure
-// op's patch type is the payload keyspace, so they can't be passed at all).
+// Patch a goal. id/scope/kind/metric are STRUCTURALLY immutable: the pure op's
+// patch type is the payload keyspace, so they're unnameable here — no runtime
+// throw needed. (See the immutability-split note on the notification PATCH
+// below for why notifications forward `id` and reject a rename at runtime.)
 dataRoutes.patch("/life/goals/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -2809,7 +2828,18 @@ dataRoutes.post("/life/notifications", handler(async (c) => {
   return c.json({ notifications: manifestNotifications(out.manifest) }, 201);
 }));
 
-// Patch a notification. id + strategy.kind are immutable (enforced in pure op).
+// Patch a notification. id + strategy.kind are immutable.
+//
+// IMMUTABILITY-ENFORCEMENT SPLIT: unlike trackables/goals — where `id`/`shape`
+// (and goal `scope`/`kind`/`metric`) are made STRUCTURALLY unnameable by simply
+// omitting them from the op's patch type, so a rename is a compile-time
+// impossibility with no runtime check — here `id` IS forwarded into the op on
+// purpose, so the pure op REJECTS a rename at RUNTIME. The reason: a
+// notification's frozen part is the NESTED `strategy.kind`, which can't be
+// expressed as a flat structural Identity field the way a top-level `id`/`shape`
+// can; so this surface validates instead of forbidding-by-shape. This forwarded
+// `id` is the immutability gate, NOT the reparent bug that `stripParentPointers`
+// guards against elsewhere — deliberate, not an oversight.
 dataRoutes.patch("/life/notifications/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;
@@ -3051,11 +3081,11 @@ dataRoutes.post("/tasks", handler(async (c) => {
   return c.json({ id: record.id, name: record.name }, 201);
 }));
 
-// Update a task. parent_id and list are intentionally NOT allowed here —
-// changing them must go through POST /tasks/:id/move so descendant `path`
-// values get recomputed transactionally. PATCHing parent_id directly was a
-// footgun that left stale subtree paths. The `allowed` allowlist also
-// blocks reparent-via-PATCH attacks (`list`/`parent_id` aren't in it).
+// Update a task. parent_id and list are intentionally NOT in the `allowed`
+// allowlist below — changing them must go through POST /tasks/:id/move so
+// descendant `path` values get recomputed transactionally. PATCHing parent_id
+// directly was a footgun that left stale subtree paths (and is also the
+// reparent-via-PATCH attack vector the allowlist closes).
 dataRoutes.patch("/tasks/:id", handler(async (c) => {
   const pb = c.get("pb");
   const userId = c.get("userId") as string;

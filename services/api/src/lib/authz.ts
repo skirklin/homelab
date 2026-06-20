@@ -210,10 +210,13 @@ export async function userOwnsChatMessage(
  * route layer is the only ownership gate for `hlk_`/`mcpat_` callers
  * touching another user's coach session row.
  *
- * Note: D1 has no HTTP routes that touch coach_sessions — the coach service
- * writes via admin-PB through the SessionStore adapter. This helper exists
- * for D2+ when an HTTP surface (e.g. "reset my coach context") needs to
- * verify ownership before mutating a session row.
+ * NOT YET WIRED: as of D1 there is NO HTTP route anywhere that calls this
+ * helper — the coach service writes coach_sessions via admin-PB through the
+ * SessionStore adapter, which never reaches the route layer. It exists ahead
+ * of a D2+ surface (e.g. "reset my coach context") that will need to verify
+ * ownership before mutating a session row. Because nothing calls it, it is
+ * untested end-to-end; a future caller MUST add the route wiring AND a mirror
+ * test alongside it (don't trust this gate until it's exercised by a route).
  *
  * coach_sessions is single-owner (migration 20260608_181214). Mirrors
  * `PB_RULES.coach_sessions.updateRule` (`owner = @request.auth.id`).
