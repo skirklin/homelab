@@ -55,6 +55,7 @@ import {
   onForegroundMessage,
   listenForServiceWorkerMessages,
   getNotificationPermissionStatus,
+  reconcilePushSubscription,
 } from "../messaging";
 import { useLifeBackend } from "@kirkl/shared";
 
@@ -337,10 +338,25 @@ export function LifeDashboard() {
     return `${h}:${m}${ampm}`;
   };
 
-  // Check notification status on mount
+  // Reflect the REAL push state on mount, and auto-heal a server-pruned
+  // subscription. Notification.permission stays "granted" forever even after
+  // the backend prunes the push_subscriptions row, so we can't trust it alone —
+  // reconcile re-registers the (still-valid) browser subscription and reports
+  // whether a live, server-acknowledged subscription actually exists.
   useEffect(() => {
-    const status = getNotificationPermissionStatus();
-    setNotificationsEnabled(status === "granted");
+    let cancelled = false;
+    void (async () => {
+      const status = getNotificationPermissionStatus();
+      if (status !== "granted") {
+        if (!cancelled) setNotificationsEnabled(false);
+        return;
+      }
+      const live = await reconcilePushSubscription();
+      if (!cancelled) setNotificationsEnabled(live);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Handle quick response submission (from notification action buttons).

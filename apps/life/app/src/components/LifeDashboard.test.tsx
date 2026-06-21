@@ -77,12 +77,17 @@ vi.mock("../messaging", () => ({
   onForegroundMessage: vi.fn(() => () => {}),
   listenForServiceWorkerMessages: vi.fn(() => () => {}),
   getNotificationPermissionStatus: vi.fn(() => "unsupported"),
+  reconcilePushSubscription: vi.fn().mockResolvedValue(false),
 }));
 
 // --- Imports under test (after mocks) ------------------------------------
 
 import { LifeDashboard } from "./LifeDashboard";
 import { LifeProvider, useLifeContext } from "../life-context";
+import {
+  getNotificationPermissionStatus,
+  reconcilePushSubscription,
+} from "../messaging";
 
 // --- Helpers -------------------------------------------------------------
 
@@ -594,5 +599,70 @@ describe("LifeDashboard session-history drill-down", () => {
     // The whole Sessions block is gated on sessionViews.length > 0, so the
     // history affordance must be absent too — Angela sees nothing.
     expect(screen.queryByTestId("session-history-open")).not.toBeInTheDocument();
+  });
+});
+
+describe("LifeDashboard push reconcile on mount", () => {
+  const mockedStatus = vi.mocked(getNotificationPermissionStatus);
+  const mockedReconcile = vi.mocked(reconcilePushSubscription);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("calls reconcilePushSubscription when permission is already granted", async () => {
+    mockedStatus.mockReturnValue("granted");
+    mockedReconcile.mockResolvedValue(true);
+
+    renderDashboard("/");
+    await screen.findByText("Today");
+
+    // The mount effect heals/reconciles instead of trusting Notification.permission.
+    await waitFor(() => {
+      expect(mockedReconcile).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reflects a pruned subscription: reconcile resolving false leaves the toggle disabled", async () => {
+    mockedStatus.mockReturnValue("granted");
+    // Server pruned the row (FCM 404/410/403) — reconcile re-POSTs; if that also
+    // fails, the true state is "not subscribed".
+    mockedReconcile.mockResolvedValue(false);
+
+    renderDashboard("/");
+    await screen.findByText("Today");
+
+    await waitFor(() => {
+      expect(mockedReconcile).toHaveBeenCalledTimes(1);
+    });
+    // Any rendered Switch must be unchecked (the dashboard only mounts the
+    // Switch on mobile+sampling, so guard for its absence too).
+    const sw = screen.queryByRole("switch");
+    if (sw) expect(sw).not.toBeChecked();
+  });
+
+  it("does NOT reconcile (or prompt) when permission is not granted", async () => {
+    mockedStatus.mockReturnValue("default");
+
+    renderDashboard("/");
+    await screen.findByText("Today");
+
+    // Give any async mount effect a chance to run.
+    await waitFor(() => {
+      expect(mockedStatus).toHaveBeenCalled();
+    });
+    expect(mockedReconcile).not.toHaveBeenCalled();
+  });
+
+  it("does NOT reconcile when notifications are unsupported", async () => {
+    mockedStatus.mockReturnValue("unsupported");
+
+    renderDashboard("/");
+    await screen.findByText("Today");
+
+    await waitFor(() => {
+      expect(mockedStatus).toHaveBeenCalled();
+    });
+    expect(mockedReconcile).not.toHaveBeenCalled();
   });
 });

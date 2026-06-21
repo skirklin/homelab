@@ -53,6 +53,7 @@ vi.mock("./messaging", () => ({
   onForegroundMessage: vi.fn(() => () => {}),
   listenForServiceWorkerMessages: vi.fn(() => () => {}),
   getNotificationPermissionStatus: vi.fn(() => "unsupported"),
+  reconcilePushSubscription: vi.fn().mockResolvedValue(false),
 }));
 
 import { LifeRoutes } from "./module";
