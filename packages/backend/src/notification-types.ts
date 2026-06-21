@@ -83,8 +83,9 @@ export const NOTIFICATION_TYPES = {
     quickRatingActions: true,
     click: { kind: "sample", path: "/life?sample=true" },
   },
-  /** Life fixed reminder (morning/evening/weekly/any View). Deep-links via `data.url`. */
+  /** Life fixed reminder (morning/evening/weekly/any View). Deep-links via `data.url`. Collapses across reminders. */
   life_reminder: {
+    tag: "life-reminder",
     click: { kind: "url" },
   },
   /** Travel: morning "today's plan". Deep-links via `data.url`. */

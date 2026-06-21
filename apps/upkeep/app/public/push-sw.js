@@ -39,6 +39,7 @@ const ROUTING = {
     }
   },
   "life_reminder": {
+    "tag": "life-reminder",
     "click": {
       "kind": "url"
     }
