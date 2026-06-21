@@ -130,20 +130,42 @@ export function TasksDueBlock() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, listIdsKey, upkeep]);
 
-  // One flattened union of every list's tasks; the three buckets below all
-  // filter/sort over it (was hand-rolled identically in each memo).
+  // One flattened union of every list's tasks; the buckets below filter/sort
+  // over the leaf-filtered slice of it (was hand-rolled identically in each
+  // memo). `allTasks` is the COMPLETE per-list set — onTasks is filtered only
+  // by list, never by completed/cleared — so the parent-id set below is
+  // accurate even when a container's children are all done.
   const allTasks = useMemo(
     () => [...tasksByList.values()].flat(),
     [tasksByList],
   );
 
+  // Ids that some other task points at as its parent. parentId is "" for roots
+  // (filtered out by Boolean).
+  const parentIds = useMemo(
+    () => new Set(allTasks.map((t) => t.parentId).filter(Boolean)),
+    [allTasks],
+  );
+
+  // Only LEAF tasks surface here — a task with ANY child is a GROUP/container,
+  // never an actionable todo. This mirrors the server notification crons'
+  // `fetchParentIds` leaf rule (services/api/.../notifications/recipients.ts):
+  // both deadlines.ts and upkeep.ts subtract that same parent-id set from their
+  // due list, so the morning block and the notifications stay in lockstep.
+  // Leaf-ness is STRUCTURAL — a container is a group even if its children are
+  // all completed/cleared.
+  const leafTasks = useMemo(
+    () => allTasks.filter((t) => !parentIds.has(t.id)),
+    [allTasks, parentIds],
+  );
+
   const todayTasks = useMemo(() => {
     const now = new Date();
-    return allTasks
+    return leafTasks
       .filter((t) => t.taskType === "recurring")
       .filter((t) => urgencyOf(t, now).kind === "dueToday")
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [allTasks]);
+  }, [leafTasks]);
 
   // "Asap" one-shots: the union of OVERDUE dated todos (past their date) and
   // SOMEDAY undated todos (no prompt, would otherwise rot). These were one
@@ -151,7 +173,7 @@ export function TasksDueBlock() {
   // sort first (most overdue on top); someday follow (no date to sort by).
   const asapTasks = useMemo(() => {
     const now = new Date();
-    return allTasks
+    return leafTasks
       .filter((t) => isActionableOneShot(t, now))
       .map((t) => ({ t, u: urgencyOf(t, now) }))
       .filter(({ u }) => u.kind === "overdue" || u.kind === "someday")
@@ -162,7 +184,7 @@ export function TasksDueBlock() {
         return bDays - aDays;
       })
       .map(({ t }) => t);
-  }, [allTasks]);
+  }, [leafTasks]);
 
   // One-shot todos due within 3 days, INCLUDING due-today. Routed through the
   // canonical `urgencyOf` projection for model consistency with the buckets
@@ -172,14 +194,14 @@ export function TasksDueBlock() {
   // Sorted by deadline ascending so the most urgent is on top.
   const dueSoonTasks = useMemo(() => {
     const now = new Date();
-    return allTasks
+    return leafTasks
       .filter((t) => isActionableOneShot(t, now))
       .filter((t) => {
         const u = urgencyOf(t, now);
         return u.kind === "dueToday" || (u.kind === "dueSoon" && u.days <= 3);
       })
       .sort((a, b) => (taskDeadline(a)?.getTime() ?? 0) - (taskDeadline(b)?.getTime() ?? 0));
-  }, [allTasks]);
+  }, [leafTasks]);
 
   // Empty / loading / no-lists: render nothing.
   // Wait for every list's first onTasks callback before deciding "empty" so
