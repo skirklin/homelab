@@ -50,6 +50,16 @@ function toWireIssue(issue: DayIssue): {
   };
 }
 
+/** Wrap a value in the MCP text-content response shape every tool returns. */
+function mcpResponse(data: unknown) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+/** Drop keys whose value is `undefined` (keeps `null`). Used to build PATCH bodies. */
+function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+}
+
 // Builds a configured MCP server bound to a specific API token. Inner closures
 // capture `apiToken`, so each caller (stdio bootstrap, per-request HTTP handler)
 // gets its own server scoped to the right user identity. The body is left at
@@ -96,7 +106,7 @@ server.tool(
   {},
   async () => {
     const data = await api("/boxes");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -140,7 +150,7 @@ server.tool(
   { id: z.string().describe("The recipe record ID") },
   async ({ id }) => {
     const data = await api(`/recipes/${id}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -152,7 +162,7 @@ server.tool(
   {},
   async () => {
     const data = await api("/shopping/lists");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -162,7 +172,7 @@ server.tool(
   { list: z.string().describe("The shopping list ID") },
   async ({ list }) => {
     const data = await api(`/shopping/items?list=${list}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -180,7 +190,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ list, ingredient, note, category_id }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -199,7 +209,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -215,7 +225,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ name, slug }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -232,7 +242,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -242,7 +252,7 @@ server.tool(
   { id: z.string().describe("The shopping list ID") },
   async ({ id }) => {
     const data = await api(`/shopping/lists/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -254,7 +264,7 @@ server.tool(
   {},
   async () => {
     const data = await api("/task-lists");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -273,7 +283,7 @@ server.tool(
     if (tag) params.set("tag", tag);
     if (task_type) params.set("task_type", task_type);
     const data = await api(`/tasks?${params}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -321,7 +331,7 @@ server.tool(
       const ob = statusOrder[String(b.status)] ?? 3;
       return oa - ob;
     });
-    return { content: [{ type: "text", text: JSON.stringify(allTrips, null, 2) }] };
+    return mcpResponse(allTrips);
   },
 );
 
@@ -355,12 +365,7 @@ server.tool(
       });
       return { ...itin, days: annotatedDays };
     });
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({ ...trip, activities: tripActivities, itineraries: enrichedItineraries }, null, 2),
-      }],
-    };
+    return mcpResponse({ ...trip, activities: tripActivities, itineraries: enrichedItineraries });
   },
 );
 
@@ -438,12 +443,7 @@ server.tool(
         days,
       };
     });
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify({ trip_id, destination, itineraries: itinSummaries }, null, 2),
-      }],
-    };
+    return mcpResponse({ trip_id, destination, itineraries: itinSummaries });
   },
 );
 
@@ -515,7 +515,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ log, subject_id, entries, labels, timestamp, end_time }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -534,7 +534,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -544,7 +544,7 @@ server.tool(
   { id: z.string().describe("The life event ID") },
   async ({ id }) => {
     const result = await api(`/life/entries/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -574,7 +574,7 @@ server.tool(
   {},
   async () => {
     const data = await api("/life/trackables");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -595,7 +595,7 @@ server.tool(
   },
   async (args) => {
     const result = await api("/life/trackables", { method: "POST", body: JSON.stringify(args) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -615,7 +615,7 @@ server.tool(
   },
   async ({ id, ...patch }) => {
     const result = await api(`/life/trackables/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -625,7 +625,7 @@ server.tool(
   { id: z.string().describe("The trackable id to remove") },
   async ({ id }) => {
     const result = await api(`/life/trackables/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -635,7 +635,7 @@ server.tool(
   { order: z.array(z.string()).describe("All current trackable ids in the desired order") },
   async ({ order }) => {
     const result = await api("/life/trackables/reorder", { method: "POST", body: JSON.stringify({ order }) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -652,7 +652,7 @@ server.tool(
     if (!t) throw new Error(`no trackable with id "${id}"`);
     const pinned = [...(Array.isArray(t.pinned) ? t.pinned : []), pin];
     const result = await api(`/life/trackables/${id}/pins`, { method: "PUT", body: JSON.stringify({ pinned }) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -671,7 +671,7 @@ server.tool(
     if (index < 0 || index >= cur.length) throw new Error(`pin index ${index} out of range (0..${cur.length - 1})`);
     const pinned = cur.filter((_, i) => i !== index);
     const result = await api(`/life/trackables/${id}/pins`, { method: "PUT", body: JSON.stringify({ pinned }) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -696,7 +696,7 @@ server.tool(
   {},
   async () => {
     const data = await api("/life/goals");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -716,7 +716,7 @@ server.tool(
   },
   async (args) => {
     const result = await api("/life/goals", { method: "POST", body: JSON.stringify(args) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -733,7 +733,7 @@ server.tool(
   },
   async ({ id, ...patch }) => {
     const result = await api(`/life/goals/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -743,7 +743,7 @@ server.tool(
   { id: z.string().describe("The goal id to remove") },
   async ({ id }) => {
     const result = await api(`/life/goals/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -753,7 +753,7 @@ server.tool(
   { order: z.array(z.string()).describe("All current goal ids in the desired order") },
   async ({ order }) => {
     const result = await api("/life/goals/reorder", { method: "POST", body: JSON.stringify({ order }) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -766,7 +766,7 @@ server.tool(
   async ({ date }) => {
     const qs = date ? `?date=${encodeURIComponent(date)}` : "";
     const data = await api(`/life/goals/progress${qs}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -808,7 +808,7 @@ server.tool(
   {},
   async () => {
     const data = await api("/life/views");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -825,7 +825,7 @@ server.tool(
   },
   async (args) => {
     const result = await api("/life/views", { method: "POST", body: JSON.stringify(args) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -842,7 +842,7 @@ server.tool(
   },
   async ({ id, ...patch }) => {
     const result = await api(`/life/views/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -852,7 +852,7 @@ server.tool(
   { id: z.string().describe("The view id to remove") },
   async ({ id }) => {
     const result = await api(`/life/views/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -862,7 +862,7 @@ server.tool(
   { order: z.array(z.string()).describe("All current view ids in the desired order") },
   async ({ order }) => {
     const result = await api("/life/views/reorder", { method: "POST", body: JSON.stringify({ order }) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -897,7 +897,7 @@ server.tool(
   {},
   async () => {
     const data = await api("/life/notifications");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -914,7 +914,7 @@ server.tool(
   },
   async (args) => {
     const result = await api("/life/notifications", { method: "POST", body: JSON.stringify(args) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -931,7 +931,7 @@ server.tool(
   },
   async ({ id, ...patch }) => {
     const result = await api(`/life/notifications/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -941,7 +941,7 @@ server.tool(
   { id: z.string().describe("The notification id to remove") },
   async ({ id }) => {
     const result = await api(`/life/notifications/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -951,7 +951,7 @@ server.tool(
   { order: z.array(z.string()).describe("All current notification ids in the desired order") },
   async ({ order }) => {
     const result = await api("/life/notifications/reorder", { method: "POST", body: JSON.stringify({ order }) });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -970,7 +970,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ period, window_start, window_end }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1002,7 +1002,7 @@ server.tool(
     if (typeof resolved === "boolean") params.set("resolved", String(resolved));
     const qs = params.toString();
     const data = await apiRaw(`/chat/messages${qs ? `?${qs}` : ""}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1029,7 +1029,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(payload),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1043,7 +1043,7 @@ server.tool(
     const data = await apiRaw(`/chat/messages/${id}/resolve`, {
       method: "POST",
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1061,7 +1061,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify({ checked }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1071,7 +1071,7 @@ server.tool(
   { id: z.string().describe("The shopping item ID to delete") },
   async ({ id }) => {
     const data = await api(`/shopping/items/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1084,7 +1084,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ list }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1099,7 +1099,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ url }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1115,7 +1115,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ name, description }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1164,7 +1164,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ boxId, data }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1180,7 +1180,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify({ data }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1201,7 +1201,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify({ fields }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1218,7 +1218,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ ingredient, position }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1235,7 +1235,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify({ ingredient }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1248,7 +1248,7 @@ server.tool(
   },
   async ({ id, index }) => {
     const result = await api(`/recipes/${id}/ingredients/${index}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1264,7 +1264,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ order }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1282,7 +1282,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1300,7 +1300,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1313,7 +1313,7 @@ server.tool(
   },
   async ({ id, index }) => {
     const result = await api(`/recipes/${id}/steps/${index}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1329,7 +1329,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ order }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1339,7 +1339,7 @@ server.tool(
   { id: z.string().describe("The recipe record ID") },
   async ({ id }) => {
     const result = await api(`/recipes/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1355,7 +1355,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify({ visibility }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1373,7 +1373,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1383,7 +1383,7 @@ server.tool(
   { id: z.string().describe("The recipe box record ID") },
   async ({ id }) => {
     const result = await api(`/boxes/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1393,7 +1393,7 @@ server.tool(
   { boxId: z.string().describe("The recipe box record ID") },
   async ({ boxId }) => {
     const result = await api(`/boxes/${boxId}/subscribe`, { method: "POST" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1403,7 +1403,7 @@ server.tool(
   { boxId: z.string().describe("The recipe box record ID") },
   async ({ boxId }) => {
     const result = await api(`/boxes/${boxId}/unsubscribe`, { method: "POST" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1413,7 +1413,7 @@ server.tool(
   { recipeId: z.string().describe("The recipe record ID") },
   async ({ recipeId }) => {
     const result = await api(`/recipes/${recipeId}/cooking-log`);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1431,7 +1431,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ notes, rating, timestamp }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1449,7 +1449,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1459,7 +1459,7 @@ server.tool(
   { eventId: z.string().describe("The cooking log event ID") },
   async ({ eventId }) => {
     const result = await api(`/cooking-log/${eventId}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return mcpResponse(result);
   },
 );
 
@@ -1481,7 +1481,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ log, destination, status, region, start_date, end_date }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1498,15 +1498,12 @@ server.tool(
   },
   async ({ id, ...fields }) => {
     // Only send non-undefined fields
-    const body: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(fields)) {
-      if (v !== undefined) body[k] = v;
-    }
+    const body = stripUndefined(fields);
     const data = await api(`/travel/trips/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1552,7 +1549,7 @@ server.tool(
   { id: z.string().describe("The activity record ID") },
   async ({ id }) => {
     const data = await api(`/travel/activities/${id}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1565,15 +1562,12 @@ server.tool(
     name: z.string().describe("Activity name (required for create)"),
   },
   async ({ log, ...fields }) => {
-    const body: Record<string, unknown> = { log };
-    for (const [k, v] of Object.entries(fields)) {
-      if (v !== undefined) body[k] = v;
-    }
+    const body = { log, ...stripUndefined(fields) };
     const data = await api("/travel/activities", {
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1585,15 +1579,12 @@ server.tool(
     ...activityFields,
   },
   async ({ id, ...fields }) => {
-    const body: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(fields)) {
-      if (v !== undefined) body[k] = v;
-    }
+    const body = stripUndefined(fields);
     const data = await api(`/travel/activities/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1612,7 +1603,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ log, trip_id, name, is_active, days }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1624,7 +1615,7 @@ server.tool(
   { id: z.string().describe("The trip record ID to delete") },
   async ({ id }) => {
     const data = await api(`/travel/trips/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1634,7 +1625,7 @@ server.tool(
   { id: z.string().describe("The activity record ID to delete") },
   async ({ id }) => {
     const data = await api(`/travel/activities/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1644,7 +1635,7 @@ server.tool(
   { id: z.string().describe("The itinerary record ID to delete") },
   async ({ id }) => {
     const data = await api(`/travel/itineraries/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1674,7 +1665,7 @@ server.tool(
   async ({ log, subject_type, subject_id }) => {
     const qs = new URLSearchParams({ log, subject_type, subject_id }).toString();
     const data = await api(`/travel/notes?${qs}`);
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1692,7 +1683,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ log, subject_type, subject_id, entries }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1708,7 +1699,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify({ entries }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1718,7 +1709,7 @@ server.tool(
   { note_id: z.string().describe("The note record ID to delete") },
   async ({ note_id }) => {
     const data = await api(`/travel/notes/${note_id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1772,7 +1763,7 @@ server.tool(
         method: "PATCH",
         body: JSON.stringify({}),
       });
-      return { content: [{ type: "text", text: JSON.stringify(final, null, 2) }] };
+      return mcpResponse(final);
     }
 
     // No days — just PATCH the metadata fields
@@ -1780,7 +1771,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1806,7 +1797,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1822,7 +1813,7 @@ server.tool(
     const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/slots/${slot_index}`, {
       method: "DELETE",
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1842,7 +1833,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1861,7 +1852,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1880,7 +1871,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1899,7 +1890,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1914,7 +1905,7 @@ server.tool(
     const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}`, {
       method: "DELETE",
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1931,7 +1922,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ to_position }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1955,7 +1946,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1971,7 +1962,7 @@ server.tool(
     const data = await api(`/travel/itineraries/${itinerary_id}/days/${day_index}/flights/${flight_index}`, {
       method: "DELETE",
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -1991,7 +1982,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2010,7 +2001,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2042,7 +2033,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ list, name, description, parent_id, position, task_type, frequency, tags, assignees, deadline, deadline_lead_days }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2166,7 +2157,7 @@ server.tool(
         deadline_lead_days,
       }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2194,7 +2185,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2212,7 +2203,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2222,7 +2213,7 @@ server.tool(
   { id: z.string().describe("The task record ID") },
   async ({ id }) => {
     const data = await api(`/tasks/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2232,7 +2223,7 @@ server.tool(
   { id: z.string().describe("The task record ID") },
   async ({ id }) => {
     const data = await api(`/tasks/${id}/complete`, { method: "POST" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2249,7 +2240,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2265,7 +2256,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ until }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2275,7 +2266,7 @@ server.tool(
   { id: z.string().describe("The task record ID") },
   async ({ id }) => {
     const data = await api(`/tasks/${id}/unsnooze`, { method: "POST" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2285,7 +2276,7 @@ server.tool(
   { list_id: z.string().describe("The task list record ID") },
   async ({ list_id }) => {
     const data = await api(`/tasks/lists/${list_id}/clear-done`, { method: "POST" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2305,7 +2296,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify(body),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2348,7 +2339,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ targetType, targetId, expiresAt }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2358,7 +2349,7 @@ server.tool(
   {},
   async () => {
     const data = await apiRaw("/sharing/invites");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2374,7 +2365,7 @@ server.tool(
       method: "PATCH",
       body: JSON.stringify({ expiresAt }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2384,7 +2375,7 @@ server.tool(
   { id: z.string().describe("The invite record ID") },
   async ({ id }) => {
     const data = await apiRaw(`/sharing/invite/${id}`, { method: "DELETE" });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2407,7 +2398,7 @@ server.tool(
   {},
   async () => {
     const data = await money("/accounts");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2419,7 +2410,7 @@ server.tool(
   },
   async ({ account_id }) => {
     const data = await money("/balances", { account_id });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2435,7 +2426,7 @@ server.tool(
   },
   async ({ account_id, category, start, end, limit }) => {
     const data = await money("/transactions", { account_id, category, start, end, limit });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2445,7 +2436,7 @@ server.tool(
   {},
   async () => {
     const data = await money("/net-worth/summary");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2458,7 +2449,7 @@ server.tool(
   },
   async ({ start, end }) => {
     const data = await money("/net-worth/history", { start, end });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2471,7 +2462,7 @@ server.tool(
   },
   async ({ account_id, institution }) => {
     const data = await money("/performance", { account_id, institution });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2483,7 +2474,7 @@ server.tool(
   },
   async ({ range }) => {
     const data = await money("/spending/summary", { range });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2495,7 +2486,7 @@ server.tool(
   },
   async ({ account_id }) => {
     const data = await money("/holdings", { account_id });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2505,7 +2496,7 @@ server.tool(
   {},
   async () => {
     const data = await money("/allocation");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2515,7 +2506,7 @@ server.tool(
   {},
   async () => {
     const data = await money("/recurring");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2525,7 +2516,7 @@ server.tool(
   {},
   async () => {
     const data = await money("/institutions");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2535,7 +2526,7 @@ server.tool(
   {},
   async () => {
     const data = await money("/people");
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
@@ -2551,7 +2542,7 @@ server.tool(
       method: "POST",
       body: JSON.stringify({ as_of }),
     });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    return mcpResponse(data);
   },
 );
 
