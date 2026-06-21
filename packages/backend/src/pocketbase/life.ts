@@ -53,6 +53,7 @@ import {
 } from "../life-view-ops";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
+import { entriesFromRecord, labelsFromRecord } from "./entries";
 
 /**
  * Coerce a PB `manifest` JSON column into a `LifeManifest` or null. The PB JS
@@ -96,38 +97,18 @@ function logFromRecord(r: RecordModel): LifeLog {
 }
 
 function eventFromRecord(r: RecordModel | RawRecord): LifeEvent {
-  // `entries` should be an array post-migration; coerce defensively so a
-  // half-deployed env or a malformed seed row can't crash the UI.
+  // `entries` / `labels` are coerced defensively (shared with the other
+  // unified-shape backends) so a half-deployed env or a malformed seed row
+  // can't crash the UI.
   const x = r as Record<string, unknown>;
-  const rawEntries = Array.isArray(x.entries) ? x.entries : [];
-  const entries: LifeEntry[] = [];
-  for (const raw of rawEntries) {
-    if (!raw || typeof raw !== "object") continue;
-    const e = raw as Record<string, unknown>;
-    if (typeof e.name !== "string") continue;
-    if (e.type === "text" && typeof e.value === "string") {
-      entries.push({ name: e.name, type: "text", value: e.value });
-    } else if (e.type === "number" && typeof e.value === "number" && typeof e.unit === "string") {
-      const out: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
-      if (typeof e.scale === "number") out.scale = e.scale;
-      entries.push(out);
-    } else if (e.type === "bool" && typeof e.value === "boolean") {
-      entries.push({ name: e.name, type: "bool", value: e.value });
-    }
-  }
-
-  const labels = (x.labels && typeof x.labels === "object" && !Array.isArray(x.labels))
-    ? (x.labels as Record<string, string>)
-    : undefined;
-
   return {
     id: r.id,
     log: x.log as string,
     subjectId: (x.subject_id as string) || "",
     timestamp: new Date(x.timestamp as string),
     endTime: x.end_time ? new Date(x.end_time as string) : undefined,
-    entries,
-    labels,
+    entries: entriesFromRecord(r),
+    labels: labelsFromRecord(r),
     createdBy: (x.created_by as string) || "",
     created: x.created as string,
     updated: x.updated as string,

@@ -17,6 +17,7 @@ import type { Unsubscribe } from "../types/common";
 import { newId } from "../wrapped-pb/ids";
 import type { WrappedPocketBase } from "../wrapped-pb";
 import type { PBMirror, RawRecord } from "../wrapped-pb/mirror";
+import { entriesFromRecord } from "./entries";
 
 function logFromRecord(r: RecordModel | RawRecord): TravelLog {
   const x = r as Record<string, unknown>;
@@ -62,32 +63,6 @@ function activityFromRecord(r: RecordModel | RawRecord): Activity {
     experiencedAt: (x.experienced_at as string) || undefined,
     created: x.created as string, updated: x.updated as string,
   };
-}
-
-/**
- * Defensive parser for the travel_notes.entries column. Identical shape to
- * recipe_events / life_events — kept local rather than imported so the travel
- * mapper has no cross-backend coupling.
- */
-function entriesFromRecord(r: RecordModel | RawRecord): LifeEntry[] {
-  const x = r as Record<string, unknown>;
-  const raw = Array.isArray(x.entries) ? x.entries : [];
-  const out: LifeEntry[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const e = item as Record<string, unknown>;
-    if (typeof e.name !== "string") continue;
-    if (e.type === "text" && typeof e.value === "string") {
-      out.push({ name: e.name, type: "text", value: e.value });
-    } else if (e.type === "number" && typeof e.value === "number" && typeof e.unit === "string") {
-      const entry: LifeEntry = { name: e.name, type: "number", value: e.value, unit: e.unit };
-      if (typeof e.scale === "number") entry.scale = e.scale;
-      out.push(entry);
-    } else if (e.type === "bool" && typeof e.value === "boolean") {
-      out.push({ name: e.name, type: "bool", value: e.value });
-    }
-  }
-  return out;
 }
 
 function noteFromRecord(r: RecordModel | RawRecord): TravelNote {
