@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { NotFound, ScrollRestoration } from '@kirkl/shared'
+import { NotFound, ScrollRestoration, fmtDollarWholeSigned as fmtDollar } from '@kirkl/shared'
 import type { Account, NetWorthSummary } from './api'
 import { fetchAccounts, fetchNetWorthSummary } from './api'
 import { Overview } from './pages/Overview'
@@ -14,9 +14,6 @@ import PersonDetail from './pages/PersonDetail'
 import InstitutionDetail from './pages/InstitutionDetail'
 import { Settings } from './pages/Settings'
 import './App.css'
-
-const fmtDollar = (v: number) =>
-  `$${v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 
 function NetWorthHeader({ summary }: { summary: NetWorthSummary | null }) {
   if (!summary) return null

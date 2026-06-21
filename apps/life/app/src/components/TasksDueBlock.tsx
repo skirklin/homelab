@@ -13,7 +13,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
-import { useAuth, useUpkeepBackend, useUserBackend } from "@kirkl/shared";
+import { useAuth, useUpkeepBackend, useUserBackend, daysBetween } from "@kirkl/shared";
 import {
   urgencyOf,
   isActionableOneShot,
@@ -37,7 +37,7 @@ function formatDeadline(deadline: Date): string {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDateOnly = new Date(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
-  const diffDays = Math.floor((dueDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const diffDays = Math.floor(daysBetween(dueDateOnly, today));
   if (diffDays < -1) return `${Math.abs(diffDays)} days overdue`;
   if (diffDays === -1) return "1 day overdue";
   if (diffDays === 0) return "due today";

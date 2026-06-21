@@ -3,9 +3,7 @@ import Plot from 'react-plotly.js'
 import type { Data as PlotlyData } from 'plotly.js'
 import type { CollectionInfo, CollectionMonthSummary } from '../api'
 import { fetchCollections, fetchCollectionByMonth } from '../api'
-
-const fmtDollar = (v: number) =>
-  `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+import { fmtDollarWhole as fmtDollar } from '@kirkl/shared'
 
 const THEME = {
   cardBg: '#1e1e3f',

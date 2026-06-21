@@ -3,9 +3,7 @@ import Plot from 'react-plotly.js'
 import type { Data as PlotlyData } from 'plotly.js'
 import type { TripSummary } from '../api'
 import { fetchTravelTrips } from '../api'
-
-const fmtDollar = (v: number) =>
-  `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+import { fmtDollarWhole as fmtDollar } from '@kirkl/shared'
 
 function formatDateRange(start: string | null, end: string | null): string {
   if (!start) return ''

@@ -2,15 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Account, SyncHistoryEntry, SyncStatus } from '../api'
 import { fetchAccounts, fetchSyncHistory, fetchSyncStatus, createManualAccount } from '../api'
-
-const fmtDollar = (v: number) => {
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : ''
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
-  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
-  return `${sign}$${abs.toFixed(2)}`
-}
+import { fmtDollarAbbrev as fmtDollar } from '@kirkl/shared'
 
 function timeAgo(secondsAgo: number | null): string {
   if (secondsAgo == null) return 'never'
