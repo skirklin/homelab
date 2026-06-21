@@ -18,6 +18,7 @@
  * the fixed behavior so neither cron can drift back to the union bug.
  */
 import type PocketBase from "pocketbase";
+import { groupTaskIds } from "@homelab/backend";
 
 /** Minimal shape of a task record needed to resolve its notify recipients. */
 export interface NotifyNode {
@@ -115,8 +116,11 @@ export async function fetchAncestorsByPath(
  * (actionable todos), never the containers that organize them, so both crons
  * subtract this set from their due list. `parent_id` is a plain text field
  * (not a relation) defaulting to "" for roots, so the cheapest way to know
- * leaf-ness is one getFullList of just the parent_id column, deduped into a
- * Set. A task with ANY child (of any task_type, completed or not) is a group.
+ * leaf-ness is one getFullList of just the parent_id column.
+ *
+ * The DB query (which rows have a parent) is the server's I/O concern; the
+ * leaf/group DEFINITION lives in `groupTaskIds` from `@homelab/backend`, shared
+ * with life's morning block so the two surfaces can't drift.
  */
 export async function fetchParentIds(pb: PocketBase): Promise<Set<string>> {
   const rows = await pb.collection("tasks").getFullList({
@@ -124,7 +128,5 @@ export async function fetchParentIds(pb: PocketBase): Promise<Set<string>> {
     fields: "parent_id",
     $autoCancel: false,
   });
-  const ids = new Set<string>();
-  for (const r of rows) if (r.parent_id) ids.add(r.parent_id as string);
-  return ids;
+  return groupTaskIds(rows.map((r) => ({ parentId: r.parent_id as string })));
 }

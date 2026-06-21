@@ -17,6 +17,7 @@ import { useAuth, useUpkeepBackend, useUserBackend } from "@kirkl/shared";
 import {
   urgencyOf,
   isActionableOneShot,
+  leafTasksOnly,
   type Task as BackendTask,
 } from "@homelab/backend";
 
@@ -131,33 +132,19 @@ export function TasksDueBlock() {
   }, [user?.uid, listIdsKey, upkeep]);
 
   // One flattened union of every list's tasks; the buckets below filter/sort
-  // over the leaf-filtered slice of it (was hand-rolled identically in each
-  // memo). `allTasks` is the COMPLETE per-list set — onTasks is filtered only
-  // by list, never by completed/cleared — so the parent-id set below is
-  // accurate even when a container's children are all done.
+  // over the leaf-filtered slice of it. `allTasks` is the COMPLETE per-list set
+  // — onTasks is filtered only by list, never by completed/cleared — so the
+  // shared leaf/group rule sees every container even when its children are all
+  // done.
   const allTasks = useMemo(
     () => [...tasksByList.values()].flat(),
     [tasksByList],
   );
 
-  // Ids that some other task points at as its parent. parentId is "" for roots
-  // (filtered out by Boolean).
-  const parentIds = useMemo(
-    () => new Set(allTasks.map((t) => t.parentId).filter(Boolean)),
-    [allTasks],
-  );
-
   // Only LEAF tasks surface here — a task with ANY child is a GROUP/container,
-  // never an actionable todo. This mirrors the server notification crons'
-  // `fetchParentIds` leaf rule (services/api/.../notifications/recipients.ts):
-  // both deadlines.ts and upkeep.ts subtract that same parent-id set from their
-  // due list, so the morning block and the notifications stay in lockstep.
-  // Leaf-ness is STRUCTURAL — a container is a group even if its children are
-  // all completed/cleared.
-  const leafTasks = useMemo(
-    () => allTasks.filter((t) => !parentIds.has(t.id)),
-    [allTasks, parentIds],
-  );
+  // never an actionable todo. `leafTasksOnly` is the single shared definition
+  // (@homelab/backend), the same rule the notification crons apply.
+  const leafTasks = useMemo(() => leafTasksOnly(allTasks), [allTasks]);
 
   const todayTasks = useMemo(() => {
     const now = new Date();

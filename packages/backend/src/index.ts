@@ -126,6 +126,9 @@ export {
 } from "./lib/upkeep-urgency";
 export type { UrgencyState, UrgencyTask } from "./lib/upkeep-urgency";
 
+// --- Task tree leaf/group rule (shared by notification crons + life morning block) ---
+export { groupTaskIds, leafTasksOnly } from "./lib/task-tree";
+
 // --- Assignee resolution (client mirror of server resolveNotifyRecipients) ---
 export { resolveAssignees } from "./lib/assignee-resolution";
 export type { AssigneeNode, ResolvedAssignees } from "./lib/assignee-resolution";
