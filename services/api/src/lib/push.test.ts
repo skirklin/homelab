@@ -305,11 +305,28 @@ describe("life + deadline buildUrl delivered through sendPushToUser", () => {
       pb,
       "user1",
       { title: "Morning check-in", buildUrl: () => viewUrl("morning") },
-      { preferredOrigins: ["https://life.kirkl.in", "https://kirkl.in"] },
+      { preferredOrigins: ["https://life.kirkl.in"] },
     );
     const url = pushedUrlFor("https://push.example/l1");
     expect(url).toBe("/morning");
     expect(url).not.toContain("https://life.kirkl.in");
+  });
+
+  // Regression: life is standalone-only and kirkl.in (the home app) no longer
+  // serves any life route, so LIFE_ORIGINS dropped its old kirkl.in fallback.
+  // A user whose ONLY sub is on the home origin must therefore get NO life
+  // reminder — delivering to it would resolve /evening → kirkl.in/evening, a
+  // dead route in the wrong app. No delivery beats a broken cross-app open.
+  it("life push is NOT delivered to a home-app (kirkl.in) only sub", async () => {
+    const pb = makeFakePb([sub("h1", "https://kirkl.in")]);
+    const result = await sendPushToUser(
+      pb,
+      "user1",
+      { title: "Evening check-in", buildUrl: () => viewUrl("evening") },
+      { preferredOrigins: ["https://life.kirkl.in"] },
+    );
+    expect(result).toEqual({ sent: 0, expired: 0, failed: 0 });
+    expect(pushedUrlFor("https://push.example/h1")).toBeUndefined();
   });
 
   it("deadline delivered to a kirkl.in sub lands /tasks (the outliner)", async () => {

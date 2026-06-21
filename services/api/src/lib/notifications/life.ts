@@ -27,14 +27,16 @@ import { makeUserTzResolver, safeTz } from "./tz";
 import { notifyOnce } from "./ledger";
 import { resolveNotifications, isEnabled } from "./life-notifications";
 
-// Life is now standalone at life.kirkl.in (the old kirkl.in/life module was
-// removed) — both session wizards and the sampling UI mount at root there, so
-// deep links are root-relative paths. `https://kirkl.in` is kept as a lower-
-// priority fallback so any LEGACY subscription registered back when life was
-// embedded under kirkl.in/life still receives reminders (otherwise it matches
-// neither the preferred list nor the empty-origin legacy fallback and silently
-// drops). The relative `/morning` path resolves fine on either origin.
-const LIFE_ORIGINS = [`https://life.${DOMAIN}`, `https://${DOMAIN}`];
+// Life is standalone at life.${DOMAIN} (the old kirkl.in/life module was
+// removed) — both session wizards and the sampling UI mount at root there.
+// `https://${DOMAIN}` (the HOME app) no longer hosts ANY life route, so a
+// home-app subscription can NEVER open a life deep link: the SW would resolve
+// `/evening` against kirkl.in → kirkl.in/evening, a route the home app doesn't
+// serve. Targeting it is therefore always broken, so life reminders target
+// ONLY life.${DOMAIN}. A user without a life.${DOMAIN} subscription correctly
+// receives NO life reminder (better than a broken one that opens the wrong app)
+// until they enable notifications in the standalone life app.
+const LIFE_ORIGINS = [`https://life.${DOMAIN}`];
 
 /**
  * Origin-aware deep link for a target View. Life is standalone-only, so the
