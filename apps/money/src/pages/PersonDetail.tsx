@@ -3,15 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import Plot from 'react-plotly.js'
 import type { PersonDetail as PersonDetailData } from '../api'
 import { fetchPersonDetail } from '../api'
-
-const fmtDollar = (v: number) => {
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : ''
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
-  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
-  return `${sign}$${abs.toFixed(2)}`
-}
+import { fmtDollarAbbrev as fmtDollar } from '@kirkl/shared'
 
 export default function PersonDetail() {
   const { person } = useParams<{ person: string }>()

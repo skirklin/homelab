@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Suggestion } from '../api'
 import { fetchSuggestions, acceptSuggestion, rejectSuggestion, generateSuggestions } from '../api'
-
-const fmtDollar = (v: number) =>
-  `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+import { fmtDollarSignedMinus as fmtDollar } from '@kirkl/shared'
 
 export function SuggestionReview({ onRulesChanged }: { onRulesChanged?: () => void }) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])

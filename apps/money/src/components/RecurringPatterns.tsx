@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { RecurringPattern, Transaction } from '../api'
 import { fetchRecurring, confirmRecurring, dismissRecurring, fetchTransactions } from '../api'
-
-const fmtDollar = (v: number) =>
-  `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+import { daysBetween, fmtDollarWhole as fmtDollar } from '@kirkl/shared'
 
 export function RecurringPatterns() {
   const [patterns, setPatterns] = useState<RecurringPattern[]>([])
@@ -71,7 +69,7 @@ export function RecurringPatterns() {
   const now = new Date()
   const stale = confirmed.filter((p) => {
     const last = new Date(p.last_seen)
-    const daysSince = (now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24)
+    const daysSince = daysBetween(now, last)
     return p.frequency === 'monthly' && daysSince > 45
   })
 

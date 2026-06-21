@@ -9,7 +9,7 @@ import {
   EditOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
-import { useFeedback } from "@kirkl/shared";
+import { useFeedback, daysBetween } from "@kirkl/shared";
 import { UNCATEGORIZED_CATEGORY_ID, type ShoppingTrip, type CategoryDef } from "../types";
 import { useShoppingBackend } from "@kirkl/shared";
 import { useShoppingContext } from "../shopping-context";
@@ -129,9 +129,7 @@ interface Props {
 
 function formatDate(date: Date): string {
   const now = new Date();
-  const diffDays = Math.floor(
-    (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
-  );
+  const diffDays = Math.floor(daysBetween(now, date));
 
   if (diffDays === 0) {
     return `Today at ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;

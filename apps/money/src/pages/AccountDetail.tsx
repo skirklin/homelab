@@ -1,19 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { useUrlParam } from '@kirkl/shared'
+import { useUrlParam, fmtDollarAbbrev as fmtDollar } from '@kirkl/shared'
 import Plot from 'react-plotly.js'
 import type { Account, BalancePoint, PerformancePoint, Transaction, Holding } from '../api'
 import { fetchAccounts, fetchBalances, fetchPerformance, fetchTransactions, fetchHoldings, updateManualBalance, renameAccount, deleteAccount } from '../api'
 import { TimeRangeSelector, type TimeRange, getStartDate } from '../components/TimeRangeSelector'
-
-const fmtDollar = (v: number) => {
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : ''
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
-  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
-  return `${sign}$${abs.toFixed(2)}`
-}
 
 const RANGE_VALUES: TimeRange[] = ['1M', '3M', '6M', '1Y', '5Y', 'ALL']
 const DEFAULT_RANGE: TimeRange = '1Y'

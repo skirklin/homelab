@@ -12,9 +12,7 @@ import Plot from 'react-plotly.js'
 import type { Data as PlotlyData } from 'plotly.js'
 import type { Transaction } from '../api'
 import { reclassifyTransaction } from '../api'
-
-const fmtDollar = (v: number) =>
-  `$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+import { fmtDollarWhole as fmtDollar } from '@kirkl/shared'
 
 const PALETTE = [
   '#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399',

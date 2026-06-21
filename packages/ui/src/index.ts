@@ -1,3 +1,14 @@
+// Formatting + date-math helpers (hoisted from per-app copies)
+export {
+  daysBetween,
+  fmtDollarAbbrev,
+  fmtDollarAbbrevB,
+  fmtDollarWhole,
+  fmtDollarWholeSigned,
+  fmtDollarSignedExplicit,
+  fmtDollarSignedMinus,
+} from "./format";
+
 // Backend
 export { initializeBackend, getBackend } from "./backend";
 

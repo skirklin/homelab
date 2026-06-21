@@ -1,18 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useUrlParam } from '@kirkl/shared'
+import { useUrlParam, fmtDollarAbbrevB as fmtDollar } from '@kirkl/shared'
 import Plot from 'react-plotly.js'
 import type { AllocationItem } from '../api'
 import { fetchAllocation } from '../api'
-
-const fmtDollar = (v: number) => {
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : ''
-  if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(2)}B`
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
-  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
-  return `${sign}$${abs.toFixed(2)}`
-}
 
 const BROAD_COLORS: Record<string, string> = {
   'US Equities': '#818cf8',

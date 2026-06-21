@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Account, Transaction } from '../api'
 import { fetchTransactions, reclassifyTransaction } from '../api'
-
-const fmtDollar = (v: number) =>
-  `${v < 0 ? '-' : '+'}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+import { fmtDollarSignedExplicit as fmtDollar } from '@kirkl/shared'
 
 type SortKey = 'date' | 'amount' | 'description' | 'category' | 'account'
 type SortDir = 'asc' | 'desc'

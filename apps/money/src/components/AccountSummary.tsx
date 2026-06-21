@@ -1,24 +1,14 @@
 import { Link } from 'react-router-dom'
+import { daysBetween, fmtDollarAbbrev as fmtDollar } from '@kirkl/shared'
 import type { Account } from '../api'
 
 interface Props {
   accounts: Account[]
 }
 
-const fmtDollar = (v: number) => {
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : ''
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
-  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
-  return `${sign}$${abs.toFixed(2)}`
-}
-
 function isStale(a: Account): boolean {
   if (!a.balance_as_of) return true
-  const days = Math.floor(
-    (Date.now() - new Date(a.balance_as_of + 'T00:00:00').getTime()) / 86400000,
-  )
+  const days = Math.floor(daysBetween(new Date(), new Date(a.balance_as_of + 'T00:00:00')))
   return days > 3
 }
 

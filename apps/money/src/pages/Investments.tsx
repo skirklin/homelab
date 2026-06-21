@@ -1,21 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useUrlParam } from '@kirkl/shared'
+import { useUrlParam, fmtDollarAbbrevB as fmtDollar } from '@kirkl/shared'
 import type { Account, PerformancePoint } from '../api'
 import { fetchAccounts, fetchGrants, fetchPerformance } from '../api'
 import { AllocationChart } from '../components/AllocationChart'
 import { AllocationOverTime } from '../components/AllocationOverTime'
 import { GrantsDetail } from '../components/GrantsDetail'
 import { PerformanceVsBenchmark } from '../components/PerformanceVsBenchmark'
-
-const fmtDollar = (v: number) => {
-  const abs = Math.abs(v)
-  const sign = v < 0 ? '-' : ''
-  if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(2)}B`
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
-  if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(2)}K`
-  return `${sign}$${abs.toFixed(2)}`
-}
 
 const fmtPct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
 

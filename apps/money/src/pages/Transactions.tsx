@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useUrlParam, useUrlParams } from '@kirkl/shared'
+import { useUrlParam, useUrlParams, fmtDollarSignedExplicit as fmtDollar } from '@kirkl/shared'
 import type { Transaction } from '../api'
 import { fetchTransactions, reclassifyTransaction } from '../api'
-
-const fmtDollar = (v: number) =>
-  `${v < 0 ? '-' : '+'}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 function daysAgo(n: number): string {
   const d = new Date()
