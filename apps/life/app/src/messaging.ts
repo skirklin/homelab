@@ -90,6 +90,32 @@ export async function initializeMessaging(): Promise<boolean> {
   }
 }
 
+/**
+ * Subscribe the browser to push (creating the PushSubscription if needed) and
+ * upsert the resulting endpoint into the backend `push_subscriptions` row.
+ * The `/push/subscribe` route upserts by endpoint, so this is idempotent —
+ * calling it when already registered is harmless. Returns the server's ok.
+ */
+async function registerSubscription(): Promise<boolean> {
+  const subscription = await subscribePush();
+  if (!subscription) return false;
+
+  const subJson = subscription.toJSON();
+  const res = await fetch(`${getApiBase()}/push/subscribe`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({
+      endpoint: subJson.endpoint,
+      keys: subJson.keys,
+    }),
+  });
+
+  return res.ok;
+}
+
 export async function requestNotificationPermission(userId: string): Promise<boolean> {
   void userId; // subscription is tied to auth token, not userId directly
   if (!isNotificationSupported()) return false;
@@ -98,25 +124,32 @@ export async function requestNotificationPermission(userId: string): Promise<boo
     const permission = await Notification.requestPermission();
     if (permission !== "granted") return false;
 
-    const subscription = await subscribePush();
-    if (!subscription) return false;
-
-    const subJson = subscription.toJSON();
-    const res = await fetch(`${getApiBase()}/push/subscribe`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify({
-        endpoint: subJson.endpoint,
-        keys: subJson.keys,
-      }),
-    });
-
-    return res.ok;
+    return registerSubscription();
   } catch (err) {
     console.error("Failed to enable push notifications:", err);
+    return false;
+  }
+}
+
+/**
+ * Heal/reconcile path: keep the backend `push_subscriptions` row in sync with
+ * the browser's subscription WITHOUT ever prompting the user. This fixes the
+ * "permission granted but the server pruned the subscription (FCM 404/410/403)
+ * → UI wrongly shows enabled, nothing re-subscribes" gap: the upsert re-creates
+ * a server-pruned row from the still-valid browser subscription (or creates a
+ * fresh subscription if the browser's was cleared). Returns whether a live,
+ * server-acknowledged subscription now exists.
+ *
+ * Only reconciles when permission is already "granted" — never prompts.
+ */
+export async function reconcilePushSubscription(): Promise<boolean> {
+  if (!isNotificationSupported()) return false;
+  if (Notification.permission !== "granted") return false;
+
+  try {
+    return await registerSubscription();
+  } catch (err) {
+    console.error("Failed to reconcile push subscription:", err);
     return false;
   }
 }
