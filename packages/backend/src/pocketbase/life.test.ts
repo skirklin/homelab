@@ -127,6 +127,76 @@ describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () =>
   });
 });
 
+describe("PocketBaseLifeBackend.mutateManifest — autocancel-safe requestKeys", () => {
+  /**
+   * Regression for "Failed to save" in the in-app manifest editors
+   * (notifications/views/trackables/goals). Every editor op routes through
+   * mutateManifest, which does a read (plain client getOne) + write (wpb
+   * update) on the SAME life_logs record. PocketBase's SDK keys in-flight
+   * requests by method+path by default, so two near-simultaneous manifest
+   * edits (e.g. the AntD TimePicker firing onChange twice) shared one key and
+   * the earlier request was auto-cancelled. Each invocation must now carry a
+   * UNIQUE requestKey on both the read and the write.
+   */
+  function makeManifestBackend(): {
+    backend: PocketBaseLifeBackend;
+    getOneSpy: ReturnType<typeof vi.fn>;
+    updateSpy: ReturnType<typeof vi.fn>;
+  } {
+    // A manifest that already contains the notification the edits target, so
+    // the pure updateNotificationOp succeeds and the write is actually issued.
+    const seedManifest = {
+      trackables: [],
+      views: [],
+      notifications: [
+        {
+          id: "notif1",
+          target: "morning",
+          strategy: { kind: "fixed", cadence: "daily", time: "07:00" },
+        },
+      ],
+    };
+    const getOneSpy = vi.fn(() => Promise.resolve({ manifest: seedManifest }));
+    const updateSpy = vi.fn((_id: string, body: Record<string, unknown>) => Promise.resolve(body));
+    const wpb = {
+      collection: () => ({ create: vi.fn(), update: updateSpy }),
+    } as unknown as WrappedPocketBase;
+    const pb = (() => ({
+      collection: () => ({ getOne: getOneSpy }),
+    })) as unknown as () => PocketBase;
+    const mirror = {} as PBMirror;
+    return { backend: new PocketBaseLifeBackend(pb, wpb, mirror), getOneSpy, updateSpy };
+  }
+
+  it("gives concurrent updateNotification calls DISTINCT requestKeys (read + write)", async () => {
+    const { backend, getOneSpy, updateSpy } = makeManifestBackend();
+
+    // Two near-simultaneous edits to the SAME log — the TimePicker-double-fire
+    // scenario. Both must resolve; neither is auto-cancelled.
+    await Promise.all([
+      backend.updateNotification("log123", "notif1", { enabled: false }),
+      backend.updateNotification("log123", "notif1", { enabled: true }),
+    ]);
+
+    expect(getOneSpy).toHaveBeenCalledTimes(2);
+    expect(updateSpy).toHaveBeenCalledTimes(2);
+
+    // Every read carries a unique requestKey...
+    const readKeys = getOneSpy.mock.calls.map(([, opts]) => {
+      expect(opts).toMatchObject({ requestKey: expect.any(String) });
+      return (opts as { requestKey: string }).requestKey;
+    });
+    // ...and so does every write...
+    const writeKeys = updateSpy.mock.calls.map(([, , opts]) => {
+      expect(opts).toMatchObject({ requestKey: expect.any(String) });
+      return (opts as { requestKey: string }).requestKey;
+    });
+    // ...with NO key shared across any of the four requests — the property
+    // that defeats the method+path-default autocancel.
+    expect(new Set([...readKeys, ...writeKeys]).size).toBe(4);
+  });
+});
+
 describe("PocketBaseLifeBackend.addEvent — empty-payload invariant (F1)", () => {
   it("throws when entries[] is empty and does not touch the backend", async () => {
     const { backend, createSpy } = makeBackend();
