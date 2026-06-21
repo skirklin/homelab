@@ -137,6 +137,9 @@ function eventFromRecord(r: RecordModel | RawRecord): LifeEvent {
 export class PocketBaseLifeBackend implements LifeBackend {
   private wpb: WrappedPocketBase;
   private mirror: PBMirror;
+  // Monotonic counter feeding a UNIQUE requestKey per mutateManifest invocation
+  // (see the requestKey rationale in mutateManifest).
+  private manifestSeq = 0;
 
   constructor(private pb: () => PocketBase, wpb: WrappedPocketBase, mirror: PBMirror) {
     this.wpb = wpb;
@@ -209,10 +212,26 @@ export class PocketBaseLifeBackend implements LifeBackend {
     // last-writer-wins. The per-op "touches only the targeted X" narrows the
     // blast radius but does NOT close the window: it's the same column either
     // way. There is no queue serializing these; don't assume one.
-    const rec = await this.pb().collection("life_logs").getOne(logId);
+    // UNIQUE requestKey per invocation. PocketBase's JS SDK keys in-flight
+    // requests by method+path by DEFAULT, so two near-simultaneous manifest
+    // edits to the SAME life_logs record (e.g. the AntD TimePicker in
+    // NotificationsEditor firing onChange twice while picking a time → two
+    // updateNotification → two mutateManifest) share one key and the earlier
+    // request is auto-cancelled ("The request was autocancelled") — surfacing
+    // as "Failed to save" even though the later write persists. A distinct key
+    // per invocation makes the reads/writes independent. Same autocancel
+    // footgun the life_events create path guards against (see addEvent below).
+    // (This does NOT serialize the writes — last-writer-wins still applies per
+    // the RACE note above — it only stops them from cancelling each other.)
+    const seq = ++this.manifestSeq;
+    const rec = await this.pb()
+      .collection("life_logs")
+      .getOne(logId, { requestKey: `life-manifest-${logId}-${seq}-r` });
     const current = manifestFromRecord(rec.manifest) ?? emptyManifest();
     const next = mutate(current);
-    await this.wpb.collection("life_logs").update(logId, { manifest: next });
+    await this.wpb
+      .collection("life_logs")
+      .update(logId, { manifest: next }, { requestKey: `life-manifest-${logId}-${seq}-w` });
     return next;
   }
 
