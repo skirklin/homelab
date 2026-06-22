@@ -446,3 +446,130 @@ def test_sync_status_closed_accounts_never_stale(server, monkeypatch):
     status = _get(port, "/api/sync-status")["statuses"][0]
     assert status["is_stale"] is False
     assert status["account_count"] == 0
+
+
+# -- Batch latest-balance lookup (institution / person detail N+1 fix) --
+
+
+def _seed_multi_balance_accounts(db):
+    """Two accounts at one institution/person, each with several balance rows.
+
+    Deliberately includes (a) multiple as_of dates, (b) a same-day as_of
+    tiebreak resolved by recorded_at, and (c) a future-dated balance that the
+    as_of<=today cutoff must exclude — so the batch query is forced to exercise
+    every branch get_latest_balance has.
+    """
+    from money.models import Balance
+
+    a = db.get_or_create_account(
+        name="Checking", account_type=AccountType.CHECKING,
+        institution="ally", external_id="c1", profile="scott@ally",
+    )
+    b = db.get_or_create_account(
+        name="Savings", account_type=AccountType.SAVINGS,
+        institution="ally", external_id="s1", profile="scott@ally",
+    )
+    # Account A: two dates, plus a same-day tiebreak where the later
+    # recorded_at must win.
+    db.insert_balance(Balance(
+        account_id=a.id, as_of=date(2026, 1, 1), balance=100.0, source="ally",
+        recorded_at=datetime(2026, 1, 1, 0, 0, 0),
+    ))
+    db.insert_balance(Balance(
+        account_id=a.id, as_of=date(2026, 3, 1), balance=300.0, source="ally",
+        recorded_at=datetime(2026, 3, 1, 8, 0, 0),
+    ))
+    db.insert_balance(Balance(
+        account_id=a.id, as_of=date(2026, 3, 1), balance=350.0, source="ally",
+        recorded_at=datetime(2026, 3, 1, 9, 0, 0),  # later -> wins the tiebreak
+    ))
+    # Account B: one current balance, plus a FUTURE balance the cutoff drops.
+    db.insert_balance(Balance(
+        account_id=b.id, as_of=date(2026, 2, 1), balance=2000.0, source="ally",
+    ))
+    db.insert_balance(Balance(
+        account_id=b.id, as_of=date(9999, 1, 1), balance=99999.0, source="ally",
+    ))
+    return a, b
+
+
+def test_batch_latest_balances_matches_get_latest_balance(db):
+    """The batch helper returns EXACTLY what a loop of get_latest_balance would.
+
+    This is the correctness guard for the institution/person N+1 refactor: it
+    locks that the correlated-subquery batch and the single-row query pick the
+    same row per account, including the same-day recorded_at tiebreak and the
+    as_of<=today cutoff.
+    """
+    a, b = _seed_multi_balance_accounts(db)
+    as_of = date.today()
+
+    expected = {}
+    for acct in (a, b):
+        bal = db.get_latest_balance(acct.id, as_of)
+        if bal is not None:
+            expected[acct.id] = (bal.id, bal.as_of, bal.balance)
+
+    batch = db.get_latest_balances_for_accounts([a.id, b.id], as_of)
+    got = {aid: (bal.id, bal.as_of, bal.balance) for aid, bal in batch.items()}
+
+    assert got == expected
+    # Spell out the expectations so a future ordering regression is obvious.
+    assert got[a.id] == (db.get_latest_balance(a.id, as_of).id, date(2026, 3, 1), 350.0)
+    assert got[b.id] == (db.get_latest_balance(b.id, as_of).id, date(2026, 2, 1), 2000.0)
+
+
+def test_batch_latest_balances_empty_and_missing(db):
+    a = db.get_or_create_account(
+        name="Checking", account_type=AccountType.CHECKING,
+        institution="ally", external_id="c1", profile="scott@ally",
+    )
+    # No balances at all -> account absent from the dict (mirrors None return).
+    assert db.get_latest_balances_for_accounts([a.id], date.today()) == {}
+    # Empty input -> empty dict, no query.
+    assert db.get_latest_balances_for_accounts([], date.today()) == {}
+
+
+def _money_config(monkeypatch):
+    from money import config as config_mod
+
+    cfg = config_mod.AppConfig(
+        institutions={"ally": config_mod.InstitutionConfig(label="Ally Bank")},
+        logins={
+            "scott@ally": config_mod.LoginConfig(person="scott", institution="ally"),
+        },
+        people={"scott": config_mod.PersonConfig(name="Scott")},
+    )
+    monkeypatch.setattr(config_mod, "load_config", lambda: cfg)
+    return cfg
+
+
+def test_institution_detail_uses_latest_balance(server, monkeypatch):
+    port, db, _ = server
+    _money_config(monkeypatch)
+    a, b = _seed_multi_balance_accounts(db)
+
+    detail = _get(port, "/api/institutions/ally")
+    by_id = {acct["id"]: acct for acct in detail["accounts"]}
+
+    # Each account reports the SAME latest balance get_latest_balance would.
+    assert by_id[a.id]["latest_balance"] == 350.0
+    assert by_id[a.id]["balance_as_of"] == "2026-03-01"
+    assert by_id[b.id]["latest_balance"] == 2000.0
+    assert by_id[b.id]["balance_as_of"] == "2026-02-01"
+    assert detail["total_balance"] == pytest.approx(2350.0)
+
+
+def test_person_detail_uses_latest_balance(server, monkeypatch):
+    port, db, _ = server
+    _money_config(monkeypatch)
+    a, b = _seed_multi_balance_accounts(db)
+
+    detail = _get(port, "/api/people/scott")
+    by_id = {acct["id"]: acct for acct in detail["accounts"]}
+
+    assert by_id[a.id]["latest_balance"] == 350.0
+    assert by_id[a.id]["balance_as_of"] == "2026-03-01"
+    assert by_id[b.id]["latest_balance"] == 2000.0
+    assert by_id[b.id]["balance_as_of"] == "2026-02-01"
+    assert detail["total_balance"] == pytest.approx(2350.0)

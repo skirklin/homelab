@@ -367,6 +367,36 @@ class Database:
             return None
         return _row_to_balance(row)
 
+    def get_latest_balances_for_accounts(
+        self, account_ids: list[str], as_of: date
+    ) -> dict[str, Balance]:
+        """Latest balance per account in ONE query (drops the per-account N+1).
+
+        Returns ``{account_id: Balance}`` for accounts that have a balance row
+        at-or-before ``as_of``; accounts with none are simply absent from the
+        dict. The correlated subquery picks the SAME row per account that
+        ``get_latest_balance(account_id, as_of)`` would: identical
+        ``as_of <= ?`` cutoff and identical ``ORDER BY as_of DESC,
+        recorded_at DESC LIMIT 1`` tiebreak, so callers can swap a loop of
+        ``get_latest_balance`` calls for one call here with identical results.
+        """
+        if not account_ids:
+            return {}
+        placeholders = ",".join("?" for _ in account_ids)
+        as_of_iso = as_of.isoformat()
+        rows = self.conn.execute(
+            f"""SELECT b.* FROM balances b
+                WHERE b.account_id IN ({placeholders})
+                  AND b.id = (
+                      SELECT b2.id FROM balances b2
+                      WHERE b2.account_id = b.account_id AND b2.as_of <= ?
+                      ORDER BY b2.as_of DESC, b2.recorded_at DESC
+                      LIMIT 1
+                  )""",
+            (*account_ids, as_of_iso),
+        ).fetchall()
+        return {row["account_id"]: _row_to_balance(row) for row in rows}
+
     # -- Transactions --
 
     def insert_transaction(self, txn: Transaction) -> None:
