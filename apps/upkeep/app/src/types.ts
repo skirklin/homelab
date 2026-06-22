@@ -19,12 +19,12 @@ export type { NotificationMode, UrgencyState };
  */
 export type Completion = Omit<LifeEvent, "log">;
 
-export type FrequencyUnit = "days" | "weeks" | "months";
-
-export interface Frequency {
-  value: number;
-  unit: FrequencyUnit;
-}
+// Frequency is identical to the backend type — re-export it rather than
+// redeclare. FrequencyUnit (used as the TaskModal select's value type) is
+// derived from it so the unit list can't drift.
+export type { Frequency } from "@homelab/backend";
+import type { Frequency } from "@homelab/backend";
+export type FrequencyUnit = Frequency["unit"];
 
 export type TaskType = "recurring" | "one_shot";
 

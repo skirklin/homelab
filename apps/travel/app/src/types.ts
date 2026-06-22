@@ -92,7 +92,7 @@ export interface Trip {
 // Activity
 // ==========================================
 
-export type ActivityVerdict = "loved" | "liked" | "meh" | "skip";
+export type { ActivityVerdict } from "@homelab/backend";
 
 export type HikeDifficulty = "easy" | "moderate" | "hard" | "strenuous";
 
