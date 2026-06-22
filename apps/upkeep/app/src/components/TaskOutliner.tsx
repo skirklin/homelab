@@ -6,7 +6,7 @@ import dayjs from "dayjs";
 import styled from "styled-components";
 import { useUpkeepBackend, useUrlParam, AssigneePicker } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { getTaskTree, getTasksFromState } from "../selectors";
+import { getTaskTree, getTasksFromState, childrenByParentId, subtreeIds } from "../selectors";
 import { formatFrequency } from "../types";
 import type { Task } from "../types";
 import { OutlinerRow } from "./OutlinerRow";
@@ -80,7 +80,7 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   // semantics turned browser-back into a one-row rewinder. A future explicit
   // zoom action can push by passing `mode: "push"` to useUrlParam.
   // Visibility-against-task-set validation happens below in the `focusedId`
-  // useMemo (we need `allTasks` to know which ids are valid); parse passes
+  // useMemo (we need `tasksById` to know which ids are valid); parse passes
   // the raw value through.
   const [rawFocusedId, setFocusedId] = useUrlParam<string | null>("focus", {
     parse: (raw) => raw,
@@ -105,25 +105,32 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
   }, [slug, listId, setCurrentList]);
 
   const tree = getTaskTree(state);
-  const allTasks = getTasksFromState(state);
-  const selectedTask = selectedId ? allTasks.find((t) => t.id === selectedId) : null;
+  // Memoize the flat array on the task Map identity so it (and everything
+  // keyed on it below) is stable across renders that don't touch the tasks —
+  // a realtime SSE event that doesn't change the Map won't churn the handlers.
+  const allTasks = useMemo(() => getTasksFromState(state), [state.tasks]);
 
   // Keyed task set + list owners feed the AssigneePicker (chip resolution +
   // candidate list). Memoized so OutlinerRow children don't re-resolve every render.
   const tasksById = useMemo(() => new Map(allTasks.map((t) => [t.id, t])), [allTasks]);
+  // Children grouped by parentId in one O(n) pass; the keyboard handlers read
+  // siblings/children from here instead of re-filtering the whole array per
+  // keystroke. Sibling order matches the old `.filter` order (see selectors).
+  const childrenMap = useMemo(() => childrenByParentId(allTasks), [allTasks]);
   const ownerIds = state.list?.owners ?? [];
+
+  const selectedTask = selectedId ? tasksById.get(selectedId) ?? null : null;
 
   // Drop stale/share-link ?focus= values that don't match any visible task —
   // otherwise the row would render with a stuck focus border on no row.
   const focusedId = useMemo(
-    () => (rawFocusedId && allTasks.some((t) => t.id === rawFocusedId) ? rawFocusedId : null),
-    [rawFocusedId, allTasks],
+    () => (rawFocusedId && tasksById.has(rawFocusedId) ? rawFocusedId : null),
+    [rawFocusedId, tasksById],
   );
 
   const handleAddRoot = useCallback(async () => {
     if (!listId) return;
-    const maxPos = allTasks
-      .filter((t) => !t.parentId)
+    const maxPos = (childrenMap.get("") ?? [])
       .reduce((max, t) => Math.max(max, t.position), 0);
     const id = await upkeep.addTask(listId, {
       parentId: "",
@@ -140,11 +147,11 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       collapsed: false,
     });
     setFocusedId(id);
-  }, [listId, allTasks, upkeep]);
+  }, [listId, childrenMap, upkeep]);
 
   const handleAddChild = useCallback(async (parentId: string) => {
     if (!listId) return;
-    const siblings = allTasks.filter((t) => t.parentId === parentId);
+    const siblings = childrenMap.get(parentId) ?? [];
     const maxPos = siblings.reduce((max, t) => Math.max(max, t.position), 0);
     const id = await upkeep.addTask(listId, {
       parentId,
@@ -160,16 +167,16 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       tags: [],
       collapsed: false,
     });
-    const parent = allTasks.find((t) => t.id === parentId);
+    const parent = tasksById.get(parentId);
     if (parent?.collapsed) {
       await upkeep.toggleCollapsed(parentId);
     }
     setFocusedId(id);
-  }, [listId, allTasks, upkeep]);
+  }, [listId, childrenMap, tasksById, upkeep]);
 
   const handleAddSibling = useCallback(async (afterId: string, parentId: string) => {
     if (!listId) return;
-    const task = allTasks.find((t) => t.id === afterId);
+    const task = tasksById.get(afterId);
     if (!task) return;
     const id = await upkeep.addTask(listId, {
       parentId,
@@ -186,38 +193,38 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
       collapsed: false,
     });
     setFocusedId(id);
-  }, [listId, allTasks, upkeep]);
+  }, [listId, tasksById, upkeep]);
 
   const handleIndent = useCallback(async (taskId: string) => {
-    const task = allTasks.find((t) => t.id === taskId);
+    const task = tasksById.get(taskId);
     if (!task) return;
-    const siblings = allTasks
-      .filter((t) => t.parentId === task.parentId)
+    const siblings = (childrenMap.get(task.parentId) ?? [])
+      .slice()
       .sort((a, b) => a.position - b.position);
     const idx = siblings.findIndex((t) => t.id === taskId);
     if (idx <= 0) return;
     const newParent = siblings[idx - 1];
-    const newSiblings = allTasks.filter((t) => t.parentId === newParent.id);
+    const newSiblings = childrenMap.get(newParent.id) ?? [];
     const maxPos = newSiblings.reduce((max, t) => Math.max(max, t.position), 0);
     await upkeep.moveTask(taskId, newParent.id, maxPos + 1);
     if (newParent.collapsed) {
       await upkeep.toggleCollapsed(newParent.id);
     }
-  }, [allTasks, upkeep]);
+  }, [childrenMap, tasksById, upkeep]);
 
   const handleOutdent = useCallback(async (taskId: string) => {
-    const task = allTasks.find((t) => t.id === taskId);
+    const task = tasksById.get(taskId);
     if (!task || !task.parentId) return;
-    const parent = allTasks.find((t) => t.id === task.parentId);
+    const parent = tasksById.get(task.parentId);
     if (!parent) return;
     await upkeep.moveTask(taskId, parent.parentId || null, parent.position + 0.5);
-  }, [allTasks, upkeep]);
+  }, [tasksById, upkeep]);
 
   const handleMoveUp = useCallback(async (taskId: string) => {
-    const task = allTasks.find((t) => t.id === taskId);
+    const task = tasksById.get(taskId);
     if (!task) return;
-    const siblings = allTasks
-      .filter((t) => t.parentId === task.parentId)
+    const siblings = (childrenMap.get(task.parentId) ?? [])
+      .slice()
       .sort((a, b) => a.position - b.position);
     const idx = siblings.findIndex((t) => t.id === taskId);
     if (idx <= 0) return;
@@ -225,13 +232,13 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
     const prevPrev = idx >= 2 ? siblings[idx - 2] : null;
     const newPos = prevPrev ? (prevPrev.position + prev.position) / 2 : prev.position - 1;
     await upkeep.updateTask(taskId, { position: newPos });
-  }, [allTasks, upkeep]);
+  }, [childrenMap, tasksById, upkeep]);
 
   const handleMoveDown = useCallback(async (taskId: string) => {
-    const task = allTasks.find((t) => t.id === taskId);
+    const task = tasksById.get(taskId);
     if (!task) return;
-    const siblings = allTasks
-      .filter((t) => t.parentId === task.parentId)
+    const siblings = (childrenMap.get(task.parentId) ?? [])
+      .slice()
       .sort((a, b) => a.position - b.position);
     const idx = siblings.findIndex((t) => t.id === taskId);
     if (idx < 0 || idx >= siblings.length - 1) return;
@@ -239,7 +246,7 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
     const nextNext = idx + 2 < siblings.length ? siblings[idx + 2] : null;
     const newPos = nextNext ? (next.position + nextNext.position) / 2 : next.position + 1;
     await upkeep.updateTask(taskId, { position: newPos });
-  }, [allTasks, upkeep]);
+  }, [childrenMap, tasksById, upkeep]);
 
   const handleUpdateField = useCallback(async (field: string, value: unknown) => {
     if (!selectedId) return;
@@ -260,46 +267,35 @@ export function TaskOutliner({ embedded: _embedded = false }: { embedded?: boole
     await upkeep.tagTask(selectedId, { remove: [tag] });
   }, [selectedId, upkeep]);
 
-  // Get all descendant IDs of a task (including itself)
-  const getSubtreeIds = useCallback((rootId: string): string[] => {
-    const root = allTasks.find((t) => t.id === rootId);
-    if (!root) return [];
-    const result = [rootId];
-    const stack = [rootId];
-    while (stack.length) {
-      const pid = stack.pop()!;
-      for (const t of allTasks) {
-        if (t.parentId === pid) {
-          result.push(t.id);
-          stack.push(t.id);
-        }
-      }
-    }
-    return result;
-  }, [allTasks]);
+  // Get all descendant IDs of a task (including itself) — O(subtree) via the
+  // grouped-children map instead of an O(subtree × n) per-node array scan.
+  const getSubtreeIds = useCallback(
+    (rootId: string): string[] => subtreeIds(childrenMap, tasksById, rootId),
+    [childrenMap, tasksById],
+  );
 
   const handleToggleOneShot = useCallback(async (taskId: string) => {
-    const task = allTasks.find((t) => t.id === taskId);
+    const task = tasksById.get(taskId);
     if (!task || task.taskType !== "one_shot") return;
     const newState = !task.completed;
     // Cascade to one-shot descendants
     const ids = getSubtreeIds(taskId);
     await Promise.all(ids.map((id) => {
-      const t = allTasks.find((x) => x.id === id);
+      const t = tasksById.get(id);
       if (!t || t.taskType !== "one_shot") return;
       if (t.completed === newState) return;
       return upkeep.updateTask(id, { completed: newState });
     }));
-  }, [allTasks, getSubtreeIds, upkeep]);
+  }, [tasksById, getSubtreeIds, upkeep]);
 
   const handleCompleteRecurring = useCallback(async (taskId: string) => {
     const ids = getSubtreeIds(taskId);
     await Promise.all(ids.map((id) => {
-      const t = allTasks.find((x) => x.id === id);
+      const t = tasksById.get(id);
       if (!t || t.taskType !== "recurring") return;
       return upkeep.completeTask(id, "", {});
     }));
-  }, [allTasks, getSubtreeIds, upkeep]);
+  }, [tasksById, getSubtreeIds, upkeep]);
 
   // Number of currently-clearable tasks (drives the button's enabled state).
   // Match the backend predicate exactly so the count and the actual flip agree.
