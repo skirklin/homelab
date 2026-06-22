@@ -1423,8 +1423,11 @@ class IngestHandler(BaseHTTPRequestHandler):
         total_balance = 0.0
         institution_totals: dict[str, float] = {}
 
+        latest_balances = self.db.get_latest_balances_for_accounts(
+            [row["id"] for row in acct_rows], date.today()
+        )
         for row in acct_rows:
-            bal = self.db.get_latest_balance(row["id"], date.today())
+            bal = latest_balances.get(row["id"])
             balance = bal.balance if bal else None
             balance_as_of = bal.as_of.isoformat() if bal else None
             display_name = row["display_name"] if row["display_name"] else None
@@ -1554,8 +1557,11 @@ class IngestHandler(BaseHTTPRequestHandler):
         accounts: list[dict[str, Any]] = []
         total_balance = 0.0
 
+        latest_balances = self.db.get_latest_balances_for_accounts(
+            [row["id"] for row in acct_rows], date.today()
+        )
         for row in acct_rows:
-            bal = self.db.get_latest_balance(row["id"], date.today())
+            bal = latest_balances.get(row["id"])
             balance = bal.balance if bal else None
             balance_as_of = bal.as_of.isoformat() if bal else None
             display_name = row["display_name"] if row["display_name"] else None
