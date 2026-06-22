@@ -2920,11 +2920,29 @@ dataRoutes.get("/life/goals/progress", handler(async (c) => {
     // owner unreadable → keep the fallback
   }
 
-  // Pull the log's events into the LifeEvent shape the evaluator expects. The
-  // evaluator only reads subjectId/timestamp/entries, but we build full rows so
-  // the contract stays honest if it grows.
+  // Window the fetch to the loosest streak horizon across the log's goals.
+  // evaluateGoal never looks back further than MAX_STREAK_LOOKBACK (366)
+  // periods, and its streak walk stops at the earliest QUALIFYING event's
+  // period — so an event older than 366 periods can affect neither the current
+  // value nor any streak step. We cut at refDate minus the LOOSEST horizon:
+  // weeks (366×7d) if any goal is week-period, else days (366d), each padded
+  // generously so no tz/boundary edge can under-count. With no goals there's
+  // nothing to evaluate, so an empty window is fine. The client (HabitBoard)
+  // can't window its mirror-fed events, but the server can and should.
+  const STREAK_PERIODS = 366;
+  const hasWeekGoal = goals.some((g) => g.period === "week");
+  // Pad: +14d covers the longest period's own span + any tz/DST off-by-one.
+  const horizonDays = (hasWeekGoal ? STREAK_PERIODS * 7 : STREAK_PERIODS) + 14;
+  const cutoff = new Date(refDate.getTime() - horizonDays * 86400000);
+
+  // Pull the log's (windowed) events into the LifeEvent shape the evaluator
+  // expects. The evaluator only reads subjectId/timestamp/entries, but we build
+  // full rows so the contract stays honest if it grows.
   const rows = await pb.collection("life_events").getFullList({
-    filter: pb.filter("log = {:logId}", { logId: log.id }),
+    filter: pb.filter("log = {:logId} && timestamp >= {:cutoff}", {
+      logId: log.id,
+      cutoff: cutoff.toISOString(),
+    }),
     sort: "-timestamp",
   });
   const events: LifeEvent[] = rows.map((e) => ({

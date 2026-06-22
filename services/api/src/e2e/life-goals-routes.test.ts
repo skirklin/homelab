@@ -235,6 +235,37 @@ describe("life goals: progress evaluation", () => {
     const bad = await req("/data/life/goals/progress?date=not-a-date", { token: alice.apiToken });
     expect(bad.status).toBe(400);
   });
+
+  it("a beyond-horizon old event does not change value or streak (fetch windowing)", async () => {
+    // The route windows the events fetch to the loosest streak horizon. An event
+    // far older than MAX_STREAK_LOOKBACK periods can't affect any goal's current
+    // value or streak — windowing it out must produce IDENTICAL output. We prove
+    // this end-to-end: a daily count goal, one qualifying event today, and one
+    // ~3 years ago (well past the 366-day day-goal horizon). Value must be 1 and
+    // streak 1 (today only) — the ancient event neither inflates nor extends.
+    const fred = await makeActor("fred-goal");
+    const list = await req("/data/life/goals", { token: fred.apiToken });
+    const logId = list.data.log as string;
+    await req("/data/life/goals", {
+      method: "POST",
+      token: fred.apiToken,
+      body: { id: "floss-prog", label: "Floss", scope: { thing: "floss" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+    });
+    const ref = new Date();
+    const ancient = new Date(ref.getTime() - 3 * 365 * 86400000); // ~3y ago
+    for (const ts of [ref, ancient]) {
+      const add = await req("/data/life/entries", {
+        method: "POST",
+        token: fred.apiToken,
+        body: { log: logId, subject_id: "floss", entries: [{ name: "count", type: "number", value: 1, unit: "ct" }], timestamp: ts.toISOString() },
+      });
+      expect(add.status).toBe(201);
+    }
+    const prog = await req(`/data/life/goals/progress?date=${encodeURIComponent(ref.toISOString())}`, { token: fred.apiToken });
+    expect(prog.status).toBe(200);
+    const floss = (prog.data.progress as any[]).find((p) => p.id === "floss-prog");
+    expect(floss).toMatchObject({ value: 1, met: true, streak: 1 });
+  });
 });
 
 describe("life goals: reorder", () => {
