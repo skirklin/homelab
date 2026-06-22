@@ -8,6 +8,7 @@
  */
 import { Hono } from "hono";
 import { handler } from "../lib/handler";
+import { stripUndefined } from "../lib/strip-undefined";
 import type { AppEnv } from "../index";
 import type PocketBase from "pocketbase";
 import {
@@ -369,11 +370,12 @@ dataRoutes.patch("/shopping/items/:id", handler(async (c) => {
     category_id?: string;
     ingredient?: string;
   }>();
-  const updates: Record<string, unknown> = {};
-  if (body.checked !== undefined) updates.checked = body.checked;
-  if (body.note !== undefined) updates.note = body.note;
-  if (body.category_id !== undefined) updates.category_id = body.category_id;
-  if (body.ingredient !== undefined) updates.ingredient = body.ingredient;
+  const updates = stripUndefined({
+    checked: body.checked,
+    note: body.note,
+    category_id: body.category_id,
+    ingredient: body.ingredient,
+  });
   if (Object.keys(updates).length === 0) return c.json({ error: "no fields provided" }, 400);
 
   const record = await pb.collection("shopping_items").update(id, updates);
@@ -530,10 +532,11 @@ dataRoutes.patch("/boxes/:id", handler(async (c) => {
     description?: string;
     visibility?: "private" | "public" | "unlisted";
   }>();
-  const updates: Record<string, unknown> = {};
-  if (body.name !== undefined) updates.name = body.name;
-  if (body.description !== undefined) updates.description = body.description;
-  if (body.visibility !== undefined) updates.visibility = body.visibility;
+  const updates = stripUndefined({
+    name: body.name,
+    description: body.description,
+    visibility: body.visibility,
+  });
   if (Object.keys(updates).length === 0) return c.json({ error: "no fields provided" }, 400);
 
   const record = await pb.collection("recipe_boxes").update(id, updates);
