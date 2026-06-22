@@ -1,7 +1,7 @@
 /**
  * Selector functions for deriving views from UpkeepState.
  */
-import { urgencyOf, buildTree } from "./types";
+import { urgencyOf, buildTree, groupTaskIds } from "./types";
 import type { Task, RecurringTask, TaskNode } from "./types";
 import type { UpkeepState } from "./upkeep-context";
 
@@ -10,14 +10,21 @@ export function getTasksFromState(state: UpkeepState) {
 }
 
 /**
- * Get recurring tasks grouped by Kanban column (for the board). The board is
- * recurring-only, so the only `UrgencyState` kinds that can occur are
- * `dueToday` / `dueSoon` / `later` / `snoozed` — `overdue` and `someday` are
- * one-shot-only and the union proves they can't appear here.
+ * Get recurring LEAF tasks grouped by Kanban column (for the board). Surfaces
+ * only leaves — a recurring task that HAS children is a structural container
+ * and is excluded, the SAME leaf/group rule the notification crons and life's
+ * morning block use (`groupTaskIds`). Group-ness is computed over the COMPLETE
+ * task universe since a child can be any task_type.
+ *
+ * The board is recurring-only, so the only `UrgencyState` kinds that can occur
+ * are `dueToday` / `dueSoon` / `later` / `snoozed` — `overdue` and `someday`
+ * are one-shot-only and the union proves they can't appear here.
  */
 export function getTasksByUrgency(state: UpkeepState) {
-  const tasks = getTasksFromState(state).filter(
-    (t): t is RecurringTask => t.taskType === "recurring",
+  const all = getTasksFromState(state);
+  const groupIds = groupTaskIds(all);
+  const tasks = all.filter(
+    (t): t is RecurringTask => t.taskType === "recurring" && !groupIds.has(t.id),
   );
   const grouped = {
     today: [] as Task[],

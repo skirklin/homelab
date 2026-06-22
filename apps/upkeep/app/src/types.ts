@@ -7,6 +7,9 @@ import {
   isActionableOneShot as sharedIsActionableOneShot,
   type UrgencyState,
 } from "@homelab/backend";
+// Shared leaf/group rule — same source the notification crons and life's
+// morning block use, so all task surfaces agree on what's a leaf vs container.
+export { groupTaskIds, leafTasksOnly } from "@homelab/backend";
 export type { NotificationMode, UrgencyState };
 
 /**
