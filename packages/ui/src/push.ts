@@ -1,12 +1,17 @@
 /**
- * Web Push notification support for the Life Tracker app.
+ * Web Push notification support — the single shared implementation for every app.
  * Uses the standard Push API with VAPID keys (replaces FCM).
+ *
+ * This module is the ONLY enable path. Both `requestNotificationPermission`
+ * (prompts, then subscribes) and `reconcilePushSubscription` (heals without
+ * prompting) route through the same `registerSubscription` — there is no
+ * separate "get token" entry point, which is what let per-app copies drift.
  */
 
-import { getApiBase, getAuthHeaders } from "@kirkl/shared";
+import { getApiBase, getAuthHeaders } from "./api";
 
 // vite-plugin-pwa generates the SW at /sw.js and importScripts() the
-// existing /push-sw.js push handler into it (see vite.config.ts).
+// existing /push-sw.js push handler into it (see each app's vite.config.ts).
 const SW_PATH = "/sw.js";
 
 /** Convert a base64url-encoded VAPID public key to a Uint8Array for subscribe(). */
@@ -36,7 +41,7 @@ async function getVapidKey(): Promise<string | null> {
   }
 }
 
-function isNotificationSupported(): boolean {
+export function isNotificationSupported(): boolean {
   return "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
 }
 
@@ -116,8 +121,12 @@ async function registerSubscription(): Promise<boolean> {
   return res.ok;
 }
 
-export async function requestNotificationPermission(userId: string): Promise<boolean> {
-  void userId; // subscription is tied to auth token, not userId directly
+/**
+ * Prompt for notification permission, then subscribe + register. Returns
+ * whether a live, server-acknowledged subscription was registered. The
+ * subscription is tied to the auth token, not a userId.
+ */
+export async function requestNotificationPermission(): Promise<boolean> {
   if (!isNotificationSupported()) return false;
 
   try {
@@ -154,8 +163,7 @@ export async function reconcilePushSubscription(): Promise<boolean> {
   }
 }
 
-export async function disableNotifications(userId: string): Promise<void> {
-  void userId;
+export async function disableNotifications(): Promise<void> {
   if (!isNotificationSupported()) return;
 
   try {

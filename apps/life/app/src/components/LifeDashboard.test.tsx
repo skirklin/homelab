@@ -43,8 +43,19 @@ const mockUserBackend = {
   setNotificationMode: vi.fn(),
 };
 
+// Push lives in @kirkl/shared now; its real impl reaches into
+// navigator.serviceWorker / Notification which jsdom doesn't have, so override
+// the push fns (and the usePushToggle hook deps) with inert stubs while keeping
+// the rest of the module actual.
+const { mockReconcile, mockRequestPermission, mockSupported } = vi.hoisted(() => ({
+  mockReconcile: vi.fn().mockResolvedValue(false),
+  mockRequestPermission: vi.fn().mockResolvedValue(false),
+  mockSupported: vi.fn(() => false),
+}));
+
 vi.mock("@kirkl/shared", async () => {
   const actual = await vi.importActual<typeof import("@kirkl/shared")>("@kirkl/shared");
+  const actualReact = await vi.importActual<typeof import("react")>("react");
   return {
     ...actual,
     useAuth: () => ({ user: { uid: "user123" }, loading: false }),
@@ -59,6 +70,43 @@ vi.mock("@kirkl/shared", async () => {
     SyncDot: () => null,
     AppHeader: ({ title }: { title: ReactNode }) => <header>{title}</header>,
     getBackend: () => ({ authStore: { clear: () => {} } }),
+    // Push stubs.
+    isNotificationSupported: mockSupported,
+    initializeMessaging: vi.fn().mockResolvedValue(false),
+    reconcilePushSubscription: mockReconcile,
+    requestNotificationPermission: mockRequestPermission,
+    disableNotifications: vi.fn().mockResolvedValue(undefined),
+    onForegroundMessage: vi.fn(() => () => {}),
+    listenForServiceWorkerMessages: vi.fn(() => () => {}),
+    // Mirror the real usePushToggle contract over the stubbed push fns so the
+    // dashboard's mount-reconcile + toggle behavior is exercised in jsdom.
+    usePushToggle: () => {
+      const supported = mockSupported();
+      const [enabled, setEnabled] = actualReact.useState(false);
+      const [loading, setLoading] = actualReact.useState(supported);
+      actualReact.useEffect(() => {
+        if (!supported) {
+          setLoading(false);
+          return;
+        }
+        let cancelled = false;
+        void mockReconcile().then((live: boolean) => {
+          if (!cancelled) {
+            setEnabled(live);
+            setLoading(false);
+          }
+        });
+        return () => {
+          cancelled = true;
+        };
+      }, [supported]);
+      const toggle = async (next: boolean) => {
+        const result = next ? await mockRequestPermission() : false;
+        setEnabled(result);
+        return result;
+      };
+      return { enabled, loading, supported, toggle };
+    },
   };
 });
 
@@ -68,26 +116,10 @@ vi.mock("../subscription", () => ({
   useEntriesSubscription: () => {},
 }));
 
-// `../messaging` reaches into navigator.serviceWorker / Notification which
-// jsdom doesn't have. Replace with inert stubs.
-vi.mock("../messaging", () => ({
-  initializeMessaging: vi.fn().mockResolvedValue(false),
-  requestNotificationPermission: vi.fn().mockResolvedValue(false),
-  disableNotifications: vi.fn().mockResolvedValue(undefined),
-  onForegroundMessage: vi.fn(() => () => {}),
-  listenForServiceWorkerMessages: vi.fn(() => () => {}),
-  getNotificationPermissionStatus: vi.fn(() => "unsupported"),
-  reconcilePushSubscription: vi.fn().mockResolvedValue(false),
-}));
-
 // --- Imports under test (after mocks) ------------------------------------
 
 import { LifeDashboard } from "./LifeDashboard";
 import { LifeProvider, useLifeContext } from "../life-context";
-import {
-  getNotificationPermissionStatus,
-  reconcilePushSubscription,
-} from "../messaging";
 
 // --- Helpers -------------------------------------------------------------
 
@@ -603,37 +635,43 @@ describe("LifeDashboard session-history drill-down", () => {
 });
 
 describe("LifeDashboard push reconcile on mount", () => {
-  const mockedStatus = vi.mocked(getNotificationPermissionStatus);
-  const mockedReconcile = vi.mocked(reconcilePushSubscription);
-
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: push supported, server reports no live subscription.
+    mockSupported.mockReturnValue(true);
+    mockReconcile.mockResolvedValue(false);
+    mockRequestPermission.mockResolvedValue(false);
   });
 
-  it("calls reconcilePushSubscription when permission is already granted", async () => {
-    mockedStatus.mockReturnValue("granted");
-    mockedReconcile.mockResolvedValue(true);
+  afterEach(() => {
+    // Restore the module-default so unrelated suites mount as "unsupported".
+    mockSupported.mockReturnValue(false);
+  });
+
+  it("reconciles on mount (heal, never prompts) when push is supported", async () => {
+    mockReconcile.mockResolvedValue(true);
 
     renderDashboard("/");
     await screen.findByText("Today");
 
-    // The mount effect heals/reconciles instead of trusting Notification.permission.
+    // usePushToggle reconciles instead of trusting Notification.permission —
+    // and never calls the prompt path on load.
     await waitFor(() => {
-      expect(mockedReconcile).toHaveBeenCalledTimes(1);
+      expect(mockReconcile).toHaveBeenCalledTimes(1);
     });
+    expect(mockRequestPermission).not.toHaveBeenCalled();
   });
 
   it("reflects a pruned subscription: reconcile resolving false leaves the toggle disabled", async () => {
-    mockedStatus.mockReturnValue("granted");
     // Server pruned the row (FCM 404/410/403) — reconcile re-POSTs; if that also
     // fails, the true state is "not subscribed".
-    mockedReconcile.mockResolvedValue(false);
+    mockReconcile.mockResolvedValue(false);
 
     renderDashboard("/");
     await screen.findByText("Today");
 
     await waitFor(() => {
-      expect(mockedReconcile).toHaveBeenCalledTimes(1);
+      expect(mockReconcile).toHaveBeenCalledTimes(1);
     });
     // Any rendered Switch must be unchecked (the dashboard only mounts the
     // Switch on mobile+sampling, so guard for its absence too).
@@ -641,28 +679,14 @@ describe("LifeDashboard push reconcile on mount", () => {
     if (sw) expect(sw).not.toBeChecked();
   });
 
-  it("does NOT reconcile (or prompt) when permission is not granted", async () => {
-    mockedStatus.mockReturnValue("default");
-
-    renderDashboard("/");
-    await screen.findByText("Today");
-
-    // Give any async mount effect a chance to run.
-    await waitFor(() => {
-      expect(mockedStatus).toHaveBeenCalled();
-    });
-    expect(mockedReconcile).not.toHaveBeenCalled();
-  });
-
   it("does NOT reconcile when notifications are unsupported", async () => {
-    mockedStatus.mockReturnValue("unsupported");
+    mockSupported.mockReturnValue(false);
 
     renderDashboard("/");
     await screen.findByText("Today");
 
-    await waitFor(() => {
-      expect(mockedStatus).toHaveBeenCalled();
-    });
-    expect(mockedReconcile).not.toHaveBeenCalled();
+    // Give any async mount effect a chance to run, then confirm no reconcile.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockReconcile).not.toHaveBeenCalled();
   });
 });

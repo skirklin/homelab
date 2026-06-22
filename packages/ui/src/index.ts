@@ -45,6 +45,21 @@ export type { SyncDotProps } from "./sync-status";
 export { useUpdateAvailable } from "./sw-register";
 export { UpdateAvailableBanner } from "./update-available-banner";
 
+// Web Push — single shared implementation (the only enable path)
+export {
+  isNotificationSupported,
+  getNotificationPermissionStatus,
+  initializeMessaging,
+  requestNotificationPermission,
+  reconcilePushSubscription,
+  disableNotifications,
+  onForegroundMessage,
+  listenForServiceWorkerMessages,
+} from "./push";
+export type { ServiceWorkerMessage } from "./push";
+export { usePushToggle } from "./usePushToggle";
+export type { PushToggle } from "./usePushToggle";
+
 // List Management
 export { ListPicker, JoinList, sanitizeSlug } from "./ListManagement";
 export type {

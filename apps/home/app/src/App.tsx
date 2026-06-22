@@ -1,11 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import { useEffect, useState } from "react";
-import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary, getInviteInfo, NotFound, ScrollRestoration } from "@kirkl/shared";
+import { AuthProvider, BackendProvider, useAuth, initializeBackend, ErrorBoundary, getInviteInfo, NotFound, ScrollRestoration, isNotificationSupported, reconcilePushSubscription } from "@kirkl/shared";
 import { ShoppingProvider, ShoppingRoutes } from "@kirkl/shopping";
 import { RecipesProvider, CookingModeProvider, RecipesRoutes, PublicRecipe } from "@kirkl/recipes";
 import { TravelProvider, TravelRoutes } from "@kirkl/travel";
-import { UpkeepProvider, UpkeepRoutes, TasksRoutes, isNotificationSupported, requestNotificationPermission, getFcmToken } from "@kirkl/upkeep";
+import { UpkeepProvider, UpkeepRoutes, TasksRoutes } from "@kirkl/upkeep";
 import { Auth } from "./shared/Auth";
 import { Shell, isModulePath } from "./shared/Shell";
 import { Timeline } from "./shared/Timeline";
@@ -108,14 +108,12 @@ function AuthenticatedRoutes() {
 function ProtectedRoute() {
   const { user, loading } = useAuth();
 
-  // Initialize upkeep notifications when user is authenticated
+  // Reconcile a possibly-pruned push subscription when authenticated. This is
+  // an idempotent heal that never prompts — enabling is driven by the upkeep
+  // notification toggles, not by app load.
   useEffect(() => {
     if (user && isNotificationSupported()) {
-      requestNotificationPermission().then((permission) => {
-        if (permission === "granted") {
-          getFcmToken(user.uid);
-        }
-      });
+      void reconcilePushSubscription();
     }
   }, [user]);
 

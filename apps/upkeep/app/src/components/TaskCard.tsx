@@ -5,10 +5,9 @@ import { CheckOutlined, EditOutlined, BellOutlined, BellFilled, InfoCircleOutlin
 import styled from "styled-components";
 import type { Task } from "../types";
 import { formatDueDate, formatDeadline, isTaskSnoozed, formatSnoozeRemaining, daysUntilDue } from "../types";
-import { useAuth, useFeedback, AssigneePicker } from "@kirkl/shared";
+import { useAuth, useFeedback, AssigneePicker, requestNotificationPermission, isNotificationSupported } from "@kirkl/shared";
 import { useUpkeepBackend } from "@kirkl/shared";
 import { useUpkeepContext } from "../upkeep-context";
-import { requestNotificationPermission, getFcmToken, isNotificationSupported } from "../messaging";
 
 const CardWrapper = styled.div<{ $snoozed?: boolean }>`
   background: ${props => props.$snoozed ? 'var(--color-bg-subtle)' : 'var(--color-bg)'};
@@ -178,15 +177,11 @@ export function TaskCard({ task, onEdit, onComplete, onViewHistory }: TaskCardPr
 
     try {
       if (!isNotified) {
-        // Enabling notifications - check permission first
-        const permission = await requestNotificationPermission();
-        if (permission !== "granted") {
+        // Enabling notifications - prompt + register the push subscription.
+        if (!(await requestNotificationPermission())) {
           message.warning("Please allow notifications to receive reminders");
           return;
         }
-
-        // Get FCM token (registers the push subscription)
-        await getFcmToken(userId);
       }
 
       await upkeep.toggleTaskNotification(task.id, userId, !isNotified);

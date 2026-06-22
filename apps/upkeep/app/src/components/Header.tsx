@@ -2,14 +2,13 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button, Popover, Segmented } from "antd";
 import { ShareAltOutlined, LogoutOutlined, PlusOutlined, BellOutlined, BellFilled } from "@ant-design/icons";
-import { AppHeader, ShareModal, useAuth, getBackend, useFeedback, SyncDot, useWpbDebug } from "@kirkl/shared";
+import { AppHeader, ShareModal, useAuth, getBackend, useFeedback, SyncDot, useWpbDebug, isNotificationSupported, requestNotificationPermission } from "@kirkl/shared";
 
 /** Scope SyncDot to upkeep's collections so the dot reflects only this app. */
 const UPKEEP_COLLECTIONS = ["task_lists", "tasks", "task_events"] as const;
 import { useUpkeepContext } from "../upkeep-context";
 import { useUserBackend } from "@kirkl/shared";
 import { appStorage, StorageKeys } from "../storage";
-import { isNotificationSupported, requestNotificationPermission, getFcmToken } from "../messaging";
 import styled from "styled-components";
 import type { NotificationMode } from "../types";
 
@@ -81,12 +80,10 @@ export function Header({ onAddTask, embedded = false }: HeaderProps) {
         message.warning("Notifications are not supported in this browser");
         return;
       }
-      const permission = await requestNotificationPermission();
-      if (permission !== "granted") {
+      if (!(await requestNotificationPermission())) {
         message.warning("Please allow notifications to receive reminders");
         return;
       }
-      await getFcmToken(user.uid);
     }
 
     setNotificationModeState(mode);

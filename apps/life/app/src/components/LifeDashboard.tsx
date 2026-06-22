@@ -50,14 +50,11 @@ import { SHAPE_ORDER, SHAPE_META } from "../lib/shapes";
 import type { TrackableShape } from "@homelab/backend";
 import {
   initializeMessaging,
-  requestNotificationPermission,
-  disableNotifications,
   onForegroundMessage,
   listenForServiceWorkerMessages,
-  getNotificationPermissionStatus,
-  reconcilePushSubscription,
-} from "../messaging";
-import { useLifeBackend } from "@kirkl/shared";
+  usePushToggle,
+  useLifeBackend,
+} from "@kirkl/shared";
 
 const NotificationToggle = styled.div`
   display: flex;
@@ -224,8 +221,13 @@ export function LifeDashboard() {
   // Session-history drill-down (parallel to HabitHistory): the Sessions header
   // opens this bottom drawer; the SessionCards keep their start-session onClick.
   const [sessionHistoryOpen, setSessionHistoryOpen] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [notificationLoading, setNotificationLoading] = useState(false);
+  // Boolean push toggle: reconciles real server state on mount (no prompt) and
+  // exposes enable/disable. Toasts are layered on in handleNotificationToggle.
+  const {
+    enabled: notificationsEnabled,
+    loading: notificationLoading,
+    toggle: togglePush,
+  } = usePushToggle();
   // Suppress the push-subscription affordance entirely on non-phone devices.
   const isMobile = useMemo(() => isMobileDevice(), []);
 
@@ -338,27 +340,6 @@ export function LifeDashboard() {
     return `${h}:${m}${ampm}`;
   };
 
-  // Reflect the REAL push state on mount, and auto-heal a server-pruned
-  // subscription. Notification.permission stays "granted" forever even after
-  // the backend prunes the push_subscriptions row, so we can't trust it alone —
-  // reconcile re-registers the (still-valid) browser subscription and reports
-  // whether a live, server-acknowledged subscription actually exists.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const status = getNotificationPermissionStatus();
-      if (status !== "granted") {
-        if (!cancelled) setNotificationsEnabled(false);
-        return;
-      }
-      const live = await reconcilePushSubscription();
-      if (!cancelled) setNotificationsEnabled(live);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Handle quick response submission (from notification action buttons).
   // questionId is the trackable id (all sample questions point at ratings).
   const handleQuickResponse = useCallback(async (questionId: string, value: number) => {
@@ -421,29 +402,23 @@ export function LifeDashboard() {
     setDeepLinkParams({ sample: null, quickResponse: null });
   }, [sampleParam, quickResponse, setDeepLinkParams, handleQuickResponse]);
 
+  // Thin toast wrapper over the shared usePushToggle: the hook owns the
+  // enable/disable + loading state; we just surface success/error feedback.
   const handleNotificationToggle = async (enabled: boolean) => {
     if (!user?.uid) return;
 
-    setNotificationLoading(true);
     try {
+      const success = await togglePush(enabled);
       if (enabled) {
-        const success = await requestNotificationPermission(user.uid);
-        if (success) {
-          setNotificationsEnabled(true);
-          message.success("Notifications enabled");
-        } else {
-          message.error("Failed to enable notifications");
-        }
+        message[success ? "success" : "error"](
+          success ? "Notifications enabled" : "Failed to enable notifications",
+        );
       } else {
-        await disableNotifications(user.uid);
-        setNotificationsEnabled(false);
         message.success("Notifications disabled");
       }
     } catch (error) {
       console.error("Failed to toggle notifications:", error);
       message.error("Failed to update notification settings");
-    } finally {
-      setNotificationLoading(false);
     }
   };
 

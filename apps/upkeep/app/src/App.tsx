@@ -1,7 +1,8 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { App as AntApp, ConfigProvider } from "antd";
 import styled from "styled-components";
-import { AuthProvider, useAuth, initializeBackend, NotFound, ScrollRestoration } from "@kirkl/shared";
+import { AuthProvider, useAuth, initializeBackend, NotFound, ScrollRestoration, isNotificationSupported, initializeMessaging, reconcilePushSubscription } from "@kirkl/shared";
 import { BackendProvider } from "@kirkl/shared";
 import { UpkeepProvider } from "./upkeep-context";
 import { Auth } from "./components/Auth";
@@ -36,6 +37,16 @@ const AppWrapper = styled.div`
 
 function AppContent() {
   const { user, loading } = useAuth();
+
+  // Register the push SW and reconcile a possibly-pruned subscription on load
+  // (idempotent heal, never prompts) so notifications self-heal like home/life.
+  useEffect(() => {
+    if (user && isNotificationSupported()) {
+      void initializeMessaging().then((ok) => {
+        if (ok) void reconcilePushSubscription();
+      });
+    }
+  }, [user]);
 
   // Still determining auth state
   if (loading) {

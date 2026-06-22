@@ -34,6 +34,15 @@ vi.mock("@kirkl/shared", async () => {
     useObserverBackend: () => ({ listObservations: vi.fn().mockResolvedValue([]), getObservation: vi.fn() }),
     getApiBase: () => "http://test",
     getAuthHeaders: () => ({}),
+    // Push lives in @kirkl/shared now; stub it inert (no SW / Notification in jsdom).
+    isNotificationSupported: vi.fn(() => false),
+    initializeMessaging: vi.fn().mockResolvedValue(false),
+    reconcilePushSubscription: vi.fn().mockResolvedValue(false),
+    requestNotificationPermission: vi.fn().mockResolvedValue(false),
+    disableNotifications: vi.fn().mockResolvedValue(undefined),
+    onForegroundMessage: vi.fn(() => () => {}),
+    listenForServiceWorkerMessages: vi.fn(() => () => {}),
+    usePushToggle: () => ({ enabled: false, loading: false, supported: false, toggle: vi.fn().mockResolvedValue(false) }),
     AppHeader: ({ title, menuItems = [] }: { title: ReactNode; menuItems?: MenuItem[] }) => (
       <header>
         <div>{title}</div>
@@ -49,18 +58,9 @@ vi.mock("@kirkl/shared", async () => {
   };
 });
 
-// LifeDashboard reaches into messaging + the entries subscription; stub both so
-// the Daily surface mounts under happy-dom without a service worker or PB.
+// LifeDashboard reaches into the entries subscription; stub it so the Daily
+// surface mounts under happy-dom without PB. (Push is stubbed via @kirkl/shared.)
 vi.mock("../subscription", () => ({ useEntriesSubscription: () => {} }));
-vi.mock("../messaging", () => ({
-  initializeMessaging: vi.fn().mockResolvedValue(false),
-  requestNotificationPermission: vi.fn().mockResolvedValue(false),
-  disableNotifications: vi.fn().mockResolvedValue(undefined),
-  onForegroundMessage: vi.fn(() => () => {}),
-  listenForServiceWorkerMessages: vi.fn(() => () => {}),
-  getNotificationPermissionStatus: vi.fn(() => "unsupported"),
-  reconcilePushSubscription: vi.fn().mockResolvedValue(false),
-}));
 
 import { LifeDashboard } from "./LifeDashboard";
 import { Coach } from "./Coach";
