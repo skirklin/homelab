@@ -15,10 +15,18 @@ WORKDIR /workspace
 # own package.json so it knows which deps to materialize into the cache layer.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
 COPY services/coach/package.json services/coach/package.json
+COPY packages/backend/package.json packages/backend/package.json
 RUN pnpm install --frozen-lockfile || pnpm install
 
 # Copy source
 COPY services/coach/ services/coach/
+
+# bundle.ts (copied below) imports @homelab/backend (normalizeSessionRuns +
+# types) since the life-b3.2 per-item session cutover. It's consumed as TS
+# source directly — package.json main → src/index.ts, tsx loads TS at runtime,
+# no build step — same as api.Dockerfile. Without this, tsx crashes at boot
+# with ERR_MODULE_NOT_FOUND.
+COPY packages/backend/ packages/backend/
 
 # Reuse the cross-source bundle assembler from the api service (warm-context
 # on session boot — see services/coach/src/agent.ts). Imported via relative

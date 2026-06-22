@@ -901,6 +901,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.168
         version: 0.3.168(@anthropic-ai/sdk@0.71.2(zod@3.25.76))(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(zod@3.25.76)
+      '@homelab/backend':
+        specifier: workspace:*
+        version: link:../../packages/backend
       '@hono/node-server':
         specifier: ^1.14.3
         version: 1.19.13(hono@4.12.12)
