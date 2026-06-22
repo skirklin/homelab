@@ -13,7 +13,10 @@ export type { LifeEvent, LifeEntry, PushSubscriptionInfo } from "@homelab/backen
 
 // ===== User Profile Types =====
 
-export type NotificationMode = "all" | "subscribed" | "off";
+// Re-exported from @homelab/backend so consumers can keep importing it from
+// @kirkl/shared without sourcing a duplicate string-union declaration.
+export type { NotificationMode } from "@homelab/backend";
+import type { NotificationMode } from "@homelab/backend";
 
 /**
  * Unified user profile type used across all apps.
