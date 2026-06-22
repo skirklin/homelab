@@ -63,6 +63,9 @@ const ItemName = styled.span<{ $checked: boolean }>`
   text-decoration: ${(props) => (props.$checked ? "line-through" : "none")};
   margin-left: var(--space-xs);
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 
   &:hover {
     text-decoration: ${(props) => (props.$checked ? "line-through" : "underline")};
