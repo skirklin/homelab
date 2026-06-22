@@ -11,6 +11,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { API_BASE } from "./config";
+import { stripUndefined } from "./lib/strip-undefined";
 import {
   validateDay,
   type DayIssue,
@@ -53,11 +54,6 @@ function toWireIssue(issue: DayIssue): {
 /** Wrap a value in the MCP text-content response shape every tool returns. */
 function mcpResponse(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
-}
-
-/** Drop keys whose value is `undefined` (keeps `null`). Used to build PATCH bodies. */
-function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 }
 
 // Builds a configured MCP server bound to a specific API token. Inner closures
