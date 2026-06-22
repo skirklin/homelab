@@ -61,4 +61,3 @@ export function UpkeepModule() {
 
 export { UpkeepProvider, useUpkeepContext } from "./upkeep-context";
 export { BackendProvider as UpkeepBackendProvider } from "@kirkl/shared";
-export { isNotificationSupported, requestNotificationPermission, getFcmToken } from "./messaging";

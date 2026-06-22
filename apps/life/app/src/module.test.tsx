@@ -41,20 +41,19 @@ vi.mock("@kirkl/shared", async () => {
     SyncDot: () => null,
     AppHeader: ({ title }: { title: ReactNode }) => <header>{title}</header>,
     getBackend: () => ({ authStore: { clear: () => {} } }),
+    // Push lives in @kirkl/shared now; stub it inert (no SW / Notification in jsdom).
+    isNotificationSupported: vi.fn(() => false),
+    initializeMessaging: vi.fn().mockResolvedValue(false),
+    reconcilePushSubscription: vi.fn().mockResolvedValue(false),
+    requestNotificationPermission: vi.fn().mockResolvedValue(false),
+    disableNotifications: vi.fn().mockResolvedValue(undefined),
+    onForegroundMessage: vi.fn(() => () => {}),
+    listenForServiceWorkerMessages: vi.fn(() => () => {}),
+    usePushToggle: () => ({ enabled: false, loading: false, supported: false, toggle: vi.fn().mockResolvedValue(false) }),
   };
 });
 
 vi.mock("./subscription", () => ({ useEntriesSubscription: () => {} }));
-
-vi.mock("./messaging", () => ({
-  initializeMessaging: vi.fn().mockResolvedValue(false),
-  requestNotificationPermission: vi.fn().mockResolvedValue(false),
-  disableNotifications: vi.fn().mockResolvedValue(undefined),
-  onForegroundMessage: vi.fn(() => () => {}),
-  listenForServiceWorkerMessages: vi.fn(() => () => {}),
-  getNotificationPermissionStatus: vi.fn(() => "unsupported"),
-  reconcilePushSubscription: vi.fn().mockResolvedValue(false),
-}));
 
 import { LifeRoutes } from "./module";
 import { LifeProvider } from "./life-context";
