@@ -146,33 +146,53 @@ function scopeSubjectIds(goal: LifeGoal, trackables: LifeManifestTrackable[]): S
   );
 }
 
-function qualifyingEvents(
-  events: LifeEvent[],
-  subjectIds: Set<string>,
-  start: Date,
-  end: Date,
-): LifeEvent[] {
-  return events.filter(
-    (e) => subjectIds.has(e.subjectId) && e.timestamp >= start && e.timestamp <= end,
-  );
+/** Start-of-period UTC instant for the period (day|week) containing `d`, in `tz`. */
+function periodStart(period: LifeGoal["period"], d: Date, tz: string): Date {
+  return period === "week" ? startOfWeek(d, tz) : startOfDay(d, tz);
 }
 
-/** Reduce qualifying events to the goal's metric value (in `tz` for days). */
-function metricValue(goal: LifeGoal, qualifying: LifeEvent[], tz: string): number {
-  if (goal.metric === "count") return qualifying.length;
+/**
+ * One bucketed period's accumulated metric state.
+ *   - `count`: incrementing counter.
+ *   - `sum`:   running total of matching-unit number entries.
+ *   - `days`:  Set of distinct local-day keys seen in this period.
+ * Only the field the goal's metric needs is populated; the rest stay at their
+ * zero value (which `valueOf` ignores).
+ */
+interface Bucket {
+  count: number;
+  sum: number;
+  days?: Set<string>;
+}
+
+/**
+ * Per-event contribution to one event's metric, by goal metric:
+ *   count → +1
+ *   sum   → sum of this event's number entries whose unit === goal.unit
+ *   days  → tracked separately via the day-key Set
+ * Identical reduction to the old `metricValue`, just applied incrementally.
+ */
+function accumulate(goal: LifeGoal, bucket: Bucket, e: LifeEvent, tz: string): void {
+  if (goal.metric === "count") {
+    bucket.count += 1;
+    return;
+  }
   if (goal.metric === "days") {
-    const days = new Set<string>();
-    for (const e of qualifying) days.add(dayKey(e.timestamp, tz));
-    return days.size;
+    (bucket.days ??= new Set<string>()).add(dayKey(e.timestamp, tz));
+    return;
   }
   // sum: name-agnostically sum every number entry whose unit matches goal.unit.
-  let total = 0;
-  for (const e of qualifying) {
-    for (const entry of e.entries) {
-      if (entry.type === "number" && entry.unit === goal.unit) total += entry.value;
-    }
+  for (const entry of e.entries) {
+    if (entry.type === "number" && entry.unit === goal.unit) bucket.sum += entry.value;
   }
-  return total;
+}
+
+/** Read a bucket's final metric value (0 for an absent/empty period). */
+function bucketValue(goal: LifeGoal, bucket: Bucket | undefined): number {
+  if (!bucket) return 0;
+  if (goal.metric === "count") return bucket.count;
+  if (goal.metric === "days") return bucket.days ? bucket.days.size : 0;
+  return bucket.sum;
 }
 
 function isMet(kind: LifeGoal["kind"], value: number, target: number): boolean {
@@ -211,33 +231,43 @@ export function evaluateGoal(
 ): GoalProgress {
   const subjectIds = scopeSubjectIds(goal, trackables);
   const { start, end } = periodBounds(goal.period, refDate, timeZone);
-  const value = metricValue(goal, qualifyingEvents(events, subjectIds, start, end), timeZone);
+
+  // SINGLE pass over the qualifying events: bucket each into its period (keyed
+  // by the period-start UTC instant — the SAME instant the streak walk reads),
+  // accumulating the goal's metric, and track the earliest qualifying period.
+  // This replaces the old O(events × periods) re-filter: both the current-period
+  // value and the streak walk now read O(1) per period from `buckets`.
+  const buckets = new Map<number, Bucket>();
+  let earliestPeriodStart: number | undefined;
+  for (const e of events) {
+    if (!subjectIds.has(e.subjectId)) continue;
+    const key = periodStart(goal.period, e.timestamp, timeZone).getTime();
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { count: 0, sum: 0 };
+      buckets.set(key, bucket);
+    }
+    accumulate(goal, bucket, e, timeZone);
+    if (earliestPeriodStart === undefined || key < earliestPeriodStart) {
+      earliestPeriodStart = key;
+    }
+  }
+
+  const value = bucketValue(goal, buckets.get(start.getTime()));
   const met = isMet(goal.kind, value, goal.target);
   const remaining = Math.max(0, goal.target - value);
 
-  // Earliest qualifying event bounds the streak back-walk: periods before the
-  // first data point are not part of the active tracking range, so they never
-  // count. (Without this, an empty `at_most` period vacuously "meets" the cap.)
-  let earliest: Date | undefined;
-  for (const e of events) {
-    if (subjectIds.has(e.subjectId) && (!earliest || e.timestamp < earliest)) {
-      earliest = e.timestamp;
-    }
-  }
-  const earliestPeriodStart = earliest
-    ? periodBounds(goal.period, earliest, timeZone).start
-    : undefined;
-
   // Streak: walk back period-by-period while each is met AND within the active
   // range (≥ the earliest qualifying event's period). Start at the ref period
-  // (counts only if met), then keep stepping back.
+  // (counts only if met), then keep stepping back. Each step is now a Map
+  // lookup keyed by the period-start instant — no re-filter per period.
   let streak = 0;
   let cursor = refDate;
   for (let i = 0; i < MAX_STREAK_LOOKBACK; i++) {
-    const b = periodBounds(goal.period, cursor, timeZone);
+    const key = periodStart(goal.period, cursor, timeZone).getTime();
     // Stop once we step before the first tracked period (empty history ⇒ 0).
-    if (!earliestPeriodStart || b.start < earliestPeriodStart) break;
-    const v = metricValue(goal, qualifyingEvents(events, subjectIds, b.start, b.end), timeZone);
+    if (earliestPeriodStart === undefined || key < earliestPeriodStart) break;
+    const v = bucketValue(goal, buckets.get(key));
     if (!isMet(goal.kind, v, goal.target)) break;
     streak += 1;
     cursor = prevPeriodRef(goal.period, cursor, timeZone);

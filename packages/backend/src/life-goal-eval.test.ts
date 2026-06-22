@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { zonedDateTime, dayKey, startOfDay, endOfDay } from "./life-goal-eval";
+import { zonedDateTime, dayKey, startOfDay, endOfDay, startOfWeek } from "./life-goal-eval";
 import type { LifeEvent, LifeEntry, LifeManifestTrackable, LifeGoal } from "./types/life";
 import { evaluateGoal } from "./life-goal-eval";
 
@@ -315,5 +315,192 @@ describe("evaluateGoal — group includes the hidden husk", () => {
     ];
     const p = evaluateGoal(goal, events, tr, TZ, ref);
     expect(p.value).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Perf refactor (bucket-once) lock: extra edge cases the bucketing must keep
+// identical, plus a brute-force reference oracle ("old == new") that re-derives
+// value + streak via per-period re-filtering — the strongest guard that the
+// O(events+periods) rewrite changed nothing observable.
+// ---------------------------------------------------------------------------
+describe("evaluateGoal — bucketing edge cases", () => {
+  it("daily streak with a gap breaks at the gap (count metric)", () => {
+    const goal: LifeGoal = { id: "g", label: "Floss", scope: { thing: "floss" }, kind: "at_least", metric: "count", target: 1, period: "day" };
+    const ref = at(2026, 6, 12);
+    // 12 met, 11 met, 10 MISSED, 9 met, 8 met → streak = 2 (12, 11).
+    const events = [
+      ev("floss", num("count", 1, "ct"), at(2026, 6, 12, 9)),
+      ev("floss", num("count", 1, "ct"), at(2026, 6, 11, 9)),
+      ev("floss", num("count", 1, "ct"), at(2026, 6, 9, 9)),
+      ev("floss", num("count", 1, "ct"), at(2026, 6, 8, 9)),
+    ];
+    expect(evaluateGoal(goal, events, TRACKABLES, TZ, ref).streak).toBe(2);
+  });
+
+  it("at_most cap: met when ≤ target, broken streak on the over-period (sum)", () => {
+    const cap: LifeGoal = { id: "c", label: "Cap", scope: { thing: "water" }, kind: "at_most", metric: "sum", unit: "drinks", target: 2, period: "day" };
+    const ref = at(2026, 6, 12);
+    // 12: 2 (met), 11: 3 (OVER), 10: 0-but-tracked(met) — streak stops at 12.
+    const events = [
+      ev("water", num("drinks", 2, "drinks"), at(2026, 6, 12, 20)),
+      ev("water", num("drinks", 3, "drinks"), at(2026, 6, 11, 20)),
+      ev("water", num("drinks", 1, "drinks"), at(2026, 6, 10, 20)),
+    ];
+    const p = evaluateGoal(cap, events, TRACKABLES, TZ, ref);
+    expect(p.value).toBe(2);
+    expect(p.met).toBe(true);
+    expect(p.streak).toBe(1);
+  });
+
+  it("sum selects the unit-matching entry, ignoring other-unit numbers in the same event", () => {
+    const goal: LifeGoal = { id: "h", label: "Hydrate", scope: { thing: "water" }, kind: "at_least", metric: "sum", unit: "oz", target: 10, period: "day" };
+    const ref = at(2026, 6, 12);
+    const events = [
+      ev("water", [
+        { name: "amount", type: "number", value: 8, unit: "oz" },
+        { name: "caffeine", type: "number", value: 95, unit: "mg" }, // wrong unit
+      ], at(2026, 6, 12, 9)),
+      ev("water", num("volume", 4, "oz"), at(2026, 6, 12, 14)),
+    ];
+    expect(evaluateGoal(goal, events, TRACKABLES, TZ, ref).value).toBe(12);
+  });
+
+  it("week-period bucketing: an event exactly at the week boundary lands in its own week", () => {
+    const wGoal: LifeGoal = { id: "w", label: "Weekly", scope: { thing: "floss" }, kind: "frequency", metric: "days", target: 1, period: "week" };
+    const ref = at(2026, 6, 10); // week Sun 06-07 .. Sat 06-13
+    // Exactly start-of-week (Sun 06-07 00:00 PT) must count in THIS week, and
+    // one ms before it must NOT.
+    const weekStart = startOfWeek(ref, TZ); // Sun 06-07 00:00 PT as UTC
+    const atStart = ev("floss", num("count", 1, "ct"), weekStart);
+    const beforeStart = ev("floss", num("count", 1, "ct"), new Date(weekStart.getTime() - 1));
+    expect(evaluateGoal(wGoal, [atStart], TRACKABLES, TZ, ref).value).toBe(1);
+    expect(evaluateGoal(wGoal, [beforeStart], TRACKABLES, TZ, ref).value).toBe(0);
+  });
+
+  it("event exactly at start-of-day boundary counts in that day", () => {
+    const goal: LifeGoal = { id: "g", label: "Floss", scope: { thing: "floss" }, kind: "at_least", metric: "count", target: 1, period: "day" };
+    const ref = at(2026, 6, 12);
+    const dayStart = startOfDay(ref, TZ); // 06-12 00:00 PT as UTC
+    expect(evaluateGoal(goal, [ev("floss", num("count", 1, "ct"), dayStart)], TRACKABLES, TZ, ref).value).toBe(1);
+    // one ms earlier is the previous day → not in today
+    expect(evaluateGoal(goal, [ev("floss", num("count", 1, "ct"), new Date(dayStart.getTime() - 1))], TRACKABLES, TZ, ref).value).toBe(0);
+  });
+});
+
+// Brute-force reference implementation: re-derives the result the OLD way
+// (full re-filter per period) so we can assert old == new across many shapes.
+const MAX_STREAK_LOOKBACK = 366;
+function refPeriodBounds(period: LifeGoal["period"], r: Date, tz: string) {
+  if (period === "week") {
+    // Week is [startOfWeek(r), startOfWeek(r+7d) − 1ms). Deriving the end from
+    // the NEXT week's tz-aware start keeps DST correct (no naive +7d UTC math).
+    const start = startOfWeek(r, tz);
+    const nextWeekSeed = new Date(start.getTime() + 9 * 86400000); // safely into next week
+    const end = new Date(startOfWeek(nextWeekSeed, tz).getTime() - 1);
+    return { start, end };
+  }
+  // Day: [startOfDay(r), startOfDay(r+~36h) − 1ms) keeps DST correct vs endOfDay.
+  const start = startOfDay(r, tz);
+  const nextDaySeed = new Date(start.getTime() + 36 * 3600000);
+  const end = new Date(startOfDay(nextDaySeed, tz).getTime() - 1);
+  return { start, end };
+}
+function refMetric(goal: LifeGoal, qualifying: LifeEvent[], tz: string): number {
+  if (goal.metric === "count") return qualifying.length;
+  if (goal.metric === "days") {
+    const s = new Set<string>();
+    for (const e of qualifying) s.add(dayKey(e.timestamp, tz));
+    return s.size;
+  }
+  let total = 0;
+  for (const e of qualifying) {
+    for (const en of e.entries) if (en.type === "number" && en.unit === goal.unit) total += en.value;
+  }
+  return total;
+}
+function refMet(kind: LifeGoal["kind"], v: number, t: number) {
+  return kind === "at_most" ? v <= t : v >= t;
+}
+function refEvaluate(goal: LifeGoal, events: LifeEvent[], trackables: LifeManifestTrackable[], tz: string, refDate: Date) {
+  const subjectIds = "thing" in goal.scope
+    ? new Set([goal.scope.thing])
+    : new Set(trackables.filter((tt) => tt.group === (goal.scope as { group: string }).group && (!tt.hidden || tt.id === (goal.scope as { group: string }).group)).map((tt) => tt.id));
+  const qual = (s: Date, e: Date) => events.filter((ev2) => subjectIds.has(ev2.subjectId) && ev2.timestamp >= s && ev2.timestamp <= e);
+  const { start, end } = refPeriodBounds(goal.period, refDate, tz);
+  const value = refMetric(goal, qual(start, end), tz);
+  let earliest: Date | undefined;
+  for (const e of events) if (subjectIds.has(e.subjectId) && (!earliest || e.timestamp < earliest)) earliest = e.timestamp;
+  const earliestStart = earliest ? refPeriodBounds(goal.period, earliest, tz).start : undefined;
+  let streak = 0;
+  let cursor = refDate;
+  for (let i = 0; i < MAX_STREAK_LOOKBACK; i++) {
+    const b = refPeriodBounds(goal.period, cursor, tz);
+    if (!earliestStart || b.start < earliestStart) break;
+    if (!refMet(goal.kind, refMetric(goal, qual(b.start, b.end), tz), goal.target)) break;
+    streak += 1;
+    const z = new Date(cursor.getTime());
+    z.setUTCDate(z.getUTCDate() - (goal.period === "week" ? 7 : 1));
+    cursor = z;
+  }
+  return { value, met: refMet(goal.kind, value, goal.target), streak };
+}
+
+describe("evaluateGoal — brute-force oracle (old == new)", () => {
+  // Randomized-but-seeded inputs across metrics/kinds/periods. The reference
+  // re-filters per period; the real impl buckets once. They must agree on
+  // value, met, and streak for every case.
+  const tz = "America/Los_Angeles";
+  const goals: LifeGoal[] = [
+    { id: "a", label: "a", scope: { thing: "floss" }, kind: "at_least", metric: "count", target: 1, period: "day" },
+    { id: "b", label: "b", scope: { thing: "floss" }, kind: "at_least", metric: "count", target: 2, period: "day" },
+    { id: "c", label: "c", scope: { thing: "water" }, kind: "at_least", metric: "sum", unit: "oz", target: 40, period: "day" },
+    { id: "d", label: "d", scope: { thing: "water" }, kind: "at_most", metric: "sum", unit: "drinks", target: 2, period: "day" },
+    { id: "e", label: "e", scope: { group: "exercise" }, kind: "frequency", metric: "days", target: 3, period: "week" },
+    { id: "f", label: "f", scope: { group: "exercise" }, kind: "at_least", metric: "count", target: 4, period: "week" },
+    { id: "g", label: "g", scope: { thing: "floss" }, kind: "frequency", metric: "days", target: 2, period: "week" },
+  ];
+
+  // Deterministic PRNG so failures are reproducible.
+  function mulberry32(seed: number) {
+    return () => {
+      seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  it("matches the reference across 40 randomized event sets", () => {
+    const rng = mulberry32(12345);
+    const subjects = ["floss", "water", "run", "walk", "yoga"];
+    const ref = at(2026, 6, 20);
+    for (let trial = 0; trial < 40; trial++) {
+      const n = Math.floor(rng() * 30);
+      const events: LifeEvent[] = [];
+      for (let i = 0; i < n; i++) {
+        const subj = subjects[Math.floor(rng() * subjects.length)];
+        // spread across ~40 days back, random hour
+        const dayBack = Math.floor(rng() * 40);
+        const hour = Math.floor(rng() * 24);
+        const when = new Date(ref.getTime() - dayBack * 86400000);
+        when.setUTCHours(hour);
+        const entries: LifeEntry[] = [
+          { name: "amount", type: "number", value: Math.floor(rng() * 30), unit: "oz" },
+          { name: "drinks", type: "number", value: Math.floor(rng() * 4), unit: "drinks" },
+          { name: "count", type: "number", value: 1, unit: "ct" },
+          { name: "duration", type: "number", value: 30, unit: "min" },
+        ];
+        events.push(ev(subj, entries, when));
+      }
+      for (const goal of goals) {
+        const got = evaluateGoal(goal, events, TRACKABLES, tz, ref);
+        const want = refEvaluate(goal, events, TRACKABLES, tz, ref);
+        const ctx = `trial=${trial} goal=${goal.id}`;
+        expect(got.value, `value ${ctx}`).toBe(want.value);
+        expect(got.met, `met ${ctx}`).toBe(want.met);
+        expect(got.streak, `streak ${ctx}`).toBe(want.streak);
+      }
+    }
   });
 });
