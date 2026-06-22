@@ -98,3 +98,45 @@ export function getTaskTree(
 export function getTasksByTag(state: UpkeepState, tag: string): Task[] {
   return getTasksFromState(state).filter((t) => t.tags.includes(tag));
 }
+
+/**
+ * Group tasks by their `parentId` in a single O(n) pass. Keyed by the raw
+ * `parentId` string (`""` for roots). Within each bucket, sibling ORDER is
+ * exactly the iteration order of the input array — i.e. identical to what
+ * `tasks.filter((t) => t.parentId === pid)` would have produced. Callers that
+ * need positional order still sort by `position` themselves (same as before).
+ */
+export function childrenByParentId(tasks: Task[]): Map<string, Task[]> {
+  const byParent = new Map<string, Task[]>();
+  for (const t of tasks) {
+    const list = byParent.get(t.parentId);
+    if (list) list.push(t);
+    else byParent.set(t.parentId, [t]);
+  }
+  return byParent;
+}
+
+/**
+ * All descendant IDs of `rootId` (including itself), via the grouped-children
+ * map — O(subtree size). Returns the same id set as a brute-force scan that
+ * re-walks the full task array per node. Returns `[]` if `rootId` is unknown.
+ */
+export function subtreeIds(
+  childrenMap: Map<string, Task[]>,
+  tasksById: Map<string, Task>,
+  rootId: string,
+): string[] {
+  if (!tasksById.has(rootId)) return [];
+  const result = [rootId];
+  const stack = [rootId];
+  while (stack.length) {
+    const pid = stack.pop()!;
+    const children = childrenMap.get(pid);
+    if (!children) continue;
+    for (const child of children) {
+      result.push(child.id);
+      stack.push(child.id);
+    }
+  }
+  return result;
+}
