@@ -1,4 +1,4 @@
-import { useContext } from 'react';
+import { useContext, useMemo } from 'react';
 import styled from 'styled-components';
 
 import { RecipeTable, type RowType } from '../RecipeTable/RecipeTable'
@@ -32,12 +32,15 @@ function Contents() {
   const { state } = useContext(Context)
   const { writeable } = state;
 
-  const data: RowType[] = []
-  for (const [boxId, box] of state.boxes.entries()) {
-    for (const [recipeId, recipe] of box.recipes.entries()) {
-      data.push({ box, recipe, key: `recipeId=${recipeId}_boxId=${boxId}` })
+  const data: RowType[] = useMemo(() => {
+    const rows: RowType[] = []
+    for (const [boxId, box] of state.boxes.entries()) {
+      for (const [recipeId, recipe] of box.recipes.entries()) {
+        rows.push({ box, recipe, key: `recipeId=${recipeId}_boxId=${boxId}` })
+      }
     }
-  }
+    return rows
+  }, [state.boxes])
 
   return (
     <PageContainer>
