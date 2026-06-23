@@ -192,6 +192,17 @@ class Database:
                 );
             """)
 
+        # Index for the per-institution last-sync lookup in
+        # _handle_list_institutions (WHERE institution = ? AND status =
+        # 'complete', MAX(finished_at)). Created unconditionally so existing
+        # databases — whose sync_history table predates this index — pick it up
+        # too, not just freshly-created ones.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sync_history_institution"
+            " ON sync_history(institution, status, finished_at)"
+        )
+        self.conn.commit()
+
         # Recurring patterns table
         if "recurring_patterns" not in tables:
             self.conn.executescript("""

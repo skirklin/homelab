@@ -139,3 +139,5 @@ CREATE TABLE IF NOT EXISTS sync_history (
     holdings INTEGER,
     error_message TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_sync_history_institution
+    ON sync_history(institution, status, finished_at);
