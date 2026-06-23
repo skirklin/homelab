@@ -147,3 +147,37 @@ def test_get_or_create_account_different_external_ids(db: Database) -> None:
     )
     assert a1.id != a2.id
     assert len(db.list_accounts()) == 2
+
+
+def test_sync_history_institution_index_exists(db: Database) -> None:
+    """The per-institution last-sync lookup index must exist after _migrate."""
+    indexes = {
+        row["name"]
+        for row in db.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='sync_history'"
+        ).fetchall()
+    }
+    assert "idx_sync_history_institution" in indexes
+
+    # Index columns must match the query's WHERE (institution, status) + ORDER
+    # BY / MAX (finished_at), in that order, or the index is unusable.
+    cols = [
+        row["name"]
+        for row in db.conn.execute(
+            "PRAGMA index_info('idx_sync_history_institution')"
+        ).fetchall()
+    ]
+    assert cols == ["institution", "status", "finished_at"]
+
+
+def test_sync_history_institution_query_uses_index(db: Database) -> None:
+    """The _handle_list_institutions last-sync query plans through the index."""
+    plan = db.conn.execute(
+        """EXPLAIN QUERY PLAN
+           SELECT MAX(sh.finished_at) as last_sync
+           FROM sync_history sh
+           WHERE sh.institution = ? AND sh.status = 'complete'""",
+        ("ally",),
+    ).fetchall()
+    detail = " ".join(str(row["detail"]) for row in plan)
+    assert "idx_sync_history_institution" in detail
