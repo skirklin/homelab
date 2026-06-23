@@ -473,7 +473,17 @@ server.tool(
   { days: z.number().optional().describe("Number of days to look back (default 7)") },
   async ({ days }) => {
     const log = (await api("/life/log")) as { id: string; name: string };
-    const events = (await api(`/life/entries?log=${log.id}`)) as Array<{
+    // Window the fetch server-side instead of pulling the whole (monotonically
+    // growing) history and filtering in JS. The cutoff is computed with the
+    // SAME calendar-day math (`Date.setDate`) the old JS post-filter used, then
+    // passed as the route's `since` param — which applies an inclusive
+    // `timestamp >= cutoff` filter. So the result is identical to the old
+    // `events.filter(e => new Date(e.timestamp) >= cutoff)` for any `days`.
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (days ?? 7));
+    const recent = (await api(
+      `/life/entries?log=${log.id}&since=${encodeURIComponent(cutoff.toISOString())}`,
+    )) as Array<{
       id: string;
       subject_id: string;
       timestamp: string;
@@ -481,9 +491,6 @@ server.tool(
       labels: unknown;
       [k: string]: unknown;
     }>;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (days ?? 7));
-    const recent = events.filter((e) => new Date(e.timestamp) >= cutoff);
     return {
       content: [{
         type: "text",

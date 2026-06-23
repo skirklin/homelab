@@ -1280,6 +1280,88 @@ describe("Life", () => {
     expect(rating?.unit).toBe("rating");
   });
 
+  it("GET /data/life/entries — server-side window (days/since) matches the old JS post-filter", async () => {
+    // Seed events around a 7-day window: well-inside, well-outside, and one
+    // EXACTLY at the cutoff instant. The old MCP code computed the cutoff as
+    // `new Date(); setDate(getDate()-days)` and kept `new Date(ts) >= cutoff`
+    // (inclusive). The route's `since`/`days` params apply the same inclusive
+    // `timestamp >= cutoff` lower bound, so the boundary event must be IN.
+    const days = 7;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffIso = cutoff.toISOString();
+
+    const insideTs = new Date(cutoff.getTime() + 2 * 86400000).toISOString(); // 2d after cutoff
+    const outsideTs = new Date(cutoff.getTime() - 2 * 86400000).toISOString(); // 2d before cutoff
+    const boundaryTs = cutoffIso; // exactly at the cutoff → inclusive → IN
+
+    const mk = async (ts: string) =>
+      (await adminPb.collection("life_events").create({
+        log: lifeLogId,
+        subject_id: "mood",
+        timestamp: ts,
+        created_by: userId,
+        entries: [{ name: "rating", type: "number", value: 3, unit: "rating", scale: 5 }],
+        labels: { source: "manual" },
+      })).id;
+
+    const insideId = await mk(insideTs);
+    const outsideId = await mk(outsideTs);
+    const boundaryId = await mk(boundaryTs);
+    cleanupIds.push(
+      { collection: "life_events", id: insideId },
+      { collection: "life_events", id: outsideId },
+      { collection: "life_events", id: boundaryId },
+    );
+
+    // (b) No window param → ALL events for the log (backward-compat). Includes
+    // the inside, outside, boundary, and the beforeAll seed event.
+    const all = await apiReq(`/data/life/entries?log=${lifeLogId}`, { token: userToken });
+    expect(all.status).toBe(200);
+    const allIds = new Set(all.data.map((e: any) => e.id));
+    expect(allIds.has(insideId)).toBe(true);
+    expect(allIds.has(outsideId)).toBe(true);
+    expect(allIds.has(boundaryId)).toBe(true);
+
+    // What the old JS post-filter would have returned, computed independently.
+    const oldFilter = (e: any) => new Date(e.timestamp) >= cutoff;
+    const expectedIds = new Set(all.data.filter(oldFilter).map((e: any) => e.id));
+
+    // (a) `since` cutoff → exactly the old in-window set.
+    const sinceResp = await apiReq(
+      `/data/life/entries?log=${lifeLogId}&since=${encodeURIComponent(cutoffIso)}`,
+      { token: userToken },
+    );
+    expect(sinceResp.status).toBe(200);
+    const sinceIds = new Set(sinceResp.data.map((e: any) => e.id));
+    expect(sinceIds).toEqual(expectedIds);
+    expect(sinceIds.has(insideId)).toBe(true);
+    expect(sinceIds.has(outsideId)).toBe(false);
+    // (c) boundary event lands on the SAME (inclusive) side as the old filter.
+    expect(sinceIds.has(boundaryId)).toBe(true);
+
+    // `days` cutoff (fixed-ms now − days) → inside in, outside out. Boundary is
+    // ~now−7d which is a hair AFTER now−7d-ms, so it stays IN here too.
+    const daysResp = await apiReq(
+      `/data/life/entries?log=${lifeLogId}&days=${days}`,
+      { token: userToken },
+    );
+    expect(daysResp.status).toBe(200);
+    const daysIds = new Set(daysResp.data.map((e: any) => e.id));
+    expect(daysIds.has(insideId)).toBe(true);
+    expect(daysIds.has(outsideId)).toBe(false);
+
+    // Result is still newest-first.
+    const tss = sinceResp.data.map((e: any) => e.timestamp);
+    expect([...tss].sort((a, b) => (a < b ? 1 : -1))).toEqual(tss);
+
+    // Bad window params are rejected.
+    const bad = await apiReq(`/data/life/entries?log=${lifeLogId}&days=0`, { token: userToken });
+    expect(bad.status).toBe(400);
+    const badSince = await apiReq(`/data/life/entries?log=${lifeLogId}&since=nope`, { token: userToken });
+    expect(badSince.status).toBe(400);
+  });
+
   it("auto-created life log defaults Coach ON (coach_enabled=true)", async () => {
     // A user with NO existing life log hits a /life/* route, which triggers
     // getOrCreateOwnLifeLog. PB bool fields schema-default to `false`, so the

@@ -2248,8 +2248,48 @@ dataRoutes.get("/life/entries", handler(async (c) => {
     return c.json({ error: "access denied" }, 403);
   }
 
+  // Optional server-side window, pushed into the PB query so we never fetch the
+  // whole (monotonically growing) history just to keep "the last N days". The
+  // cutoff is an inclusive `timestamp >= cutoff` lower bound, matching the `>=`
+  // JS post-filter the MCP `list_life_entries` tool used to apply. With no
+  // window param the behavior is unchanged (all events for the log) so
+  // non-windowing callers are unaffected. Two equivalent ways to express it:
+  //   - `since` (ISO timestamp): exact instant cutoff. The MCP tool uses this
+  //     so it can reproduce its prior calendar-day (`Date.setDate`) cutoff math
+  //     byte-for-byte, including across DST.
+  //   - `days` (positive integer): convenience cutoff at now − days, computed
+  //     with fixed-millisecond arithmetic.
+  // `since` wins if both are supplied.
+  const sinceRaw = c.req.query("since");
+  const daysRaw = c.req.query("days");
+  let cutoff: Date | undefined;
+  if (sinceRaw !== undefined) {
+    const since = new Date(sinceRaw);
+    if (Number.isNaN(since.getTime())) {
+      return c.json({ error: "since must be a valid ISO timestamp" }, 400);
+    }
+    cutoff = since;
+  } else if (daysRaw !== undefined) {
+    const days = Number(daysRaw);
+    if (!Number.isFinite(days) || days <= 0 || !Number.isInteger(days)) {
+      return c.json({ error: "days must be a positive integer" }, 400);
+    }
+    cutoff = new Date(Date.now() - days * 86400000);
+  }
+
+  // FOOTGUN: bind the cutoff as a `Date`, NOT an ISO string. PB stores datetime
+  // as `YYYY-MM-DD HH:MM:SS.sssZ` (space separator) and compares the filter
+  // param LEXICALLY. The SDK formats a Date into that exact space-separated
+  // form, but passes an ISO string (`...T...Z`) through verbatim — and `T`
+  // (0x54) sorts after space (0x20), so an ISO bound would drop events whose
+  // stored timestamp equals the cutoff to the millisecond, breaking the
+  // inclusive `>=` boundary the old JS post-filter had.
+  const filter = cutoff === undefined
+    ? pb.filter("log = {:logId}", { logId })
+    : pb.filter("log = {:logId} && timestamp >= {:cutoff}", { logId, cutoff });
+
   const events = await pb.collection("life_events").getFullList({
-    filter: pb.filter("log = {:logId}", { logId }),
+    filter,
     sort: "-timestamp",
   });
   return c.json(events.map((e) => ({
