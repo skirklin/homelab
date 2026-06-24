@@ -189,6 +189,7 @@ The cron fires every day at 6am PT. Fresh Claude session. Has access to the home
 | 2026-06-21 | NO-OP | Day 24 waiting: `ANTHROPIC_API_KEY` still missing from `.env`; observer-weekly CronJob still not applied. No new observer-related commits. |
 | 2026-06-22 | NO-OP | Day 26 waiting: same two deploy blockers persist; no new observer-related commits. |
 | 2026-06-23 | NO-OP | Day 27 waiting: `ANTHROPIC_API_KEY` still missing from `.env`; `observer-weekly` CronJob still not applied. No new observer-related commits. |
+| 2026-06-24 | NO-OP | Day 28 waiting: same two deploy blockers persist. No new observer-related commits. |
 
 ## Decision log
 
