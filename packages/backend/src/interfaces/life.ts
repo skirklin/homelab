@@ -161,6 +161,13 @@ export interface LifeBackend {
    */
   setCoachEnabled(logId: string, enabled: boolean): Promise<void>;
 
+  /**
+   * Enable or disable the Journal surface for this log. Frontend-only: when
+   * disabled, the life app hides all Journal UI and the /journal route
+   * redirects to "/". No api-service/cron consults this. Defaults to enabled.
+   */
+  setJournalEnabled(logId: string, enabled: boolean): Promise<void>;
+
   // --- Trackable manifest (P4) ---
 
   /**

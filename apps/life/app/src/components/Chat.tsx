@@ -53,9 +53,12 @@ export function Chat() {
   // into Coach surfaces — omit those when Coach is disabled.
   const { state } = useLifeContext();
   const coachEnabled = state.log?.coachEnabled ?? true;
+  const journalEnabled = state.log?.journalEnabled ?? true;
 
   const menuItems = [
-    { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("/journal") },
+    ...(journalEnabled
+      ? [{ key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("/journal") }]
+      : []),
     ...(coachEnabled
       ? [
           { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("/insights") },

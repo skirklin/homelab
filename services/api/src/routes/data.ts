@@ -2467,6 +2467,8 @@ async function getOrCreateOwnLifeLog(pb: PocketBase, userId: string) {
     // mapper's `?? true` only rescues a genuinely-absent column — so a row
     // created without this key reads back `false`. Seed it true explicitly.
     coach_enabled: true,
+    // Journal defaults ON too — same PB-bool-default rationale as coach.
+    journal_enabled: true,
   });
 }
 

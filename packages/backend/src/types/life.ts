@@ -360,6 +360,18 @@ export interface LifeLog {
    * existing users are unaffected until they explicitly toggle it off.
    */
   coachEnabled: boolean;
+  /**
+   * Per-log switch for the Journal surface. When false, the life app hides all
+   * Journal UI (the Journal tab, the /journal route + every nav link into it).
+   *
+   * Frontend-only: unlike coachEnabled, this has NO backend/cron impact — no
+   * api-service code consults it. It purely gates the journaling UI.
+   *
+   * Defaults to TRUE (Journal is on by default — mirrors coachEnabled): the PB
+   * column is backfilled to true and the mapper reads `?? true`, so existing
+   * users are unaffected until they explicitly toggle it off.
+   */
+  journalEnabled: boolean;
   created: string;
   updated: string;
 }

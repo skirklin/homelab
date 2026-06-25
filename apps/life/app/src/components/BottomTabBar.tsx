@@ -117,10 +117,16 @@ export function BottomTabBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const active = activeTabForPath(location.pathname);
-  // Coach is a per-log master switch (default on). When off, drop its tab.
+  // Coach and Journal are per-log switches (both default on). When off, drop
+  // the corresponding tab.
   const { state } = useLifeContext();
   const coachEnabled = state.log?.coachEnabled ?? true;
-  const tabs = coachEnabled ? TABS : TABS.filter((t) => t.tab !== "coach");
+  const journalEnabled = state.log?.journalEnabled ?? true;
+  const tabs = TABS.filter(
+    (t) =>
+      (coachEnabled || t.tab !== "coach") &&
+      (journalEnabled || t.tab !== "journal"),
+  );
 
   return (
     <Bar aria-label="Primary" data-testid="bottom-tab-bar">

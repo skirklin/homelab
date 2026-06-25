@@ -82,6 +82,10 @@ describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () =>
     // for a present-but-false value).
     expect((payload as { coach_enabled: boolean }).coach_enabled).toBe(true);
     expect(log.coachEnabled).toBe(true);
+
+    // Journal defaults ON too — same PB-bool-default rationale as coach.
+    expect((payload as { journal_enabled: boolean }).journal_enabled).toBe(true);
+    expect(log.journalEnabled).toBe(true);
   });
 
   it("preserves an existing log's manifest (does NOT re-seed or overwrite)", async () => {
@@ -124,6 +128,39 @@ describe("PocketBaseLifeBackend.getOrCreateLog — manifest seeding (P1)", () =>
     });
     const log = await backend.getOrCreateLog("user-on");
     expect(log.coachEnabled).toBe(true);
+  });
+
+  it("maps journal_enabled defaulting TRUE (legacy/undefined → enabled)", async () => {
+    const { backend } = makeLogBackend({ owned: { id: "log-legacy" } });
+    const log = await backend.getOrCreateLog("user-legacy");
+    expect(log.journalEnabled).toBe(true);
+  });
+
+  it("maps an explicit journal_enabled=false through as disabled", async () => {
+    const { backend } = makeLogBackend({
+      owned: { id: "log-off", journal_enabled: false },
+    });
+    const log = await backend.getOrCreateLog("user-off");
+    expect(log.journalEnabled).toBe(false);
+  });
+
+  it("maps an explicit journal_enabled=true through as enabled", async () => {
+    const { backend } = makeLogBackend({
+      owned: { id: "log-on", journal_enabled: true },
+    });
+    const log = await backend.getOrCreateLog("user-on");
+    expect(log.journalEnabled).toBe(true);
+  });
+});
+
+describe("PocketBaseLifeBackend.setJournalEnabled", () => {
+  it("writes journal_enabled to the log via the wpb wrapper", async () => {
+    const { backend, updateSpy } = makeBackend();
+    await backend.setJournalEnabled("log123", false);
+    expect(updateSpy).toHaveBeenCalledWith("log123", { journal_enabled: false });
+
+    await backend.setJournalEnabled("log123", true);
+    expect(updateSpy).toHaveBeenCalledWith("log123", { journal_enabled: true });
   });
 });
 

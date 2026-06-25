@@ -86,6 +86,28 @@ describe("life route tree — bottom tab bar", () => {
     expect(screen.getByTestId("tab-daily")).toHaveAttribute("aria-current", "page");
   });
 
+  it("redirects /journal to the Daily surface when journalEnabled is false", async () => {
+    // A log with journal turned off: the /journal route must redirect to "/"
+    // (mirrors the coach-disabled redirect) so a deep link can't land a
+    // disabled user on the Journal surface.
+    mockLifeBackend.getOrCreateLog.mockResolvedValueOnce({ ...mockLog, journalEnabled: false });
+    renderApp("/journal");
+    // The <Navigate to="/" replace> redirect is async — wait until Daily is the
+    // active tab rather than asserting on the pre-redirect render.
+    await waitFor(() =>
+      expect(screen.getByTestId("tab-daily")).toHaveAttribute("aria-current", "page"),
+    );
+    // The Journal tab is hidden (journal disabled).
+    expect(screen.queryByTestId("tab-journal")).not.toBeInTheDocument();
+  });
+
+  it("renders the Journal surface at /journal when journalEnabled is true (default)", async () => {
+    renderApp("/journal");
+    // The default mockLog has no journalEnabled → mapper `?? true` → enabled.
+    await waitFor(() => expect(screen.getByTestId("tab-journal")).toBeInTheDocument());
+    expect(screen.getByTestId("tab-journal")).toHaveAttribute("aria-current", "page");
+  });
+
   it("hides the bottom bar when embedded", async () => {
     renderApp("/", true);
     // Wait for the log to load past the spinner, then assert no bar.

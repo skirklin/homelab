@@ -110,6 +110,17 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
     <Navigate to="/" replace />
   );
 
+  // Journal switch (default on). Frontend-only: when off, /journal redirects to
+  // "/" so deep links can't land a disabled user on the Journal surface.
+  const journalEnabled = state.log?.journalEnabled ?? true;
+  const journalRoute = journalEnabled ? (
+    <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
+      <Journal />
+    </Suspense>
+  ) : (
+    <Navigate to="/" replace />
+  );
+
   return (
     <SettingsMenuProvider value={settingsMenu}>
       <Routes>
@@ -127,11 +138,7 @@ function LifeRoutesInner({ embedded = false }: LifeRoutesProps) {
         <Route path="/coach" element={coachRoute} />
         <Route path="/insights" element={coachRoute} />
         <Route path="/observations" element={coachRoute} />
-        <Route path="/journal" element={
-          <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>
-            <Journal />
-          </Suspense>
-        } />
+        <Route path="/journal" element={journalRoute} />
         <Route path="/observations/:id" element={
           coachEnabled ? (
             <Suspense fallback={<LoadingContainer><Spin size="large" /></LoadingContainer>}>

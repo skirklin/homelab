@@ -31,6 +31,18 @@ function mockCoach(coachEnabled: boolean | undefined) {
   });
 }
 
+/** Stub the life context's `state.log.journalEnabled` for one render. */
+function mockJournal(journalEnabled: boolean | undefined) {
+  vi.spyOn(lifeContext, "useLifeContext").mockReturnValue({
+    state: {
+      log: journalEnabled === undefined ? null : ({ journalEnabled } as never),
+      entries: new Map(),
+      loading: false,
+    },
+    dispatch: vi.fn(),
+  });
+}
+
 describe("BottomTabBar", () => {
   it("renders the 3 primary tabs", () => {
     renderBar("/");
@@ -74,6 +86,23 @@ describe("BottomTabBar", () => {
     mockCoach(true);
     renderBar("/");
     expect(screen.getByTestId("tab-coach")).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("hides the Journal tab when journalEnabled is false", () => {
+    mockJournal(false);
+    renderBar("/");
+    expect(screen.queryByTestId("tab-journal")).not.toBeInTheDocument();
+    // The other two primary tabs still render.
+    expect(screen.getByTestId("tab-daily")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-coach")).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("shows the Journal tab when journalEnabled is true", () => {
+    mockJournal(true);
+    renderBar("/");
+    expect(screen.getByTestId("tab-journal")).toBeInTheDocument();
     vi.restoreAllMocks();
   });
 });
