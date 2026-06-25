@@ -41,6 +41,7 @@ import {
 import type { ClaudeObservation } from "@homelab/backend";
 import { ChatThreadPanel } from "./ChatThreadPanel";
 import { periodTag } from "../lib/observations";
+import { useLifeContext } from "../life-context";
 
 dayjs.extend(relativeTime);
 
@@ -112,6 +113,8 @@ export function ObservationDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const observer = useObserverBackend();
+  const { state } = useLifeContext();
+  const journalEnabled = state.log?.journalEnabled ?? true;
 
   const [observation, setObservation] = useState<ClaudeObservation | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,7 +146,10 @@ export function ObservationDetail() {
   // these jump to the other primary destinations. /chat is intentionally
   // omitted — it's unlinked from nav app-wide.
   const menuItems = [
-    { key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("/journal") },
+    // Journal is independently switchable (default on) — omit the link when off.
+    ...(journalEnabled
+      ? [{ key: "journal", icon: <BookOutlined />, label: "Journal", onClick: () => navigate("/journal") }]
+      : []),
     { key: "insights", icon: <LineChartOutlined />, label: "Insights", onClick: () => navigate("/insights") },
     { key: "observations", icon: <RobotOutlined />, label: "Coach", onClick: () => navigate("/observations") },
   ];

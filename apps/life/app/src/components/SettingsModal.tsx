@@ -122,6 +122,7 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
   const [loadingTokens, setLoadingTokens] = useState(false);
   const [savingSampling, setSavingSampling] = useState(false);
   const [savingCoach, setSavingCoach] = useState(false);
+  const [savingJournal, setSavingJournal] = useState(false);
 
   const schedule = log?.sampleSchedule;
   const config = RANDOM_SAMPLES;
@@ -174,6 +175,23 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
       message.error("Failed to update Coach setting");
     } finally {
       setSavingCoach(false);
+    }
+  };
+
+  const toggleJournal = async (next: boolean) => {
+    if (!log?.id) return;
+    setSavingJournal(true);
+    try {
+      await life.setJournalEnabled(log.id, next);
+      dispatch({
+        type: "SET_LOG",
+        log: { ...log, journalEnabled: next },
+      });
+    } catch (err) {
+      console.error("Failed to update Journal opt-in:", err);
+      message.error("Failed to update Journal setting");
+    } finally {
+      setSavingJournal(false);
     }
   };
 
@@ -236,6 +254,27 @@ export function SettingsModal({ open, onClose, log, userId, onResetSchedule, onE
             checked={log?.coachEnabled ?? true}
             onChange={toggleCoach}
             loading={savingCoach}
+            disabled={!log?.id}
+          />
+        </SettingRow>
+      </Section>
+
+      <Section>
+        <SectionTitle>
+          <span>Journal</span>
+        </SectionTitle>
+        <SettingRow>
+          <div>
+            <SettingLabel>Enable Journal</SettingLabel>
+            <SettingDescription>
+              The journal tab and journaling surface. When off, the Journal tab
+              and its screen are hidden.
+            </SettingDescription>
+          </div>
+          <Switch
+            checked={log?.journalEnabled ?? true}
+            onChange={toggleJournal}
+            loading={savingJournal}
             disabled={!log?.id}
           />
         </SettingRow>

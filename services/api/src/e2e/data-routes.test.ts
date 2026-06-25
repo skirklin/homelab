@@ -1384,6 +1384,8 @@ describe("Life", () => {
     });
     expect(logs.items.length).toBe(1);
     expect(logs.items[0].coach_enabled).toBe(true);
+    // Journal defaults ON too — same PB-bool-default seed rationale as coach.
+    expect(logs.items[0].journal_enabled).toBe(true);
 
     // Cleanup
     await adminPb.collection("life_logs").delete(logs.items[0].id);

@@ -91,6 +91,9 @@ function logFromRecord(r: RecordModel): LifeLog {
     // Default TRUE: Coach is on by default, and legacy rows that predate the
     // 20260619_190000 migration read as undefined → enabled.
     coachEnabled: r.coach_enabled ?? true,
+    // Default TRUE: Journal is on by default, and legacy rows that predate the
+    // 20260624_120000 migration read as undefined → enabled.
+    journalEnabled: r.journal_enabled ?? true,
     created: r.created,
     updated: r.updated,
   };
@@ -156,6 +159,8 @@ export class PocketBaseLifeBackend implements LifeBackend {
       // Seed it true explicitly so new users get Coach on, matching the
       // migration's backfill of existing rows.
       coach_enabled: true,
+      // Journal defaults ON too — same PB-bool-default rationale as coach.
+      journal_enabled: true,
     });
     return logFromRecord(r as RecordModel);
   }
@@ -173,6 +178,12 @@ export class PocketBaseLifeBackend implements LifeBackend {
   async setCoachEnabled(logId: string, enabled: boolean): Promise<void> {
     await this.wpb.collection("life_logs").update(logId, {
       coach_enabled: enabled,
+    });
+  }
+
+  async setJournalEnabled(logId: string, enabled: boolean): Promise<void> {
+    await this.wpb.collection("life_logs").update(logId, {
+      journal_enabled: enabled,
     });
   }
 

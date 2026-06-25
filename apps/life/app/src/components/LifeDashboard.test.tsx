@@ -239,6 +239,7 @@ function SeedLog({ views }: { views: { id: string; title: string; items: [] }[] 
         manifest: { trackables: [], views },
         randomSamplingEnabled: false,
         coachEnabled: true,
+        journalEnabled: true,
         created: "",
         updated: "",
       } as never,

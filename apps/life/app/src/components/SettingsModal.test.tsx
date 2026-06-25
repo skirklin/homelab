@@ -13,6 +13,8 @@ const mockUserBackend = {
 };
 const mockLifeBackend = {
   setRandomSamplingEnabled: vi.fn(),
+  setCoachEnabled: vi.fn(),
+  setJournalEnabled: vi.fn().mockResolvedValue(undefined),
 };
 
 vi.mock("@kirkl/shared", async () => {
@@ -68,5 +70,37 @@ describe("SettingsModal Export section", () => {
   it("omits the Export section when no onExport is provided", () => {
     renderModal(undefined);
     expect(screen.queryByText("Export")).not.toBeInTheDocument();
+  });
+});
+
+describe("SettingsModal Journal section", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // The AntD Switch is a role="switch" button with no accessible name from the
+  // sibling label, so locate it by walking up from the "Enable Journal" label
+  // to its SettingRow and querying the switch within that row.
+  function journalSwitch(): HTMLElement {
+    // "Enable Journal" (SettingLabel div) → wrapping div → SettingRow, which
+    // holds the Switch as a sibling of the wrapping div.
+    // eslint-disable-next-line testing-library/no-node-access
+    const row = screen.getByText("Enable Journal").parentElement!.parentElement!;
+    // eslint-disable-next-line testing-library/no-node-access
+    const sw = row.querySelector('[role="switch"]');
+    if (!sw) throw new Error("Journal switch not found");
+    return sw as HTMLElement;
+  }
+
+  it("renders the Journal toggle, checked by default (journalEnabled undefined → on)", () => {
+    renderModal();
+    expect(screen.getByText("Enable Journal")).toBeInTheDocument();
+    // Switch reflects `journalEnabled ?? true` — the log here has no flag → on.
+    expect(journalSwitch()).toBeChecked();
+  });
+
+  it("calls setJournalEnabled(false) when toggled off", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(journalSwitch());
+    expect(mockLifeBackend.setJournalEnabled).toHaveBeenCalledWith("log1", false);
   });
 });
