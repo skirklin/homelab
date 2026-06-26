@@ -1,0 +1,92 @@
+# Kalshi order-book recorder — READ-ONLY depth-over-time capture, tailnet-invisible.
+#
+# Producer counterpart to the `trader` dashboard (which only serves rsync'd data). This pod
+# runs the kalshi-trader recorder daemon against the live PUBLIC market-data endpoints (ro
+# role, no order surface) and appends dated Parquet to its own PVC. Kalshi keeps no history of
+# order-book depth, so this is the only way to accrue the depth-over-time series the desk needs
+# for transient-structure measurement and the fill-realism gate.
+#
+# Same image as the dashboard (localhost:30500/homelab/trader), built + pushed by the trader
+# repo; the command override runs the recorder module instead of the web server. No Service and
+# no Ingress — it serves nothing; it only writes.
+#
+# Storage: a 2Gi local-path PVC. NOTE k3s local-path does not hard-enforce the size request —
+# the real bound is the daemon's own retention prune (KALSHI_OB_KEEP_DAYS), ~0.3 GB at 30 days
+# / ~90 markets / 60s. The 2Gi is headroom + intent on a disk that runs other homelab workloads.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trader-recorder-data
+  namespace: homelab
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trader-recorder
+  namespace: homelab
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the PVC is ReadWriteOnce (single writer), so a new pod must
+  # not mount it while the old one still holds it during a rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: trader-recorder
+  template:
+    metadata:
+      labels:
+        app: trader-recorder
+    spec:
+      containers:
+        - name: recorder
+          image: localhost:30500/homelab/trader:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "kalshi_trader.record_orderbook"]
+          env:
+            - name: KALSHI_ENV
+              value: prod
+            - name: KALSHI_DATA_DIR
+              value: /data
+            - name: KALSHI_OB_INTERVAL_S
+              value: "60"
+            - name: KALSHI_OB_KEEP_DAYS
+              value: "30"
+            # Read-only Kalshi key (cannot place orders). The market-data endpoints are public,
+            # but the ro client authenticates when a key is present; mounted like the dashboard.
+            - name: KALSHI_PROD_RO_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kalshi-prod-ro
+                  key: key-id
+                  optional: true
+            - name: KALSHI_PROD_RO_KEY_PATH
+              value: /secrets/kalshi-prod-ro/key.pem
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: kalshi-ro
+              mountPath: /secrets/kalshi-prod-ro
+              readOnly: true
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 50m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: trader-recorder-data
+        - name: kalshi-ro
+          secret:
+            secretName: kalshi-prod-ro
+            optional: true

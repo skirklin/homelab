@@ -10,6 +10,7 @@ resources:
   - apps.yaml
   - ingest.yaml
   - trader.yaml
+  - trader-recorder.yaml
   - api.yaml
   - coach.yaml
   - beszel.yaml
